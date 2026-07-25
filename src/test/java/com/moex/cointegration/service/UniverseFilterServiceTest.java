@@ -54,6 +54,36 @@ class UniverseFilterServiceTest {
         assertFalse(UniverseFilterService.isPreferredShare("T"));
     }
 
+    @Test
+    void pairRequiresSameSectorAndBalancedAdv() throws Exception {
+        ImoexProperties props = new ImoexProperties(
+                "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
+                ImoexProperties.CointegrationProperties.of(0.05, 2.0, 0.0, 10),
+                new ImoexProperties.NewsProperties(false, 10, 10, 1),
+                tempDir.toString(),
+                tempDir.resolve("charts").toString(),
+                ImoexProperties.RiskProperties.defaults(),
+                ImoexProperties.WalkForwardProperties.defaults(),
+                ImoexProperties.PaperProperties.defaults(),
+                new ImoexProperties.UniverseProperties(true, 60, 10_000_000.0, 1.0, 0.15, true, true, 20_000_000.0, 5.0),
+                ImoexProperties.AuthProperties.defaults()
+        );
+        MarketDataStorage storage = new MarketDataStorage(props);
+        storage.saveCandles("SBER", liquidCandles(300, 200_000)); // ADV 60M
+        storage.saveCandles("VTBR", liquidCandles(25.0, 3_000_000)); // ADV 75M banks
+        storage.saveCandles("LKOH", liquidCandles(7000, 50_000)); // oil ADV 350M
+
+        UniverseFilterService filter = new UniverseFilterService(storage, props);
+        filter.filter(Map.of(
+                "SBER", series("SBER"),
+                "VTBR", series("VTBR"),
+                "LKOH", series("LKOH")
+        ));
+
+        assertTrue(filter.allowPair("SBER", "VTBR")); // same sector banks
+        assertFalse(filter.allowPair("SBER", "LKOH")); // cross sector
+    }
+
     private ImoexProperties props(boolean enabled, double minAdv, double minPrice, boolean exclPref) {
         return new ImoexProperties(
                 "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
@@ -64,7 +94,7 @@ class UniverseFilterServiceTest {
                 ImoexProperties.RiskProperties.defaults(),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 ImoexProperties.PaperProperties.defaults(),
-                new ImoexProperties.UniverseProperties(enabled, 60, minAdv, minPrice, 0.15, exclPref),
+                new ImoexProperties.UniverseProperties(enabled, 60, minAdv, minPrice, 0.15, exclPref, false, 0.0, 100.0),
                 ImoexProperties.AuthProperties.defaults()
         );
     }
