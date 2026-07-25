@@ -50,7 +50,7 @@ class RiskPolicyServiceTest {
                         dynamic, 0.02, 0.25, 1.5, null, null, null, null),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 ImoexProperties.PaperProperties.defaults(),
-                new ImoexProperties.UniverseProperties(false, 60, 0, 0, 1.0, false, false, 0.0, 100.0),
+                new ImoexProperties.UniverseProperties(false, 60, 0, 0, 1.0, false, false, false, 0.0, 100.0),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );

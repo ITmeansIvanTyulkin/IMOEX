@@ -65,7 +65,7 @@ class UniverseFilterServiceTest {
                 ImoexProperties.RiskProperties.defaults(),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 ImoexProperties.PaperProperties.defaults(),
-                new ImoexProperties.UniverseProperties(true, 60, 10_000_000.0, 1.0, 0.15, true, true, 20_000_000.0, 5.0),
+                new ImoexProperties.UniverseProperties(true, 60, 10_000_000.0, 1.0, 0.15, true, true, false, 20_000_000.0, 5.0),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );
@@ -95,7 +95,7 @@ class UniverseFilterServiceTest {
                 ImoexProperties.RiskProperties.defaults(),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 ImoexProperties.PaperProperties.defaults(),
-                new ImoexProperties.UniverseProperties(enabled, 60, minAdv, minPrice, 0.15, exclPref, false, 0.0, 100.0),
+                new ImoexProperties.UniverseProperties(enabled, 60, minAdv, minPrice, 0.15, exclPref, false, false, 0.0, 100.0),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );

@@ -82,8 +82,13 @@ public class UniverseFilterService {
         if (!u.enabled()) {
             return null;
         }
-        if (u.sameSectorOnlyEnabled() && !SectorCatalog.sameSector(tickerY, tickerX)) {
-            return "разные сектора / неизвестный сектор";
+        if (u.sameSectorOnlyEnabled()) {
+            boolean ok = u.allowRelatedSectorsEnabled()
+                    ? SectorCatalog.sameOrRelatedSector(tickerY, tickerX)
+                    : SectorCatalog.sameSector(tickerY, tickerX);
+            if (!ok) {
+                return "разные сектора / неизвестный сектор";
+            }
         }
 
         Metrics my = metrics(tickerY);

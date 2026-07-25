@@ -72,11 +72,37 @@ public final class SectorCatalog {
         return Optional.ofNullable(BY_TICKER.get(ticker.toUpperCase(Locale.ROOT)));
     }
 
-    /** true, если оба тикера в одном секторе и сектор известен. */
     public static boolean sameSector(String tickerY, String tickerX) {
         Optional<Sector> a = sectorOf(tickerY);
         Optional<Sector> b = sectorOf(tickerX);
         return a.isPresent() && b.isPresent() && a.get() == b.get();
+    }
+
+    /**
+     * Same sector или related-группа (например OIL_GAS ↔ UTILITIES = energy complex).
+     */
+    public static boolean sameOrRelatedSector(String tickerY, String tickerX) {
+        if (sameSector(tickerY, tickerX)) {
+            return true;
+        }
+        Optional<Sector> a = sectorOf(tickerY);
+        Optional<Sector> b = sectorOf(tickerX);
+        if (a.isEmpty() || b.isEmpty()) {
+            return false;
+        }
+        return relatedGroup(a.get()).equals(relatedGroup(b.get()));
+    }
+
+    private static String relatedGroup(Sector s) {
+        return switch (s) {
+            case OIL_GAS, UTILITIES -> "ENERGY";
+            case BANKS -> "FINANCE";
+            case METALS_MINING -> "METALS";
+            case RETAIL, TELECOM -> "CONSUMER_COMMS";
+            case TECH_IT -> "TECH";
+            case CHEM_FERT -> "CHEM";
+            case REAL_ESTATE, INDUSTRIALS, TRANSPORT -> "REAL_ASSETS";
+        };
     }
 
     public static Set<String> knownTickers() {
