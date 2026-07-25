@@ -5,8 +5,10 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
+import com.moex.cointegration.model.PairAnalysisResult;
 import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.PaperTradeEntry;
+import com.moex.cointegration.model.SpreadPoint;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
 import jakarta.annotation.PostConstruct;
@@ -17,29 +19,44 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Paper track-record: фиксирует ENTER/REDUCE сигналы в журнал без брокера.
+ * Автоматический paper track-record: вход по ENTER/REDUCE → удержание с MTM → выход с псевдо-PnL.
+ * Триггер — каждый {@code sync} (полный анализ / news-refresh / daily cron).
  */
 @Service
 public class PaperTradingService {
 
     private static final Logger log = LoggerFactory.getLogger(PaperTradingService.class);
 
+    /** Proxy: 1 единица Z ≈ 1% notional Y (журнальная метрика, не брокерский P&amp;L). */
+    private static final double Z_TO_PCT = 0.01;
+
     private final ImoexProperties properties;
     private final RiskPolicyService riskPolicyService;
+    private final PairLookupService pairLookupService;
     private final ObjectMapper objectMapper;
     private final List<PaperTradeEntry> entries = new CopyOnWriteArrayList<>();
 
-    public PaperTradingService(ImoexProperties properties, RiskPolicyService riskPolicyService) {
+    public PaperTradingService(
+            ImoexProperties properties,
+            RiskPolicyService riskPolicyService,
+            PairLookupService pairLookupService
+    ) {
         this.properties = properties;
         this.riskPolicyService = riskPolicyService;
+        this.pairLookupService = pairLookupService;
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     }
 
@@ -70,19 +87,48 @@ public class PaperTradingService {
     }
 
     /**
-     * Открывает paper-сделки по финальным рекомендациям с учётом maxOpenPairs.
+     * Совместимость: sync только по finals (котировки берутся из technical внутри finals + lookup).
      */
-    public synchronized List<PaperTradeEntry> syncFromFinals(List<FinalTradeRecommendation> finals) throws IOException {
+    public synchronized List<PaperTradeEntry> syncFromFinals(List<FinalTradeRecommendation> finals)
+            throws IOException {
+        List<TradingRecommendation> quotes = finals == null ? List.of()
+                : finals.stream().map(FinalTradeRecommendation::technical).toList();
+        return sync(finals, quotes);
+    }
+
+    /**
+     * Полный цикл: mark/close открытых → открыть новые ENTER/REDUCE (в пределах maxOpenPairs).
+     */
+    public synchronized List<PaperTradeEntry> sync(
+            List<FinalTradeRecommendation> finals,
+            List<TradingRecommendation> technicalQuotes
+    ) throws IOException {
         if (!properties.paper().enabled()) {
             return List.of();
         }
 
+        Map<String, TradingRecommendation> quotes = indexQuotes(technicalQuotes);
+        if (finals != null) {
+            for (FinalTradeRecommendation f : finals) {
+                quotes.putIfAbsent(key(f.technical().tickerY(), f.technical().tickerX()), f.technical());
+            }
+        }
+
+        int closed = markAndCloseOpen(quotes);
+        List<PaperTradeEntry> opened = openNew(finals == null ? List.of() : finals);
+        save();
+        log.info("Paper sync: opened={}, closed={}, openNow={}, realized≈{} ₽, unrealized≈{} ₽",
+                opened.size(), closed, getOpenTrades().size(),
+                round(sumRealizedRub()), round(sumUnrealizedRub()));
+        return opened;
+    }
+
+    private List<PaperTradeEntry> openNew(List<FinalTradeRecommendation> finals) {
         List<PaperTradeEntry> opened = new ArrayList<>();
         int openCount = getOpenTrades().size();
         int capacity = riskPolicyService.maxOpenPairs() - openCount;
-        if (capacity <= 0) {
-            log.info("Paper journal at capacity ({} open pairs)", openCount);
-            return List.of();
+        if (capacity <= 0 || finals.isEmpty()) {
+            return opened;
         }
 
         List<FinalTradeRecommendation> candidates = finals.stream()
@@ -99,6 +145,15 @@ public class PaperTradingService {
 
         for (FinalTradeRecommendation f : candidates) {
             if (alreadyOpen(f.technical().tickerY(), f.technical().tickerX())) {
+                continue;
+            }
+            double z = f.technical().currentZScore();
+            double stopZ = properties.risk().stopZ();
+            // Не входить почти у стопа: при entry 3.3 и stop 3.5 запас ~0.2 Z — лотерея.
+            if (Math.abs(z) >= stopZ - 0.5) {
+                log.info("Paper skip {}/{}: |Z|={} слишком близко к stop {}",
+                        f.technical().tickerY(), f.technical().tickerX(),
+                        String.format(Locale.ROOT, "%.2f", Math.abs(z)), stopZ);
                 continue;
             }
             boolean reduce = f.decision() == FinalTradeDecision.REDUCE_SIZE;
@@ -123,52 +178,168 @@ public class PaperTradingService {
                     null,
                     null,
                     null,
-                    f.decisionSummary()
+                    null,
+                    f.technical().currentZScore(),
+                    0.0,
+                    0.0,
+                    f.technical().asOfDate(),
+                    "AUTO OPEN: " + f.decisionSummary()
             );
             entries.add(entry);
             opened.add(entry);
         }
-
-        // Mark-to-close: if latest signal for open pair is HOLD near zero / NO_SIGNAL, close.
-        List<PaperTradeEntry> updated = new ArrayList<>();
-        for (PaperTradeEntry open : getOpenTrades()) {
-            finals.stream()
-                    .filter(f -> f.technical().tickerY().equalsIgnoreCase(open.tickerY())
-                            && f.technical().tickerX().equalsIgnoreCase(open.tickerX()))
-                    .findFirst()
-                    .ifPresent(f -> {
-                        TradingRecommendation t = f.technical();
-                        if (Math.abs(t.currentZScore()) <= properties.cointegration().zScoreExit() + 0.25
-                                || t.signal() == TradingSignal.HOLD
-                                || t.signal() == TradingSignal.NO_SIGNAL) {
-                            double pnl = approximatePnlPct(open.entryZ(), t.currentZScore(), open.signal());
-                            PaperTradeEntry closed = open.withClose(
-                                    LocalDateTime.now(), t.currentZScore(), pnl, "Z mean-reverted / signal flat");
-                            updated.add(closed);
-                        }
-                    });
-        }
-        for (PaperTradeEntry closed : updated) {
-            replace(closed);
-        }
-
-        save();
-        log.info("Paper sync: opened={}, closed={}, openNow={}",
-                opened.size(), updated.size(), getOpenTrades().size());
         return opened;
     }
 
-    public PaperJournal summary() {
-        return new PaperJournal(LocalDateTime.now(), getJournal());
+    private int markAndCloseOpen(Map<String, TradingRecommendation> quotes) {
+        double zExit = properties.cointegration().zScoreExit();
+        double stopZ = properties.risk().stopZ();
+        int maxHold = properties.risk().maxHoldBars();
+        List<PaperTradeEntry> updated = new ArrayList<>();
+
+        for (PaperTradeEntry open : getOpenTrades()) {
+            Quote q = resolveQuote(open, quotes);
+            if (q == null) {
+                log.warn("Paper: no Z quote for open {}/{} — skip mark this run",
+                        open.tickerY(), open.tickerX());
+                continue;
+            }
+
+            double pnlPct = approximatePnlPct(open.entryZ(), q.z(), open.signal());
+            double pnlRub = open.notionalY() * pnlPct;
+            int barsHeld = (int) ChronoUnit.DAYS.between(open.asOfDate(), q.asOf());
+            if (barsHeld < 0) {
+                barsHeld = 0;
+            }
+
+            // Пока нет новой дневной свечи — только MTM. Иначе повторный run в тот же день
+            // пересчитывает rolling/Kalman Z и ложно бьёт по стопу (как FEES/SNGS −719 ₽).
+            String closeReason = null;
+            if (barsHeld >= 1) {
+                closeReason = closeReason(open, q, zExit, stopZ, maxHold, barsHeld);
+            }
+            if (closeReason != null) {
+                updated.add(open.withClose(LocalDateTime.now(), q.z(), pnlPct, pnlRub, closeReason));
+            } else {
+                updated.add(open.withMark(q.asOf(), q.z(), pnlPct, pnlRub));
+            }
+        }
+
+        for (PaperTradeEntry e : updated) {
+            replace(e);
+        }
+        return (int) updated.stream().filter(e -> "CLOSED".equals(e.status())).count();
     }
 
-    private double approximatePnlPct(double entryZ, double exitZ, TradingSignal signal) {
-        // Rough proxy: long spread profits when Z rises toward 0 from negative.
+    private String closeReason(
+            PaperTradeEntry open,
+            Quote q,
+            double zExit,
+            double stopZ,
+            int maxHold,
+            int barsHeld
+    ) {
+        if (Math.abs(q.z()) <= zExit + 0.25) {
+            return String.format(Locale.ROOT,
+                    "AUTO CLOSE: mean-reversion Z=%.2f → exit (псевдо PnL)", q.z());
+        }
+        if (Math.abs(q.z()) >= stopZ) {
+            return String.format(Locale.ROOT,
+                    "AUTO CLOSE: stop |Z|=%.2f ≥ %.1f", q.z(), stopZ);
+        }
+        if (barsHeld >= maxHold) {
+            return String.format(Locale.ROOT,
+                    "AUTO CLOSE: time-stop %d ≥ %d дней", barsHeld, maxHold);
+        }
+        if (q.signal() == TradingSignal.HOLD || q.signal() == TradingSignal.NO_SIGNAL) {
+            if (Math.abs(q.z()) <= 1.0) {
+                return "AUTO CLOSE: сигнал HOLD/NO_SIGNAL при |Z|≤1";
+            }
+        }
+        if (open.signal() == TradingSignal.LONG_SPREAD && q.signal() == TradingSignal.SHORT_SPREAD) {
+            return "AUTO CLOSE: разворот сигнала LONG→SHORT";
+        }
+        if (open.signal() == TradingSignal.SHORT_SPREAD && q.signal() == TradingSignal.LONG_SPREAD) {
+            return "AUTO CLOSE: разворот сигнала SHORT→LONG";
+        }
+        return null;
+    }
+
+    private Quote resolveQuote(PaperTradeEntry open, Map<String, TradingRecommendation> quotes) {
+        TradingRecommendation fromMap = quotes.get(key(open.tickerY(), open.tickerX()));
+        if (fromMap != null && !Double.isNaN(fromMap.currentZScore())) {
+            return new Quote(fromMap.currentZScore(), fromMap.asOfDate(), fromMap.signal());
+        }
+        try {
+            PairAnalysisResult pair = pairLookupService.requirePair(open.tickerY(), open.tickerX());
+            List<SpreadPoint> z = pair.zScoreSeries();
+            if (z == null || z.isEmpty()) {
+                return null;
+            }
+            SpreadPoint last = z.get(z.size() - 1);
+            TradingSignal guess = TradingSignal.HOLD;
+            if (last.value() <= -properties.cointegration().zScoreEntry()) {
+                guess = TradingSignal.LONG_SPREAD;
+            } else if (last.value() >= properties.cointegration().zScoreEntry()) {
+                guess = TradingSignal.SHORT_SPREAD;
+            }
+            return new Quote(last.value(), last.date(), guess);
+        } catch (Exception ex) {
+            log.debug("Paper lookup failed for {}/{}: {}", open.tickerY(), open.tickerX(), ex.getMessage());
+            return null;
+        }
+    }
+
+    public PaperJournal summary() {
+        return new PaperJournal(
+                LocalDateTime.now(),
+                getJournal(),
+                round(sumRealizedRub()),
+                round(sumUnrealizedRub()),
+                getOpenTrades().size(),
+                (int) entries.stream().filter(e -> "CLOSED".equals(e.status())).count()
+        );
+    }
+
+    double approximatePnlPct(double entryZ, double exitZ, TradingSignal signal) {
         double delta = exitZ - entryZ;
         if (signal == TradingSignal.SHORT_SPREAD) {
             delta = -delta;
         }
-        return delta * 0.01; // 1% notional proxy per 1 Z — journal metric only
+        return delta * Z_TO_PCT;
+    }
+
+    private double sumRealizedRub() {
+        return entries.stream()
+                .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
+                .mapToDouble(PaperTradeEntry::pnlRub)
+                .sum();
+    }
+
+    private double sumUnrealizedRub() {
+        return getOpenTrades().stream()
+                .filter(e -> e.unrealizedPnlRub() != null)
+                .mapToDouble(PaperTradeEntry::unrealizedPnlRub)
+                .sum();
+    }
+
+    private static double round(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
+    private static Map<String, TradingRecommendation> indexQuotes(List<TradingRecommendation> technicalQuotes) {
+        Map<String, TradingRecommendation> map = new HashMap<>();
+        if (technicalQuotes == null) {
+            return map;
+        }
+        for (TradingRecommendation t : technicalQuotes) {
+            map.put(key(t.tickerY(), t.tickerX()), t);
+        }
+        return map;
+    }
+
+    private static String key(String y, String x) {
+        return y.toUpperCase(Locale.ROOT) + "/" + x.toUpperCase(Locale.ROOT);
     }
 
     private boolean alreadyOpen(String y, String x) {
@@ -176,10 +347,10 @@ public class PaperTradingService {
                 .anyMatch(e -> e.tickerY().equalsIgnoreCase(y) && e.tickerX().equalsIgnoreCase(x));
     }
 
-    private void replace(PaperTradeEntry closed) {
+    private void replace(PaperTradeEntry next) {
         for (int i = 0; i < entries.size(); i++) {
-            if (entries.get(i).id().equals(closed.id())) {
-                entries.set(i, closed);
+            if (entries.get(i).id().equals(next.id())) {
+                entries.set(i, next);
                 return;
             }
         }
@@ -187,9 +358,9 @@ public class PaperTradingService {
 
     private void save() throws IOException {
         Path file = journalFile();
-        Files.createDirectories(file.getParent());
+        Files.createDirectories(file.getParent() == null ? Path.of(".") : file.getParent());
         objectMapper.writerWithDefaultPrettyPrinter()
-                .writeValue(file.toFile(), new PaperJournal(LocalDateTime.now(), getJournal()));
+                .writeValue(file.toFile(), summary());
     }
 
     private Path journalFile() {
@@ -198,5 +369,8 @@ public class PaperTradingService {
             name = "paper-journal.json";
         }
         return Path.of(properties.dataDir(), name);
+    }
+
+    private record Quote(double z, LocalDate asOf, TradingSignal signal) {
     }
 }

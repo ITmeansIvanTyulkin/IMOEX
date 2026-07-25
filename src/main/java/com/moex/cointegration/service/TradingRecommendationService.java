@@ -7,6 +7,7 @@ import com.moex.cointegration.model.PairAnalysisResult;
 import com.moex.cointegration.model.SpreadPoint;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
+import com.moex.cointegration.quant.SignalRules;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,6 +107,13 @@ public class TradingRecommendationService {
         double zEntry = properties.cointegration().zScoreEntry();
         double zExit = properties.cointegration().zScoreExit();
         boolean qualityOk = riskPolicyService.passesQualityFilters(pair);
+        boolean reversal = properties.cointegration().entryReversalRequired();
+
+        double zPrev = Double.NaN;
+        List<SpreadPoint> zSeries = pair.zScoreSeries();
+        if (zSeries.size() >= 2) {
+            zPrev = zSeries.get(zSeries.size() - 2).value();
+        }
 
         TradingSignal signal;
         String summary;
@@ -119,18 +127,29 @@ public class TradingRecommendationService {
             signal = TradingSignal.NO_SIGNAL;
             summary = "Не торговать — пара не прошла фильтры качества";
             details = beginnerSkip(pair);
-        } else if (z <= -zEntry) {
+        } else if (SignalRules.confirmLongEntry(zPrev, z, zEntry, reversal)) {
             signal = TradingSignal.LONG_SPREAD;
             summary = String.format(
                     "КУПИТЬ спред: купите %s и одновременно продайте (шорт) %s",
                     pair.tickerY(), pair.tickerX());
             details = beginnerLong(pair, z, date, zEntry, zExit);
-        } else if (z >= zEntry) {
+        } else if (SignalRules.confirmShortEntry(zPrev, z, zEntry, reversal)) {
             signal = TradingSignal.SHORT_SPREAD;
             summary = String.format(
                     "ПРОДАТЬ спред: продайте (шорт) %s и одновременно купите %s",
                     pair.tickerY(), pair.tickerX());
             details = beginnerShort(pair, z, date, zEntry, zExit);
+        } else if (!Double.isNaN(z) && Math.abs(z) >= zEntry) {
+            signal = TradingSignal.WATCH;
+            summary = String.format(
+                    "Ждём разворот: |Z|=%.2f уже за порогом ±%.1f, но подтверждения разворота ещё нет",
+                    Math.abs(z), zEntry);
+            details = String.format("""
+                    Z = %.2f на %s. При режиме require-entry-reversal вход только когда Z \
+                    уже за ±%.1f и начинает идти к нулю. Сейчас спред ещё расширяется или стоит — не входим.
+                    Пара %s/%s, half-life≈%.0f дн., Sharpe=%.2f.
+                    """, z, date, zEntry, pair.tickerY(), pair.tickerX(),
+                    pair.halfLifeDays(), pair.sharpeRatio()).trim();
         } else if (Math.abs(z) >= WATCH_Z_THRESHOLD) {
             signal = TradingSignal.WATCH;
             summary = String.format(

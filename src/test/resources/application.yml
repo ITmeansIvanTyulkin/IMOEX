@@ -1,0 +1,4 @@
+# Тесты: auth выключен, чтобы MockMvc/unit не требовали Basic.
+imoex:
+  auth:
+    enabled: false

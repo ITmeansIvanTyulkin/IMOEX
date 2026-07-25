@@ -42,7 +42,15 @@ class TradingRecommendationServiceTest {
     @Test
     void watchWhenZBetweenThresholdAndEntry() throws Exception {
         TradingRecommendationService service = newService();
-        assertEquals(TradingSignal.WATCH, service.analyzeAndPrint(List.of(samplePair(1.7))).get(0).signal());
+        // |Z| в зоне 1.5–2.0, без экстремума — WATCH
+        assertEquals(TradingSignal.WATCH, service.analyzeAndPrint(List.of(samplePair(1.7, 1.6))).get(0).signal());
+    }
+
+    @Test
+    void watchWhileExtremeButNoReversalYet() throws Exception {
+        TradingRecommendationService service = newService();
+        // Z растёт дальше за +2 — ждём разворот, не SHORT
+        assertEquals(TradingSignal.WATCH, service.analyzeAndPrint(List.of(samplePair(2.8, 2.5))).get(0).signal());
     }
 
     @Test
@@ -77,7 +85,13 @@ class TradingRecommendationServiceTest {
     }
 
     private static PairAnalysisResult samplePair(double lastZ) {
-        LocalDate date = LocalDate.of(2026, 7, 11);
+        double prevZ = lastZ < 0 ? lastZ - 0.4 : lastZ + 0.4;
+        return samplePair(lastZ, prevZ);
+    }
+
+    private static PairAnalysisResult samplePair(double lastZ, double prevZ) {
+        LocalDate d0 = LocalDate.of(2026, 7, 10);
+        LocalDate d1 = LocalDate.of(2026, 7, 11);
         return new PairAnalysisResult(
                 "SBER",
                 "LKOH",
@@ -90,8 +104,8 @@ class TradingRecommendationServiceTest {
                 12.0,
                 20,
                 0.15,
-                List.of(new SpreadPoint(date, -0.05)),
-                List.of(new SpreadPoint(date, lastZ))
+                List.of(new SpreadPoint(d0, -0.05), new SpreadPoint(d1, -0.04)),
+                List.of(new SpreadPoint(d0, prevZ), new SpreadPoint(d1, lastZ))
         );
     }
 }

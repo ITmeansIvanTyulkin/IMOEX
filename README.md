@@ -101,6 +101,8 @@ curl.exe -X POST "http://localhost:8080/api/analysis/news-refresh"
 | **Итог + новости** | http://localhost:8080/view/final |
 | Техсигналы | http://localhost:8080/view/signals |
 | Все рекомендации | http://localhost:8080/view/recommendations |
+| **Paper journal** | http://localhost:8080/view/paper |
+| **Walk-forward OOS** | http://localhost:8080/view/walk-forward |
 | График пары | http://localhost:8080/view/charts/{Y}/{X} |
 
 Корень `/` перенаправляет на `/view`.
@@ -275,10 +277,11 @@ controllers (MockMvc), pipeline, storage, paper journal.
 
 | Модуль | Конфиг | API |
 |---|---|---|
-| **Rolling Z + FDR** | `imoex.cointegration.use-rolling-z`, `rolling-z-window`, `fdr-q` | внутри `/api/analysis/run` |
-| **Risk policy** | `imoex.risk.*` (stop-z, max-hold-bars, reduce-size-factor, max-open-pairs) | `GET /api/risk/policy` |
-| **Walk-forward** | `imoex.walk-forward.*` | `POST/GET /api/analysis/walk-forward` |
-| **Paper journal** | `imoex.paper.*` | `GET /api/paper/journal` |
+| **Rolling Z + FDR + Kalman** | `use-rolling-z`, `fdr-q`, `use-kalman-hedge` | внутри `/api/analysis/run` |
+| **Entry reversal** | `require-entry-reversal: true` | вход только после разворота Z к 0 (не на первом касании ±2) |
+| **Risk policy** | `imoex.risk.*` (stop-z, max-hold-bars, borrow-rate-annual, …) | `GET /api/risk/policy` |
+| **Walk-forward** | `imoex.walk-forward.*` | `POST/GET /api/analysis/walk-forward`, UI `/view/walk-forward` |
+| **Paper journal** | `imoex.paper.*` (+ `auto-run-daily`) | `GET /api/paper/journal`, UI `/view/paper` — auto open/hold/close |
 | **Auth** | `imoex.auth.enabled=true` (по умолчанию) + username/password | HTTP Basic на `POST /api/**` |
 
 Логин по умолчанию: `imoex` / `change-me`. Смените пароль перед выкладкой наружу.
@@ -308,10 +311,13 @@ Actuator: `GET /actuator/health`.
 ## Типичный рабочий день
 
 1. `mvn spring-boot:run`  
-2. `POST /api/analysis/run?refresh=true` (или `false`, если свечи свежие)  
-3. Открыть **http://localhost:8080/view/final**  
-4. Пары с **ENTER / REDUCE** → открыть **График** → сверить стрелки и KAMA  
-5. При необходимости днём: `POST /api/analysis/news-refresh`  
+2. Либо дождаться **daily cron** (пн–пт 19:05, `imoex.paper.auto-run-daily=true`), либо вручную:
+   `POST /api/analysis/run?refresh=true`  
+3. Открыть **`/view/paper`**: AUTO OPEN → MTM (unrealized) → AUTO CLOSE + псевдо PnL ₽  
+4. **`/view/final`** + график: вход только после разворота Z к нулю  
+5. Днём по желанию: `POST /api/analysis/news-refresh` (новости + paper sync)  
+
+Достаточно одного POST (или cron): paper сам входит, держит и закрывает. На выходных свечей нет — цикл почти ничего не меняет. 
 
 ---
 

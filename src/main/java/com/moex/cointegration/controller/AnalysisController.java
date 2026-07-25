@@ -196,7 +196,7 @@ public class AnalysisController {
             throw new IllegalStateException("No technical recommendations. Run POST /api/analysis/run first.");
         }
         List<FinalTradeRecommendation> finals = finalRecommendationService.reanalyzeExisting(technical);
-        paperTradingService.syncFromFinals(finals);
+        paperTradingService.sync(finals, technical);
         return finals;
     }
 
