@@ -278,6 +278,7 @@ controllers (MockMvc), pipeline, storage, paper journal.
 | Модуль | Конфиг | API |
 |---|---|---|
 | **Rolling Z + FDR + Kalman** | `use-rolling-z`, `fdr-q`, `use-kalman-hedge` | внутри `/api/analysis/run` |
+| **Universe filter** | `imoex.universe.*` (ADV / min-price / exclude preferred) | до Engle–Granger в `/api/analysis/run` |
 | **Entry reversal** | `require-entry-reversal: true` | вход только после разворота Z к 0 (не на первом касании ±2) |
 | **Risk policy** | `imoex.risk.*` (stop-z, max-hold-bars, borrow-rate-annual, …) | `GET /api/risk/policy` |
 | **Walk-forward** | `imoex.walk-forward.*` | `POST/GET /api/analysis/walk-forward`, UI `/view/walk-forward` |

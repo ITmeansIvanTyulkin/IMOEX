@@ -174,6 +174,7 @@ class PaperTradingServiceTest {
                 new ImoexProperties.RiskProperties(3.5, 40, 0.5, maxOpen, 1.0, 0.0, 90.0, 1.0, 0.08),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null),
+                ImoexProperties.UniverseProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );
     }
