@@ -31,16 +31,15 @@ public class TradingRecommendationService {
 
     private static final Logger log = LoggerFactory.getLogger(TradingRecommendationService.class);
     private static final double WATCH_Z_THRESHOLD = 1.5;
-    private static final double MIN_SHARPE_FOR_ENTRY = 0.0;
-    private static final double MAX_HALF_LIFE_DAYS = 90.0;
-    private static final double MIN_HALF_LIFE_DAYS = 1.0;
 
     private final ImoexProperties properties;
+    private final RiskPolicyService riskPolicyService;
     private final ObjectMapper objectMapper;
     private final List<TradingRecommendation> lastRecommendations = new CopyOnWriteArrayList<>();
 
-    public TradingRecommendationService(ImoexProperties properties) {
+    public TradingRecommendationService(ImoexProperties properties, RiskPolicyService riskPolicyService) {
         this.properties = properties;
+        this.riskPolicyService = riskPolicyService;
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     }
 
@@ -106,13 +105,17 @@ public class TradingRecommendationService {
 
         double zEntry = properties.cointegration().zScoreEntry();
         double zExit = properties.cointegration().zScoreExit();
-        boolean qualityOk = isTradeQualityOk(pair);
+        boolean qualityOk = riskPolicyService.passesQualityFilters(pair);
 
         TradingSignal signal;
         String summary;
         String details;
 
-        if (!qualityOk) {
+        if (Double.isNaN(z)) {
+            signal = TradingSignal.NO_SIGNAL;
+            summary = "Не торговать — rolling Z ещё не прогрет";
+            details = "Недостаточно баров для окна rolling Z. Дождитесь накопления истории.";
+        } else if (!qualityOk) {
             signal = TradingSignal.NO_SIGNAL;
             summary = "Не торговать — пара не прошла фильтры качества";
             details = beginnerSkip(pair);
@@ -164,38 +167,36 @@ public class TradingRecommendationService {
 
     private String beginnerLong(PairAnalysisResult pair, double z, LocalDate date, double zEntry, double zExit) {
         double beta = Math.abs(pair.hedgeRatio());
+        double notionalY = properties.paper().notionalPerLeg();
+        double notionalX = notionalY * beta;
         return String.format("""
                 Что происходит простыми словами
                 Акции %s и %s обычно движутся «вместе». Сейчас %s выглядит слишком дешёвой относительно %s \
                 (Z-score = %.2f на дату %s, порог входа = −%.1f). Исторически такой разрыв часто сужается.
 
                 Что сделать на счёте (парная сделка)
-                1) Купить 100 акций %s (или 1 лот — как удобнее по размеру депозита).
-                2) Одновременно продать (шорт) примерно %.0f акций %s \
-                (коэффициент хеджа beta ≈ %.3f: на 1 рубль %s нужно ≈ %.3f рубля %s).
-                3) Обе ноги открывать в один день, чтобы ставка была на схождение, а не на рынок в целом.
+                1) Купить notional ≈ %.0f ₽ в %s (смотрите risk policy / paper journal).
+                2) Одновременно продать (шорт) ≈ %.0f ₽ в %s (beta ≈ %.3f).
+                3) Обе ноги в один день. Стоп |Z|≈%.1f или time-stop %d баров.
 
                 Когда выходить
-                Закрыть обе ноги, когда Z-score вернётся к ≈ %.1f (спред «нормализовался»). \
-                Ожидаемое время возврата (half-life) ≈ %.0f торговых дней — это ориентир, не гарантия.
+                Закрыть обе ноги при Z ≈ %.1f. Half-life ≈ %.0f торговых дней (ориентир).
 
                 Почему сигнал выглядит качественным
-                • p-value коинтеграции = %.4f (ниже %.2f — связь статистически подтверждена).
-                • Sharpe бэктеста = %.2f (чем выше, тем стабильнее была стратегия на истории).
-                • Max drawdown в симуляции смотрите на дашборде / в отчёте.
+                • p-value = %.4f (порог %.2f).
+                • Sharpe бэктеста = %.2f.
+                • Rolling Z / FDR / risk stops включены в пайплайн.
 
-                Риски для новичка
-                Коинтеграция может «сломаться» (одна компания уходит в новости/делистинг). \
-                Держите небольшой размер позиции, не усредняйте без плана, всегда закрывайте ОБЕ ноги.
+                Риски
+                Коинтеграция может сломаться. Не усредняйте без плана, закрывайте ОБЕ ноги.
                 """,
                 pair.tickerY(), pair.tickerX(),
                 pair.tickerY(), pair.tickerX(),
                 z, date, zEntry,
-                pair.tickerY(),
-                beta * 100.0, pair.tickerX(),
-                pair.hedgeRatio(), pair.tickerY(), beta, pair.tickerX(),
-                zExit,
-                pair.halfLifeDays(),
+                notionalY, pair.tickerY(),
+                notionalX, pair.tickerX(), pair.hedgeRatio(),
+                properties.risk().stopZ(), properties.risk().maxHoldBars(),
+                zExit, pair.halfLifeDays(),
                 pair.pValue(), properties.cointegration().pValueThreshold(),
                 pair.sharpeRatio()
         ).trim();
@@ -203,35 +204,35 @@ public class TradingRecommendationService {
 
     private String beginnerShort(PairAnalysisResult pair, double z, LocalDate date, double zEntry, double zExit) {
         double beta = Math.abs(pair.hedgeRatio());
+        double notionalY = properties.paper().notionalPerLeg();
+        double notionalX = notionalY * beta;
         return String.format("""
                 Что происходит простыми словами
                 Акции %s и %s обычно движутся «вместе». Сейчас %s выглядит слишком дорогой относительно %s \
                 (Z-score = %.2f на дату %s, порог входа = +%.1f). Ставка — на сужение спреда.
 
                 Что сделать на счёте (парная сделка)
-                1) Продать (шорт) 100 акций %s.
-                2) Одновременно купить примерно %.0f акций %s (beta ≈ %.3f).
-                3) Открывать обе ноги вместе; закрывать тоже вместе.
+                1) Продать (шорт) ≈ %.0f ₽ в %s.
+                2) Одновременно купить ≈ %.0f ₽ в %s (beta ≈ %.3f).
+                3) Стоп |Z|≈%.1f или time-stop %d баров; закрывать ноги вместе.
 
                 Когда выходить
-                Закрыть обе позиции, когда Z вернётся к ≈ %.1f. \
-                Ориентир по времени возврата (half-life) ≈ %.0f торговых дней.
+                Закрыть обе позиции при Z ≈ %.1f. Half-life ≈ %.0f дн.
 
                 Почему сигнал выглядит качественным
                 • p-value = %.4f (порог %.2f).
                 • Sharpe бэктеста = %.2f.
 
-                Риски для новичка
-                Шорт дороже по комиссиям/заёмной ставке; коинтеграция может исчезнуть. \
-                Не ставьте размер, который «болит» при просадке 10–20%% по паре.
+                Риски
+                Шорт дороже (borrow); коинтеграция может исчезнуть.
                 """,
                 pair.tickerY(), pair.tickerX(),
                 pair.tickerY(), pair.tickerX(),
                 z, date, zEntry,
-                pair.tickerY(),
-                beta * 100.0, pair.tickerX(), pair.hedgeRatio(),
-                zExit,
-                pair.halfLifeDays(),
+                notionalY, pair.tickerY(),
+                notionalX, pair.tickerX(), pair.hedgeRatio(),
+                properties.risk().stopZ(), properties.risk().maxHoldBars(),
+                zExit, pair.halfLifeDays(),
                 pair.pValue(), properties.cointegration().pValueThreshold(),
                 pair.sharpeRatio()
         ).trim();
@@ -271,7 +272,7 @@ public class TradingRecommendationService {
     }
 
     private String beginnerSkip(PairAnalysisResult pair) {
-        return "Пара отфильтрована: " + qualityReason(pair)
+        return "Пара отфильтрована: " + riskPolicyService.qualityRejectReason(pair)
                 + ". Для новичка это значит: даже при «красивом» Z лучше пропустить — "
                 + "история возврата спреда выглядит слабой или слишком шумной.";
     }
@@ -283,32 +284,6 @@ public class TradingRecommendationService {
         return details + "\n\nВнимание: последняя общая свеча пары — " + asOfDate
                 + ". Один из тикеров мог уйти с торгов (делистинг). Сигнал может быть устаревшим — "
                 + "проверьте, что обе бумаги реально торгуются на MOEX сегодня.";
-    }
-
-    private boolean isTradeQualityOk(PairAnalysisResult pair) {
-        if (pair.sharpeRatio() < MIN_SHARPE_FOR_ENTRY) {
-            return false;
-        }
-        if (Double.isNaN(pair.halfLifeDays())) {
-            return false;
-        }
-        return pair.halfLifeDays() >= MIN_HALF_LIFE_DAYS && pair.halfLifeDays() <= MAX_HALF_LIFE_DAYS;
-    }
-
-    private String qualityReason(PairAnalysisResult pair) {
-        if (pair.sharpeRatio() < MIN_SHARPE_FOR_ENTRY) {
-            return String.format("Sharpe=%.2f < %.1f", pair.sharpeRatio(), MIN_SHARPE_FOR_ENTRY);
-        }
-        if (Double.isNaN(pair.halfLifeDays())) {
-            return "half-life не определён (спред не mean-reverting)";
-        }
-        if (pair.halfLifeDays() > MAX_HALF_LIFE_DAYS) {
-            return String.format("half-life=%.1f дней — слишком медленный возврат", pair.halfLifeDays());
-        }
-        if (pair.halfLifeDays() < MIN_HALF_LIFE_DAYS) {
-            return String.format("half-life=%.2f — подозрительно быстрый (шум)", pair.halfLifeDays());
-        }
-        return "неизвестная причина";
     }
 
     private SpreadPoint lastPoint(List<SpreadPoint> series) {

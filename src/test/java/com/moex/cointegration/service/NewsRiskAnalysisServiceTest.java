@@ -81,13 +81,13 @@ class NewsRiskAnalysisServiceTest {
     }
 
     private static ImoexProperties props(boolean enabled) {
-        return new ImoexProperties(
+        return ImoexProperties.forTests(
                 "https://iss.moex.com/iss",
                 "TQBR",
                 "IMOEX",
                 5,
                 0.0005,
-                new ImoexProperties.CointegrationProperties(0.05, 2.0, 0.0, 10),
+                ImoexProperties.CointegrationProperties.of(0.05, 2.0, 0.0, 10),
                 new ImoexProperties.NewsProperties(enabled, 10, 10, 3),
                 "data",
                 "data/charts"

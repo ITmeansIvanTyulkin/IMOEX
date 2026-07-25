@@ -1,17 +1,23 @@
 package com.moex.cointegration.controller;
 
+import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.AnalysisReport;
 import com.moex.cointegration.model.ChartPayload;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.PairAnalysisResult;
+import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
+import com.moex.cointegration.model.WalkForwardReport;
 import com.moex.cointegration.service.ChartDataService;
 import com.moex.cointegration.service.ChartService;
 import com.moex.cointegration.service.CointegrationAnalysisService;
 import com.moex.cointegration.service.FinalRecommendationService;
 import com.moex.cointegration.service.MarketDataService;
+import com.moex.cointegration.service.PaperTradingService;
+import com.moex.cointegration.service.RiskPolicyService;
 import com.moex.cointegration.service.TradingRecommendationService;
+import com.moex.cointegration.service.WalkForwardService;
 import com.moex.cointegration.storage.MarketDataStorage;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpHeaders;
@@ -28,6 +34,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * REST API для загрузки данных, запуска анализа и получения графиков.
@@ -43,6 +50,9 @@ public class AnalysisController {
     private final MarketDataStorage storage;
     private final TradingRecommendationService recommendationService;
     private final FinalRecommendationService finalRecommendationService;
+    private final WalkForwardService walkForwardService;
+    private final PaperTradingService paperTradingService;
+    private final RiskPolicyService riskPolicyService;
 
     public AnalysisController(
             CointegrationAnalysisService analysisService,
@@ -51,7 +61,10 @@ public class AnalysisController {
             ChartDataService chartDataService,
             MarketDataStorage storage,
             TradingRecommendationService recommendationService,
-            FinalRecommendationService finalRecommendationService
+            FinalRecommendationService finalRecommendationService,
+            WalkForwardService walkForwardService,
+            PaperTradingService paperTradingService,
+            RiskPolicyService riskPolicyService
     ) {
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
@@ -60,6 +73,9 @@ public class AnalysisController {
         this.storage = storage;
         this.recommendationService = recommendationService;
         this.finalRecommendationService = finalRecommendationService;
+        this.walkForwardService = walkForwardService;
+        this.paperTradingService = paperTradingService;
+        this.riskPolicyService = riskPolicyService;
     }
 
     /**
@@ -127,6 +143,49 @@ public class AnalysisController {
     }
 
     /**
+     * POST /api/analysis/walk-forward — OOS walk-forward по топ-парам последнего отчёта.
+     */
+    @PostMapping("/analysis/walk-forward")
+    public WalkForwardReport runWalkForward(
+            @RequestParam(defaultValue = "10") int maxPairs
+    ) throws IOException {
+        return walkForwardService.runForTopPairs(maxPairs);
+    }
+
+    /**
+     * GET /api/analysis/walk-forward — последний walk-forward отчёт.
+     */
+    @GetMapping("/analysis/walk-forward")
+    public WalkForwardReport latestWalkForward() throws IOException {
+        return walkForwardService.getLastReport()
+                .or(() -> {
+                    try {
+                        return storage.loadWalkForwardReport();
+                    } catch (IOException e) {
+                        return Optional.empty();
+                    }
+                })
+                .orElseThrow(() -> new IllegalStateException(
+                        "No walk-forward report. Run POST /api/analysis/walk-forward or full analysis."));
+    }
+
+    /**
+     * GET /api/paper/journal — paper track-record.
+     */
+    @GetMapping("/paper/journal")
+    public PaperJournal paperJournal() {
+        return paperTradingService.summary();
+    }
+
+    /**
+     * GET /api/risk/policy — текущая risk policy.
+     */
+    @GetMapping("/risk/policy")
+    public ImoexProperties.RiskProperties riskPolicy() {
+        return riskPolicyService.policy();
+    }
+
+    /**
      * POST /api/analysis/news-refresh — пересчитать новости по уже готовым техническим сигналам
      * (без полного Engle–Granger). Удобно для дневного обновления safety-layer.
      */
@@ -136,7 +195,9 @@ public class AnalysisController {
         if (technical.isEmpty()) {
             throw new IllegalStateException("No technical recommendations. Run POST /api/analysis/run first.");
         }
-        return finalRecommendationService.reanalyzeExisting(technical);
+        List<FinalTradeRecommendation> finals = finalRecommendationService.reanalyzeExisting(technical);
+        paperTradingService.syncFromFinals(finals);
+        return finals;
     }
 
     /**
