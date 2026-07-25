@@ -39,6 +39,11 @@ imoex:
     target-spread-sigma: 0.02
     min-size-mult: 0.25
     max-size-mult: 1.5
+    # умный выход
+    partial-tp-fraction: 0.5   # TP половины при 50% пути к Z=0
+    trail-z: 0.75              # trailing от лучшего Z
+    beta-break-pct: 0.35       # скачок β → выход
+    coint-p-break: 0.20        # p-value ≥ → слом коинтеграции
   walk-forward:
     enabled: true
     train-bars: 504

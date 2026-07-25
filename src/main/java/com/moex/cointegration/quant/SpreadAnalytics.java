@@ -185,19 +185,24 @@ public final class SpreadAnalytics {
         double scale = Math.max(sampleStd(spread, mean(spread)), 1e-6);
         double dailyBorrow = Math.max(0.0, borrowRateAnnual) / 252.0;
         List<Double> strategyReturns = new ArrayList<>();
-        int position = 0;
+        int position = 0; // +1 long, -1 short
+        double posScale = 1.0;
         int barsInTrade = 0;
         int tradeCount = 0;
         double equity = 1.0;
         double peak = 1.0;
         double maxDrawdown = 0.0;
         boolean useStop = !Double.isNaN(stopZ) && stopZ > 0.0;
+        double entryZ = Double.NaN;
+        double bestZ = Double.NaN;
+        boolean partialDone = false;
+        final double trailZ = 0.75;
 
         for (int i = 1; i < spread.length; i++) {
             double dailyReturn = 0.0;
             if (position != 0) {
-                dailyReturn = position * (spread[i] - spread[i - 1]) / scale;
-                dailyReturn -= dailyBorrow;
+                dailyReturn = position * posScale * (spread[i] - spread[i - 1]) / scale;
+                dailyReturn -= dailyBorrow * posScale;
                 barsInTrade++;
             }
 
@@ -207,16 +212,25 @@ public final class SpreadAnalytics {
             if (position == 0) {
                 if (SignalRules.confirmShortEntry(zPrev, z, zEntry, requireEntryReversal)) {
                     position = -1;
+                    posScale = 1.0;
                     barsInTrade = 0;
                     tradeCount += 2;
                     dailyReturn -= 2 * commissionRate;
+                    entryZ = z;
+                    bestZ = z;
+                    partialDone = false;
                 } else if (SignalRules.confirmLongEntry(zPrev, z, zEntry, requireEntryReversal)) {
                     position = 1;
+                    posScale = 1.0;
                     barsInTrade = 0;
                     tradeCount += 2;
                     dailyReturn -= 2 * commissionRate;
+                    entryZ = z;
+                    bestZ = z;
+                    partialDone = false;
                 }
             } else {
+                bestZ = ExitRules.updateBestZ(position > 0, bestZ, z);
                 boolean exit = false;
                 if (position == 1 && SignalRules.exitLong(zPrev, z, zExit)) {
                     exit = true;
@@ -224,15 +238,27 @@ public final class SpreadAnalytics {
                     exit = true;
                 } else if (useStop && !Double.isNaN(z) && Math.abs(z) >= stopZ) {
                     exit = true;
+                } else if (ExitRules.trailStopHit(position > 0, bestZ, z, trailZ)) {
+                    exit = true;
                 }
                 if (!exit && maxHoldBars > 0 && barsInTrade >= maxHoldBars) {
                     exit = true;
                 }
+                if (!exit && !partialDone && ExitRules.halfwayToZero(entryZ, z, 0.5)) {
+                    dailyReturn -= commissionRate;
+                    posScale = 0.5;
+                    partialDone = true;
+                    tradeCount += 1;
+                }
                 if (exit) {
                     position = 0;
+                    posScale = 1.0;
                     barsInTrade = 0;
                     tradeCount += 2;
-                    dailyReturn -= 2 * commissionRate;
+                    dailyReturn -= 2 * commissionRate * (partialDone ? 0.5 : 1.0);
+                    entryZ = Double.NaN;
+                    bestZ = Double.NaN;
+                    partialDone = false;
                 }
             }
 
