@@ -157,7 +157,7 @@ public class PaperTradingService {
                 continue;
             }
             boolean reduce = f.decision() == FinalTradeDecision.REDUCE_SIZE;
-            double mult = riskPolicyService.sizeMultiplier(f.technical().signal(), reduce);
+            double mult = riskPolicyService.sizeMultiplier(f.technical(), reduce);
             double notional = properties.paper().notionalPerLeg() * mult;
             double beta = Math.abs(f.technical().hedgeRatio());
 

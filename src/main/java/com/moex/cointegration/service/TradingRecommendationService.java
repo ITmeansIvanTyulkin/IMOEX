@@ -186,15 +186,23 @@ public class TradingRecommendationService {
 
     private String beginnerLong(PairAnalysisResult pair, double z, LocalDate date, double zEntry, double zExit) {
         double beta = Math.abs(pair.hedgeRatio());
-        double notionalY = properties.paper().notionalPerLeg();
+        double lastSpread = pair.spreadSeries().isEmpty()
+                ? Double.NaN
+                : pair.spreadSeries().get(pair.spreadSeries().size() - 1).value();
+        TradingRecommendation tmp = new TradingRecommendation(
+                pair.tickerY(), pair.tickerX(), TradingSignal.LONG_SPREAD, z, date,
+                lastSpread, pair.hedgeRatio(), pair.halfLifeDays(), pair.sharpeRatio(), pair.pValue(), "", ""
+        );
+        double notionalY = riskPolicyService.suggestedNotional(tmp, false);
         double notionalX = notionalY * beta;
+        double mult = riskPolicyService.sizeMultiplier(tmp, false);
         return String.format("""
                 Что происходит простыми словами
                 Акции %s и %s обычно движутся «вместе». Сейчас %s выглядит слишком дешёвой относительно %s \
                 (Z-score = %.2f на дату %s, порог входа = −%.1f). Исторически такой разрыв часто сужается.
 
                 Что сделать на счёте (парная сделка)
-                1) Купить notional ≈ %.0f ₽ в %s (смотрите risk policy / paper journal).
+                1) Купить notional ≈ %.0f ₽ в %s (dynamic size ×%.2f от base; risk / paper).
                 2) Одновременно продать (шорт) ≈ %.0f ₽ в %s (beta ≈ %.3f).
                 3) Обе ноги в один день. Стоп |Z|≈%.1f или time-stop %d баров.
 
@@ -204,7 +212,7 @@ public class TradingRecommendationService {
                 Почему сигнал выглядит качественным
                 • p-value = %.4f (порог %.2f).
                 • Sharpe бэктеста = %.2f.
-                • Rolling Z / FDR / risk stops включены в пайплайн.
+                • Rolling Z / FDR / risk stops / dynamic sizing включены в пайплайн.
 
                 Риски
                 Коинтеграция может сломаться. Не усредняйте без плана, закрывайте ОБЕ ноги.
@@ -212,7 +220,7 @@ public class TradingRecommendationService {
                 pair.tickerY(), pair.tickerX(),
                 pair.tickerY(), pair.tickerX(),
                 z, date, zEntry,
-                notionalY, pair.tickerY(),
+                notionalY, pair.tickerY(), mult,
                 notionalX, pair.tickerX(), pair.hedgeRatio(),
                 properties.risk().stopZ(), properties.risk().maxHoldBars(),
                 zExit, pair.halfLifeDays(),
@@ -223,15 +231,23 @@ public class TradingRecommendationService {
 
     private String beginnerShort(PairAnalysisResult pair, double z, LocalDate date, double zEntry, double zExit) {
         double beta = Math.abs(pair.hedgeRatio());
-        double notionalY = properties.paper().notionalPerLeg();
+        double lastSpread = pair.spreadSeries().isEmpty()
+                ? Double.NaN
+                : pair.spreadSeries().get(pair.spreadSeries().size() - 1).value();
+        TradingRecommendation tmp = new TradingRecommendation(
+                pair.tickerY(), pair.tickerX(), TradingSignal.SHORT_SPREAD, z, date,
+                lastSpread, pair.hedgeRatio(), pair.halfLifeDays(), pair.sharpeRatio(), pair.pValue(), "", ""
+        );
+        double notionalY = riskPolicyService.suggestedNotional(tmp, false);
         double notionalX = notionalY * beta;
+        double mult = riskPolicyService.sizeMultiplier(tmp, false);
         return String.format("""
                 Что происходит простыми словами
                 Акции %s и %s обычно движутся «вместе». Сейчас %s выглядит слишком дорогой относительно %s \
                 (Z-score = %.2f на дату %s, порог входа = +%.1f). Ставка — на сужение спреда.
 
                 Что сделать на счёте (парная сделка)
-                1) Продать (шорт) ≈ %.0f ₽ в %s.
+                1) Продать (шорт) ≈ %.0f ₽ в %s (dynamic size ×%.2f).
                 2) Одновременно купить ≈ %.0f ₽ в %s (beta ≈ %.3f).
                 3) Стоп |Z|≈%.1f или time-stop %d баров; закрывать ноги вместе.
 
@@ -248,7 +264,7 @@ public class TradingRecommendationService {
                 pair.tickerY(), pair.tickerX(),
                 pair.tickerY(), pair.tickerX(),
                 z, date, zEntry,
-                notionalY, pair.tickerY(),
+                notionalY, pair.tickerY(), mult,
                 notionalX, pair.tickerX(), pair.hedgeRatio(),
                 properties.risk().stopZ(), properties.risk().maxHoldBars(),
                 zExit, pair.halfLifeDays(),

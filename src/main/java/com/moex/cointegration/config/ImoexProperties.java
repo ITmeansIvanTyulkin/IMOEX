@@ -129,6 +129,11 @@ public record ImoexProperties(
 
     /**
      * Risk policy для сигналов и бэктеста.
+     *
+     * @param dynamicSizing     размер ~ (targetσ / σ_spread) × (room to stop)
+     * @param targetSpreadSigma опорная σ спреда для полного размера
+     * @param minSizeMult       нижний clamp множителя
+     * @param maxSizeMult       верхний clamp множителя
      */
     public record RiskProperties(
             double stopZ,
@@ -139,16 +144,37 @@ public record ImoexProperties(
             double minSharpe,
             double maxHalfLifeDays,
             double minHalfLifeDays,
-            Double borrowRateAnnual
+            Double borrowRateAnnual,
+            Boolean dynamicSizing,
+            Double targetSpreadSigma,
+            Double minSizeMult,
+            Double maxSizeMult
     ) {
         public RiskProperties {
             if (borrowRateAnnual == null || borrowRateAnnual < 0) {
                 borrowRateAnnual = 0.08;
             }
+            if (dynamicSizing == null) {
+                dynamicSizing = true;
+            }
+            if (targetSpreadSigma == null || targetSpreadSigma <= 0) {
+                targetSpreadSigma = 0.02;
+            }
+            if (minSizeMult == null || minSizeMult <= 0) {
+                minSizeMult = 0.25;
+            }
+            if (maxSizeMult == null || maxSizeMult < minSizeMult) {
+                maxSizeMult = 1.5;
+            }
         }
 
         public static RiskProperties defaults() {
-            return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 1.0, 0.08);
+            return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 1.0, 0.08,
+                    true, 0.02, 0.25, 1.5);
+        }
+
+        public boolean dynamicSizingEnabled() {
+            return Boolean.TRUE.equals(dynamicSizing);
         }
     }
 

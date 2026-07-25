@@ -34,6 +34,11 @@ imoex:
     max-half-life-days: 90.0
     min-half-life-days: 1.0
     borrow-rate-annual: 0.08
+    # размер ~ (targetσ/σ_spread) × (stopZ−|Z|)/stopZ
+    dynamic-sizing: true
+    target-spread-sigma: 0.02
+    min-size-mult: 0.25
+    max-size-mult: 1.5
   walk-forward:
     enabled: true
     train-bars: 504
