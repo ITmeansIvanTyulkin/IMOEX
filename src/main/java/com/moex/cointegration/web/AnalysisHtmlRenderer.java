@@ -27,71 +27,64 @@ public class AnalysisHtmlRenderer {
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
               <title>{{TITLE}}</title>
-              <style>
-                * { box-sizing: border-box; }
-                body { font-family: Segoe UI, system-ui, sans-serif; margin: 0; background: #f4f6f9; color: #1a1a2e; }
-                header { background: #1a1a2e; color: #fff; padding: 1rem 1.5rem; }
-                header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
-                nav { background: #16213e; padding: .5rem 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap; }
-                nav a { color: #a8b2d1; text-decoration: none; padding: .35rem .75rem; border-radius: 4px; font-size: .9rem; }
-                nav a:hover, nav a.active { background: #0f3460; color: #fff; }
-                main { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
-                h2 { font-size: 1.1rem; margin: 1.5rem 0 .75rem; color: #16213e; }
-                .meta { color: #666; font-size: .9rem; }
-                .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
-                .card { background: #fff; border-radius: 8px; padding: .75rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-                .card .label { display: block; font-size: .75rem; color: #888; text-transform: uppercase; letter-spacing: .03em; }
-                .card .value { display: block; font-size: 1.4rem; font-weight: 600; margin-top: .25rem; }
-                .card .value.accent { color: #e94560; }
-                .table-wrap { overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-                table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-                th { background: #16213e; color: #fff; text-align: left; padding: .65rem .75rem; white-space: nowrap; }
-                td { padding: .6rem .75rem; border-bottom: 1px solid #eee; vertical-align: top; }
-                tr:nth-child(even) td { background: #fafbfc; }
-                tr:hover td { background: #f0f4ff; }
-                td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-                td.details { max-width: 360px; line-height: 1.4; }
-                td.details small { color: #555; }
-                td.links { white-space: nowrap; }
-                td.links a { color: #0f3460; }
-                .badge { display: inline-block; padding: .2rem .5rem; border-radius: 4px; font-size: .75rem; font-weight: 600; }
-                .badge.long { background: #d4edda; color: #155724; }
-                .badge.short { background: #f8d7da; color: #721c24; }
-                .badge.watch { background: #fff3cd; color: #856404; }
-                .badge.hold { background: #e2e3e5; color: #383d41; }
-                    .badge.skip { background: #f5f5f5; color: #999; }
-                    .badge.enter { background: #d4edda; color: #155724; }
-                    .badge.reduce { background: #fff3cd; color: #856404; }
-                    .badge.block { background: #f8d7da; color: #721c24; }
-                    .badge.news-low { background: #e8f5e9; color: #2e7d32; }
-                    .badge.news-med { background: #fff8e1; color: #f57f17; }
-                    .badge.news-high { background: #ffe0b2; color: #e65100; }
-                    .badge.news-block { background: #ffcdd2; color: #b71c1c; }
-                    .empty, .empty-msg { color: #666; padding: 1rem; }
-                    pre { background: #1a1a2e; color: #a8b2d1; padding: 1rem; border-radius: 6px; overflow-x: auto; }
-                    .hint { background: #eef2ff; border-left: 4px solid #0f3460; padding: .75rem 1rem; margin: .5rem 0 1rem; font-size: .9rem; line-height: 1.45; }
-                    .summary { font-weight: 600; margin-bottom: .35rem; }
-                    .explain { white-space: normal; color: #333; font-size: .8rem; line-height: 1.45; max-width: 420px; }
-                    .chart-head .back { color: #0f3460; text-decoration: none; font-size: .9rem; }
-                    .legend { display: flex; flex-wrap: wrap; gap: .75rem; margin: .75rem 0; font-size: .85rem; }
-                    .legend .buy { color: #16a34a; font-weight: 600; }
-                    .legend .sell { color: #dc2626; font-weight: 600; }
-                    .legend .exit { color: #64748b; }
-                    .legend .kama { color: #b45309; }
-                    .chart-block { margin: 1.25rem 0; background: #fff; border-radius: 8px; padding: .75rem 1rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-                    .chart-block h3 { margin: 0 0 .5rem; font-size: .95rem; color: #16213e; }
-                    .chart { width: 100%; height: 320px; }
-                    .chart.tall { height: 360px; }
-                    #chart-explain { background: #f8fafc; border-radius: 6px; padding: .75rem 1rem; margin: .75rem 0; font-size: .9rem; line-height: 1.5; }
-              </style>
+              <link rel="preconnect" href="https://fonts.googleapis.com">
+              <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+              <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="/css/operator.css">
             </head>
             <body>
-              <header><h1>IMOEX Cointegration — {{TITLE}}</h1></header>
+              <header class="site-header">
+                <h1 class="brand">IMOEX Cointegration</h1>
+                <p class="tagline">Research · paper trading · walk-forward — без брокера, с прозрачным journal</p>
+              </header>
               {{NAV}}
-              <main>{{BODY}}</main>
+              <main>
+                {{OPS}}
+                {{BODY}}
+                <p class="footnote">Research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — псевдо-метрика.</p>
+              </main>
+              <script src="/js/operator.js"></script>
             </body>
             </html>
             """;
+
+    private String opsPanel() {
+        return """
+                <section class="ops-panel" id="ops-panel">
+                  <h2>Пульт оператора</h2>
+                  <p class="ops-lead">
+                    Запускайте анализ и обновляйте paper прямо отсюда — без консоли.
+                    POST-запросы идут с HTTP Basic (логин ниже). Полный refresh свечей может занять много минут.
+                  </p>
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <div class="ops-grid">
+                    <div>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="ops-user">API user</label>
+                          <input id="ops-user" type="text" autocomplete="username" spellcheck="false">
+                        </div>
+                        <div class="field">
+                          <label for="ops-pass">API password</label>
+                          <input id="ops-pass" type="password" autocomplete="current-password">
+                        </div>
+                        <button type="button" class="btn btn-ghost" id="ops-save-creds">Сохранить логин</button>
+                      </div>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                        <button type="button" class="btn btn-secondary" data-ops-action="run-full">Анализ + скачать свечи</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="news-refresh">Только новости / paper</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="walk-forward">Walk-forward</button>
+                        <button type="button" class="btn btn-warn" data-ops-action="data-refresh">Скачать свечи</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="status-box" id="ops-log" aria-live="polite"></div>
+                    </div>
+                  </div>
+                </section>
+                """;
+    }
 
     /**
      * Главная страница: сводка, сигналы входа, топ-пары.
@@ -128,7 +121,7 @@ public class AnalysisHtmlRenderer {
     public String renderAllRecommendations(List<TradingRecommendation> recommendations) {
         StringBuilder body = new StringBuilder();
         body.append("<p class=\"meta\">Всего рекомендаций: ").append(recommendations.size()).append("</p>");
-        body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Запустите POST /api/analysis/run"));
+        body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Нажмите «Анализ + paper» в пульте выше."));
         return page("IMOEX — рекомендации", body.toString(), nav("recommendations"));
     }
 
@@ -145,9 +138,9 @@ public class AnalysisHtmlRenderer {
         String body = """
                 <div class="empty">
                   <h2>Анализ ещё не выполнен</h2>
-                  <p>Запустите в PowerShell:</p>
-                  <pre>curl.exe -X POST "http://localhost:8080/api/analysis/run?refresh=false"</pre>
-                  <p>Затем обновите эту страницу.</p>
+                  <p>Нажмите <strong>«Анализ + paper»</strong> в пульте выше (логин по умолчанию
+                  <code>imoex</code> / <code>change-me</code>). После завершения страница обновится сама.</p>
+                  <p class="meta">Если свечей ещё нет — сначала «Скачать свечи», либо «Анализ + скачать свечи».</p>
                 </div>
                 """;
         return page("IMOEX — нет данных", body, nav("none"));
@@ -528,8 +521,8 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append("""
                 <div class="hint">
-                  <strong>Paper journal — автомат.</strong> На каждом анализе (POST или daily cron)
-                  система сама открывает ENTER/REDUCE, держит позицию с mark-to-market и закрывает
+                  <strong>Paper journal — автомат.</strong> Кнопка «Анализ + paper» или daily cron
+                  открывает ENTER/REDUCE, держит позицию с mark-to-market и закрывает
                   при возврате Z≈0, стопе |Z| или time-stop. PnL — псевдо (1 Z ≈ 1% notional Y), без брокера.
                 </div>
                 """);
@@ -555,7 +548,7 @@ public class AnalysisHtmlRenderer {
         body.append("</div>");
 
         if (entries.isEmpty()) {
-            body.append("<p class=\"empty\">Журнал пуст. Запустите анализ — появятся AUTO OPEN сделки.</p>");
+            body.append("<p class=\"empty\">Журнал пуст. Нажмите «Анализ + paper» — появятся AUTO OPEN сделки.</p>");
         } else {
             body.append("<div class=\"table-wrap\"><table><thead><tr>");
             body.append("<th>Статус</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
@@ -605,7 +598,7 @@ public class AnalysisHtmlRenderer {
                 </div>
                 """);
         if (report == null || report.pairs() == null || report.pairs().isEmpty()) {
-            body.append("<p class=\"empty\">Нет walk-forward отчёта. Запустите полный анализ или POST /api/analysis/walk-forward.</p>");
+            body.append("<p class=\"empty\">Нет walk-forward отчёта. Нажмите «Walk-forward» в пульте или запустите полный анализ.</p>");
             return page("Walk-forward", body.toString(), nav("walkforward"));
         }
 
@@ -646,7 +639,7 @@ public class AnalysisHtmlRenderer {
 
     private String nav(String active) {
         return """
-                <nav>
+                <nav class="topnav">
                   <a href="/view" class="%s">Дашборд</a>
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
@@ -669,6 +662,7 @@ public class AnalysisHtmlRenderer {
         return PAGE_TEMPLATE
                 .replace("{{TITLE}}", escape(title))
                 .replace("{{NAV}}", nav)
+                .replace("{{OPS}}", opsPanel())
                 .replace("{{BODY}}", body);
     }
 
