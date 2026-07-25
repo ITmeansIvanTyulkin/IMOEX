@@ -2,9 +2,9 @@
 
 **Поиск коинтегрированных пар акций индекса МосБиржи и торговые рекомендации для дневной / свинговой парной торговли.**
 
-Система загружает дневные свечи через MOEX ISS, тестирует пары методом Engle–Granger, считает спред и Z-score, строит бэктест mean-reversion, показывает интерактивные графики и пропускает сигналы через новостной safety-layer.
+Система загружает дневные свечи через MOEX ISS, отсекает тонкий рынок, тестирует пары Engle–Granger, считает спред / rolling Z-score (опционально Kalman-hedge), симулирует mean-reversion с risk-стопами, показывает графики, пропускает сигналы через новостной фильтр и ведёт **автоматический paper journal** с псевдо-PnL.
 
-> **Важно.** Это research / decision-support инструмент, а не автоисполняющий бот и не гарантия прибыли. Перед реальной торговлей нужна собственная валидация (walk-forward, paper-trading, учёт издержек шорта).
+> **Важно.** Это research / decision-support инструмент, а не автоисполняющий бот и не гарантия прибыли. Перед реальной торговлей нужна собственная валидация (walk-forward, paper-trading, учёт издержек шорта и проскальзывания).
 
 ---
 
@@ -12,13 +12,19 @@
 
 | Модуль | Что делает |
 |---|---|
-| **Данные** | Состав IMOEX + дневные OHLCV с MOEX ISS, локальный кэш в `data/candles/` |
-| **Коинтеграция** | Попарный Engle–Granger (ADF на остатках, MacKinnon CV, BIC-лаги) |
-| **Сигналы** | Z-score вход ±2.0, выход ≈ 0, half-life, Sharpe, max drawdown |
-| **Рекомендации** | Подробные тексты «для новичка»: что купить/продать и когда выходить |
-| **Графики** | Свечи Y/X, дивергенция, спред + **KAMA**, Z-score со стрелками входа/выхода |
-| **Новости** | Фильтр по MOEX sitenews + статус бумаги → **ENTER / REDUCE / WATCH / BLOCK** |
-| **UI** | HTML-дашборд в браузере + JSON REST API |
+| **Данные** | Состав IMOEX + дневные OHLCV с MOEX ISS, кэш в `data/candles/` |
+| **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P` (proxy шорта) |
+| **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) |
+| **Хедж** | Статический β или **Kalman** динамический hedge ratio |
+| **Сигналы** | Rolling Z, вход после **разворота** за ±entry, выход ≈ 0, stop / time-stop |
+| **Risk** | stop-z, max-hold, min Sharpe / half-life, borrow-rate в бэктесте, лимит открытых пар |
+| **Рекомендации** | Тексты «что купить/продать» + итог ENTER / REDUCE / WATCH / BLOCK |
+| **Новости** | MOEX sitenews + статус бумаги → safety-layer |
+| **Paper journal** | AUTO OPEN → MTM → AUTO CLOSE, псевдо PnL ₽, daily cron |
+| **Walk-forward** | OOS окна train/test по топ-парам |
+| **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
+| **Auth** | HTTP Basic на mutating API (`POST /api/**`) |
+| **UI** | HTML-дашборд + JSON REST |
 
 ---
 
@@ -26,33 +32,57 @@
 
 ```mermaid
 flowchart LR
-  A[MOEX ISS] --> B[Свечи + новости]
-  B --> C[Предобработка LOCF]
-  C --> D[Engle–Granger по парам]
-  D --> E[Спред / Z-score / метрики]
-  E --> F[Техсигналы]
-  F --> G[Новостной фильтр]
-  G --> H[Итог ENTER · REDUCE · BLOCK]
+  A[MOEX ISS] --> B[Свечи]
+  B --> U[Universe filter]
+  U --> C[LOCF + align]
+  C --> D[Engle–Granger + FDR]
+  D --> E[Kalman / спред / rolling Z]
+  E --> F[Сигналы + risk]
+  F --> G[Новости]
+  G --> H[ENTER · REDUCE · WATCH · BLOCK]
+  H --> P[Paper open/hold/close]
   H --> I[HTML / JSON / графики]
+  H --> W[Walk-forward OOS]
 ```
 
-**Идея стратегии (pair trading):**  
-если две акции обычно движутся вместе, а спред аномально расширился, ставка делается на **схождение** — одновременно long одной ноги и short другой (market-neutral по замыслу).
+**Идея стратегии:** две акции обычно движутся вместе; если спред аномально расширился и Z **развернулся** к нулю — ставка на схождение (long одной ноги + short другой).
 
 ---
 
-## Быстрый старт
+## Пошаговый запуск
 
-### Требования
+Ниже — полный путь от нуля до первого paper-цикла. Команды даны для **macOS / Linux** (`curl`) и **Windows** (`curl.exe`).
 
-- **Java 17+** (проверялось также на JDK 24)
-- **Maven 3.9+**
-- Доступ в интернет к `iss.moex.com`
+### 0. Что нужно заранее
 
-### Запуск
+| Требование | Проверка |
+|---|---|
+| **Java 17+** | `java -version` |
+| **Maven 3.9+** | `mvn -v` |
+| Интернет к `iss.moex.com` | браузер / `curl -I https://iss.moex.com` |
+| Свободный порт **8080** | иначе смените `server.port` в `application.yml` |
 
-```powershell
-cd C:\Users\i.tyulkin\Projects\imoex-cointegration
+Клон / каталог проекта:
+
+```bash
+cd /path/to/IMOEX          # macOS / Linux
+# или
+cd C:\path\to\IMOEX        # Windows
+```
+
+### 1. (Опционально) Прогнать тесты
+
+```bash
+mvn test
+```
+
+Все зелёные — можно запускать приложение.
+
+### 2. Запустить сервер
+
+**Терминал A** (оставьте открытым):
+
+```bash
 mvn spring-boot:run
 ```
 
@@ -62,50 +92,127 @@ mvn spring-boot:run
 Started CointegrationApplication
 ```
 
-Приложение слушает **http://localhost:8080**
+Приложение слушает **http://localhost:8080**.
 
-Если порт занят:
+**Если порт занят**
+
+macOS / Linux:
+
+```bash
+lsof -i :8080
+kill <PID>
+```
+
+Windows:
 
 ```powershell
 netstat -ano | findstr :8080
 taskkill /PID <PID> /F
 ```
 
-### Первый анализ
+### 3. Логин API (обязательно для POST)
 
-В **втором** окне терминала:
+По умолчанию Basic Auth включён:
 
-```powershell
-# Полный цикл: обновить свечи с MOEX + пересчитать пары + новости
-curl.exe -X POST "http://localhost:8080/api/analysis/run?refresh=true"
-```
-
-`refresh=true` может занять много минут (скачивание истории по тикерам).  
-Повторный пересчёт на уже скачанных данных:
-
-```powershell
-curl.exe -X POST "http://localhost:8080/api/analysis/run?refresh=false"
-```
-
-Только обновить новостной слой (без Engle–Granger):
-
-```powershell
-curl.exe -X POST "http://localhost:8080/api/analysis/news-refresh"
-```
-
-### Открыть в браузере
-
-| Страница | URL |
+| Поле | Значение |
 |---|---|
-| Дашборд | http://localhost:8080/view |
-| **Итог + новости** | http://localhost:8080/view/final |
-| Техсигналы | http://localhost:8080/view/signals |
-| Все рекомендации | http://localhost:8080/view/recommendations |
-| **Paper journal** | http://localhost:8080/view/paper |
-| **Walk-forward OOS** | http://localhost:8080/view/walk-forward |
-| График пары | http://localhost:8080/view/charts/{Y}/{X} |
+| Username | `imoex` |
+| Password | `change-me` |
 
-Корень `/` перенаправляет на `/view`.
+Смените пароль в `application.yml` (`imoex.auth.*`) перед любым внешним доступом.
+
+Проверка, что сервер жив (GET без пароля обычно ок):
+
+```bash
+curl -sS http://localhost:8080/actuator/health
+```
+
+### 4. Первый полный анализ (скачать свечи)
+
+**Терминал B.** Первый раз обязательно `refresh=true` — качает историю по тикерам IMOEX (может занять **много минут**).
+
+macOS / Linux:
+
+```bash
+curl -u imoex:change-me -X POST \
+  "http://localhost:8080/api/analysis/run?refresh=true"
+```
+
+Windows:
+
+```powershell
+curl.exe -u imoex:change-me -X POST "http://localhost:8080/api/analysis/run?refresh=true"
+```
+
+Что происходит внутри:
+
+1. Скачивание / обновление свечей → `data/candles/`  
+2. **Universe filter** (оборот ≥ 50 млн ₽, цена ≥ 5 ₽, без `*P`)  
+3. Engle–Granger + FDR → Kalman / rolling Z → метрики + risk  
+4. Техсигналы (вход только после **разворота** Z)  
+5. Новостной слой → ENTER / REDUCE / WATCH / BLOCK  
+6. **Paper sync** — авто-открытие по ENTER  
+7. Walk-forward по топ-парам (если включён)
+
+В логе Терминала A ищите строки вроде `Universe filter: … → … tickers` и `Paper sync: opened=…`.
+
+### 5. Повторный пересчёт без скачивания
+
+Когда свечи уже есть (типичный будний день после первого прогона):
+
+```bash
+curl -u imoex:change-me -X POST \
+  "http://localhost:8080/api/analysis/run?refresh=false"
+```
+
+Быстрее: только новости + paper sync (без полного Engle–Granger):
+
+```bash
+curl -u imoex:change-me -X POST \
+  "http://localhost:8080/api/analysis/news-refresh"
+```
+
+### 6. Смотреть результаты в браузере
+
+| Шаг | URL | Зачем |
+|---|---|---|
+| 1 | http://localhost:8080/view/final | Итог ENTER / REDUCE / BLOCK |
+| 2 | http://localhost:8080/view/paper | Paper: открытые / закрытые, Net ₽ |
+| 3 | http://localhost:8080/view/walk-forward | OOS Sharpe по окнам |
+| 4 | http://localhost:8080/view/signals | Сырые LONG / SHORT |
+| 5 | http://localhost:8080/view/charts/SBER/LKOH | График конкретной пары (подставьте тикеры) |
+
+Корень `/` → редирект на `/view`.
+
+### 7. Ежедневный режим (после первого прогона)
+
+**Вариант A — вручную (торговый день, после закрытия):**
+
+```bash
+curl -u imoex:change-me -X POST \
+  "http://localhost:8080/api/analysis/run?refresh=true"
+```
+
+Затем откройте `/view/paper` и `/view/final`.
+
+**Вариант B — автомат:** при `imoex.paper.auto-run-daily: true` (по умолчанию) планировщик в **пн–пт ~19:05** сам гоняет полный цикл (свечи → анализ → paper), пока `mvn spring-boot:run` запущен.
+
+На выходных новых дневных свечей нет — повтор почти ничего не меняет. Paper **не закрывает** стопом на той же свече, что и вход (защита от шума пересчёта Z).
+
+### 8. Сброс paper journal (чистый track-record)
+
+1. Остановите приложение.  
+2. Удалите `data/paper-journal.json`.  
+3. Запустите снова и сделайте `POST …/analysis/run?refresh=false`.
+
+### 9. Чеклист «всё ок»
+
+- [ ] `Started CointegrationApplication` в логе  
+- [ ] `POST /api/analysis/run` вернул JSON / не 401 (логин верный)  
+- [ ] В `data/candles/` появились JSON-файлы тикеров  
+- [ ] `/view/final` показывает пары и решения  
+- [ ] `/view/paper` не пустой после ENTER (или пустой осознанно — нет сигналов / близко к стопу)  
+- [ ] На графике Z стрелки входа только после разворота к нулю  
 
 ---
 
@@ -115,228 +222,236 @@ curl.exe -X POST "http://localhost:8080/api/analysis/news-refresh"
 
 | Сигнал | Смысл |
 |---|---|
-| **КУПИТЬ спред** (`LONG_SPREAD`) | Z ≤ −entry → купить Y, продать X |
-| **ПРОДАТЬ спред** (`SHORT_SPREAD`) | Z ≥ +entry → продать Y, купить X |
-| **НАБЛЮДАТЬ** | Спред расширяется, порог ещё не пробит |
-| **ЖДАТЬ / ПРОПУСК** | Нет входа или пара не прошла фильтры качества |
+| **КУПИТЬ спред** (`LONG_SPREAD`) | Z был ≤ −entry и развернулся вверх → купить Y, продать X |
+| **ПРОДАТЬ спред** (`SHORT_SPREAD`) | Z был ≥ +entry и развернулся вниз → продать Y, купить X |
+| **НАБЛЮДАТЬ / ЖДЁМ РАЗВОРОТ** | \|Z\| за порогом, но ещё расширяется — **не входить** |
+| **ЖДАТЬ / ПРОПУСК** | Нет входа или не прошли фильтры качества |
 
-Колонка **«Дата»** у пары — дата **последней общей свечи**, не обязательно «сегодня».  
-Карточка **«Дата анализа»** — когда вы запускали `POST /api/analysis/run`.
+Колонка **«Дата»** у пары — дата **последней общей свечи**.  
+**«Дата анализа»** — когда вы запускали `POST /api/analysis/run`.
 
 ### Итог после новостей (`/view/final`)
 
 | Итог | Действие |
 |---|---|
-| **ENTER** | Техника ок, блокеров нет — можно разбирать размер |
-| **REDUCE** | Есть caution-триггеры — вход только уменьшенным размером |
+| **ENTER** | Техника ок, блокеров нет |
+| **REDUCE** | Caution — уменьшенный размер |
 | **WATCH** | Не входить, наблюдать |
-| **BLOCK** | Вход запрещён (делистинг, стоп торгов, протухшие данные и т.п.) |
+| **BLOCK** | Вход запрещён (делистинг, стоп торгов, stale data, …) |
+
+### Paper journal (`/view/paper`)
+
+| Поле | Смысл |
+|---|---|
+| **OPEN** | Бумажная позиция открыта |
+| **CLOSED** | Закрыта (mean-reversion / stop / time-stop / разворот сигнала) |
+| **Realized ₽** | Псевдо-PnL закрытых (1 Z ≈ 1% notional Y) |
+| **Unrealized ₽** | Mark-to-market открытых |
+| **Net ₽** | Realized + Unrealized |
+
+Это **не** брокерский P&L: комиссии овернайта и проскальзывание в paper учтены упрощённо / не полностью.
 
 ### График пары
 
 1. Свечи Y  
 2. Свечи X  
-3. Дивергенция (нормализованные цены от 100)  
-4. Спред + **Kaufman Adaptive MA (KAMA)**  
-5. Z-score: уровни ±entry, ▲ зелёная = купить спред, ▼ красная = продать, ● серый = выход  
+3. Дивергенция (норм. цены от 100)  
+4. Спред + **KAMA**  
+5. Z-score: ±entry, ▲ купить, ▼ продать (после разворота), ● выход / «ждём разворот»  
 
 ---
 
 ## REST API
 
-Базовый префикс: `/api`
+Базовый префикс: `/api`.  
+**POST** требуют `-u imoex:change-me` (если `imoex.auth.enabled=true`).
 
 | Метод | Путь | Описание |
 |---|---|---|
-| `POST` | `/data/refresh` | Скачать свечи IMOEX |
-| `POST` | `/analysis/run?refresh=true\|false` | Полный анализ (+ опционально refresh) |
-| `POST` | `/analysis/news-refresh` | Пересчитать только новости (+ paper sync) |
-| `POST` | `/analysis/walk-forward?maxPairs=10` | OOS walk-forward по топ-парам |
-| `GET` | `/analysis/walk-forward` | Последний walk-forward отчёт |
+| `POST` | `/data/refresh` | Только скачать свечи |
+| `POST` | `/analysis/run?refresh=true\|false` | Полный анализ (+ paper + walk-forward) |
+| `POST` | `/analysis/news-refresh` | Новости + paper sync |
+| `POST` | `/analysis/walk-forward?maxPairs=10` | Пересчёт OOS |
+| `GET` | `/analysis/walk-forward` | Последний WF-отчёт |
 | `GET` | `/paper/journal` | Paper track-record |
-| `GET` | `/risk/policy` | Текущая risk policy |
-| `GET` | `/analysis/report` | Сводка последнего отчёта |
+| `GET` | `/risk/policy` | Risk policy |
+| `GET` | `/analysis/report` | Сводка отчёта |
 | `GET` | `/analysis/top-pairs` | Топ-N по Sharpe |
 | `GET` | `/analysis/recommendations` | Все техрекомендации |
 | `GET` | `/analysis/signals` | Только LONG/SHORT |
 | `GET` | `/analysis/final` | Итог техника + новости |
-| `GET` | `/charts/{Y}/{X}/data` | JSON для интерактивного графика |
+| `GET` | `/charts/{Y}/{X}/data` | JSON графика |
 | `GET` | `/charts/{Y}/{X}/spread` | PNG спреда |
 | `GET` | `/charts/{Y}/{X}/zscore` | PNG Z-score |
+| `GET` | `/actuator/health` | Healthcheck |
 
 Пример:
 
-```powershell
-curl.exe "http://localhost:8080/api/analysis/final"
+```bash
+curl -u imoex:change-me -sS "http://localhost:8080/api/analysis/final" | head
+curl -u imoex:change-me -sS "http://localhost:8080/api/paper/journal" | head
 ```
 
 ---
 
 ## Конфигурация
 
-Файл: `src/main/resources/application.yml`
+Файл: `src/main/resources/application.yml` (ключевые блоки):
 
 ```yaml
 server:
   port: 8080
 
 imoex:
-  base-url: https://iss.moex.com/iss
-  board: TQBR
-  index: IMOEX
-  history-years: 5
-  commission-rate: 0.0005          # 0.05% на ногу в симуляции
+  commission-rate: 0.0005
   cointegration:
     p-value-threshold: 0.05
     z-score-entry: 2.0
     z-score-exit: 0.0
     top-n: 10
-  data-dir: data
-  charts-dir: data/charts
-  news:
+    use-rolling-z: true
+    rolling-z-window: 60
+    fdr-q: 0.10
+    use-kalman-hedge: true
+    require-entry-reversal: true   # вход только после разворота Z
+  universe:
     enabled: true
-    lookback-days: 10              # окно новостей (дни)
-    stale-candle-days: 10          # старше → BLOCK
-    max-news-pages: 8
+    lookback-days: 60
+    min-median-turnover-rub: 50000000  # ~p25 IMOEX
+    min-price: 5.0
+    max-zero-volume-fraction: 0.15
+    exclude-preferred: true            # SBERP, SNGSP, …
+  risk:
+    stop-z: 3.5
+    max-hold-bars: 40
+    max-open-pairs: 5
+    borrow-rate-annual: 0.08
+  walk-forward:
+    enabled: true
+    train-bars: 504
+    test-bars: 63
+    step-bars: 63
+  paper:
+    enabled: true
+    notional-per-leg: 100000
+    journal-file: paper-journal.json
+    auto-run-daily: true
+    daily-cron: "0 5 19 * * MON-FRI"
+  auth:
+    enabled: true
+    username: imoex
+    password: change-me
 
 analysis:
   schedule:
-    enabled: false                 # true — еженедельный cron
+    enabled: false              # отдельный weekly full-refresh
     cron: "0 0 6 * * SUN"
 ```
+
+| Модуль | Конфиг | Где видно |
+|---|---|---|
+| Universe filter | `imoex.universe.*` | до EG в `/analysis/run` |
+| Entry reversal | `require-entry-reversal` | сигналы + график |
+| Kalman / rolling Z / FDR | `use-kalman-hedge`, `use-rolling-z`, `fdr-q` | метрики пар |
+| Risk | `imoex.risk.*` | `GET /api/risk/policy` |
+| Walk-forward | `imoex.walk-forward.*` | `/view/walk-forward` |
+| Paper | `imoex.paper.*` | `/view/paper` |
+| Auth | `imoex.auth.*` | HTTP Basic на POST |
 
 ---
 
 ## Структура проекта
 
 ```text
-imoex-cointegration/
+IMOEX/
 ├── src/main/java/com/moex/cointegration/
-│   ├── client/          # MOEX ISS: свечи, новости, статус бумаг
-│   ├── config/          # application properties
+│   ├── client/          # MOEX ISS: свечи, новости, статус
+│   ├── config/          # properties + Security
 │   ├── controller/      # REST + HTML
 │   ├── model/           # DTO / records
-│   ├── news/            # триггеры заголовков новостей
-│   ├── quant/           # ADF, Engle–Granger, OLS, спред, KAMA
-│   ├── scheduler/       # опциональный weekly job
-│   ├── service/         # оркестрация анализа и рекомендаций
-│   ├── storage/         # локальный JSON-кэш
+│   ├── news/            # триггеры заголовков
+│   ├── quant/           # ADF, EG, OLS, Spread, KAMA, Kalman, SignalRules, WF
+│   ├── scheduler/       # weekly + daily paper cron
+│   ├── service/         # анализ, paper, universe filter, …
+│   ├── storage/         # JSON-кэш
 │   └── web/             # HTML-рендер
 ├── src/main/resources/application.yml
-├── src/test/java/       # unit-тесты quant / news / services
-└── data/                # свечи, отчёты, рекомендации (в .gitignore)
+├── src/test/java/
+├── pom.xml
+└── data/                # свечи, отчёты, paper (в .gitignore)
 ```
 
 ### Локальные артефакты (`data/`)
 
 | Файл / папка | Содержимое |
 |---|---|
-| `candles/*.json` | Дневные OHLCV по тикерам |
-| `analysis-report.json` | Отчёт + топ-пары с рядами |
+| `candles/*.json` | Дневные OHLCV |
+| `analysis-report.json` | Отчёт + топ-пары |
 | `trading-recommendations.json` | Техрекомендации |
 | `final-recommendations.json` | Итог после новостей |
-| `charts/` | PNG-графики (запасной формат) |
+| `paper-journal.json` | Paper track-record |
+| `walk-forward-report.json` | OOS отчёт |
+| `charts/` | PNG (запасной формат) |
 
 ---
 
 ## Методология (кратко)
 
 1. **Загрузка** тикеров IMOEX и дневных свечей за `history-years`.  
-2. **LOCF** для пропусков; выравнивание **попарно** по общим датам (не глобальное пересечение всех тикеров).  
-3. **Engle–Granger:** OLS `logY ~ logX`, ADF на остатках без константы, критические значения для коинтеграции.  
-4. **Спред** = `logY − (α + β·logX)`, **Z-score** по истории спреда.  
-5. **Симуляция** mean-reversion с комиссией → Sharpe, max DD, half-life, число сделок.  
-6. **Топ-N** по Sharpe сохраняется в отчёт; сигналы строятся по всем коинтегрированным парам.  
-7. **Новости:** MOEX sitenews + tradability + stale data → финальный вердикт.
+2. **Universe filter:** медианный оборот, мин. цена, без preferred `*P`.  
+3. **LOCF**; выравнивание **попарно** по общим датам.  
+4. **Engle–Granger** + **FDR** по p-value.  
+5. Спред (статический или **Kalman** β), **rolling Z**.  
+6. Симуляция mean-reversion: commission + borrow, stop-z, time-stop, **entry reversal**.  
+7. Топ-N по Sharpe; сигналы по коинтегрированным парам.  
+8. **Новости** → ENTER / REDUCE / WATCH / BLOCK.  
+9. **Paper** sync + опционально **walk-forward** OOS.
 
 ### Новостные триггеры (примеры)
 
-- **BLOCK:** приостановка торгов, делистинг, санкции, банкротство/дефолт, M&A/реорганизация, неторгуемая бумага, устаревшие свечи  
-- **HIGH:** дискретный аукцион, оферта, SPO/допэмиссия  
-- **MEDIUM:** дивиденды, buyback, смена менеджмента, риск-параметры MOEX, отсутствие в актуальном индексе  
+- **BLOCK:** приостановка торгов, делистинг, санкции, банкротство/дефолт, M&A, stale свечи  
+- **HIGH:** дискретный аукцион, оферта, SPO  
+- **MEDIUM:** дивиденды, buyback, смена менеджмента, риск-параметры MOEX  
 
 ---
 
 ## Тесты
 
-```powershell
+```bash
 mvn test
-# отчёт + gate покрытия (минимум 40% line, без model/web)
-mvn verify
+mvn verify   # + JaCoCo gate
 ```
 
-Отчёт JaCoCo: `target/site/jacoco/index.html`.
+Отчёт: `target/site/jacoco/index.html`.
 
-Покрыты ADF / Engle–Granger / **SpreadAnalytics** (Z, rolling Z, half-life, бэктест, stops),
-walk-forward + FDR, предобработка, рекомендации, news, clients (MockRest),
-controllers (MockMvc), pipeline, storage, paper journal.
-
----
-
-## Risk / Walk-forward / Paper / Auth
-
-| Модуль | Конфиг | API |
-|---|---|---|
-| **Rolling Z + FDR + Kalman** | `use-rolling-z`, `fdr-q`, `use-kalman-hedge` | внутри `/api/analysis/run` |
-| **Universe filter** | `imoex.universe.*` (ADV / min-price / exclude preferred) | до Engle–Granger в `/api/analysis/run` |
-| **Entry reversal** | `require-entry-reversal: true` | вход только после разворота Z к 0 (не на первом касании ±2) |
-| **Risk policy** | `imoex.risk.*` (stop-z, max-hold-bars, borrow-rate-annual, …) | `GET /api/risk/policy` |
-| **Walk-forward** | `imoex.walk-forward.*` | `POST/GET /api/analysis/walk-forward`, UI `/view/walk-forward` |
-| **Paper journal** | `imoex.paper.*` (+ `auto-run-daily`) | `GET /api/paper/journal`, UI `/view/paper` — auto open/hold/close |
-| **Auth** | `imoex.auth.enabled=true` (по умолчанию) + username/password | HTTP Basic на `POST /api/**` |
-
-Логин по умолчанию: `imoex` / `change-me`. Смените пароль перед выкладкой наружу.
-
-Пример:
-
-```powershell
-curl.exe -u imoex:change-me -X POST "http://localhost:8080/api/analysis/run?refresh=false"
-```
-
-Actuator: `GET /actuator/health`.
+Покрыты ADF / EG / SpreadAnalytics / Kalman / SignalRules / universe filter /
+walk-forward / FDR / рекомендации / news / clients / controllers / paper / pipeline.
 
 ---
 
-## Ограничения и честный дисклеймер
+## Ограничения
 
-- Нет интеграции с брокером и автоисполнения ордеров.  
-- Z-score и метрики считаются на историческом окне; возможен **look-ahead / overfitting** при наивной интерпретации Sharpe.  
-- Издержки шорта, проскальзывание и ликвидность учтены упрощённо.  
-- Коинтеграция может «сломаться» — новостной фильтр снижает, но не устраняет этот риск.  
-- Проект **не является** индивидуальной инвестиционной рекомендацией.
+- Нет брокера и автоисполнения.  
+- Возможен look-ahead / overfitting при наивном чтении in-sample Sharpe.  
+- Paper PnL — proxy (1 Z ≈ 1% notional); полный учёт овернайта/проскальзывания не заменяет брокерский отчёт.  
+- Shortability без брокера — приближение (ликвидность + exclude preferred).  
+- Коинтеграция может сломаться.  
+- **Не является** индивидуальной инвестиционной рекомендацией.
 
-Рекомендуемый путь к live: rolling Z → walk-forward → paper journal → жёсткие лимиты риска → только потом брокерский API.
-
----
-
-## Типичный рабочий день
-
-1. `mvn spring-boot:run`  
-2. Либо дождаться **daily cron** (пн–пт 19:05, `imoex.paper.auto-run-daily=true`), либо вручную:
-   `POST /api/analysis/run?refresh=true`  
-3. Открыть **`/view/paper`**: AUTO OPEN → MTM (unrealized) → AUTO CLOSE + псевдо PnL ₽  
-4. **`/view/final`** + график: вход только после разворота Z к нулю  
-5. Днём по желанию: `POST /api/analysis/news-refresh` (новости + paper sync)  
-
-Достаточно одного POST (или cron): paper сам входит, держит и закрывает. На выходных свечей нет — цикл почти ничего не меняет. 
+Путь к live: universe filter → rolling Z → walk-forward → paper → жёсткий risk → только потом брокерский API.
 
 ---
 
 ## Стек
 
-- Java 17 · Spring Boot 3.3  
-- Apache Commons Math 3  
-- JFreeChart (PNG) · Lightweight Charts (браузер)  
-- Jackson · Maven  
+Java 17 · Spring Boot 3.3 · Apache Commons Math 3 · JFreeChart · Lightweight Charts · Jackson · Maven · Spring Security (Basic) · Actuator
 
 ---
 
 ## Лицензия и данные
 
-Код проекта — ваш; рыночные данные принадлежат **Московской бирже** и предоставляются через публичный ISS API с его условиями использования.
+Код проекта — ваш; рыночные данные принадлежат **Московской бирже** (публичный ISS API и его условия).
 
 ---
 
-<p align="center">
-  <sub>IMOEX Cointegration — от сырых свечей до итоговой таблицы ENTER / REDUCE / BLOCK</sub>
-</p>
+<sub>IMOEX Cointegration — от сырых свечей до ENTER / paper track-record</sub>
