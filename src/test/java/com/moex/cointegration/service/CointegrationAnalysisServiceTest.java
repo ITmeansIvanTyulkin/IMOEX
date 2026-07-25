@@ -42,6 +42,7 @@ class CointegrationAnalysisServiceTest {
                 new ImoexProperties.WalkForwardProperties(false, 200, 40, 40),
                 new ImoexProperties.PaperProperties(false, 100_000, "paper.json", false, null),
                 new ImoexProperties.UniverseProperties(false, 60, 0, 0, 1.0, false, false, 0.0, 100.0),
+                ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );
 
