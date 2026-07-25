@@ -174,13 +174,16 @@ curl -u imoex:change-me -X POST \
 
 ### 6. Смотреть результаты в браузере
 
+Откройте http://localhost:8080/view — сверху **пульт оператора**: кнопки «Анализ + paper», «Анализ + скачать свечи», «Только новости / paper», «Walk-forward», «Скачать свечи». Логин/пароль (`imoex` / `change-me`) вводятся в панели и сохраняются в браузере. `curl` ниже — запасной путь.
+
 | Шаг | URL | Зачем |
 |---|---|---|
-| 1 | http://localhost:8080/view/final | Итог ENTER / REDUCE / BLOCK |
-| 2 | http://localhost:8080/view/paper | Paper: открытые / закрытые, Net ₽ |
-| 3 | http://localhost:8080/view/walk-forward | OOS Sharpe по окнам |
-| 4 | http://localhost:8080/view/signals | Сырые LONG / SHORT |
-| 5 | http://localhost:8080/view/charts/SBER/LKOH | График конкретной пары (подставьте тикеры) |
+| 1 | http://localhost:8080/view | Дашборд + пульт |
+| 2 | http://localhost:8080/view/final | Итог ENTER / REDUCE / BLOCK |
+| 3 | http://localhost:8080/view/paper | Paper: открытые / закрытые, Net ₽ |
+| 4 | http://localhost:8080/view/walk-forward | OOS Sharpe по окнам |
+| 5 | http://localhost:8080/view/signals | Сырые LONG / SHORT |
+| 6 | http://localhost:8080/view/charts/SBER/LKOH | График конкретной пары (подставьте тикеры) |
 
 Корень `/` → редирект на `/view`.
 
