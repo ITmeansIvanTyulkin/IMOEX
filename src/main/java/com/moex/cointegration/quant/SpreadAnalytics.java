@@ -122,6 +122,7 @@ public final class SpreadAnalytics {
      *   <li>Опционально: stop по |Z| и time-stop по числу баров в позиции</li>
      *   <li>Доходность нормируется на σ спреда (не на |spread|), чтобы избежать взрыва у нуля</li>
      *   <li>Комиссия: 2 сделки на вход и 2 на выход (обе ноги пары)</li>
+     *   <li>Borrow: дневной cost ≈ annualBorrow/252, пока позиция открыта (одна короткая нога)</li>
      * </ul>
      */
     public static TradingMetrics simulateMeanReversion(
@@ -130,17 +131,9 @@ public final class SpreadAnalytics {
             double zEntry,
             double zExit
     ) {
-        return simulateMeanReversion(spread, commissionRate, zEntry, zExit, zScores(spread), Double.NaN, 0);
+        return simulateMeanReversion(spread, commissionRate, zEntry, zExit, zScores(spread), Double.NaN, 0, 0.0, false);
     }
 
-    /**
-     * То же, что {@link #simulateMeanReversion(double[], double, double, double)}, но с явным
-     * рядом Z (например rolling) и risk-параметрами.
-     *
-     * @param zScoreSeries  Z для сигналов (длина = spread.length; NaN → нет входа)
-     * @param stopZ         |Z| стоп (NaN/≤0 — выключен)
-     * @param maxHoldBars   макс. баров в позиции (≤0 — выключен)
-     */
     public static TradingMetrics simulateMeanReversion(
             double[] spread,
             double commissionRate,
@@ -150,6 +143,38 @@ public final class SpreadAnalytics {
             double stopZ,
             int maxHoldBars
     ) {
+        return simulateMeanReversion(spread, commissionRate, zEntry, zExit, zScoreSeries, stopZ, maxHoldBars, 0.0, false);
+    }
+
+    public static TradingMetrics simulateMeanReversion(
+            double[] spread,
+            double commissionRate,
+            double zEntry,
+            double zExit,
+            double[] zScoreSeries,
+            double stopZ,
+            int maxHoldBars,
+            double borrowRateAnnual
+    ) {
+        return simulateMeanReversion(
+                spread, commissionRate, zEntry, zExit, zScoreSeries, stopZ, maxHoldBars, borrowRateAnnual, false);
+    }
+
+    /**
+     * @param borrowRateAnnual     годовая ставка займа под шорт; 0 — выкл.
+     * @param requireEntryReversal true — вход только на развороте за порогом entry
+     */
+    public static TradingMetrics simulateMeanReversion(
+            double[] spread,
+            double commissionRate,
+            double zEntry,
+            double zExit,
+            double[] zScoreSeries,
+            double stopZ,
+            int maxHoldBars,
+            double borrowRateAnnual,
+            boolean requireEntryReversal
+    ) {
         if (spread.length != zScoreSeries.length) {
             throw new IllegalArgumentException("spread and zScoreSeries length mismatch");
         }
@@ -158,6 +183,7 @@ public final class SpreadAnalytics {
         }
 
         double scale = Math.max(sampleStd(spread, mean(spread)), 1e-6);
+        double dailyBorrow = Math.max(0.0, borrowRateAnnual) / 252.0;
         List<Double> strategyReturns = new ArrayList<>();
         int position = 0;
         int barsInTrade = 0;
@@ -171,6 +197,7 @@ public final class SpreadAnalytics {
             double dailyReturn = 0.0;
             if (position != 0) {
                 dailyReturn = position * (spread[i] - spread[i - 1]) / scale;
+                dailyReturn -= dailyBorrow;
                 barsInTrade++;
             }
 
@@ -178,29 +205,25 @@ public final class SpreadAnalytics {
             double zPrev = zScoreSeries[i - 1];
 
             if (position == 0) {
-                if (!Double.isNaN(z)) {
-                    if (z >= zEntry) {
-                        position = -1;
-                        barsInTrade = 0;
-                        tradeCount += 2;
-                        dailyReturn -= 2 * commissionRate;
-                    } else if (z <= -zEntry) {
-                        position = 1;
-                        barsInTrade = 0;
-                        tradeCount += 2;
-                        dailyReturn -= 2 * commissionRate;
-                    }
+                if (SignalRules.confirmShortEntry(zPrev, z, zEntry, requireEntryReversal)) {
+                    position = -1;
+                    barsInTrade = 0;
+                    tradeCount += 2;
+                    dailyReturn -= 2 * commissionRate;
+                } else if (SignalRules.confirmLongEntry(zPrev, z, zEntry, requireEntryReversal)) {
+                    position = 1;
+                    barsInTrade = 0;
+                    tradeCount += 2;
+                    dailyReturn -= 2 * commissionRate;
                 }
             } else {
                 boolean exit = false;
-                if (!Double.isNaN(z) && !Double.isNaN(zPrev)) {
-                    if (position == 1 && zPrev < zExit && z >= zExit) {
-                        exit = true;
-                    } else if (position == -1 && zPrev > zExit && z <= zExit) {
-                        exit = true;
-                    } else if (useStop && Math.abs(z) >= stopZ) {
-                        exit = true;
-                    }
+                if (position == 1 && SignalRules.exitLong(zPrev, z, zExit)) {
+                    exit = true;
+                } else if (position == -1 && SignalRules.exitShort(zPrev, z, zExit)) {
+                    exit = true;
+                } else if (useStop && !Double.isNaN(z) && Math.abs(z) >= stopZ) {
+                    exit = true;
                 }
                 if (!exit && maxHoldBars > 0 && barsInTrade >= maxHoldBars) {
                     exit = true;

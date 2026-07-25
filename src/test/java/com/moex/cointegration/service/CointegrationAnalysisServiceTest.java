@@ -34,13 +34,13 @@ class CointegrationAnalysisServiceTest {
     void runFullAnalysisFindsCointegratedSyntheticPairAndPersists() throws Exception {
         ImoexProperties props = new ImoexProperties(
                 "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
-                new ImoexProperties.CointegrationProperties(0.05, 2.0, 0.0, 5, true, 40, 0.20),
+                new ImoexProperties.CointegrationProperties(0.05, 2.0, 0.0, 5, true, 40, 0.20, true, 1e-5, 1e-3, true),
                 new ImoexProperties.NewsProperties(false, 10, 10, 1),
                 tempDir.toString(),
                 tempDir.resolve("charts").toString(),
                 ImoexProperties.RiskProperties.defaults(),
                 new ImoexProperties.WalkForwardProperties(false, 200, 40, 40),
-                new ImoexProperties.PaperProperties(false, 100_000, "paper.json"),
+                new ImoexProperties.PaperProperties(false, 100_000, "paper.json", false, null),
                 ImoexProperties.AuthProperties.defaults()
         );
 

@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * Walk-forward (rolling train/test) валидация pair-trading без look-ahead в OOS-окне.
  * <p>
- * На каждом шаге: EG + hedge на train → спред/rolling-Z/симуляция только на test.
+ * На каждом шаге: EG на train → Kalman/OLS спред на test → rolling-Z + risk/borrow симуляция.
  */
 public final class WalkForwardAnalyzer {
 
@@ -55,6 +55,52 @@ public final class WalkForwardAnalyzer {
             int testBars,
             int stepBars
     ) {
+        return evaluate(logY, logX, pThreshold, commissionRate, zEntry, zExit, rollingZWindow,
+                stopZ, maxHoldBars, trainBars, testBars, stepBars, true, 1e-5, 1e-3, 0.08, true);
+    }
+
+    public static Summary evaluate(
+            double[] logY,
+            double[] logX,
+            double pThreshold,
+            double commissionRate,
+            double zEntry,
+            double zExit,
+            int rollingZWindow,
+            double stopZ,
+            int maxHoldBars,
+            int trainBars,
+            int testBars,
+            int stepBars,
+            boolean useKalman,
+            double kalmanDelta,
+            double kalmanVe,
+            double borrowRateAnnual
+    ) {
+        return evaluate(logY, logX, pThreshold, commissionRate, zEntry, zExit, rollingZWindow,
+                stopZ, maxHoldBars, trainBars, testBars, stepBars,
+                useKalman, kalmanDelta, kalmanVe, borrowRateAnnual, true);
+    }
+
+    public static Summary evaluate(
+            double[] logY,
+            double[] logX,
+            double pThreshold,
+            double commissionRate,
+            double zEntry,
+            double zExit,
+            int rollingZWindow,
+            double stopZ,
+            int maxHoldBars,
+            int trainBars,
+            int testBars,
+            int stepBars,
+            boolean useKalman,
+            double kalmanDelta,
+            double kalmanVe,
+            double borrowRateAnnual,
+            boolean requireEntryReversal
+    ) {
         if (logY.length != logX.length) {
             throw new IllegalArgumentException("logY/logX length mismatch");
         }
@@ -82,10 +128,19 @@ public final class WalkForwardAnalyzer {
 
             double[] yTest = slice(logY, trainEnd, testEnd);
             double[] xTest = slice(logX, trainEnd, testEnd);
-            double[] spreadTest = SpreadAnalytics.computeSpread(yTest, xTest, eg.intercept(), eg.hedgeRatio());
-            double[] zTest = SpreadAnalytics.rollingZScores(spreadTest, Math.min(rollingZWindow, Math.max(2, spreadTest.length / 2)));
+            double[] spreadTest;
+            if (useKalman) {
+                spreadTest = KalmanHedgeFilter.filter(
+                        yTest, xTest, eg.intercept(), eg.hedgeRatio(), kalmanDelta, kalmanVe
+                ).spread();
+            } else {
+                spreadTest = SpreadAnalytics.computeSpread(yTest, xTest, eg.intercept(), eg.hedgeRatio());
+            }
+            int zWindow = Math.min(rollingZWindow, Math.max(2, spreadTest.length / 2));
+            double[] zTest = SpreadAnalytics.rollingZScores(spreadTest, zWindow);
             TradingMetrics metrics = SpreadAnalytics.simulateMeanReversion(
-                    spreadTest, commissionRate, zEntry, zExit, zTest, stopZ, maxHoldBars
+                    spreadTest, commissionRate, zEntry, zExit, zTest, stopZ, maxHoldBars,
+                    borrowRateAnnual, requireEntryReversal
             );
 
             windows.add(new WindowResult(
@@ -104,9 +159,6 @@ public final class WalkForwardAnalyzer {
         return new Summary(windows.size(), coint.size(), meanSharpe, medianSharpe, meanDd, meanRet, windows);
     }
 
-    /**
-     * Benjamini–Hochberg FDR: возвращает индексы гипотез, прошедших порог q.
-     */
     public static boolean[] benjaminiHochberg(double[] pValues, double q) {
         int m = pValues.length;
         boolean[] reject = new boolean[m];

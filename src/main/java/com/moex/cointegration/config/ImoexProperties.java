@@ -26,7 +26,7 @@ public record ImoexProperties(
             news = new NewsProperties(true, 10, 10, 8);
         }
         if (cointegration == null) {
-            cointegration = new CointegrationProperties(0.05, 2.0, 0.0, 10, true, 60, 0.10);
+            cointegration = new CointegrationProperties(0.05, 2.0, 0.0, 10, true, 60, 0.10, true, 1e-5, 1e-3, true);
         }
         if (risk == null) {
             risk = RiskProperties.defaults();
@@ -67,7 +67,11 @@ public record ImoexProperties(
             int topN,
             Boolean useRollingZ,
             Integer rollingZWindow,
-            Double fdrQ
+            Double fdrQ,
+            Boolean useKalmanHedge,
+            Double kalmanDelta,
+            Double kalmanVe,
+            Boolean requireEntryReversal
     ) {
         public CointegrationProperties {
             if (useRollingZ == null) {
@@ -79,14 +83,35 @@ public record ImoexProperties(
             if (fdrQ == null || fdrQ <= 0 || fdrQ > 1) {
                 fdrQ = 0.10;
             }
+            if (useKalmanHedge == null) {
+                useKalmanHedge = true;
+            }
+            if (kalmanDelta == null || kalmanDelta < 0) {
+                kalmanDelta = 1e-5;
+            }
+            if (kalmanVe == null || kalmanVe <= 0) {
+                kalmanVe = 1e-3;
+            }
+            if (requireEntryReversal == null) {
+                requireEntryReversal = true;
+            }
         }
 
         public static CointegrationProperties of(double pValueThreshold, double zScoreEntry, double zScoreExit, int topN) {
-            return new CointegrationProperties(pValueThreshold, zScoreEntry, zScoreExit, topN, true, 60, 0.10);
+            return new CointegrationProperties(pValueThreshold, zScoreEntry, zScoreExit, topN,
+                    true, 60, 0.10, true, 1e-5, 1e-3, true);
         }
 
         public boolean rollingZEnabled() {
             return Boolean.TRUE.equals(useRollingZ);
+        }
+
+        public boolean kalmanEnabled() {
+            return Boolean.TRUE.equals(useKalmanHedge);
+        }
+
+        public boolean entryReversalRequired() {
+            return Boolean.TRUE.equals(requireEntryReversal);
         }
     }
 
@@ -109,10 +134,17 @@ public record ImoexProperties(
             double maxPortfolioGross,
             double minSharpe,
             double maxHalfLifeDays,
-            double minHalfLifeDays
+            double minHalfLifeDays,
+            Double borrowRateAnnual
     ) {
+        public RiskProperties {
+            if (borrowRateAnnual == null || borrowRateAnnual < 0) {
+                borrowRateAnnual = 0.08;
+            }
+        }
+
         public static RiskProperties defaults() {
-            return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 1.0);
+            return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 1.0, 0.08);
         }
     }
 
@@ -132,14 +164,32 @@ public record ImoexProperties(
 
     /**
      * Paper trading journal.
+     *
+     * @param autoRunDaily при true планировщик каждый торговый день гоняет анализ + paper sync
+     * @param dailyCron    cron (по умолчанию пн–пт 19:05 Europe/Moscow wall clock JVM)
      */
     public record PaperProperties(
             boolean enabled,
             double notionalPerLeg,
-            String journalFile
+            String journalFile,
+            Boolean autoRunDaily,
+            String dailyCron
     ) {
+        public PaperProperties {
+            if (autoRunDaily == null) {
+                autoRunDaily = true;
+            }
+            if (dailyCron == null || dailyCron.isBlank()) {
+                dailyCron = "0 5 19 * * MON-FRI";
+            }
+        }
+
         public static PaperProperties defaults() {
-            return new PaperProperties(true, 100_000.0, "paper-journal.json");
+            return new PaperProperties(true, 100_000.0, "paper-journal.json", true, "0 5 19 * * MON-FRI");
+        }
+
+        public boolean autoRunDailyEnabled() {
+            return Boolean.TRUE.equals(autoRunDaily);
         }
     }
 

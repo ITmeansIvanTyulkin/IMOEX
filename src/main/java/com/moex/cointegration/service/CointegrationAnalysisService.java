@@ -11,6 +11,7 @@ import com.moex.cointegration.model.PriceSeries;
 import com.moex.cointegration.model.TradingMetrics;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.quant.EngleGrangerTest;
+import com.moex.cointegration.quant.KalmanHedgeFilter;
 import com.moex.cointegration.quant.SpreadAnalytics;
 import com.moex.cointegration.quant.WalkForwardAnalyzer;
 import com.moex.cointegration.storage.MarketDataStorage;
@@ -131,14 +132,32 @@ public class CointegrationAnalysisService {
                 continue;
             }
 
-            double[] spread = SpreadAnalytics.computeSpread(
-                    c.pairData().logY(), c.pairData().logX(), c.eg().intercept(), c.eg().hedgeRatio());
+            double[] spread;
+            double intercept;
+            double hedgeRatio;
+            if (coint.kalmanEnabled()) {
+                KalmanHedgeFilter.Result kf = KalmanHedgeFilter.filter(
+                        c.pairData().logY(),
+                        c.pairData().logX(),
+                        c.eg().intercept(),
+                        c.eg().hedgeRatio(),
+                        coint.kalmanDelta(),
+                        coint.kalmanVe()
+                );
+                spread = kf.spread();
+                intercept = kf.lastIntercept();
+                hedgeRatio = kf.lastBeta();
+            } else {
+                intercept = c.eg().intercept();
+                hedgeRatio = c.eg().hedgeRatio();
+                spread = SpreadAnalytics.computeSpread(
+                        c.pairData().logY(), c.pairData().logX(), intercept, hedgeRatio);
+            }
 
             double[] zScores = coint.rollingZEnabled()
                     ? SpreadAnalytics.rollingZScores(spread, coint.rollingZWindow())
                     : SpreadAnalytics.zScores(spread);
 
-            // For ranking metrics use risk-aware simulation on the chosen Z series.
             TradingMetrics metrics = SpreadAnalytics.simulateMeanReversion(
                     spread,
                     properties.commissionRate(),
@@ -146,14 +165,16 @@ public class CointegrationAnalysisService {
                     coint.zScoreExit(),
                     replaceNanZWithZeroForMetrics(zScores),
                     risk.stopZ(),
-                    risk.maxHoldBars()
+                    risk.maxHoldBars(),
+                    risk.borrowRateAnnual(),
+                    coint.entryReversalRequired()
             );
 
             cointegratedPairs.add(new PairAnalysisResult(
                     c.tickerY(),
                     c.tickerX(),
-                    c.eg().intercept(),
-                    c.eg().hedgeRatio(),
+                    intercept,
+                    hedgeRatio,
                     c.eg().adfStatistic(),
                     c.eg().pValue(),
                     metrics.sharpeRatio(),
@@ -183,7 +204,7 @@ public class CointegrationAnalysisService {
 
         List<TradingRecommendation> recommendations = recommendationService.analyzeAndPrint(cointegratedPairs);
         List<FinalTradeRecommendation> finals = finalRecommendationService.rebuildFromTechnical(recommendations);
-        paperTradingService.syncFromFinals(finals);
+        paperTradingService.sync(finals, recommendations);
 
         if (properties.walkForward().enabled()) {
             try {

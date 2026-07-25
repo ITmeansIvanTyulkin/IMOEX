@@ -5,8 +5,11 @@ import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.NewsTriggerHit;
 import com.moex.cointegration.model.PairAnalysisResult;
+import com.moex.cointegration.model.PaperJournal;
+import com.moex.cointegration.model.PaperTradeEntry;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
+import com.moex.cointegration.model.WalkForwardReport;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -106,6 +109,7 @@ public class AnalysisHtmlRenderer {
                   <strong>Как читать сигнал.</strong> Парная торговля — это одновременно купить одну акцию и продать другую.
                   Зелёная стрелка на графике = момент «купить спред», красная = «продать спред».
                   Откройте <a href="/view/final">Итог + новости</a>: там техника уже пропущена через новостной фильтр (ENTER / REDUCE / BLOCK).
+                  Также: <a href="/view/paper">Paper journal</a> и <a href="/view/walk-forward">Walk-forward OOS</a>.
                 </div>
                 """);
         body.append(recommendationsTable(
@@ -268,8 +272,8 @@ public class AnalysisHtmlRenderer {
                   <h2>График пары {{Y}} / {{X}}</h2>
                   <p class="meta" id="chart-meta">Загрузка данных…</p>
                   <div class="legend">
-                    <span class="lg buy">▲ зелёная стрелка — купить спред</span>
-                    <span class="lg sell">▼ красная стрелка — продать спред</span>
+                    <span class="lg buy">▲ зелёная стрелка — купить спред (после разворота к 0)</span>
+                    <span class="lg sell">▼ красная стрелка — продать спред (после разворота к 0)</span>
                     <span class="lg exit">● серый — выход к равновесию</span>
                     <span class="lg kama">линия KAMA — адаптивная средняя спреда</span>
                   </div>
@@ -517,6 +521,129 @@ public class AnalysisHtmlRenderer {
         return text.replace("\n", "<br>");
     }
 
+    /**
+     * Paper track-record таблица.
+     */
+    public String renderPaperJournal(PaperJournal journal) {
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Paper journal — автомат.</strong> На каждом анализе (POST или daily cron)
+                  система сама открывает ENTER/REDUCE, держит позицию с mark-to-market и закрывает
+                  при возврате Z≈0, стопе |Z| или time-stop. PnL — псевдо (1 Z ≈ 1% notional Y), без брокера.
+                </div>
+                """);
+        List<PaperTradeEntry> entries = journal.entries() == null ? List.of() : journal.entries();
+        long open = journal.openCount() != null ? journal.openCount()
+                : entries.stream().filter(e -> "OPEN".equals(e.status())).count();
+        long closed = journal.closedCount() != null ? journal.closedCount()
+                : entries.stream().filter(e -> "CLOSED".equals(e.status())).count();
+        body.append("<div class=\"cards\">");
+        body.append(card("Всего", String.valueOf(entries.size()), false));
+        body.append(card("OPEN", String.valueOf(open), false));
+        body.append(card("CLOSED", String.valueOf(closed), false));
+        body.append(card("Realized ₽*",
+                journal.realizedPnlRub() == null ? "—" : String.format("%.0f", journal.realizedPnlRub()),
+                journal.realizedPnlRub() != null && journal.realizedPnlRub() >= 0));
+        body.append(card("Unrealized ₽*",
+                journal.unrealizedPnlRub() == null ? "—" : String.format("%.0f", journal.unrealizedPnlRub()),
+                journal.unrealizedPnlRub() != null && journal.unrealizedPnlRub() >= 0));
+        double net = (journal.realizedPnlRub() == null ? 0 : journal.realizedPnlRub())
+                + (journal.unrealizedPnlRub() == null ? 0 : journal.unrealizedPnlRub());
+        body.append(card("Net ₽* (R+U)", String.format("%.0f", net), net >= 0));
+        body.append(card("Обновлено", journal.updatedAt() == null ? "—" : journal.updatedAt().toString(), false));
+        body.append("</div>");
+
+        if (entries.isEmpty()) {
+            body.append("<p class=\"empty\">Журнал пуст. Запустите анализ — появятся AUTO OPEN сделки.</p>");
+        } else {
+            body.append("<div class=\"table-wrap\"><table><thead><tr>");
+            body.append("<th>Статус</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
+            body.append("<th class=\"num\">Entry Z</th><th class=\"num\">Mark/Exit Z</th>");
+            body.append("<th class=\"num\">Notional Y</th>");
+            body.append("<th class=\"num\">PnL %*</th><th class=\"num\">PnL ₽*</th>");
+            body.append("<th>Opened</th><th>Closed</th><th>Notes</th><th></th>");
+            body.append("</tr></thead><tbody>");
+            for (PaperTradeEntry e : entries) {
+                Double markOrExit = e.exitZ() != null ? e.exitZ() : e.markZ();
+                Double pct = e.pnlPct() != null ? e.pnlPct() : e.unrealizedPnlPct();
+                Double rub = e.pnlRub() != null ? e.pnlRub() : e.unrealizedPnlRub();
+                body.append("<tr>");
+                body.append("<td>").append(escape(e.status())).append("</td>");
+                body.append("<td>").append(escape(e.tickerY())).append(" / ").append(escape(e.tickerX())).append("</td>");
+                body.append("<td>").append(signalBadge(e.signal())).append("</td>");
+                body.append("<td>").append(decisionBadge(e.decision())).append("</td>");
+                body.append("<td class=\"num\">").append(formatZ(e.entryZ())).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(markOrExit == null ? "—" : formatZ(markOrExit)).append("</td>");
+                body.append("<td class=\"num\">").append(String.format("%.0f", e.notionalY())).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(pct == null ? "—" : formatPct(pct)).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(rub == null ? "—" : String.format("%.0f", rub)).append("</td>");
+                body.append("<td>").append(e.openedAt() == null ? "—" : escape(e.openedAt().toString())).append("</td>");
+                body.append("<td>").append(e.closedAt() == null ? "—" : escape(e.closedAt().toString())).append("</td>");
+                body.append("<td>").append(escape(e.notes() == null ? "" : e.notes())).append("</td>");
+                body.append("<td class=\"links\">").append(chartPageLink(e.tickerY(), e.tickerX())).append("</td>");
+                body.append("</tr>");
+            }
+            body.append("</tbody></table></div>");
+            body.append("<p class=\"meta\">* Псевдо-PnL: 1 единица Z ≈ 1% notional Y. Не брокерский результат.</p>");
+        }
+        return page("Paper journal", body.toString(), nav("paper"));
+    }
+
+    /**
+     * Walk-forward OOS отчёт.
+     */
+    public String renderWalkForward(WalkForwardReport report) {
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Walk-forward.</strong> Train → тест коинтеграции; test → Kalman/rolling-Z симуляция
+                  с commission + borrow. Смотрите median OOS Sharpe: in-sample лидеры часто не держатся.
+                </div>
+                """);
+        if (report == null || report.pairs() == null || report.pairs().isEmpty()) {
+            body.append("<p class=\"empty\">Нет walk-forward отчёта. Запустите полный анализ или POST /api/analysis/walk-forward.</p>");
+            return page("Walk-forward", body.toString(), nav("walkforward"));
+        }
+
+        body.append("<div class=\"cards\">");
+        body.append(card("Дата", report.analysisDate().toString(), false));
+        body.append(card("Пар", String.valueOf(report.pairsEvaluated()), false));
+        body.append(card("Median OOS > 0", String.valueOf(report.pairsWithPositiveMedianOosSharpe()), true));
+        body.append(card("Mean median OOS", formatNum(report.meanMedianOosSharpe()), false));
+        body.append("</div>");
+
+        body.append("<div class=\"table-wrap\"><table><thead><tr>");
+        body.append("<th>Пара</th><th class=\"num\">Windows</th><th class=\"num\">Coint win</th>");
+        body.append("<th class=\"num\">Median OOS Sharpe</th><th class=\"num\">Mean OOS Sharpe</th>");
+        body.append("<th class=\"num\">Mean OOS DD</th><th class=\"num\">Mean OOS Ret</th><th></th>");
+        body.append("</tr></thead><tbody>");
+        for (WalkForwardReport.PairWalkForward p : report.pairs()) {
+            var s = p.summary();
+            body.append("<tr>");
+            body.append("<td>").append(escape(p.tickerY())).append(" / ").append(escape(p.tickerX())).append("</td>");
+            body.append("<td class=\"num\">").append(s.windows()).append("</td>");
+            body.append("<td class=\"num\">").append(s.cointegratedWindows()).append("</td>");
+            body.append("<td class=\"num\">").append(formatNum(s.medianOosSharpe())).append("</td>");
+            body.append("<td class=\"num\">").append(formatNum(s.meanOosSharpe())).append("</td>");
+            body.append("<td class=\"num\">").append(formatPct(s.meanOosMaxDrawdown())).append("</td>");
+            body.append("<td class=\"num\">").append(formatPct(s.meanOosReturn())).append("</td>");
+            body.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
+            body.append("</tr>");
+        }
+        body.append("</tbody></table></div>");
+        return page("Walk-forward OOS", body.toString(), nav("walkforward"));
+    }
+
+    private String card(String label, String value, boolean accent) {
+        return "<div class=\"card\"><span class=\"label\">" + escape(label)
+                + "</span><span class=\"value" + (accent ? " accent" : "") + "\">"
+                + escape(value) + "</span></div>";
+    }
+
     private String nav(String active) {
         return """
                 <nav>
@@ -524,13 +651,17 @@ public class AnalysisHtmlRenderer {
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
                   <a href="/view/recommendations" class="%s">Все рекомендации</a>
+                  <a href="/view/paper" class="%s">Paper</a>
+                  <a href="/view/walk-forward" class="%s">Walk-forward</a>
                   <a href="/api/analysis/final" target="_blank">JSON итог</a>
                 </nav>
                 """.formatted(
                 active.equals("dashboard") ? "active" : "",
                 active.equals("final") ? "active" : "",
                 active.equals("signals") ? "active" : "",
-                active.equals("recommendations") ? "active" : ""
+                active.equals("recommendations") ? "active" : "",
+                active.equals("paper") ? "active" : "",
+                active.equals("walkforward") ? "active" : ""
         );
     }
 

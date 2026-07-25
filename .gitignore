@@ -1,0 +1,21 @@
+# Build
+target/
+*.class
+*.jar
+*.war
+*.iml
+
+# IDE / OS
+.idea/
+.PVS-Studio/
+.vscode/
+*.DS_Store
+.DS_Store
+
+# Nested / one-off tooling (repo-root only)
+/moex/
+/pdf_build/
+/build_pdf_now.py
+/run_gen_pdf.bat
+/run_gen_pptx_pdf.cmd
+/data/

@@ -94,7 +94,12 @@ public class WalkForwardService {
                     risk.maxHoldBars(),
                     wf.trainBars(),
                     wf.testBars(),
-                    wf.stepBars()
+                    wf.stepBars(),
+                    coint.kalmanEnabled(),
+                    coint.kalmanDelta(),
+                    coint.kalmanVe(),
+                    risk.borrowRateAnnual(),
+                    coint.entryReversalRequired()
             );
             results.add(new WalkForwardReport.PairWalkForward(key[0], key[1], summary));
         }

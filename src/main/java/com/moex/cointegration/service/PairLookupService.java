@@ -9,6 +9,7 @@ import com.moex.cointegration.model.PricePoint;
 import com.moex.cointegration.model.PriceSeries;
 import com.moex.cointegration.model.TradingMetrics;
 import com.moex.cointegration.quant.EngleGrangerTest;
+import com.moex.cointegration.quant.KalmanHedgeFilter;
 import com.moex.cointegration.quant.SpreadAnalytics;
 import com.moex.cointegration.storage.MarketDataStorage;
 import org.springframework.stereotype.Service;
@@ -73,29 +74,53 @@ public class PairLookupService {
         }
 
         AlignedPairData pairData = aligned.get();
+        var coint = properties.cointegration();
+        var risk = properties.risk();
         EngleGrangerResult eg = EngleGrangerTest.test(
                 tickerY,
                 tickerX,
                 pairData.logY(),
                 pairData.logX(),
-                properties.cointegration().pValueThreshold()
+                coint.pValueThreshold()
         );
 
-        double[] spread = SpreadAnalytics.computeSpread(
-                pairData.logY(), pairData.logX(), eg.intercept(), eg.hedgeRatio());
-        double[] zScores = SpreadAnalytics.zScores(spread);
+        double intercept;
+        double hedgeRatio;
+        double[] spread;
+        if (coint.kalmanEnabled()) {
+            KalmanHedgeFilter.Result kf = KalmanHedgeFilter.filter(
+                    pairData.logY(), pairData.logX(),
+                    eg.intercept(), eg.hedgeRatio(),
+                    coint.kalmanDelta(), coint.kalmanVe()
+            );
+            spread = kf.spread();
+            intercept = kf.lastIntercept();
+            hedgeRatio = kf.lastBeta();
+        } else {
+            intercept = eg.intercept();
+            hedgeRatio = eg.hedgeRatio();
+            spread = SpreadAnalytics.computeSpread(pairData.logY(), pairData.logX(), intercept, hedgeRatio);
+        }
+        double[] zScores = coint.rollingZEnabled()
+                ? SpreadAnalytics.rollingZScores(spread, coint.rollingZWindow())
+                : SpreadAnalytics.zScores(spread);
         TradingMetrics metrics = SpreadAnalytics.simulateMeanReversion(
                 spread,
                 properties.commissionRate(),
-                properties.cointegration().zScoreEntry(),
-                properties.cointegration().zScoreExit()
+                coint.zScoreEntry(),
+                coint.zScoreExit(),
+                zScores,
+                risk.stopZ(),
+                risk.maxHoldBars(),
+                risk.borrowRateAnnual(),
+                coint.entryReversalRequired()
         );
 
         return Optional.of(new PairAnalysisResult(
                 tickerY,
                 tickerX,
-                eg.intercept(),
-                eg.hedgeRatio(),
+                intercept,
+                hedgeRatio,
                 eg.adfStatistic(),
                 eg.pValue(),
                 metrics.sharpeRatio(),
