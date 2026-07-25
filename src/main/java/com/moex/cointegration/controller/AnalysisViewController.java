@@ -2,9 +2,13 @@ package com.moex.cointegration.controller;
 
 import com.moex.cointegration.model.AnalysisReport;
 import com.moex.cointegration.model.FinalTradeRecommendation;
+import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.TradingRecommendation;
+import com.moex.cointegration.model.WalkForwardReport;
 import com.moex.cointegration.service.FinalRecommendationService;
+import com.moex.cointegration.service.PaperTradingService;
 import com.moex.cointegration.service.TradingRecommendationService;
+import com.moex.cointegration.service.WalkForwardService;
 import com.moex.cointegration.storage.MarketDataStorage;
 import com.moex.cointegration.web.AnalysisHtmlRenderer;
 import org.springframework.http.MediaType;
@@ -27,17 +31,23 @@ public class AnalysisViewController {
     private final MarketDataStorage storage;
     private final TradingRecommendationService recommendationService;
     private final FinalRecommendationService finalRecommendationService;
+    private final PaperTradingService paperTradingService;
+    private final WalkForwardService walkForwardService;
     private final AnalysisHtmlRenderer htmlRenderer;
 
     public AnalysisViewController(
             MarketDataStorage storage,
             TradingRecommendationService recommendationService,
             FinalRecommendationService finalRecommendationService,
+            PaperTradingService paperTradingService,
+            WalkForwardService walkForwardService,
             AnalysisHtmlRenderer htmlRenderer
     ) {
         this.storage = storage;
         this.recommendationService = recommendationService;
         this.finalRecommendationService = finalRecommendationService;
+        this.paperTradingService = paperTradingService;
+        this.walkForwardService = walkForwardService;
         this.htmlRenderer = htmlRenderer;
     }
 
@@ -67,9 +77,6 @@ public class AnalysisViewController {
         return htmlRenderer.renderSignals(recommendationService.getActionableSignals());
     }
 
-    /**
-     * GET /view/final — итоговая таблица техника + новости.
-     */
     @GetMapping(value = "/final", produces = MediaType.TEXT_HTML_VALUE)
     public String finalTable() throws IOException {
         if (storage.loadReport().isEmpty()) {
@@ -77,6 +84,30 @@ public class AnalysisViewController {
         }
         List<FinalTradeRecommendation> rows = finalRecommendationService.getLastFinal();
         return htmlRenderer.renderFinalTable(rows);
+    }
+
+    @GetMapping(value = "/paper", produces = MediaType.TEXT_HTML_VALUE)
+    public String paperJournal() {
+        PaperJournal journal = paperTradingService.summary();
+        return htmlRenderer.renderPaperJournal(journal);
+    }
+
+    @GetMapping(value = "/walk-forward", produces = MediaType.TEXT_HTML_VALUE)
+    public String walkForward() throws IOException {
+        Optional<WalkForwardReport> report = walkForwardService.getLastReport()
+                .or(() -> {
+                    try {
+                        return storage.loadWalkForwardReport();
+                    } catch (IOException e) {
+                        return Optional.empty();
+                    }
+                });
+        return htmlRenderer.renderWalkForward(report.orElse(null));
+    }
+
+    @GetMapping(value = "/strategy", produces = MediaType.TEXT_HTML_VALUE)
+    public String strategy() {
+        return htmlRenderer.renderStrategy();
     }
 
     @GetMapping(value = "/charts/{tickerY}/{tickerX}", produces = MediaType.TEXT_HTML_VALUE)

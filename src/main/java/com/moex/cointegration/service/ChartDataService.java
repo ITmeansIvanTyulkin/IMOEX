@@ -11,6 +11,7 @@ import com.moex.cointegration.model.SpreadPoint;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
 import com.moex.cointegration.quant.KaufmanAdaptiveMa;
+import com.moex.cointegration.quant.SignalRules;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -95,7 +96,8 @@ public class ChartDataService {
 
         double zEntry = properties.cointegration().zScoreEntry();
         double zExit = properties.cointegration().zScoreExit();
-        List<ChartMarker> markers = buildMarkers(pair.zScoreSeries(), zEntry, zExit);
+        boolean reversal = properties.cointegration().entryReversalRequired();
+        List<ChartMarker> markers = buildMarkers(pair.zScoreSeries(), zEntry, zExit, reversal);
 
         TradingRecommendation rec = recommendationService.findForPair(tickerY, tickerX)
                 .orElse(null);
@@ -103,7 +105,7 @@ public class ChartDataService {
         return new ChartPayload(
                 tickerY,
                 tickerX,
-                rec != null ? rec.signal().name() : guessSignal(pair, zEntry).name(),
+                rec != null ? rec.signal().name() : guessSignal(pair, zEntry, reversal).name(),
                 lastZ(pair),
                 pair.hedgeRatio(),
                 pair.halfLifeDays(),
@@ -123,53 +125,88 @@ public class ChartDataService {
         );
     }
 
-    private List<ChartMarker> buildMarkers(List<SpreadPoint> zSeries, double zEntry, double zExit) {
+    private List<ChartMarker> buildMarkers(
+            List<SpreadPoint> zSeries,
+            double zEntry,
+            double zExit,
+            boolean requireReversal
+    ) {
         List<ChartMarker> markers = new ArrayList<>();
         if (zSeries.size() < 2) {
             return markers;
         }
 
-        int position = 0; // -1 long, +1 short, 0 flat
+        int position = 0; // +1 long spread, -1 short spread, 0 flat
         for (int i = 1; i < zSeries.size(); i++) {
             double prev = zSeries.get(i - 1).value();
             double cur = zSeries.get(i).value();
             String time = zSeries.get(i).date().toString();
 
-            if (position == 0 && prev > -zEntry && cur <= -zEntry) {
-                position = -1;
-                markers.add(new ChartMarker(time, "belowBar", "#16a34a", "arrowUp", "КУПИТЬ спред", "zscore"));
-            } else if (position == 0 && prev < zEntry && cur >= zEntry) {
-                position = 1;
-                markers.add(new ChartMarker(time, "aboveBar", "#dc2626", "arrowDown", "ПРОДАТЬ спред", "zscore"));
-            } else if (position == -1 && prev < zExit && cur >= zExit) {
+            if (position == 0) {
+                if (SignalRules.confirmLongEntry(prev, cur, zEntry, requireReversal)) {
+                    position = 1;
+                    markers.add(new ChartMarker(time, "belowBar", "#16a34a", "arrowUp", "КУПИТЬ спред", "zscore"));
+                } else if (SignalRules.confirmShortEntry(prev, cur, zEntry, requireReversal)) {
+                    position = -1;
+                    markers.add(new ChartMarker(time, "aboveBar", "#dc2626", "arrowDown", "ПРОДАТЬ спред", "zscore"));
+                }
+            } else if (position == 1 && SignalRules.exitLong(prev, cur, zExit)) {
                 position = 0;
                 markers.add(new ChartMarker(time, "aboveBar", "#64748b", "circle", "ВЫХОД", "zscore"));
-            } else if (position == 1 && prev > zExit && cur <= zExit) {
+            } else if (position == -1 && SignalRules.exitShort(prev, cur, zExit)) {
                 position = 0;
                 markers.add(new ChartMarker(time, "belowBar", "#64748b", "circle", "ВЫХОД", "zscore"));
             }
         }
 
-        // Подсветка текущего сигнала на последней свече
-        SpreadPoint last = zSeries.get(zSeries.size() - 1);
-        if (last.value() <= -zEntry) {
-            markers.add(new ChartMarker(
-                    last.date().toString(), "belowBar", "#16a34a", "arrowUp", "СЕЙЧАС: КУПИТЬ", "zscore"));
-        } else if (last.value() >= zEntry) {
-            markers.add(new ChartMarker(
-                    last.date().toString(), "aboveBar", "#dc2626", "arrowDown", "СЕЙЧАС: ПРОДАТЬ", "zscore"));
+        // «СЕЙЧАС» только если на последнем баре реально сработал вход (разворот),
+        // либо мягкая метка «в зоне / ждём разворот» без второй стрелки входа.
+        int last = zSeries.size() - 1;
+        double zPrev = zSeries.get(last - 1).value();
+        double zCur = zSeries.get(last).value();
+        String lastTime = zSeries.get(last).date().toString();
+
+        if (SignalRules.confirmLongEntry(zPrev, zCur, zEntry, requireReversal) && position != 1) {
+            // already marked in loop when position was 0; if last bar is entry, loop added it
+        } else if (SignalRules.confirmShortEntry(zPrev, zCur, zEntry, requireReversal) && position != -1) {
+            // same
+        }
+
+        boolean lastIsEntryLong = SignalRules.confirmLongEntry(zPrev, zCur, zEntry, requireReversal);
+        boolean lastIsEntryShort = SignalRules.confirmShortEntry(zPrev, zCur, zEntry, requireReversal);
+
+        if (lastIsEntryLong) {
+            markers.add(new ChartMarker(lastTime, "belowBar", "#16a34a", "arrowUp", "СЕЙЧАС: КУПИТЬ", "zscore"));
+        } else if (lastIsEntryShort) {
+            markers.add(new ChartMarker(lastTime, "aboveBar", "#dc2626", "arrowDown", "СЕЙЧАС: ПРОДАТЬ", "zscore"));
+        } else if (position == -1) {
+            markers.add(new ChartMarker(lastTime, "aboveBar", "#f97316", "circle", "В ШОРТЕ (удержание)", "zscore"));
+        } else if (position == 1) {
+            markers.add(new ChartMarker(lastTime, "belowBar", "#22c55e", "circle", "В ЛОНГЕ (удержание)", "zscore"));
+        } else if (!Double.isNaN(zCur) && zCur >= zEntry) {
+            markers.add(new ChartMarker(lastTime, "aboveBar", "#a8a29e", "circle", "ЖДЁМ РАЗВОРОТ ↓", "zscore"));
+        } else if (!Double.isNaN(zCur) && zCur <= -zEntry) {
+            markers.add(new ChartMarker(lastTime, "belowBar", "#a8a29e", "circle", "ЖДЁМ РАЗВОРОТ ↑", "zscore"));
         }
 
         return markers;
     }
 
-    private TradingSignal guessSignal(PairAnalysisResult pair, double zEntry) {
-        double z = lastZ(pair);
-        if (z <= -zEntry) {
+    private TradingSignal guessSignal(PairAnalysisResult pair, double zEntry, boolean reversal) {
+        List<SpreadPoint> zSeries = pair.zScoreSeries();
+        if (zSeries.size() < 2) {
+            return TradingSignal.HOLD;
+        }
+        double prev = zSeries.get(zSeries.size() - 2).value();
+        double cur = zSeries.get(zSeries.size() - 1).value();
+        if (SignalRules.confirmLongEntry(prev, cur, zEntry, reversal)) {
             return TradingSignal.LONG_SPREAD;
         }
-        if (z >= zEntry) {
+        if (SignalRules.confirmShortEntry(prev, cur, zEntry, reversal)) {
             return TradingSignal.SHORT_SPREAD;
+        }
+        if (!Double.isNaN(cur) && Math.abs(cur) >= zEntry) {
+            return TradingSignal.WATCH;
         }
         return TradingSignal.HOLD;
     }

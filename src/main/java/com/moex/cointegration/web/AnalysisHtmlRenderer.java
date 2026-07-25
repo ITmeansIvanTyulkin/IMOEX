@@ -5,8 +5,11 @@ import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.NewsTriggerHit;
 import com.moex.cointegration.model.PairAnalysisResult;
+import com.moex.cointegration.model.PaperJournal;
+import com.moex.cointegration.model.PaperTradeEntry;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
+import com.moex.cointegration.model.WalkForwardReport;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -24,71 +27,64 @@ public class AnalysisHtmlRenderer {
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
               <title>{{TITLE}}</title>
-              <style>
-                * { box-sizing: border-box; }
-                body { font-family: Segoe UI, system-ui, sans-serif; margin: 0; background: #f4f6f9; color: #1a1a2e; }
-                header { background: #1a1a2e; color: #fff; padding: 1rem 1.5rem; }
-                header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
-                nav { background: #16213e; padding: .5rem 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap; }
-                nav a { color: #a8b2d1; text-decoration: none; padding: .35rem .75rem; border-radius: 4px; font-size: .9rem; }
-                nav a:hover, nav a.active { background: #0f3460; color: #fff; }
-                main { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
-                h2 { font-size: 1.1rem; margin: 1.5rem 0 .75rem; color: #16213e; }
-                .meta { color: #666; font-size: .9rem; }
-                .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
-                .card { background: #fff; border-radius: 8px; padding: .75rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-                .card .label { display: block; font-size: .75rem; color: #888; text-transform: uppercase; letter-spacing: .03em; }
-                .card .value { display: block; font-size: 1.4rem; font-weight: 600; margin-top: .25rem; }
-                .card .value.accent { color: #e94560; }
-                .table-wrap { overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-                table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-                th { background: #16213e; color: #fff; text-align: left; padding: .65rem .75rem; white-space: nowrap; }
-                td { padding: .6rem .75rem; border-bottom: 1px solid #eee; vertical-align: top; }
-                tr:nth-child(even) td { background: #fafbfc; }
-                tr:hover td { background: #f0f4ff; }
-                td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-                td.details { max-width: 360px; line-height: 1.4; }
-                td.details small { color: #555; }
-                td.links { white-space: nowrap; }
-                td.links a { color: #0f3460; }
-                .badge { display: inline-block; padding: .2rem .5rem; border-radius: 4px; font-size: .75rem; font-weight: 600; }
-                .badge.long { background: #d4edda; color: #155724; }
-                .badge.short { background: #f8d7da; color: #721c24; }
-                .badge.watch { background: #fff3cd; color: #856404; }
-                .badge.hold { background: #e2e3e5; color: #383d41; }
-                    .badge.skip { background: #f5f5f5; color: #999; }
-                    .badge.enter { background: #d4edda; color: #155724; }
-                    .badge.reduce { background: #fff3cd; color: #856404; }
-                    .badge.block { background: #f8d7da; color: #721c24; }
-                    .badge.news-low { background: #e8f5e9; color: #2e7d32; }
-                    .badge.news-med { background: #fff8e1; color: #f57f17; }
-                    .badge.news-high { background: #ffe0b2; color: #e65100; }
-                    .badge.news-block { background: #ffcdd2; color: #b71c1c; }
-                    .empty, .empty-msg { color: #666; padding: 1rem; }
-                    pre { background: #1a1a2e; color: #a8b2d1; padding: 1rem; border-radius: 6px; overflow-x: auto; }
-                    .hint { background: #eef2ff; border-left: 4px solid #0f3460; padding: .75rem 1rem; margin: .5rem 0 1rem; font-size: .9rem; line-height: 1.45; }
-                    .summary { font-weight: 600; margin-bottom: .35rem; }
-                    .explain { white-space: normal; color: #333; font-size: .8rem; line-height: 1.45; max-width: 420px; }
-                    .chart-head .back { color: #0f3460; text-decoration: none; font-size: .9rem; }
-                    .legend { display: flex; flex-wrap: wrap; gap: .75rem; margin: .75rem 0; font-size: .85rem; }
-                    .legend .buy { color: #16a34a; font-weight: 600; }
-                    .legend .sell { color: #dc2626; font-weight: 600; }
-                    .legend .exit { color: #64748b; }
-                    .legend .kama { color: #b45309; }
-                    .chart-block { margin: 1.25rem 0; background: #fff; border-radius: 8px; padding: .75rem 1rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-                    .chart-block h3 { margin: 0 0 .5rem; font-size: .95rem; color: #16213e; }
-                    .chart { width: 100%; height: 320px; }
-                    .chart.tall { height: 360px; }
-                    #chart-explain { background: #f8fafc; border-radius: 6px; padding: .75rem 1rem; margin: .75rem 0; font-size: .9rem; line-height: 1.5; }
-              </style>
+              <link rel="preconnect" href="https://fonts.googleapis.com">
+              <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+              <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="/css/operator.css">
             </head>
             <body>
-              <header><h1>IMOEX Cointegration — {{TITLE}}</h1></header>
+              <header class="site-header">
+                <h1 class="brand">IMOEX Cointegration</h1>
+                <p class="tagline">Research · paper trading · walk-forward — без брокера, с прозрачным journal</p>
+              </header>
               {{NAV}}
-              <main>{{BODY}}</main>
+              <main>
+                {{OPS}}
+                {{BODY}}
+                <p class="footnote">Research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — псевдо-метрика.</p>
+              </main>
+              <script src="/js/operator.js"></script>
             </body>
             </html>
             """;
+
+    private String opsPanel() {
+        return """
+                <section class="ops-panel" id="ops-panel">
+                  <h2>Пульт оператора</h2>
+                  <p class="ops-lead">
+                    Запускайте анализ и обновляйте paper прямо отсюда — без консоли.
+                    POST-запросы идут с HTTP Basic (логин ниже). Полный refresh свечей может занять много минут.
+                  </p>
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <div class="ops-grid">
+                    <div>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="ops-user">API user</label>
+                          <input id="ops-user" type="text" autocomplete="username" spellcheck="false">
+                        </div>
+                        <div class="field">
+                          <label for="ops-pass">API password</label>
+                          <input id="ops-pass" type="password" autocomplete="current-password">
+                        </div>
+                        <button type="button" class="btn btn-ghost" id="ops-save-creds">Сохранить логин</button>
+                      </div>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                        <button type="button" class="btn btn-secondary" data-ops-action="run-full">Анализ + скачать свечи</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="news-refresh">Только новости / paper</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="walk-forward">Walk-forward</button>
+                        <button type="button" class="btn btn-warn" data-ops-action="data-refresh">Скачать свечи</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="status-box" id="ops-log" aria-live="polite"></div>
+                    </div>
+                  </div>
+                </section>
+                """;
+    }
 
     /**
      * Главная страница: сводка, сигналы входа, топ-пары.
@@ -106,6 +102,7 @@ public class AnalysisHtmlRenderer {
                   <strong>Как читать сигнал.</strong> Парная торговля — это одновременно купить одну акцию и продать другую.
                   Зелёная стрелка на графике = момент «купить спред», красная = «продать спред».
                   Откройте <a href="/view/final">Итог + новости</a>: там техника уже пропущена через новостной фильтр (ENTER / REDUCE / BLOCK).
+                  Также: <a href="/view/paper">Paper journal</a> и <a href="/view/walk-forward">Walk-forward OOS</a>.
                 </div>
                 """);
         body.append(recommendationsTable(
@@ -124,7 +121,7 @@ public class AnalysisHtmlRenderer {
     public String renderAllRecommendations(List<TradingRecommendation> recommendations) {
         StringBuilder body = new StringBuilder();
         body.append("<p class=\"meta\">Всего рекомендаций: ").append(recommendations.size()).append("</p>");
-        body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Запустите POST /api/analysis/run"));
+        body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Нажмите «Анализ + paper» в пульте выше."));
         return page("IMOEX — рекомендации", body.toString(), nav("recommendations"));
     }
 
@@ -141,12 +138,221 @@ public class AnalysisHtmlRenderer {
         String body = """
                 <div class="empty">
                   <h2>Анализ ещё не выполнен</h2>
-                  <p>Запустите в PowerShell:</p>
-                  <pre>curl.exe -X POST "http://localhost:8080/api/analysis/run?refresh=false"</pre>
-                  <p>Затем обновите эту страницу.</p>
+                  <p>Нажмите <strong>«Анализ + paper»</strong> в пульте выше (логин по умолчанию
+                  <code>imoex</code> / <code>change-me</code>). После завершения страница обновится сама.</p>
+                  <p class="meta">Если свечей ещё нет — сначала «Скачать свечи», либо «Анализ + скачать свечи».</p>
                 </div>
                 """;
         return page("IMOEX — нет данных", body, nav("none"));
+    }
+
+    /**
+     * Описание торговой стратегии простым языком.
+     */
+    public String renderStrategy() {
+        String body = """
+                <article class="strategy-doc">
+                  <h2>Описание торговой стратегии</h2>
+                  <p class="lead">
+                    Это парный трейдинг: мы не угадываем, вырастет ли рынок.
+                    Ищем две акции, которые обычно «ходят вместе», и торгуем их временный разрыв —
+                    ставку на то, что разрыв снова сожмётся.
+                  </p>
+
+                  <nav class="strategy-toc" aria-label="Содержание">
+                    <strong>Содержание</strong>
+                    <ol>
+                      <li><a href="#idea">Идея простыми словами</a></li>
+                      <li><a href="#pipeline">Что за чем происходит</a></li>
+                      <li><a href="#universe">Как отбираются акции</a></li>
+                      <li><a href="#pairs">Как пары попадают в анализ</a></li>
+                      <li><a href="#signals">Как появляется сигнал</a></li>
+                      <li><a href="#news">Новостной фильтр</a></li>
+                      <li><a href="#size">Размер позиции и лимиты</a></li>
+                      <li><a href="#exits">Как выходим</a></li>
+                      <li><a href="#paper">Paper и проверка на истории</a></li>
+                      <li><a href="#limits">Честные ограничения</a></li>
+                    </ol>
+                  </nav>
+
+                  <h3 id="idea">1. Идея простыми словами</h3>
+                  <p>
+                    Берём пару акций, например банк A и банк B. Если исторически их цены связаны,
+                    можно собрать <em>спред</em> — разницу с учётом «коэффициента хеджа» β:
+                    сколько бумаги X нужно против одной единицы Y.
+                  </p>
+                  <p>
+                    Дальше смотрим на <strong>Z-score</strong>: насколько спред сейчас ушёл от своей нормы.
+                    Если Z очень высокий — спред «раздут», ждём сжатия вниз.
+                    Если очень низкий — ждём отскока вверх.
+                  </p>
+                  <ul>
+                    <li><strong>LONG спред</strong> (Z слишком низкий): купить Y и одновременно продать X.</li>
+                    <li><strong>SHORT спред</strong> (Z слишком высокий): продать Y и купить X.</li>
+                  </ul>
+                  <div class="callout">
+                    Прибыль (или убыток) идёт от <strong>схождения ног</strong>, а не от того,
+                    что весь рынок вырос. Поэтому важны обе ноги сразу.
+                  </div>
+
+                  <h3 id="pipeline">2. Что за чем происходит в одном прогоне</h3>
+                  <div class="flow" aria-hidden="true">
+                    <span>Свечи IMOEX</span><i>→</i>
+                    <span>Фильтр тикеров</span><i>→</i>
+                    <span>Пары + коинтеграция</span><i>→</i>
+                    <span>Z и бэктест</span><i>→</i>
+                    <span>Сигналы</span><i>→</i>
+                    <span>Новости</span><i>→</i>
+                    <span>Paper</span>
+                  </div>
+                  <ol class="pipeline">
+                    <li><strong>Данные.</strong> Дневные свечи состава индекса IMOEX (или уже скачанные локально).</li>
+                    <li><strong>Юниверс.</strong> Отсекаем неликвидное, слишком дешёвое, привилегированные и «дыры» в обороте.</li>
+                    <li><strong>Пары.</strong> Перебираем допустимые пары (сектор / related), проверяем коинтеграцию Engle–Granger.</li>
+                    <li><strong>FDR.</strong> Множественные проверки p-value проходят контроль ложных открытий (Benjamini–Hochberg).</li>
+                    <li><strong>Спред и Z.</strong> Хедж (Kalman или OLS), скользящий Z, метрики mean-reversion (Sharpe, half-life…).</li>
+                    <li><strong>Техсигнал.</strong> LONG / SHORT / WATCH / HOLD — по порогам Z и правилу разворота.</li>
+                    <li><strong>Новости.</strong> Итог ENTER / REDUCE / WATCH / BLOCK.</li>
+                    <li><strong>Paper.</strong> Авто-открытие, mark-to-market, умные выходы. Опционально walk-forward OOS.</li>
+                  </ol>
+
+                  <h3 id="universe">3. Как отбираются акции в анализ</h3>
+                  <p>До любых статистических тестов тикер должен пройти простой «рыночный» фильтр:</p>
+                  <ul>
+                    <li>состав индекса <strong>IMOEX</strong>, режим TQBR;</li>
+                    <li>медианный дневной оборот за ~60 дней не ниже порога (по умолчанию ~50 млн ₽);</li>
+                    <li>цена закрытия не ниже минимума (по умолчанию 5 ₽);</li>
+                    <li>мало дней с нулевым объёмом;</li>
+                    <li>привилегированные акции (<code>*P</code>) обычно исключены;</li>
+                    <li>тикер должен быть в секторном каталоге, если включён секторный режим.</li>
+                  </ul>
+                  <p>
+                    Смысл: не тестировать illiquid «мусор», где спред нельзя нормально набрать и закрыть.
+                  </p>
+
+                  <h3 id="pairs">4. Как пары попадают в анализ и проходят фильтры</h3>
+                  <ol class="pipeline">
+                    <li>
+                      <strong>Кандидаты.</strong> Из отфильтрованного списка строим пары.
+                      По умолчанию — только один сектор или «родственная» группа
+                      (например нефть ↔ электроэнергетика, ритейл ↔ телеком).
+                    </li>
+                    <li>
+                      <strong>Ликвидность пары.</strong> Обе ноги должны иметь достаточный ADV,
+                      и обороты не должны различаться в десятки раз (иначе хедж на бумаге, а в жизни — нет).
+                    </li>
+                    <li>
+                      <strong>Общая история.</strong> Нужно достаточно общих торговых дней (порядка 100+).
+                    </li>
+                    <li>
+                      <strong>Коинтеграция Engle–Granger.</strong>
+                      Проверяем, что остатки регрессии log-цен стационарны — то есть «связь» не случайная на коротком куске.
+                    </li>
+                    <li>
+                      <strong>FDR (q ≈ 0.20).</strong>
+                      Когда пар тысячи, часть «значимых» p-value — ложные. FDR оставляет только те,
+                      кто проходит контроль множественных сравнений.
+                    </li>
+                    <li>
+                      <strong>Качество серии.</strong>
+                      Считаем спред, Z, half-life, Sharpe симуляции. Слишком медленный возврат к среднему
+                      или слабые метрики не дают входной сигнал.
+                    </li>
+                  </ol>
+                  <div class="callout">
+                    На дашборде «Топ-пары по Sharpe» — это уже прошедшие статистику и отобранные для обзора.
+                    Сырой сигнал LONG/SHORT ещё не равен разрешению торговать: дальше новости и лимиты книги.
+                  </div>
+
+                  <h3 id="signals">5. Как появляется торговый сигнал</h3>
+                  <p>
+                    Пороги по умолчанию: вход при |Z| ≥ <strong>2.0</strong>, цель возврата около <strong>Z ≈ 0</strong>.
+                    Z считается в скользящем окне (~60 дней), хедж может подстраиваться фильтром Калмана.
+                  </p>
+                  <p>
+                    Важная деталь: <strong>вход не на первом касании</strong> порога ±2.
+                    Ждём, пока Z уже был за порогом и развернулся к нулю — меньше ложных входов
+                    «в расширяющийся» дисбаланс.
+                  </p>
+                  <ul>
+                    <li><strong>LONG / SHORT</strong> — есть подтверждённый вход.</li>
+                    <li><strong>WATCH</strong> — спред экстремальный, но разворота ещё нет (или зона внимания).</li>
+                    <li><strong>HOLD / NO_SIGNAL</strong> — сейчас не входим.</li>
+                  </ul>
+                  <p>
+                    Смотреть картинку удобнее на странице пары: стрелки входа, зона «ждём разворот»,
+                    линия KAMA / спреда.
+                  </p>
+
+                  <h3 id="news">6. Новостной фильтр (после техники)</h3>
+                  <p>
+                    Техсигнал пропускается через новости и простые «структурные» проверки
+                    (устаревшие свечи, бумага не торгуется и т.п.) за короткий lookback.
+                  </p>
+                  <table class="params">
+                    <thead><tr><th>Итог</th><th>Что это значит</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>ENTER</strong></td><td>Техника ок, новостной риск низкий — можно открывать paper.</td></tr>
+                      <tr><td><strong>REDUCE</strong></td><td>Есть умеренный/высокий риск — размер меньше.</td></tr>
+                      <tr><td><strong>WATCH</strong></td><td>Следим, но не открываем как полноценный вход.</td></tr>
+                      <tr><td><strong>BLOCK</strong></td><td>Жёсткий стоп: halt, делистинг, санкции, дефолт, тяжёлый M&amp;A и т.п.</td></tr>
+                    </tbody>
+                  </table>
+                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет».</p>
+
+                  <h3 id="size">7. Размер позиции и лимиты портфеля</h3>
+                  <p>
+                    Базовый notional на ногу задаётся в конфиге (по умолчанию 100 000 ₽).
+                    Дальше размер масштабируется: волатильность спреда, расстояние до стопа по Z,
+                    и множитель REDUCE.
+                  </p>
+                  <ul>
+                    <li>не больше N открытых paper-пар всего;</li>
+                    <li>не больше ~2 открытых пар на один сектор (диверсификация книги);</li>
+                    <li>не открываем, если |Z| уже слишком близко к стоп-уровню.</li>
+                  </ul>
+
+                  <h3 id="exits">8. Как выходим из позиции</h3>
+                  <p>Выход — не только «дождались Z≈0». В paper работают несколько правил:</p>
+                  <ul>
+                    <li><strong>Mean-reversion</strong> — спред вернулся к цели около нуля;</li>
+                    <li><strong>Partial take-profit</strong> — на полпути к нулю можно зафиксировать часть;</li>
+                    <li><strong>Trailing по Z</strong> — отдали от лучшей точки — закрываем;</li>
+                    <li><strong>Stop по |Z|</strong> — спред ушёл ещё дальше против нас;</li>
+                    <li><strong>Time-stop</strong> — слишком долго в позиции без результата;</li>
+                    <li><strong>Слом связи</strong> — сильно изменился β или коинтеграция «развалилась» по p-value;</li>
+                    <li><strong>Смена сигнала</strong> — логика пары перевернулась.</li>
+                  </ul>
+
+                  <h3 id="paper">9. Paper trading и walk-forward</h3>
+                  <p>
+                    <a href="/view/paper">Paper journal</a> — учебный журнал без брокера.
+                    На каждом анализе система сама открывает ENTER/REDUCE, ведёт mark-to-market
+                    и закрывает по правилам выше. PnL — <strong>псевдо-метрика</strong>
+                    (ориентир: изменение Z ≈ процент от notional), не брокерский результат.
+                  </p>
+                  <p>
+                    <a href="/view/walk-forward">Walk-forward</a> режет историю на train/test окна:
+                    на обучении проверяем коинтеграцию, на тесте гоняем правила без подглядывания вперёд.
+                    Это проверка «не подогнали ли мы всё под прошлый год», а не гарантия прибыли.
+                  </p>
+
+                  <h3 id="limits">10. Честные ограничения</h3>
+                  <ul>
+                    <li>Стратегия классическая (textbook pairs) — уникальность скорее в процессе и дисциплине риска, не в «секретной формуле».</li>
+                    <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
+                    <li>Новости по ISS — эвристика, не полный fundamental research.</li>
+                    <li>Шорт, borrow, проскальзывание и комиссии в жизни жёстче, чем в модели.</li>
+                    <li>Нужны месяцы чистого paper track-record, прежде чем судить об alpha.</li>
+                  </ul>
+                  <div class="callout">
+                    Это research / decision-support, не индивидуальная инвестиционная рекомендация.
+                    Параметры порогов живут в <code>application.yml</code> (<code>imoex.cointegration</code>,
+                    <code>universe</code>, <code>risk</code>, <code>news</code>, <code>paper</code>).
+                  </div>
+                </article>
+                """;
+        return page("IMOEX — описание стратегии", body, nav("strategy"));
     }
 
     private String summaryBlock(AnalysisReport report, int recCount, long actionable) {
@@ -268,8 +474,8 @@ public class AnalysisHtmlRenderer {
                   <h2>График пары {{Y}} / {{X}}</h2>
                   <p class="meta" id="chart-meta">Загрузка данных…</p>
                   <div class="legend">
-                    <span class="lg buy">▲ зелёная стрелка — купить спред</span>
-                    <span class="lg sell">▼ красная стрелка — продать спред</span>
+                    <span class="lg buy">▲ зелёная стрелка — купить спред (после разворота к 0)</span>
+                    <span class="lg sell">▼ красная стрелка — продать спред (после разворота к 0)</span>
                     <span class="lg exit">● серый — выход к равновесию</span>
                     <span class="lg kama">линия KAMA — адаптивная средняя спреда</span>
                   </div>
@@ -517,20 +723,149 @@ public class AnalysisHtmlRenderer {
         return text.replace("\n", "<br>");
     }
 
+    /**
+     * Paper track-record таблица.
+     */
+    public String renderPaperJournal(PaperJournal journal) {
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Paper journal — автомат.</strong> Кнопка «Анализ + paper» или daily cron
+                  открывает ENTER/REDUCE, держит позицию с mark-to-market и закрывает
+                  при возврате Z≈0, стопе |Z| или time-stop. PnL — псевдо (1 Z ≈ 1% notional Y), без брокера.
+                </div>
+                """);
+        List<PaperTradeEntry> entries = journal.entries() == null ? List.of() : journal.entries();
+        long open = journal.openCount() != null ? journal.openCount()
+                : entries.stream().filter(e -> "OPEN".equals(e.status())).count();
+        long closed = journal.closedCount() != null ? journal.closedCount()
+                : entries.stream().filter(e -> "CLOSED".equals(e.status())).count();
+        body.append("<div class=\"cards\">");
+        body.append(card("Всего", String.valueOf(entries.size()), false));
+        body.append(card("OPEN", String.valueOf(open), false));
+        body.append(card("CLOSED", String.valueOf(closed), false));
+        body.append(card("Realized ₽*",
+                journal.realizedPnlRub() == null ? "—" : String.format("%.0f", journal.realizedPnlRub()),
+                journal.realizedPnlRub() != null && journal.realizedPnlRub() >= 0));
+        body.append(card("Unrealized ₽*",
+                journal.unrealizedPnlRub() == null ? "—" : String.format("%.0f", journal.unrealizedPnlRub()),
+                journal.unrealizedPnlRub() != null && journal.unrealizedPnlRub() >= 0));
+        double net = (journal.realizedPnlRub() == null ? 0 : journal.realizedPnlRub())
+                + (journal.unrealizedPnlRub() == null ? 0 : journal.unrealizedPnlRub());
+        body.append(card("Net ₽* (R+U)", String.format("%.0f", net), net >= 0));
+        body.append(card("Обновлено", journal.updatedAt() == null ? "—" : journal.updatedAt().toString(), false));
+        body.append("</div>");
+
+        if (entries.isEmpty()) {
+            body.append("<p class=\"empty\">Журнал пуст. Нажмите «Анализ + paper» — появятся AUTO OPEN сделки.</p>");
+        } else {
+            body.append("<div class=\"table-wrap\"><table><thead><tr>");
+            body.append("<th>Статус</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
+            body.append("<th class=\"num\">Entry Z</th><th class=\"num\">Mark/Exit Z</th>");
+            body.append("<th class=\"num\">Notional Y</th>");
+            body.append("<th class=\"num\">PnL %*</th><th class=\"num\">PnL ₽*</th>");
+            body.append("<th>Opened</th><th>Closed</th><th>Notes</th><th></th>");
+            body.append("</tr></thead><tbody>");
+            for (PaperTradeEntry e : entries) {
+                Double markOrExit = e.exitZ() != null ? e.exitZ() : e.markZ();
+                Double pct = e.pnlPct() != null ? e.pnlPct() : e.unrealizedPnlPct();
+                Double rub = e.pnlRub() != null ? e.pnlRub() : e.unrealizedPnlRub();
+                body.append("<tr>");
+                body.append("<td>").append(escape(e.status())).append("</td>");
+                body.append("<td>").append(escape(e.tickerY())).append(" / ").append(escape(e.tickerX())).append("</td>");
+                body.append("<td>").append(signalBadge(e.signal())).append("</td>");
+                body.append("<td>").append(decisionBadge(e.decision())).append("</td>");
+                body.append("<td class=\"num\">").append(formatZ(e.entryZ())).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(markOrExit == null ? "—" : formatZ(markOrExit)).append("</td>");
+                body.append("<td class=\"num\">").append(String.format("%.0f", e.notionalY())).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(pct == null ? "—" : formatPct(pct)).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(rub == null ? "—" : String.format("%.0f", rub)).append("</td>");
+                body.append("<td>").append(e.openedAt() == null ? "—" : escape(e.openedAt().toString())).append("</td>");
+                body.append("<td>").append(e.closedAt() == null ? "—" : escape(e.closedAt().toString())).append("</td>");
+                body.append("<td>").append(escape(e.notes() == null ? "" : e.notes())).append("</td>");
+                body.append("<td class=\"links\">").append(chartPageLink(e.tickerY(), e.tickerX())).append("</td>");
+                body.append("</tr>");
+            }
+            body.append("</tbody></table></div>");
+            body.append("<p class=\"meta\">* Псевдо-PnL: 1 единица Z ≈ 1% notional Y. Не брокерский результат.</p>");
+        }
+        return page("Paper journal", body.toString(), nav("paper"));
+    }
+
+    /**
+     * Walk-forward OOS отчёт.
+     */
+    public String renderWalkForward(WalkForwardReport report) {
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Walk-forward.</strong> Train → тест коинтеграции; test → Kalman/rolling-Z симуляция
+                  с commission + borrow. Смотрите median OOS Sharpe: in-sample лидеры часто не держатся.
+                </div>
+                """);
+        if (report == null || report.pairs() == null || report.pairs().isEmpty()) {
+            body.append("<p class=\"empty\">Нет walk-forward отчёта. Нажмите «Walk-forward» в пульте или запустите полный анализ.</p>");
+            return page("Walk-forward", body.toString(), nav("walkforward"));
+        }
+
+        body.append("<div class=\"cards\">");
+        body.append(card("Дата", report.analysisDate().toString(), false));
+        body.append(card("Пар", String.valueOf(report.pairsEvaluated()), false));
+        body.append(card("Median OOS > 0", String.valueOf(report.pairsWithPositiveMedianOosSharpe()), true));
+        body.append(card("Mean median OOS", formatNum(report.meanMedianOosSharpe()), false));
+        body.append("</div>");
+
+        body.append("<div class=\"table-wrap\"><table><thead><tr>");
+        body.append("<th>Пара</th><th class=\"num\">Windows</th><th class=\"num\">Coint win</th>");
+        body.append("<th class=\"num\">Median OOS Sharpe</th><th class=\"num\">Mean OOS Sharpe</th>");
+        body.append("<th class=\"num\">Mean OOS DD</th><th class=\"num\">Mean OOS Ret</th><th></th>");
+        body.append("</tr></thead><tbody>");
+        for (WalkForwardReport.PairWalkForward p : report.pairs()) {
+            var s = p.summary();
+            body.append("<tr>");
+            body.append("<td>").append(escape(p.tickerY())).append(" / ").append(escape(p.tickerX())).append("</td>");
+            body.append("<td class=\"num\">").append(s.windows()).append("</td>");
+            body.append("<td class=\"num\">").append(s.cointegratedWindows()).append("</td>");
+            body.append("<td class=\"num\">").append(formatNum(s.medianOosSharpe())).append("</td>");
+            body.append("<td class=\"num\">").append(formatNum(s.meanOosSharpe())).append("</td>");
+            body.append("<td class=\"num\">").append(formatPct(s.meanOosMaxDrawdown())).append("</td>");
+            body.append("<td class=\"num\">").append(formatPct(s.meanOosReturn())).append("</td>");
+            body.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
+            body.append("</tr>");
+        }
+        body.append("</tbody></table></div>");
+        return page("Walk-forward OOS", body.toString(), nav("walkforward"));
+    }
+
+    private String card(String label, String value, boolean accent) {
+        return "<div class=\"card\"><span class=\"label\">" + escape(label)
+                + "</span><span class=\"value" + (accent ? " accent" : "") + "\">"
+                + escape(value) + "</span></div>";
+    }
+
     private String nav(String active) {
         return """
-                <nav>
+                <nav class="topnav">
                   <a href="/view" class="%s">Дашборд</a>
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
                   <a href="/view/recommendations" class="%s">Все рекомендации</a>
+                  <a href="/view/paper" class="%s">Paper</a>
+                  <a href="/view/walk-forward" class="%s">Walk-forward</a>
+                  <a href="/view/strategy" class="%s">Описание торговой стратегии</a>
                   <a href="/api/analysis/final" target="_blank">JSON итог</a>
                 </nav>
                 """.formatted(
                 active.equals("dashboard") ? "active" : "",
                 active.equals("final") ? "active" : "",
                 active.equals("signals") ? "active" : "",
-                active.equals("recommendations") ? "active" : ""
+                active.equals("recommendations") ? "active" : "",
+                active.equals("paper") ? "active" : "",
+                active.equals("walkforward") ? "active" : "",
+                active.equals("strategy") ? "active" : ""
         );
     }
 
@@ -538,6 +873,7 @@ public class AnalysisHtmlRenderer {
         return PAGE_TEMPLATE
                 .replace("{{TITLE}}", escape(title))
                 .replace("{{NAV}}", nav)
+                .replace("{{OPS}}", opsPanel())
                 .replace("{{BODY}}", body);
     }
 
