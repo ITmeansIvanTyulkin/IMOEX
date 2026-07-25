@@ -134,6 +134,10 @@ public record ImoexProperties(
      * @param targetSpreadSigma опорная σ спреда для полного размера
      * @param minSizeMult       нижний clamp множителя
      * @param maxSizeMult       верхний clamp множителя
+     * @param partialTpFraction доля пути к 0 для частичного TP (0.5 = 50%)
+     * @param trailZ            откат Z от лучшего уровня для trailing exit
+     * @param betaBreakPct      отн. скачок β для выхода
+     * @param cointPBreak       p-value выше → считаем коинтеграцию сломанной
      */
     public record RiskProperties(
             double stopZ,
@@ -148,7 +152,11 @@ public record ImoexProperties(
             Boolean dynamicSizing,
             Double targetSpreadSigma,
             Double minSizeMult,
-            Double maxSizeMult
+            Double maxSizeMult,
+            Double partialTpFraction,
+            Double trailZ,
+            Double betaBreakPct,
+            Double cointPBreak
     ) {
         public RiskProperties {
             if (borrowRateAnnual == null || borrowRateAnnual < 0) {
@@ -166,11 +174,23 @@ public record ImoexProperties(
             if (maxSizeMult == null || maxSizeMult < minSizeMult) {
                 maxSizeMult = 1.5;
             }
+            if (partialTpFraction == null || partialTpFraction <= 0 || partialTpFraction >= 1) {
+                partialTpFraction = 0.5;
+            }
+            if (trailZ == null || trailZ <= 0) {
+                trailZ = 0.75;
+            }
+            if (betaBreakPct == null || betaBreakPct <= 0) {
+                betaBreakPct = 0.35;
+            }
+            if (cointPBreak == null || cointPBreak <= 0) {
+                cointPBreak = 0.20;
+            }
         }
 
         public static RiskProperties defaults() {
             return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 1.0, 0.08,
-                    true, 0.02, 0.25, 1.5);
+                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.20);
         }
 
         public boolean dynamicSizingEnabled() {

@@ -11,6 +11,7 @@ import com.moex.cointegration.model.PaperTradeEntry;
 import com.moex.cointegration.model.SpreadPoint;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
+import com.moex.cointegration.quant.ExitRules;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -183,7 +184,11 @@ public class PaperTradingService {
                     0.0,
                     0.0,
                     f.technical().asOfDate(),
-                    "AUTO OPEN: " + f.decisionSummary()
+                    "AUTO OPEN: " + f.decisionSummary(),
+                    f.technical().currentZScore(),
+                    false,
+                    1.0,
+                    0.0
             );
             entries.add(entry);
             opened.add(entry);
@@ -195,6 +200,7 @@ public class PaperTradingService {
         double zExit = properties.cointegration().zScoreExit();
         double stopZ = properties.risk().stopZ();
         int maxHold = properties.risk().maxHoldBars();
+        var risk = properties.risk();
         List<PaperTradeEntry> updated = new ArrayList<>();
 
         for (PaperTradeEntry open : getOpenTrades()) {
@@ -205,6 +211,10 @@ public class PaperTradingService {
                 continue;
             }
 
+            boolean longSpread = open.signal() == TradingSignal.LONG_SPREAD;
+            double bestZ = ExitRules.updateBestZ(longSpread,
+                    open.bestZ() == null ? open.entryZ() : open.bestZ(), q.z());
+
             double pnlPct = approximatePnlPct(open.entryZ(), q.z(), open.signal());
             double pnlRub = open.notionalY() * pnlPct;
             int barsHeld = (int) ChronoUnit.DAYS.between(open.asOfDate(), q.asOf());
@@ -212,16 +222,27 @@ public class PaperTradingService {
                 barsHeld = 0;
             }
 
-            // Пока нет новой дневной свечи — только MTM. Иначе повторный run в тот же день
-            // пересчитывает rolling/Kalman Z и ложно бьёт по стопу (как FEES/SNGS −719 ₽).
             String closeReason = null;
             if (barsHeld >= 1) {
-                closeReason = closeReason(open, q, zExit, stopZ, maxHold, barsHeld);
+                closeReason = closeReason(open, q, zExit, stopZ, maxHold, barsHeld, bestZ, risk);
             }
+
             if (closeReason != null) {
                 updated.add(open.withClose(LocalDateTime.now(), q.z(), pnlPct, pnlRub, closeReason));
+            } else if (barsHeld >= 1
+                    && !open.partialDone()
+                    && ExitRules.halfwayToZero(open.entryZ(), q.z(), risk.partialTpFraction())) {
+                double halfRub = pnlRub * 0.5;
+                updated.add(open.withPartialTp(
+                        q.asOf(),
+                        q.z(),
+                        halfRub,
+                        String.format(Locale.ROOT,
+                                "PARTIAL TP %.0f%% пути к 0: Z=%.2f (зафиксировано ≈%.0f ₽)",
+                                risk.partialTpFraction() * 100, q.z(), halfRub)
+                ).withMark(q.asOf(), q.z(), pnlPct * 0.5, pnlRub * 0.5, bestZ));
             } else {
-                updated.add(open.withMark(q.asOf(), q.z(), pnlPct, pnlRub));
+                updated.add(open.withMark(q.asOf(), q.z(), pnlPct, pnlRub, bestZ));
             }
         }
 
@@ -237,8 +258,12 @@ public class PaperTradingService {
             double zExit,
             double stopZ,
             int maxHold,
-            int barsHeld
+            int barsHeld,
+            double bestZ,
+            ImoexProperties.RiskProperties risk
     ) {
+        boolean longSpread = open.signal() == TradingSignal.LONG_SPREAD;
+
         if (Math.abs(q.z()) <= zExit + 0.25) {
             return String.format(Locale.ROOT,
                     "AUTO CLOSE: mean-reversion Z=%.2f → exit (псевдо PnL)", q.z());
@@ -246,6 +271,21 @@ public class PaperTradingService {
         if (Math.abs(q.z()) >= stopZ) {
             return String.format(Locale.ROOT,
                     "AUTO CLOSE: stop |Z|=%.2f ≥ %.1f", q.z(), stopZ);
+        }
+        if (ExitRules.trailStopHit(longSpread, bestZ, q.z(), risk.trailZ())) {
+            return String.format(Locale.ROOT,
+                    "AUTO CLOSE: trailing — откат %.2f от bestZ=%.2f (trail=%.2f)",
+                    q.z(), bestZ, risk.trailZ());
+        }
+        if (ExitRules.betaBreak(open.hedgeRatio(), q.hedgeRatio(), risk.betaBreakPct())) {
+            return String.format(Locale.ROOT,
+                    "AUTO CLOSE: β-break entry=%.3f now=%.3f (>%s%%)",
+                    open.hedgeRatio(), q.hedgeRatio(),
+                    String.format(Locale.ROOT, "%.0f", risk.betaBreakPct() * 100));
+        }
+        if (ExitRules.cointegrationBroken(q.pValue(), risk.cointPBreak())) {
+            return String.format(Locale.ROOT,
+                    "AUTO CLOSE: cointegration break p=%.3f ≥ %.2f", q.pValue(), risk.cointPBreak());
         }
         if (barsHeld >= maxHold) {
             return String.format(Locale.ROOT,
@@ -268,7 +308,13 @@ public class PaperTradingService {
     private Quote resolveQuote(PaperTradeEntry open, Map<String, TradingRecommendation> quotes) {
         TradingRecommendation fromMap = quotes.get(key(open.tickerY(), open.tickerX()));
         if (fromMap != null && !Double.isNaN(fromMap.currentZScore())) {
-            return new Quote(fromMap.currentZScore(), fromMap.asOfDate(), fromMap.signal());
+            return new Quote(
+                    fromMap.currentZScore(),
+                    fromMap.asOfDate(),
+                    fromMap.signal(),
+                    fromMap.hedgeRatio(),
+                    fromMap.pValue()
+            );
         }
         try {
             PairAnalysisResult pair = pairLookupService.requirePair(open.tickerY(), open.tickerX());
@@ -283,7 +329,7 @@ public class PaperTradingService {
             } else if (last.value() >= properties.cointegration().zScoreEntry()) {
                 guess = TradingSignal.SHORT_SPREAD;
             }
-            return new Quote(last.value(), last.date(), guess);
+            return new Quote(last.value(), last.date(), guess, pair.hedgeRatio(), pair.pValue());
         } catch (Exception ex) {
             log.debug("Paper lookup failed for {}/{}: {}", open.tickerY(), open.tickerX(), ex.getMessage());
             return null;
@@ -310,10 +356,15 @@ public class PaperTradingService {
     }
 
     private double sumRealizedRub() {
-        return entries.stream()
+        double closed = entries.stream()
                 .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
                 .mapToDouble(PaperTradeEntry::pnlRub)
                 .sum();
+        double partialOpen = getOpenTrades().stream()
+                .filter(e -> e.realizedPartialRub() != null)
+                .mapToDouble(PaperTradeEntry::realizedPartialRub)
+                .sum();
+        return closed + partialOpen;
     }
 
     private double sumUnrealizedRub() {
@@ -371,6 +422,6 @@ public class PaperTradingService {
         return Path.of(properties.dataDir(), name);
     }
 
-    private record Quote(double z, LocalDate asOf, TradingSignal signal) {
+    private record Quote(double z, LocalDate asOf, TradingSignal signal, double hedgeRatio, double pValue) {
     }
 }
