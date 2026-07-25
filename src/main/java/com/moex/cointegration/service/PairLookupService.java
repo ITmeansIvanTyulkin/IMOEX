@@ -1,0 +1,150 @@
+package com.moex.cointegration.service;
+
+import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.model.AlignedPairData;
+import com.moex.cointegration.model.Candle;
+import com.moex.cointegration.model.EngleGrangerResult;
+import com.moex.cointegration.model.PairAnalysisResult;
+import com.moex.cointegration.model.PricePoint;
+import com.moex.cointegration.model.PriceSeries;
+import com.moex.cointegration.model.TradingMetrics;
+import com.moex.cointegration.quant.EngleGrangerTest;
+import com.moex.cointegration.quant.SpreadAnalytics;
+import com.moex.cointegration.storage.MarketDataStorage;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * Ищет пару в топ-отчёте или пересчитывает её заново по локальным свечам.
+ * Нужен, чтобы графики работали не только для top-N по Sharpe, но и для сигналов.
+ */
+@Service
+public class PairLookupService {
+
+    private final MarketDataStorage storage;
+    private final PreprocessingService preprocessingService;
+    private final ImoexProperties properties;
+
+    public PairLookupService(
+            MarketDataStorage storage,
+            PreprocessingService preprocessingService,
+            ImoexProperties properties
+    ) {
+        this.storage = storage;
+        this.preprocessingService = preprocessingService;
+        this.properties = properties;
+    }
+
+    /**
+     * Возвращает результат анализа пары: сначала из отчёта, иначе on-demand по свечам.
+     */
+    public PairAnalysisResult requirePair(String tickerY, String tickerX) throws IOException {
+        Optional<PairAnalysisResult> fromReport = storage.findPair(tickerY, tickerX);
+        if (fromReport.isPresent()) {
+            return fromReport.get();
+        }
+        return analyzeFromCandles(tickerY, tickerX)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Не удалось построить пару " + tickerY + "/" + tickerX
+                                + ": нет общих свечей или пара не коинтегрирована."));
+    }
+
+    /** Пересчёт Engle–Granger + спред/Z по локальным OHLC. */
+    public Optional<PairAnalysisResult> analyzeFromCandles(String tickerY, String tickerX) throws IOException {
+        PriceSeries seriesY = toPriceSeries(tickerY);
+        PriceSeries seriesX = toPriceSeries(tickerX);
+        if (seriesY.points().size() < 100 || seriesX.points().size() < 100) {
+            return Optional.empty();
+        }
+
+        PriceSeries y = preprocessingService.applyLocf(seriesY);
+        PriceSeries x = preprocessingService.applyLocf(seriesX);
+
+        Optional<AlignedPairData> aligned = preprocessingService.alignPair(y, x);
+        if (aligned.isEmpty()) {
+            return Optional.empty();
+        }
+
+        AlignedPairData pairData = aligned.get();
+        EngleGrangerResult eg = EngleGrangerTest.test(
+                tickerY,
+                tickerX,
+                pairData.logY(),
+                pairData.logX(),
+                properties.cointegration().pValueThreshold()
+        );
+
+        double[] spread = SpreadAnalytics.computeSpread(
+                pairData.logY(), pairData.logX(), eg.intercept(), eg.hedgeRatio());
+        double[] zScores = SpreadAnalytics.zScores(spread);
+        TradingMetrics metrics = SpreadAnalytics.simulateMeanReversion(
+                spread,
+                properties.commissionRate(),
+                properties.cointegration().zScoreEntry(),
+                properties.cointegration().zScoreExit()
+        );
+
+        return Optional.of(new PairAnalysisResult(
+                tickerY,
+                tickerX,
+                eg.intercept(),
+                eg.hedgeRatio(),
+                eg.adfStatistic(),
+                eg.pValue(),
+                metrics.sharpeRatio(),
+                metrics.maxDrawdown(),
+                metrics.halfLifeDays(),
+                metrics.tradeCount(),
+                metrics.totalReturn(),
+                SpreadAnalytics.toSeries(pairData.dates(), spread),
+                SpreadAnalytics.toSeries(pairData.dates(), zScores)
+        ));
+    }
+
+    /** Выровненные по датам OHLC обеих ног пары. */
+    public AlignedCandles loadAlignedCandles(String tickerY, String tickerX) throws IOException {
+        List<Candle> rawY = storage.loadCandles(tickerY);
+        List<Candle> rawX = storage.loadCandles(tickerX);
+        if (rawY.isEmpty() || rawX.isEmpty()) {
+            throw new IllegalArgumentException("Нет локальных свечей для " + tickerY + "/" + tickerX);
+        }
+
+        Map<LocalDate, Candle> yByDate = new HashMap<>();
+        for (Candle c : rawY) {
+            yByDate.put(c.date(), c);
+        }
+        Map<LocalDate, Candle> xByDate = new HashMap<>();
+        for (Candle c : rawX) {
+            xByDate.put(c.date(), c);
+        }
+
+        List<LocalDate> dates = yByDate.keySet().stream()
+                .filter(xByDate::containsKey)
+                .sorted()
+                .toList();
+
+        List<Candle> candlesY = dates.stream().map(yByDate::get).toList();
+        List<Candle> candlesX = dates.stream().map(xByDate::get).toList();
+        return new AlignedCandles(dates, candlesY, candlesX);
+    }
+
+    private PriceSeries toPriceSeries(String ticker) throws IOException {
+        List<Candle> candles = storage.loadCandles(ticker).stream()
+                .sorted(Comparator.comparing(Candle::date))
+                .toList();
+        List<PricePoint> points = candles.stream()
+                .map(c -> new PricePoint(c.date(), c.close()))
+                .toList();
+        return new PriceSeries(ticker, points);
+    }
+
+    public record AlignedCandles(List<LocalDate> dates, List<Candle> candlesY, List<Candle> candlesX) {
+    }
+}
