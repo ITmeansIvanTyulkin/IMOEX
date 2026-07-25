@@ -105,6 +105,11 @@ public class AnalysisViewController {
         return htmlRenderer.renderWalkForward(report.orElse(null));
     }
 
+    @GetMapping(value = "/strategy", produces = MediaType.TEXT_HTML_VALUE)
+    public String strategy() {
+        return htmlRenderer.renderStrategy();
+    }
+
     @GetMapping(value = "/charts/{tickerY}/{tickerX}", produces = MediaType.TEXT_HTML_VALUE)
     public String pairChart(
             @PathVariable String tickerY,

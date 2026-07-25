@@ -409,3 +409,112 @@ td.links { white-space: nowrap; }
   color: var(--muted);
   font-size: 0.8rem;
 }
+
+/* Strategy guide */
+.strategy-doc {
+  max-width: 72ch;
+}
+
+.strategy-doc > h2:first-child {
+  margin-top: 0.25rem;
+}
+
+.strategy-doc .lead {
+  font-family: var(--font);
+  font-size: 1.15rem;
+  line-height: 1.55;
+  color: var(--navy);
+  margin: 0 0 1.25rem;
+}
+
+.strategy-doc h3 {
+  font-family: var(--font);
+  font-size: 1.05rem;
+  color: var(--navy);
+  margin: 1.5rem 0 0.5rem;
+  font-weight: 600;
+}
+
+.strategy-doc p,
+.strategy-doc li {
+  color: #2e2c28;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.strategy-doc ol.pipeline,
+.strategy-doc ul {
+  margin: 0.4rem 0 0.9rem;
+  padding-left: 1.25rem;
+}
+
+.strategy-doc ol.pipeline > li {
+  margin-bottom: 0.55rem;
+}
+
+.strategy-doc .callout {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 1rem 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.strategy-doc .flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.75rem 0 1.25rem;
+}
+
+.strategy-doc .flow span {
+  background: var(--navy);
+  color: #f4f7f9;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.35rem 0.55rem;
+  border-radius: 4px;
+}
+
+.strategy-doc .flow i {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.85rem;
+}
+
+.strategy-doc table.params {
+  width: 100%;
+  max-width: 100%;
+  font-size: 0.86rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.strategy-doc table.params th {
+  background: var(--navy-2);
+}
+
+.strategy-toc {
+  background: #f7f4ee;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+}
+
+.strategy-toc ol {
+  margin: 0.35rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.strategy-toc a {
+  text-decoration: none;
+}
+
+.strategy-toc a:hover {
+  text-decoration: underline;
+}
