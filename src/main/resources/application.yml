@@ -1,0 +1,102 @@
+imoex:
+  base-url: https://iss.moex.com/iss
+  board: TQBR
+  index: IMOEX
+  history-years: 5
+  commission-rate: 0.0005
+  cointegration:
+    p-value-threshold: 0.05
+    z-score-entry: 2.0
+    z-score-exit: 0.0
+    top-n: 10
+    use-rolling-z: true
+    rolling-z-window: 60
+    fdr-q: 0.20
+    use-kalman-hedge: true
+    kalman-delta: 0.00001
+    kalman-ve: 0.001
+    # true = вход только после разворота Z за порогом (не на первом касании ±2)
+    require-entry-reversal: true
+  data-dir: data
+  charts-dir: data/charts
+  news:
+    enabled: true
+    lookback-days: 10
+    stale-candle-days: 10
+    max-news-pages: 8
+  risk:
+    stop-z: 3.5
+    max-hold-bars: 40
+    reduce-size-factor: 0.5
+    max-open-pairs: 5
+    max-portfolio-gross: 1.0
+    min-sharpe: 0.0
+    max-half-life-days: 90.0
+    min-half-life-days: 1.0
+    borrow-rate-annual: 0.08
+    # размер ~ (targetσ/σ_spread) × (stopZ−|Z|)/stopZ
+    dynamic-sizing: true
+    target-spread-sigma: 0.02
+    min-size-mult: 0.25
+    max-size-mult: 1.5
+    # умный выход
+    partial-tp-fraction: 0.5   # TP половины при 50% пути к Z=0
+    trail-z: 0.75              # trailing от лучшего Z
+    beta-break-pct: 0.35       # скачок β → выход
+    coint-p-break: 0.20        # p-value ≥ → слом коинтеграции
+  walk-forward:
+    enabled: true
+    train-bars: 504
+    test-bars: 63
+    step-bars: 63
+  paper:
+    enabled: true
+    notional-per-leg: 100000
+    journal-file: paper-journal.json
+    # пн–пт ~19:05: скачать свечи → анализ → auto open/hold/close paper
+    auto-run-daily: true
+    daily-cron: "0 5 19 * * MON-FRI"
+  # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
+  universe:
+    enabled: true
+    lookback-days: 60
+    min-median-turnover-rub: 50000000   # тикерный floor
+    min-price: 5.0
+    max-zero-volume-fraction: 0.15
+    exclude-preferred: true
+    # пары внутри сектора или related-группы (ENERGY=oil+utilities, …)
+    same-sector-only: true
+    allow-related-sectors: true
+    # обе ноги ≥ этого ADV; и ADV ratio ≤ max-turnover-ratio
+    min-pair-turnover-rub: 50000000
+    max-turnover-ratio: 20.0
+  portfolio:
+    # не больше N открытых paper-пар на один сектор (банки/нефть/…)
+    diversify-by-sector: true
+    max-pairs-per-sector: 2
+  auth:
+    enabled: true
+    username: imoex
+    password: change-me
+    api-key: ""
+
+server:
+  port: 8080
+
+spring:
+  application:
+    name: imoex-cointegration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+analysis:
+  schedule:
+    enabled: false
+    cron: "0 0 6 * * SUN"
