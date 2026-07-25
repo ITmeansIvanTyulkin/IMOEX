@@ -42,6 +42,7 @@ public class CointegrationAnalysisService {
     private final FinalRecommendationService finalRecommendationService;
     private final PaperTradingService paperTradingService;
     private final WalkForwardService walkForwardService;
+    private final UniverseFilterService universeFilterService;
     private final ImoexProperties properties;
 
     public CointegrationAnalysisService(
@@ -52,6 +53,7 @@ public class CointegrationAnalysisService {
             FinalRecommendationService finalRecommendationService,
             PaperTradingService paperTradingService,
             WalkForwardService walkForwardService,
+            UniverseFilterService universeFilterService,
             ImoexProperties properties
     ) {
         this.marketDataService = marketDataService;
@@ -61,6 +63,7 @@ public class CointegrationAnalysisService {
         this.finalRecommendationService = finalRecommendationService;
         this.paperTradingService = paperTradingService;
         this.walkForwardService = walkForwardService;
+        this.universeFilterService = universeFilterService;
         this.properties = properties;
     }
 
@@ -74,7 +77,8 @@ public class CointegrationAnalysisService {
         }
 
         Map<String, PriceSeries> loaded = marketDataService.loadAlignedPriceSeries();
-        Map<String, PriceSeries> processed = preprocessingService.preprocess(loaded);
+        Map<String, PriceSeries> filtered = universeFilterService.filter(loaded);
+        Map<String, PriceSeries> processed = preprocessingService.preprocess(filtered);
         Map<String, AdfResult> stationarity = preprocessingService.checkPriceStationarity(processed);
 
         long nonStationary = stationarity.values().stream().filter(r -> !r.stationary()).count();

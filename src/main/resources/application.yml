@@ -46,6 +46,14 @@ imoex:
     # пн–пт ~19:05: скачать свечи → анализ → auto open/hold/close paper
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
+  # Pre-filter до Engle–Granger: оборот / цена / preferred (proxy short)
+  universe:
+    enabled: true
+    lookback-days: 60
+    min-median-turnover-rub: 50000000   # ~p25 IMOEX; ниже — тонкий рынок
+    min-price: 5.0
+    max-zero-volume-fraction: 0.15
+    exclude-preferred: true             # SBERP, SNGSP, … обычно хуже для шорта
   auth:
     enabled: true
     username: imoex

@@ -41,6 +41,7 @@ class CointegrationAnalysisServiceTest {
                 ImoexProperties.RiskProperties.defaults(),
                 new ImoexProperties.WalkForwardProperties(false, 200, 40, 40),
                 new ImoexProperties.PaperProperties(false, 100_000, "paper.json", false, null),
+                new ImoexProperties.UniverseProperties(false, 60, 0, 0, 1.0, false),
                 ImoexProperties.AuthProperties.defaults()
         );
 
@@ -56,6 +57,7 @@ class CointegrationAnalysisServiceTest {
         when(finalRecommendationService.rebuildFromTechnical(anyList())).thenReturn(List.of());
         PaperTradingService paperTradingService = mock(PaperTradingService.class);
         WalkForwardService walkForwardService = mock(WalkForwardService.class);
+        UniverseFilterService universeFilterService = new UniverseFilterService(storage, props);
 
         CointegrationAnalysisService service = new CointegrationAnalysisService(
                 marketDataService,
@@ -65,6 +67,7 @@ class CointegrationAnalysisServiceTest {
                 finalRecommendationService,
                 paperTradingService,
                 walkForwardService,
+                universeFilterService,
                 props
         );
 

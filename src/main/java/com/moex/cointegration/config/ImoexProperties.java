@@ -19,6 +19,7 @@ public record ImoexProperties(
         RiskProperties risk,
         WalkForwardProperties walkForward,
         PaperProperties paper,
+        UniverseProperties universe,
         AuthProperties auth
 ) {
     public ImoexProperties {
@@ -37,12 +38,15 @@ public record ImoexProperties(
         if (paper == null) {
             paper = PaperProperties.defaults();
         }
+        if (universe == null) {
+            universe = UniverseProperties.defaults();
+        }
         if (auth == null) {
             auth = AuthProperties.defaults();
         }
     }
 
-    /** Фабрика для unit-тестов (risk / walk-forward / paper / auth — defaults). */
+    /** Фабрика для unit-тестов (risk / walk-forward / paper / universe / auth — defaults). */
     public static ImoexProperties forTests(
             String baseUrl,
             String board,
@@ -56,7 +60,7 @@ public record ImoexProperties(
     ) {
         return new ImoexProperties(
                 baseUrl, board, index, historyYears, commissionRate, cointegration, news,
-                dataDir, chartsDir, null, null, null, null
+                dataDir, chartsDir, null, null, null, null, null
         );
     }
 
@@ -190,6 +194,24 @@ public record ImoexProperties(
 
         public boolean autoRunDailyEnabled() {
             return Boolean.TRUE.equals(autoRunDaily);
+        }
+    }
+
+    /**
+     * Pre-filter тикеров перед Engle–Granger (ликвидность / цена / preferred).
+     * Shortability без брокера аппроксимируется: exclude-preferred + ADV.
+     */
+    public record UniverseProperties(
+            boolean enabled,
+            int lookbackDays,
+            double minMedianTurnoverRub,
+            double minPrice,
+            double maxZeroVolumeFraction,
+            boolean excludePreferred
+    ) {
+        public static UniverseProperties defaults() {
+            // ~p25 по IMOEX свечам: отсекает самый тонкий квартиль, оставляет торгуемое ядро
+            return new UniverseProperties(true, 60, 50_000_000.0, 5.0, 0.15, true);
         }
     }
 
