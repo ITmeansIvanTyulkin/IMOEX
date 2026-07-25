@@ -69,6 +69,10 @@ imoex:
     # обе ноги ≥ этого ADV; и ADV ratio ≤ max-turnover-ratio
     min-pair-turnover-rub: 80000000
     max-turnover-ratio: 15.0
+  portfolio:
+    # не больше N открытых paper-пар на один сектор (банки/нефть/…)
+    diversify-by-sector: true
+    max-pairs-per-sector: 2
   auth:
     enabled: true
     username: imoex

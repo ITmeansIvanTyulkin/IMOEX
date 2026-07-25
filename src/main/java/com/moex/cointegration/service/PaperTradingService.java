@@ -132,6 +132,8 @@ public class PaperTradingService {
             return opened;
         }
 
+        Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> openBySector = countOpenBySector();
+
         List<FinalTradeRecommendation> candidates = finals.stream()
                 .filter(f -> f.decision() == FinalTradeDecision.ENTER
                         || f.decision() == FinalTradeDecision.REDUCE_SIZE)
@@ -139,18 +141,28 @@ public class PaperTradingService {
                     TradingSignal s = f.technical().signal();
                     return s == TradingSignal.LONG_SPREAD || s == TradingSignal.SHORT_SPREAD;
                 })
-                .sorted(Comparator.comparingDouble((FinalTradeRecommendation f) ->
-                        Math.abs(f.technical().currentZScore())).reversed())
-                .limit(capacity)
+                .sorted(Comparator
+                        .comparingInt((FinalTradeRecommendation f) ->
+                                sectorOpenCount(f.technical().tickerY(), openBySector))
+                        .thenComparing(Comparator.comparingDouble((FinalTradeRecommendation f) ->
+                                Math.abs(f.technical().currentZScore())).reversed()))
                 .toList();
 
         for (FinalTradeRecommendation f : candidates) {
+            if (opened.size() >= capacity) {
+                break;
+            }
             if (alreadyOpen(f.technical().tickerY(), f.technical().tickerX())) {
+                continue;
+            }
+            if (!allowSectorSlot(f.technical().tickerY(), f.technical().tickerX(), openBySector)) {
+                log.info("Paper skip {}/{}: sector book full (max {}/sector)",
+                        f.technical().tickerY(), f.technical().tickerX(),
+                        properties.portfolio().maxPairsPerSector());
                 continue;
             }
             double z = f.technical().currentZScore();
             double stopZ = properties.risk().stopZ();
-            // Не входить почти у стопа: при entry 3.3 и stop 3.5 запас ~0.2 Z — лотерея.
             if (Math.abs(z) >= stopZ - 0.5) {
                 log.info("Paper skip {}/{}: |Z|={} слишком близко к stop {}",
                         f.technical().tickerY(), f.technical().tickerX(),
@@ -192,8 +204,51 @@ public class PaperTradingService {
             );
             entries.add(entry);
             opened.add(entry);
+            bumpSector(f.technical().tickerY(), openBySector);
         }
         return opened;
+    }
+
+    private Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> countOpenBySector() {
+        Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> map = new HashMap<>();
+        for (PaperTradeEntry e : getOpenTrades()) {
+            bumpSector(e.tickerY(), map);
+        }
+        return map;
+    }
+
+    private static int sectorOpenCount(
+            String tickerY,
+            Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> openBySector
+    ) {
+        return com.moex.cointegration.universe.SectorCatalog.sectorOf(tickerY)
+                .map(s -> openBySector.getOrDefault(s, 0))
+                .orElse(0);
+    }
+
+    private boolean allowSectorSlot(
+            String tickerY,
+            String tickerX,
+            Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> openBySector
+    ) {
+        if (!properties.portfolio().diversifyBySectorEnabled()) {
+            return true;
+        }
+        var sector = com.moex.cointegration.universe.SectorCatalog.sectorOf(tickerY)
+                .or(() -> com.moex.cointegration.universe.SectorCatalog.sectorOf(tickerX));
+        if (sector.isEmpty()) {
+            return true;
+        }
+        int open = openBySector.getOrDefault(sector.get(), 0);
+        return open < properties.portfolio().maxPairsPerSector();
+    }
+
+    private static void bumpSector(
+            String tickerY,
+            Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> openBySector
+    ) {
+        com.moex.cointegration.universe.SectorCatalog.sectorOf(tickerY).ifPresent(s ->
+                openBySector.merge(s, 1, Integer::sum));
     }
 
     private int markAndCloseOpen(Map<String, TradingRecommendation> quotes) {

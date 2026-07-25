@@ -20,6 +20,7 @@ public record ImoexProperties(
         WalkForwardProperties walkForward,
         PaperProperties paper,
         UniverseProperties universe,
+        PortfolioProperties portfolio,
         AuthProperties auth
 ) {
     public ImoexProperties {
@@ -41,12 +42,15 @@ public record ImoexProperties(
         if (universe == null) {
             universe = UniverseProperties.defaults();
         }
+        if (portfolio == null) {
+            portfolio = PortfolioProperties.defaults();
+        }
         if (auth == null) {
             auth = AuthProperties.defaults();
         }
     }
 
-    /** Фабрика для unit-тестов (risk / walk-forward / paper / universe / auth — defaults). */
+    /** Фабрика для unit-тестов (risk / walk-forward / paper / universe / portfolio / auth — defaults). */
     public static ImoexProperties forTests(
             String baseUrl,
             String board,
@@ -60,7 +64,7 @@ public record ImoexProperties(
     ) {
         return new ImoexProperties(
                 baseUrl, board, index, historyYears, commissionRate, cointegration, news,
-                dataDir, chartsDir, null, null, null, null, null
+                dataDir, chartsDir, null, null, null, null, null, null
         );
     }
 
@@ -195,6 +199,31 @@ public record ImoexProperties(
 
         public boolean dynamicSizingEnabled() {
             return Boolean.TRUE.equals(dynamicSizing);
+        }
+    }
+
+    /**
+     * Портфельные book'и: лимит открытых пар на сектор (диверсификация).
+     */
+    public record PortfolioProperties(
+            Boolean diversifyBySector,
+            Integer maxPairsPerSector
+    ) {
+        public PortfolioProperties {
+            if (diversifyBySector == null) {
+                diversifyBySector = true;
+            }
+            if (maxPairsPerSector == null || maxPairsPerSector < 1) {
+                maxPairsPerSector = 2;
+            }
+        }
+
+        public static PortfolioProperties defaults() {
+            return new PortfolioProperties(true, 2);
+        }
+
+        public boolean diversifyBySectorEnabled() {
+            return Boolean.TRUE.equals(diversifyBySector);
         }
     }
 
