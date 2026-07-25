@@ -6,6 +6,7 @@ import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.AnalysisReport;
 import com.moex.cointegration.model.Candle;
 import com.moex.cointegration.model.PairAnalysisResult;
+import com.moex.cointegration.model.WalkForwardReport;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -24,6 +25,7 @@ public class MarketDataStorage {
     private final Path dataDir;
     private final Path candlesDir;
     private final Path reportFile;
+    private final Path walkForwardFile;
     private final ObjectMapper objectMapper;
 
     /**
@@ -35,6 +37,7 @@ public class MarketDataStorage {
         this.dataDir = Path.of(properties.dataDir());
         this.candlesDir = dataDir.resolve("candles");
         this.reportFile = dataDir.resolve("analysis-report.json");
+        this.walkForwardFile = dataDir.resolve("walk-forward-report.json");
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         Files.createDirectories(candlesDir);
         Files.createDirectories(Path.of(properties.chartsDir()));
@@ -87,6 +90,17 @@ public class MarketDataStorage {
             return Optional.empty();
         }
         return Optional.of(objectMapper.readValue(reportFile.toFile(), AnalysisReport.class));
+    }
+
+    public void saveWalkForwardReport(WalkForwardReport report) throws IOException {
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(walkForwardFile.toFile(), report);
+    }
+
+    public Optional<WalkForwardReport> loadWalkForwardReport() throws IOException {
+        if (!Files.exists(walkForwardFile)) {
+            return Optional.empty();
+        }
+        return Optional.of(objectMapper.readValue(walkForwardFile.toFile(), WalkForwardReport.class));
     }
 
     /**

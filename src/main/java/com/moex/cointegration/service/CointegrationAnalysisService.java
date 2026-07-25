@@ -12,6 +12,7 @@ import com.moex.cointegration.model.TradingMetrics;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.quant.EngleGrangerTest;
 import com.moex.cointegration.quant.SpreadAnalytics;
+import com.moex.cointegration.quant.WalkForwardAnalyzer;
 import com.moex.cointegration.storage.MarketDataStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,8 @@ public class CointegrationAnalysisService {
     private final MarketDataStorage storage;
     private final TradingRecommendationService recommendationService;
     private final FinalRecommendationService finalRecommendationService;
+    private final PaperTradingService paperTradingService;
+    private final WalkForwardService walkForwardService;
     private final ImoexProperties properties;
 
     public CointegrationAnalysisService(
@@ -46,6 +49,8 @@ public class CointegrationAnalysisService {
             MarketDataStorage storage,
             TradingRecommendationService recommendationService,
             FinalRecommendationService finalRecommendationService,
+            PaperTradingService paperTradingService,
+            WalkForwardService walkForwardService,
             ImoexProperties properties
     ) {
         this.marketDataService = marketDataService;
@@ -53,15 +58,14 @@ public class CointegrationAnalysisService {
         this.storage = storage;
         this.recommendationService = recommendationService;
         this.finalRecommendationService = finalRecommendationService;
+        this.paperTradingService = paperTradingService;
+        this.walkForwardService = walkForwardService;
         this.properties = properties;
     }
 
     /**
      * Выполняет полный pipeline: загрузка данных → предобработка → перебор пар →
-     * Engle-Granger → метрики стратегии → топ-N по Sharpe → сохранение отчёта.
-     *
-     * @param refreshData если {@code true}, перед анализом обновляет свечи с MOEX
-     * @return итоговый отчёт с топ-парами
+     * Engle-Granger → FDR → метрики стратегии (rolling Z + risk) → топ-N → paper sync → walk-forward.
      */
     public AnalysisReport runFullAnalysis(boolean refreshData) throws IOException {
         if (refreshData) {
@@ -77,9 +81,12 @@ public class CointegrationAnalysisService {
                 nonStationary, stationarity.size());
 
         List<String> tickers = processed.keySet().stream().sorted().toList();
-        List<PairAnalysisResult> cointegratedPairs = new ArrayList<>();
+        List<Candidate> candidates = new ArrayList<>();
         int pairsTested = 0;
         int pairsSkipped = 0;
+
+        ImoexProperties.CointegrationProperties coint = properties.cointegration();
+        ImoexProperties.RiskProperties risk = properties.risk();
 
         for (int i = 0; i < tickers.size(); i++) {
             for (int j = i + 1; j < tickers.size(); j++) {
@@ -103,45 +110,65 @@ public class CointegrationAnalysisService {
                         tickerX,
                         pairData.logY(),
                         pairData.logX(),
-                        properties.cointegration().pValueThreshold()
+                        coint.pValueThreshold()
                 );
 
-                if (!eg.cointegrated()) {
-                    continue;
-                }
-
-                double[] spread = SpreadAnalytics.computeSpread(
-                        pairData.logY(), pairData.logX(), eg.intercept(), eg.hedgeRatio());
-                double[] zScores = SpreadAnalytics.zScores(spread);
-
-                TradingMetrics metrics = SpreadAnalytics.simulateMeanReversion(
-                        spread,
-                        properties.commissionRate(),
-                        properties.cointegration().zScoreEntry(),
-                        properties.cointegration().zScoreExit()
-                );
-
-                cointegratedPairs.add(new PairAnalysisResult(
-                        tickerY,
-                        tickerX,
-                        eg.intercept(),
-                        eg.hedgeRatio(),
-                        eg.adfStatistic(),
-                        eg.pValue(),
-                        metrics.sharpeRatio(),
-                        metrics.maxDrawdown(),
-                        metrics.halfLifeDays(),
-                        metrics.tradeCount(),
-                        metrics.totalReturn(),
-                        SpreadAnalytics.toSeries(pairData.dates(), spread),
-                        SpreadAnalytics.toSeries(pairData.dates(), zScores)
-                ));
+                // Keep all EG results for FDR; filter after BH.
+                candidates.add(new Candidate(tickerY, tickerX, pairData, eg));
             }
+        }
+
+        double[] pValues = candidates.stream().mapToDouble(c -> c.eg().pValue()).toArray();
+        boolean[] passFdr = WalkForwardAnalyzer.benjaminiHochberg(pValues, coint.fdrQ());
+
+        List<PairAnalysisResult> cointegratedPairs = new ArrayList<>();
+        for (int idx = 0; idx < candidates.size(); idx++) {
+            if (!passFdr[idx]) {
+                continue;
+            }
+            Candidate c = candidates.get(idx);
+            if (!c.eg().cointegrated()) {
+                continue;
+            }
+
+            double[] spread = SpreadAnalytics.computeSpread(
+                    c.pairData().logY(), c.pairData().logX(), c.eg().intercept(), c.eg().hedgeRatio());
+
+            double[] zScores = coint.rollingZEnabled()
+                    ? SpreadAnalytics.rollingZScores(spread, coint.rollingZWindow())
+                    : SpreadAnalytics.zScores(spread);
+
+            // For ranking metrics use risk-aware simulation on the chosen Z series.
+            TradingMetrics metrics = SpreadAnalytics.simulateMeanReversion(
+                    spread,
+                    properties.commissionRate(),
+                    coint.zScoreEntry(),
+                    coint.zScoreExit(),
+                    replaceNanZWithZeroForMetrics(zScores),
+                    risk.stopZ(),
+                    risk.maxHoldBars()
+            );
+
+            cointegratedPairs.add(new PairAnalysisResult(
+                    c.tickerY(),
+                    c.tickerX(),
+                    c.eg().intercept(),
+                    c.eg().hedgeRatio(),
+                    c.eg().adfStatistic(),
+                    c.eg().pValue(),
+                    metrics.sharpeRatio(),
+                    metrics.maxDrawdown(),
+                    metrics.halfLifeDays(),
+                    metrics.tradeCount(),
+                    metrics.totalReturn(),
+                    SpreadAnalytics.toSeries(c.pairData().dates(), spread),
+                    SpreadAnalytics.toSeries(c.pairData().dates(), zScores)
+            ));
         }
 
         List<PairAnalysisResult> topPairs = cointegratedPairs.stream()
                 .sorted(Comparator.comparingDouble(PairAnalysisResult::sharpeRatio).reversed())
-                .limit(properties.cointegration().topN())
+                .limit(coint.topN())
                 .toList();
 
         AnalysisReport report = new AnalysisReport(
@@ -156,12 +183,43 @@ public class CointegrationAnalysisService {
 
         List<TradingRecommendation> recommendations = recommendationService.analyzeAndPrint(cointegratedPairs);
         List<FinalTradeRecommendation> finals = finalRecommendationService.rebuildFromTechnical(recommendations);
+        paperTradingService.syncFromFinals(finals);
 
-        log.info("Analysis complete: {} tickers, {} pairs tested, {} skipped (short overlap), "
-                        + "{} cointegrated, top {} selected, {} trading recommendations, {} final after news",
+        if (properties.walkForward().enabled()) {
+            try {
+                walkForwardService.runForTopPairs(Math.min(coint.topN(), 10));
+            } catch (Exception ex) {
+                log.warn("Walk-forward failed: {}", ex.getMessage());
+            }
+        }
+
+        log.info("Analysis complete: {} tickers, {} pairs tested, {} skipped, {} FDR-pass cointegrated, "
+                        + "top {}, {} recommendations, {} final after news",
                 tickers.size(), pairsTested, pairsSkipped, cointegratedPairs.size(), topPairs.size(),
                 recommendations.size(), finals.size());
 
         return report;
+    }
+
+    /**
+     * NaN rolling warmup → 0 so simulator does not enter on incomplete window,
+     * while series stored for charts keep NaN semantics via original array.
+     */
+    private static double[] replaceNanZWithZeroForMetrics(double[] z) {
+        double[] copy = z.clone();
+        for (int i = 0; i < copy.length; i++) {
+            if (Double.isNaN(copy[i])) {
+                copy[i] = 0.0;
+            }
+        }
+        return copy;
+    }
+
+    private record Candidate(
+            String tickerY,
+            String tickerX,
+            AlignedPairData pairData,
+            EngleGrangerResult eg
+    ) {
     }
 }
