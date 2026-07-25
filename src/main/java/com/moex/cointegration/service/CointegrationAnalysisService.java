@@ -107,6 +107,11 @@ public class CointegrationAnalysisService {
                     continue;
                 }
 
+                if (!universeFilterService.allowPair(tickerY, tickerX)) {
+                    pairsSkipped++;
+                    continue;
+                }
+
                 pairsTested++;
                 AlignedPairData pairData = aligned.get();
 

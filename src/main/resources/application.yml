@@ -50,10 +50,15 @@ imoex:
   universe:
     enabled: true
     lookback-days: 60
-    min-median-turnover-rub: 50000000   # ~p25 IMOEX; ниже — тонкий рынок
+    min-median-turnover-rub: 50000000   # тикерный floor
     min-price: 5.0
     max-zero-volume-fraction: 0.15
-    exclude-preferred: true             # SBERP, SNGSP, … обычно хуже для шорта
+    exclude-preferred: true
+    # пары только внутри сектора (банки/нефть/металлы/…)
+    same-sector-only: true
+    # обе ноги ≥ этого ADV; и ADV ratio ≤ max-turnover-ratio
+    min-pair-turnover-rub: 80000000
+    max-turnover-ratio: 15.0
   auth:
     enabled: true
     username: imoex

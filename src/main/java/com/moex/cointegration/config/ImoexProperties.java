@@ -198,8 +198,12 @@ public record ImoexProperties(
     }
 
     /**
-     * Pre-filter тикеров перед Engle–Granger (ликвидность / цена / preferred).
+     * Pre-filter тикеров перед Engle–Granger (ликвидность / цена / preferred / сектора).
      * Shortability без брокера аппроксимируется: exclude-preferred + ADV.
+     *
+     * @param sameSectorOnly        пары только внутри одного сектора (банки, нефть, …)
+     * @param minPairTurnoverRub    обе ноги должны иметь медианный оборот ≥ этого порога
+     * @param maxTurnoverRatio      max(ADV_y,ADV_x)/min ≤ ratio (баланс ликвидности ног)
      */
     public record UniverseProperties(
             boolean enabled,
@@ -207,11 +211,32 @@ public record ImoexProperties(
             double minMedianTurnoverRub,
             double minPrice,
             double maxZeroVolumeFraction,
-            boolean excludePreferred
+            boolean excludePreferred,
+            Boolean sameSectorOnly,
+            Double minPairTurnoverRub,
+            Double maxTurnoverRatio
     ) {
+        public UniverseProperties {
+            if (sameSectorOnly == null) {
+                sameSectorOnly = true;
+            }
+            if (minPairTurnoverRub == null || minPairTurnoverRub < 0) {
+                minPairTurnoverRub = 80_000_000.0;
+            }
+            if (maxTurnoverRatio == null || maxTurnoverRatio < 1) {
+                maxTurnoverRatio = 15.0;
+            }
+        }
+
         public static UniverseProperties defaults() {
-            // ~p25 по IMOEX свечам: отсекает самый тонкий квартиль, оставляет торгуемое ядро
-            return new UniverseProperties(true, 60, 50_000_000.0, 5.0, 0.15, true);
+            return new UniverseProperties(
+                    true, 60, 50_000_000.0, 5.0, 0.15, true,
+                    true, 80_000_000.0, 15.0
+            );
+        }
+
+        public boolean sameSectorOnlyEnabled() {
+            return Boolean.TRUE.equals(sameSectorOnly);
         }
     }
 
