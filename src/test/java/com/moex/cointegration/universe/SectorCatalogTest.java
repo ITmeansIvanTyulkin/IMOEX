@@ -20,8 +20,8 @@ class SectorCatalogTest {
     }
 
     @Test
-    void metalsGroup() {
-        assertTrue(SectorCatalog.sameSector("NLMK", "MAGN"));
-        assertTrue(SectorCatalog.sameSector("GMKN", "PLZL"));
+    void relatedEnergyGroup() {
+        assertTrue(SectorCatalog.sameOrRelatedSector("LKOH", "FEES")); // oil + utilities
+        assertFalse(SectorCatalog.sameOrRelatedSector("LKOH", "SBER"));
     }
 }

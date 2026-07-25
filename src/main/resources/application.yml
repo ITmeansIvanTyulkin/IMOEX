@@ -11,7 +11,7 @@ imoex:
     top-n: 10
     use-rolling-z: true
     rolling-z-window: 60
-    fdr-q: 0.10
+    fdr-q: 0.20
     use-kalman-hedge: true
     kalman-delta: 0.00001
     kalman-ve: 0.001
@@ -56,7 +56,7 @@ imoex:
     # пн–пт ~19:05: скачать свечи → анализ → auto open/hold/close paper
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
-  # Pre-filter до Engle–Granger: оборот / цена / preferred (proxy short)
+  # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
   universe:
     enabled: true
     lookback-days: 60
@@ -64,11 +64,12 @@ imoex:
     min-price: 5.0
     max-zero-volume-fraction: 0.15
     exclude-preferred: true
-    # пары только внутри сектора (банки/нефть/металлы/…)
+    # пары внутри сектора или related-группы (ENERGY=oil+utilities, …)
     same-sector-only: true
+    allow-related-sectors: true
     # обе ноги ≥ этого ADV; и ADV ratio ≤ max-turnover-ratio
-    min-pair-turnover-rub: 80000000
-    max-turnover-ratio: 15.0
+    min-pair-turnover-rub: 50000000
+    max-turnover-ratio: 20.0
   portfolio:
     # не больше N открытых paper-пар на один сектор (банки/нефть/…)
     diversify-by-sector: true
