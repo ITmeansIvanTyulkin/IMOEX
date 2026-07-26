@@ -7,23 +7,30 @@ alwaysApply: true
 
 Three strategies under one brand. Do not jump ahead without completing the current stage.
 
-## Active now — Strategy 1: cointegration (pairs MR)
+## Product shape
 
-- Mean-reversion on cointegrated IMOEX pairs, **sideways only** (ADX regime gate blocks TREND entries).
-- Default session: **DAILY**. INTRADAY is the same strategy on 1H + session flatten — not a separate product yet.
-- Sequence:
-  1. Harden and validate **daily** (paper track-record, walk-forward OOS).
-  2. Then full **intraday** historical backtest + paper (`session.mode: INTRADAY`).
-  3. Only then consider live/broker wiring.
+1. **Cointegration / pairs** — active now (implement fully).
+2. **Futures calendar** arbitrage — roadmap only, no code yet.
+3. **Options** — roadmap only, no code yet.
 
-## Roadmap — not built yet
+## Strategy 1 — complete this first (full scope)
 
-- **Strategy 2:** futures **calendar** arbitrage (separate module).
-- **Strategy 3:** **options** (separate module).
+Mean-reversion on cointegrated IMOEX pairs, **sideways only** (ADX blocks TREND).
 
-Do not mix calendar/options work into the cointegration pipeline unless the user explicitly reprioritizes.
+Target operator profile: equity **from ~100 000 ₽**, book of **1–2 pairs**, not a wide multi-pair portfolio.
+
+Two horizons of the **same** pairs module (both are in scope for strategy 1):
+
+1. **Multi-day** (default `session.mode: DAILY`) — hold a few days with Z exits / stops; small book 1–2 pairs.
+2. **Intraday** (`INTRADAY`) — 1H bars, flatten by session end; same MR logic, no overnight.
+
+Do not start calendar/options until pairs (daily short-hold + intraday) is validated on paper/OOS.
+
+## Config intent (pairs)
+
+- `max-open-pairs` ≈ 2, notional per leg sized for ~100k equity (no leverage below 1M).
+- Prefer honest cash PnL and regime discipline over optimistic in-sample Sharpe.
 
 ## Product truth
 
 - Research / decision-support, not auto-execution.
-- Prefer honest metrics (cash PnL, OOS) over optimistic in-sample Sharpe.
