@@ -6,6 +6,7 @@ import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.WalkForwardReport;
 import com.moex.cointegration.service.FinalRecommendationService;
+import com.moex.cointegration.service.MarketRegimeService;
 import com.moex.cointegration.service.PaperTradingService;
 import com.moex.cointegration.service.TradingRecommendationService;
 import com.moex.cointegration.service.WalkForwardService;
@@ -33,6 +34,7 @@ public class AnalysisViewController {
     private final FinalRecommendationService finalRecommendationService;
     private final PaperTradingService paperTradingService;
     private final WalkForwardService walkForwardService;
+    private final MarketRegimeService marketRegimeService;
     private final AnalysisHtmlRenderer htmlRenderer;
 
     public AnalysisViewController(
@@ -41,6 +43,7 @@ public class AnalysisViewController {
             FinalRecommendationService finalRecommendationService,
             PaperTradingService paperTradingService,
             WalkForwardService walkForwardService,
+            MarketRegimeService marketRegimeService,
             AnalysisHtmlRenderer htmlRenderer
     ) {
         this.storage = storage;
@@ -48,6 +51,7 @@ public class AnalysisViewController {
         this.finalRecommendationService = finalRecommendationService;
         this.paperTradingService = paperTradingService;
         this.walkForwardService = walkForwardService;
+        this.marketRegimeService = marketRegimeService;
         this.htmlRenderer = htmlRenderer;
     }
 
@@ -58,7 +62,7 @@ public class AnalysisViewController {
             return htmlRenderer.renderEmpty();
         }
         List<TradingRecommendation> recommendations = recommendationService.getLastRecommendations();
-        return htmlRenderer.renderDashboard(report.get(), recommendations);
+        return htmlRenderer.renderDashboard(report.get(), recommendations, marketRegimeService.current());
     }
 
     @GetMapping(value = "/recommendations", produces = MediaType.TEXT_HTML_VALUE)

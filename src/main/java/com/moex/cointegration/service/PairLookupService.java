@@ -110,10 +110,15 @@ public class PairLookupService {
                 coint.zScoreEntry(),
                 coint.zScoreExit(),
                 zScores,
-                risk.stopZ(),
+                risk.adaptiveStopEnabled()
+                        ? com.moex.cointegration.quant.AdaptiveStop.stopZ(
+                        spread, risk.adaptiveStopBase(), risk.adaptiveStopCap(), 20, 252)
+                        : risk.stopZ(),
                 risk.maxHoldBars(),
                 risk.borrowRateAnnual(),
-                coint.entryReversalRequired()
+                coint.entryReversalRequired(),
+                risk.trailZ(),
+                risk.partialTpFraction()
         );
 
         return Optional.of(new PairAnalysisResult(
@@ -128,6 +133,7 @@ public class PairLookupService {
                 metrics.halfLifeDays(),
                 metrics.tradeCount(),
                 metrics.totalReturn(),
+                eg.rSquared(),
                 SpreadAnalytics.toSeries(pairData.dates(), spread),
                 SpreadAnalytics.toSeries(pairData.dates(), zScores)
         ));

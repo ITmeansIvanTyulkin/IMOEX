@@ -109,29 +109,60 @@ public class MoexIssClient {
 
     /**
      * Загружает дневные свечи (interval=24) по одному тикеру с постраничной выборкой.
-     *
-     * @param ticker тикер акции
-     * @param from   начало периода включительно
-     * @param till   конец периода включительно
-     * @return список свечей OHLCV
      */
     public List<Candle> fetchDailyCandles(String ticker, LocalDate from, LocalDate till) {
+        return fetchShareCandles(ticker, from, till, 24);
+    }
+
+    /**
+     * Свечи акции TQBR с произвольным interval (24=day, 60=1H, …).
+     */
+    public List<Candle> fetchShareCandles(String ticker, LocalDate from, LocalDate till, int interval) {
+        return fetchCandles(
+                "/engines/stock/markets/shares/boards/{board}/securities/{ticker}/candles.json",
+                List.of(properties.board(), ticker),
+                from, till, interval
+        );
+    }
+
+    /**
+     * Свечи индекса (обычно board SNDX, secid IMOEX).
+     */
+    public List<Candle> fetchIndexCandles(
+            String secid, String indexBoard, LocalDate from, LocalDate till, int interval
+    ) {
+        return fetchCandles(
+                "/engines/stock/markets/index/boards/{board}/securities/{ticker}/candles.json",
+                List.of(indexBoard, secid),
+                from, till, interval
+        );
+    }
+
+    private List<Candle> fetchCandles(
+            String pathTemplate,
+            List<String> pathArgs,
+            LocalDate from,
+            LocalDate till,
+            int interval
+    ) {
         List<Candle> candles = new ArrayList<>();
         int start = 0;
 
         while (true) {
-            String url = UriComponentsBuilder
+            var builder = UriComponentsBuilder
                     .fromHttpUrl(properties.baseUrl())
-                    .path("/engines/stock/markets/shares/boards/{board}/securities/{ticker}/candles.json")
+                    .path(pathTemplate)
                     .queryParam("from", from.format(MOEX_DATE))
                     .queryParam("till", till.format(MOEX_DATE))
-                    .queryParam("interval", 24)
+                    .queryParam("interval", interval)
                     .queryParam("start", start)
-                    .queryParam("iss.meta", "off")
-                    .buildAndExpand(properties.board(), ticker)
-                    .toUriString();
+                    .queryParam("iss.meta", "off");
+            String url = builder.buildAndExpand(pathArgs.toArray()).toUriString();
 
             JsonNode root = restTemplate.getForObject(url, JsonNode.class);
+            if (root == null) {
+                break;
+            }
             JsonNode candlesNode = root.path("candles");
             JsonNode columns = candlesNode.path("columns");
             JsonNode data = candlesNode.path("data");

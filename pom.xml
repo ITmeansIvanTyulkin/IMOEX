@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.moex</groupId>
-    <artifactId>imoex-cointegration</artifactId>
+    <artifactId>trinity-arbitrage</artifactId>
     <version>1.0.0-SNAPSHOT</version>
-    <name>imoex-cointegration</name>
-    <description>IMOEX cointegrated pairs finder</description>
+    <name>trinity-arbitrage</name>
+    <description>TRINITY Multi-Strategy Arbitrage — IMOEX cointegration / paper / walk-forward</description>
 
     <properties>
         <java.version>17</java.version>

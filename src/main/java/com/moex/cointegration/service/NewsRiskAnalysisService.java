@@ -253,9 +253,18 @@ public class NewsRiskAnalysisService {
         return switch (decision) {
             case ENTER -> "ИТОГ: ВХОД разрешён — техника подтверждена, новостных блокеров нет.";
             case REDUCE_SIZE -> "ИТОГ: вход только уменьшенным размером — есть caution-новости (" + news.riskLevel() + ").";
-            case WATCH -> "ИТОГ: не входить — наблюдать (техника=" + rec.signal() + ", новости=" + news.riskLevel() + ").";
+            case WATCH -> regimeWatchSummary(rec, news);
             case BLOCK -> "ИТОГ: ВХОД ЗАПРЕЩЁН — структурный/новостной блокер.";
         };
+    }
+
+    private String regimeWatchSummary(TradingRecommendation rec, PairNewsAssessment news) {
+        String s = rec.summary() == null ? "" : rec.summary();
+        if (s.contains("тренд") || s.contains("TREND") || s.contains("боковик")) {
+            return "ИТОГ: НЕ ТОРГОВАТЬ — выявлен тренд, стратегия только боковик.";
+        }
+        return "ИТОГ: не входить — наблюдать (техника=" + rec.signal()
+                + ", новости=" + news.riskLevel() + ").";
     }
 
     private String beginnerGuide(FinalTradeDecision decision, TradingRecommendation rec, PairNewsAssessment news) {

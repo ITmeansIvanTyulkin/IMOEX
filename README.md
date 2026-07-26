@@ -1,8 +1,10 @@
-# IMOEX Cointegration
+# TRINITY — Multi-Strategy Arbitrage
 
-**Поиск коинтегрированных пар акций индекса МосБиржи и торговые рекомендации для дневной / свинговой парной торговли.**
+**Three Strategies. One Mission.**
 
-Система загружает дневные свечи через MOEX ISS, отсекает тонкий рынок, тестирует пары Engle–Granger, считает спред / rolling Z-score (опционально Kalman-hedge), симулирует mean-reversion с risk-стопами, показывает графики, пропускает сигналы через новостной фильтр и ведёт **автоматический paper journal** с псевдо-PnL.
+Сейчас активен модуль **cointegration** (поиск коинтегрированных пар IMOEX и paper mean-reversion в боковике). Опционы и фьючерсный календарь — в дорожной карте.
+
+Система загружает дневные свечи через MOEX ISS, отсекает тонкий рынок, тестирует пары Engle–Granger, считает спред / rolling Z-score (опционально Kalman-hedge), симулирует mean-reversion с risk-стопами, показывает графики, пропускает сигналы через новостной фильтр и ведёт **автоматический paper journal**.
 
 > **Важно.** Это research / decision-support инструмент, а не автоисполняющий бот и не гарантия прибыли. Перед реальной торговлей нужна собственная валидация (walk-forward, paper-trading, учёт издержек шорта и проскальзывания).
 
@@ -17,14 +19,15 @@
 | **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) |
 | **Хедж** | Статический β или **Kalman** динамический hedge ratio |
 | **Сигналы** | Rolling Z, вход после **разворота** за ±entry, выход ≈ 0, stop / time-stop |
-| **Risk** | stop-z, max-hold, min Sharpe / half-life, borrow-rate в бэктесте, лимит открытых пар |
-| **Рекомендации** | Тексты «что купить/продать» + итог ENTER / REDUCE / WATCH / BLOCK |
+| **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются |
+| **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades, лимит открытых пар |
+| **Рекомендации** | Тексты «что купить/продать» + явный блок при тренде + итог ENTER / REDUCE / WATCH / BLOCK |
 | **Новости** | MOEX sitenews + статус бумаги → safety-layer |
-| **Paper journal** | AUTO OPEN → MTM → AUTO CLOSE, псевдо PnL ₽, daily cron |
+| **Paper journal** | AUTO OPEN → MTM → AUTO CLOSE, PnL по qty×цена (+ slippage/borrow), daily cron |
 | **Walk-forward** | OOS окна train/test по топ-парам |
 | **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
 | **Auth** | HTTP Basic на mutating API (`POST /api/**`) |
-| **UI** | HTML-дашборд + JSON REST |
+| **UI** | HTML-дашборд TRINITY (операторский пульт) |
 
 ---
 
@@ -37,7 +40,7 @@ flowchart LR
   U --> C[LOCF + align]
   C --> D[Engle–Granger + FDR]
   D --> E[Kalman / спред / rolling Z]
-  E --> F[Сигналы + risk]
+  E --> F[Сигналы + risk + ADX regime]
   F --> G[Новости]
   G --> H[ENTER · REDUCE · WATCH · BLOCK]
   H --> P[Paper open/hold/close]
@@ -45,7 +48,7 @@ flowchart LR
   H --> W[Walk-forward OOS]
 ```
 
-**Идея стратегии:** две акции обычно движутся вместе; если спред аномально расширился и Z **развернулся** к нулю — ставка на схождение (long одной ноги + short другой).
+**Идея стратегии:** две акции обычно движутся вместе; если спред аномально расширился и Z **развернулся** к нулю — ставка на схождение (long одной ноги + short другой). Модуль рассчитан **только на боковик**: при высоком ADX индекса (режим TREND) новые входы блокируются.
 
 ---
 
@@ -237,6 +240,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | **КУПИТЬ спред** (`LONG_SPREAD`) | Z был ≤ −entry и развернулся вверх → купить Y, продать X |
 | **ПРОДАТЬ спред** (`SHORT_SPREAD`) | Z был ≥ +entry и развернулся вниз → продать Y, купить X |
 | **НАБЛЮДАТЬ / ЖДЁМ РАЗВОРОТ** | \|Z\| за порогом, но ещё расширяется — **не входить** |
+| **Не торговать (тренд)** | Режим TREND по ADX — стратегия только боковик, входы запрещены |
 | **ЖДАТЬ / ПРОПУСК** | Нет входа или не прошли фильтры качества |
 
 Колонка **«Дата»** у пары — дата **последней общей свечи**.  
@@ -248,8 +252,10 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 |---|---|
 | **ENTER** | Техника ок, блокеров нет |
 | **REDUCE** | Caution — уменьшенный размер |
-| **WATCH** | Не входить, наблюдать |
+| **WATCH** | Не входить, наблюдать (в т.ч. тренд / нет разворота) |
 | **BLOCK** | Вход запрещён (делистинг, стоп торгов, stale data, …) |
+
+На дашборде баннер **«Режим рынка»** (ADX): SIDEWAYS / NEUTRAL / TREND.
 
 ### Paper journal (`/view/paper`)
 
@@ -257,11 +263,11 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 |---|---|
 | **OPEN** | Бумажная позиция открыта |
 | **CLOSED** | Закрыта (mean-reversion / stop / time-stop / разворот сигнала) |
-| **Realized ₽** | Псевдо-PnL закрытых (1 Z ≈ 1% notional Y) |
+| **Realized ₽** | PnL закрытых сделок (qty×цена ног, − slippage/borrow) |
 | **Unrealized ₽** | Mark-to-market открытых |
 | **Net ₽** | Realized + Unrealized |
 
-Это **не** брокерский P&L: комиссии овернайта и проскальзывание в paper учтены упрощённо / не полностью.
+Это **не** брокерский P&L: модель упрощает исполнение и издержки, но уже не «1 Z ≈ 1%».
 
 ### График пары
 
@@ -337,7 +343,13 @@ imoex:
     stop-z: 3.5
     max-hold-bars: 40
     max-open-pairs: 5
+    trade-max-half-life-days: 15.0
+    min-r-squared: 0.70
     borrow-rate-annual: 0.08
+  regime:
+    enabled: true
+    adx-reduce: 20.0
+    adx-block: 25.0
   walk-forward:
     enabled: true
     train-bars: 504
@@ -349,6 +361,7 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
+    slippage-bps: 20
   auth:
     enabled: true
     username: imoex
@@ -360,6 +373,7 @@ imoex:
 | Universe filter | `imoex.universe.*` | до EG в `/analysis/run` |
 | Entry reversal | `require-entry-reversal` | сигналы + график |
 | Kalman / rolling Z / FDR | `use-kalman-hedge`, `use-rolling-z`, `fdr-q` | метрики пар |
+| Regime (ADX) | `imoex.regime.*` | баннер на дашборде, блок входов |
 | Risk | `imoex.risk.*` | `GET /api/risk/policy` |
 | Walk-forward | `imoex.walk-forward.*` | `/view/walk-forward` |
 | Paper | `imoex.paper.*` | `/view/paper` |
@@ -409,10 +423,11 @@ IMOEX/
 3. **LOCF**; выравнивание **попарно** по общим датам.  
 4. **Engle–Granger** + **FDR** по p-value.  
 5. Спред (статический или **Kalman** β), **rolling Z**.  
-6. Симуляция mean-reversion: commission + borrow, stop-z, time-stop, **entry reversal**.  
-7. Топ-N по Sharpe; сигналы по коинтегрированным парам.  
-8. **Новости** → ENTER / REDUCE / WATCH / BLOCK.  
-9. **Paper** sync + опционально **walk-forward** OOS.
+6. **Режим рынка (ADX):** в TREND — не торговать (стратегия только боковик).  
+7. Симуляция mean-reversion: commission + borrow, stop-z / adaptive / CUSUM, **entry reversal**.  
+8. Топ-N по Sharpe; сигналы по коинтегрированным парам.  
+9. **Новости** → ENTER / REDUCE / WATCH / BLOCK.  
+10. **Paper** sync (cash PnL) + опционально **walk-forward** OOS.
 
 ### Новостные триггеры (примеры)
 
@@ -440,9 +455,9 @@ walk-forward / FDR / рекомендации / news / clients / controllers / p
 
 - Нет брокера и автоисполнения.  
 - Возможен look-ahead / overfitting при наивном чтении in-sample Sharpe.  
-- Paper PnL — proxy (1 Z ≈ 1% notional); полный учёт овернайта/проскальзывания не заменяет брокерский отчёт.  
+- Paper PnL — research-метрика по qty×цене (+ упрощённый slippage/borrow), не брокерский отчёт.  
 - Shortability без брокера — приближение (ликвидность + exclude preferred).  
-- Коинтеграция может сломаться.  
+- Коинтеграция может сломаться; в тренде стратегия намеренно не торгует.  
 - **Не является** индивидуальной инвестиционной рекомендацией.
 
 Путь к live: universe filter → rolling Z → walk-forward → paper → жёсткий risk → только потом брокерский API.

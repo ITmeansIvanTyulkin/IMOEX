@@ -31,6 +31,7 @@ public record PairAnalysisResult(
         double halfLifeDays,
         int tradeCount,
         double totalReturn,
+        double rSquared,
         List<SpreadPoint> spreadSeries,
         List<SpreadPoint> zScoreSeries
 ) {

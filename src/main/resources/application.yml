@@ -33,17 +33,46 @@ imoex:
     min-sharpe: 0.0
     max-half-life-days: 90.0
     min-half-life-days: 1.0
+    # торговый gate для боковика (research top-N может быть шире)
+    trade-max-half-life-days: 15.0
+    min-r-squared: 0.70
+    min-trade-count: 8
     borrow-rate-annual: 0.08
-    # размер ~ (targetσ/σ_spread) × (stopZ−|Z|)/stopZ
     dynamic-sizing: true
     target-spread-sigma: 0.02
     min-size-mult: 0.25
     max-size-mult: 1.5
-    # умный выход
-    partial-tp-fraction: 0.5   # TP половины при 50% пути к Z=0
-    trail-z: 0.75              # trailing от лучшего Z
-    beta-break-pct: 0.35       # скачок β → выход
-    coint-p-break: 0.20        # p-value ≥ → слом коинтеграции
+    partial-tp-fraction: 0.5
+    trail-z: 0.75
+    beta-break-pct: 0.35
+    coint-p-break: 0.20
+    adaptive-stop: true
+    adaptive-stop-base: 2.5
+    adaptive-stop-cap: 4.0
+    cusum-enabled: true
+    cusum-threshold: 5.0
+    cusum-drift: 0.5
+    cusum-lookback: 40
+  regime:
+    enabled: true
+    adx-period: 14
+    adx-reduce: 20.0
+    adx-block: 25.0
+    reduce-factor: 0.5
+    index-board: SNDX
+  capital:
+    equity-rub: 100000
+    allow-leverage-above-rub: 1000000
+    max-gross-when-no-leverage: 1.0
+  session:
+    mode: DAILY          # или INTRADAY
+    candle-interval: 60
+    pre-close-start: "18:30"
+    pre-close-end: "18:45"
+    session-open: "10:00"
+    session-close: "18:45"
+    prevent-weekend-hold: true
+    intraday-journal-file: paper-journal-intraday.json
   walk-forward:
     enabled: true
     train-bars: 504
@@ -53,9 +82,10 @@ imoex:
     enabled: true
     notional-per-leg: 100000
     journal-file: paper-journal.json
-    # пн–пт ~19:05: скачать свечи → анализ → auto open/hold/close paper
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
+    slippage-bps: 20
+    apply-borrow: true
   # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
   universe:
     enabled: true
@@ -83,12 +113,22 @@ imoex:
     password: ${IMOEX_AUTH_PASSWORD:}
     api-key: ""
 
+# Продуктовый бренд (стратегии 2–3 появятся позже; сейчас cointegration)
+trinity:
+  name: TRINITY Multi-Strategy Arbitrage
+  version: 1.0.0
+  slogan: "Three Strategies. One Mission."
+  strategies:
+    - cointegration
+    # - options-premium
+    # - futures-arbitrage
+
 server:
   port: 8080
 
 spring:
   application:
-    name: imoex-cointegration
+    name: trinity-arbitrage
   config:
     import: optional:file:./application-local.yml,optional:file:./config/application-local.yml
 

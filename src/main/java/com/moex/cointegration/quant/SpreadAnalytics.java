@@ -175,6 +175,24 @@ public final class SpreadAnalytics {
             double borrowRateAnnual,
             boolean requireEntryReversal
     ) {
+        return simulateMeanReversion(
+                spread, commissionRate, zEntry, zExit, zScoreSeries, stopZ, maxHoldBars,
+                borrowRateAnnual, requireEntryReversal, 0.75, 0.5);
+    }
+
+    public static TradingMetrics simulateMeanReversion(
+            double[] spread,
+            double commissionRate,
+            double zEntry,
+            double zExit,
+            double[] zScoreSeries,
+            double stopZ,
+            int maxHoldBars,
+            double borrowRateAnnual,
+            boolean requireEntryReversal,
+            double trailZ,
+            double partialTpFraction
+    ) {
         if (spread.length != zScoreSeries.length) {
             throw new IllegalArgumentException("spread and zScoreSeries length mismatch");
         }
@@ -196,7 +214,8 @@ public final class SpreadAnalytics {
         double entryZ = Double.NaN;
         double bestZ = Double.NaN;
         boolean partialDone = false;
-        final double trailZ = 0.75;
+        double trail = trailZ > 0 ? trailZ : 0.75;
+        double partialFrac = partialTpFraction > 0 && partialTpFraction < 1 ? partialTpFraction : 0.5;
 
         for (int i = 1; i < spread.length; i++) {
             double dailyReturn = 0.0;
@@ -238,13 +257,13 @@ public final class SpreadAnalytics {
                     exit = true;
                 } else if (useStop && !Double.isNaN(z) && Math.abs(z) >= stopZ) {
                     exit = true;
-                } else if (ExitRules.trailStopHit(position > 0, bestZ, z, trailZ)) {
+                } else if (ExitRules.trailStopHit(position > 0, bestZ, z, trail)) {
                     exit = true;
                 }
                 if (!exit && maxHoldBars > 0 && barsInTrade >= maxHoldBars) {
                     exit = true;
                 }
-                if (!exit && !partialDone && ExitRules.halfwayToZero(entryZ, z, 0.5)) {
+                if (!exit && !partialDone && ExitRules.halfwayToZero(entryZ, z, partialFrac)) {
                     dailyReturn -= commissionRate;
                     posScale = 0.5;
                     partialDone = true;
