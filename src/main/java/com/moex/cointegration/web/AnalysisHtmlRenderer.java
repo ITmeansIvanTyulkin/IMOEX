@@ -138,8 +138,9 @@ public class AnalysisHtmlRenderer {
         String body = """
                 <div class="empty">
                   <h2>Анализ ещё не выполнен</h2>
-                  <p>Нажмите <strong>«Анализ + paper»</strong> в пульте выше (логин по умолчанию
-                  <code>imoex</code> / <code>change-me</code>). После завершения страница обновится сама.</p>
+                  <p>Нажмите <strong>«Анализ + paper»</strong> в пульте выше.
+                  Логин/пароль API — из вашего локального <code>application-local.yml</code>
+                  (в репозитории секретов нет). После завершения страница обновится сама.</p>
                   <p class="meta">Если свечей ещё нет — сначала «Скачать свечи», либо «Анализ + скачать свечи».</p>
                 </div>
                 """;
