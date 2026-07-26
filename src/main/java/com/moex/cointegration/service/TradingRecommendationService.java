@@ -129,10 +129,12 @@ public class TradingRecommendationService {
             details = beginnerSkip(pair);
         } else if (riskPolicyService.regimeBlocksEntries()) {
             signal = TradingSignal.WATCH;
-            summary = "Режим TREND — mean-reversion отключена (ADX)";
+            summary = "Не торговать! Выявлен тренд — стратегия только боковик";
             details = riskPolicyService.regime().detail()
+                    + "\nTRINITY торгует mean-reversion только в боковике. При сильном тренде индекса "
+                    + "новые входы блокируются: спред может «уехать» вместе с рынком и не вернуться."
                     + "\nПара " + pair.tickerY() + "/" + pair.tickerX()
-                    + " формально прошла качество, но вход блокирован режимным фильтром.";
+                    + " формально могла пройти по качеству/Z, но вход запрещён режимным фильтром.";
         } else if (riskPolicyService.structuralBreak(pair)) {
             signal = TradingSignal.WATCH;
             summary = "WATCH — CUSUM structural break на спреде";
