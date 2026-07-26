@@ -83,12 +83,22 @@ imoex:
     password: ${IMOEX_AUTH_PASSWORD:}
     api-key: ""
 
+# Продуктовый бренд (стратегии 2–3 появятся позже; сейчас cointegration)
+trinity:
+  name: TRINITY Multi-Strategy Arbitrage
+  version: 1.0.0
+  slogan: "Three Strategies. One Mission."
+  strategies:
+    - cointegration
+    # - options-premium
+    # - futures-arbitrage
+
 server:
   port: 8080
 
 spring:
   application:
-    name: imoex-cointegration
+    name: trinity-arbitrage
   config:
     import: optional:file:./application-local.yml,optional:file:./config/application-local.yml
 

@@ -34,14 +34,24 @@ public class AnalysisHtmlRenderer {
             </head>
             <body>
               <header class="site-header">
-                <h1 class="brand">IMOEX Cointegration</h1>
-                <p class="tagline">Research · paper trading · walk-forward — без брокера, с прозрачным journal</p>
+                <div class="brand-row">
+                  <div class="trinity-logo" aria-hidden="true">
+                    <span class="ring ring-a"></span>
+                    <span class="ring ring-b"></span>
+                    <span class="ring ring-c"></span>
+                  </div>
+                  <div class="brand-text">
+                    <h1 class="brand">TRINITY</h1>
+                    <p class="brand-sub">Multi-Strategy Arbitrage</p>
+                  </div>
+                </div>
+                <p class="tagline">Three Strategies. One Mission. — mean-reversion research, paper и риск на IMOEX</p>
               </header>
               {{NAV}}
               <main>
                 {{OPS}}
                 {{BODY}}
-                <p class="footnote">Research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — псевдо-метрика.</p>
+                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — псевдо-метрика.</p>
               </main>
               <script src="/js/operator.js"></script>
             </body>
@@ -114,7 +124,7 @@ public class AnalysisHtmlRenderer {
         body.append("<h2>Топ-пары по Sharpe</h2>");
         body.append(topPairsTable(report.topPairs()));
 
-        return page("IMOEX — дашборд", body.toString(), nav("dashboard"));
+        return page("TRINITY — дашборд", body.toString(), nav("dashboard"));
     }
 
     /** Страница всех торговых рекомендаций. */
@@ -122,7 +132,7 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append("<p class=\"meta\">Всего рекомендаций: ").append(recommendations.size()).append("</p>");
         body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Нажмите «Анализ + paper» в пульте выше."));
-        return page("IMOEX — рекомендации", body.toString(), nav("recommendations"));
+        return page("TRINITY — рекомендации", body.toString(), nav("recommendations"));
     }
 
     /** Страница только actionable-сигналов. */
@@ -130,7 +140,7 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append("<p class=\"meta\">Сигналов входа: ").append(signals.size()).append("</p>");
         body.append(recommendationsTable(signals, "Нет пар с |Z| ≥ порога входа."));
-        return page("IMOEX — сигналы", body.toString(), nav("signals"));
+        return page("TRINITY — сигналы", body.toString(), nav("signals"));
     }
 
     /** Страница «анализ не выполнен». */
@@ -144,7 +154,7 @@ public class AnalysisHtmlRenderer {
                   <p class="meta">Если свечей ещё нет — сначала «Скачать свечи», либо «Анализ + скачать свечи».</p>
                 </div>
                 """;
-        return page("IMOEX — нет данных", body, nav("none"));
+        return page("TRINITY — нет данных", body, nav("none"));
     }
 
     /**
@@ -155,9 +165,9 @@ public class AnalysisHtmlRenderer {
                 <article class="strategy-doc">
                   <h2>Описание торговой стратегии</h2>
                   <p class="lead">
-                    Это парный трейдинг: мы не угадываем, вырастет ли рынок.
-                    Ищем две акции, которые обычно «ходят вместе», и торгуем их временный разрыв —
-                    ставку на то, что разрыв снова сожмётся.
+                    TRINITY сейчас крутит модуль cointegration: парный трейдинг в боковике.
+                    Мы не угадываем, вырастет ли рынок. Ищем две акции, которые обычно «ходят вместе»,
+                    и торгуем их временный разрыв — ставку на то, что разрыв снова сожмётся.
                   </p>
 
                   <nav class="strategy-toc" aria-label="Содержание">
@@ -353,7 +363,7 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </article>
                 """;
-        return page("IMOEX — описание стратегии", body, nav("strategy"));
+        return page("TRINITY — описание стратегии", body, nav("strategy"));
     }
 
     private String summaryBlock(AnalysisReport report, int recCount, long actionable) {
@@ -617,7 +627,7 @@ public class AnalysisHtmlRenderer {
         body.append("<p class=\"meta\">Строк: ").append(rows.size()).append("</p>");
         if (rows.isEmpty()) {
             body.append("<p class=\"empty-msg\">Итоговых рекомендаций нет. Запустите POST /api/analysis/run</p>");
-            return page("IMOEX — итог", body.toString(), nav("final"));
+            return page("TRINITY — итог", body.toString(), nav("final"));
         }
 
         body.append("""
@@ -668,7 +678,7 @@ public class AnalysisHtmlRenderer {
         }
 
         body.append("</tbody></table></div>");
-        return page("IMOEX — итог", body.toString(), nav("final"));
+        return page("TRINITY — итог", body.toString(), nav("final"));
     }
 
     private String decisionBadge(FinalTradeDecision decision) {
@@ -857,7 +867,6 @@ public class AnalysisHtmlRenderer {
                   <a href="/view/paper" class="%s">Paper</a>
                   <a href="/view/walk-forward" class="%s">Walk-forward</a>
                   <a href="/view/strategy" class="%s">Описание торговой стратегии</a>
-                  <a href="/api/analysis/final" target="_blank">JSON итог</a>
                 </nav>
                 """.formatted(
                 active.equals("dashboard") ? "active" : "",
