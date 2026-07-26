@@ -45,7 +45,8 @@ public final class EngleGrangerTest {
                 ols.beta(),
                 adf.testStatistic(),
                 adf.pValue(),
-                cointegrated
+                cointegrated,
+                ols.rSquared()
         );
     }
 

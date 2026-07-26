@@ -18,6 +18,7 @@ public record EngleGrangerResult(
         double hedgeRatio,
         double adfStatistic,
         double pValue,
-        boolean cointegrated
+        boolean cointegrated,
+        double rSquared
 ) {
 }
