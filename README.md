@@ -110,16 +110,25 @@ netstat -ano | findstr :8080
 taskkill /PID <PID> /F
 ```
 
-### 3. Логин API (обязательно для POST)
+### 3. Локальные секреты (обязательно — иначе приложение не стартует)
 
-По умолчанию Basic Auth включён:
+В git **нет** паролей и unlock-ключа. Свечи и journal тоже не в репозитории (`/data/` в `.gitignore`).
 
-| Поле | Значение |
-|---|---|
-| Username | `imoex` |
-| Password | `change-me` |
+```bash
+cp application-local.yml.example application-local.yml
+# отредактируйте imoex.run.unlock и imoex.auth.password
+```
 
-Смените пароль в `application.yml` (`imoex.auth.*`) перед любым внешним доступом.
+Либо через env:
+
+```bash
+export IMOEX_UNLOCK='длинная-случайная-строка'
+export IMOEX_AUTH_PASSWORD='сильный-пароль'
+```
+
+Без `imoex.run.unlock` процесс сразу падает с понятной ошибкой — так публичный клон «из коробки» не работает. Это не DRM: исходники открыты, упорный человек может пропатчить guard; цель — не раздавать готовый запуск и не светить секреты.
+
+В пульте `/view` и в `curl` используйте **свой** пароль из `application-local.yml`.
 
 Проверка, что сервер жив (GET без пароля обычно ок):
 
@@ -134,14 +143,14 @@ curl -sS http://localhost:8080/actuator/health
 macOS / Linux:
 
 ```bash
-curl -u imoex:change-me -X POST \
+curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
   "http://localhost:8080/api/analysis/run?refresh=true"
 ```
 
-Windows:
+Windows (PowerShell, подставьте свой пароль):
 
 ```powershell
-curl.exe -u imoex:change-me -X POST "http://localhost:8080/api/analysis/run?refresh=true"
+curl.exe -u "imoex:YOUR_PASSWORD" -X POST "http://localhost:8080/api/analysis/run?refresh=true"
 ```
 
 Что происходит внутри:
@@ -161,20 +170,20 @@ curl.exe -u imoex:change-me -X POST "http://localhost:8080/api/analysis/run?refr
 Когда свечи уже есть (типичный будний день после первого прогона):
 
 ```bash
-curl -u imoex:change-me -X POST \
+curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
   "http://localhost:8080/api/analysis/run?refresh=false"
 ```
 
 Быстрее: только новости + paper sync (без полного Engle–Granger):
 
 ```bash
-curl -u imoex:change-me -X POST \
+curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
   "http://localhost:8080/api/analysis/news-refresh"
 ```
 
 ### 6. Смотреть результаты в браузере
 
-Откройте http://localhost:8080/view — сверху **пульт оператора**: кнопки «Анализ + paper», «Анализ + скачать свечи», «Только новости / paper», «Walk-forward», «Скачать свечи». Логин/пароль (`imoex` / `change-me`) вводятся в панели и сохраняются в браузере. `curl` ниже — запасной путь.
+Откройте http://localhost:8080/view — сверху **пульт оператора**: кнопки «Анализ + paper», «Анализ + скачать свечи», «Только новости / paper», «Walk-forward», «Скачать свечи». Логин/пароль API — из `application-local.yml`, сохраняются в браузере. `curl` ниже — запасной путь.
 
 | Шаг | URL | Зачем |
 |---|---|---|
@@ -192,7 +201,7 @@ curl -u imoex:change-me -X POST \
 **Вариант A — вручную (торговый день, после закрытия):**
 
 ```bash
-curl -u imoex:change-me -X POST \
+curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
   "http://localhost:8080/api/analysis/run?refresh=true"
 ```
 
@@ -267,7 +276,7 @@ curl -u imoex:change-me -X POST \
 ## REST API
 
 Базовый префикс: `/api`.  
-**POST** требуют `-u imoex:change-me` (если `imoex.auth.enabled=true`).
+**POST** требуют `-u imoex:$IMOEX_AUTH_PASSWORD` (если `imoex.auth.enabled=true`).
 
 | Метод | Путь | Описание |
 |---|---|---|
@@ -291,8 +300,8 @@ curl -u imoex:change-me -X POST \
 Пример:
 
 ```bash
-curl -u imoex:change-me -sS "http://localhost:8080/api/analysis/final" | head
-curl -u imoex:change-me -sS "http://localhost:8080/api/paper/journal" | head
+curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -sS "http://localhost:8080/api/analysis/final" | head
+curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -sS "http://localhost:8080/api/paper/journal" | head
 ```
 
 ---
@@ -343,12 +352,7 @@ imoex:
   auth:
     enabled: true
     username: imoex
-    password: change-me
-
-analysis:
-  schedule:
-    enabled: false              # отдельный weekly full-refresh
-    cron: "0 0 6 * * SUN"
+    # password и unlock — только в application-local.yml / env, не в git
 ```
 
 | Модуль | Конфиг | Где видно |

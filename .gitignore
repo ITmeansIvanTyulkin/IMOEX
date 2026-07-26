@@ -19,3 +19,10 @@ target/
 /run_gen_pdf.bat
 /run_gen_pptx_pdf.cmd
 /data/
+
+# Local secrets (required to run; never commit)
+/application-local.yml
+/config/application-local.yml
+.env
+.env.*
+!.env.example

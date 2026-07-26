@@ -74,10 +74,13 @@ imoex:
     # не больше N открытых paper-пар на один сектор (банки/нефть/…)
     diversify-by-sector: true
     max-pairs-per-sector: 2
+  # Секреты НЕ в git: unlock + пароль только из env / application-local.yml
+  run:
+    unlock: ${IMOEX_UNLOCK:}
   auth:
     enabled: true
     username: imoex
-    password: change-me
+    password: ${IMOEX_AUTH_PASSWORD:}
     api-key: ""
 
 server:
@@ -86,6 +89,8 @@ server:
 spring:
   application:
     name: imoex-cointegration
+  config:
+    import: optional:file:./application-local.yml,optional:file:./config/application-local.yml
 
 management:
   endpoints:
