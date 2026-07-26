@@ -63,8 +63,9 @@ public class AnalysisHtmlRenderer {
                 <section class="ops-panel" id="ops-panel">
                   <h2>Пульт оператора</h2>
                   <p class="ops-lead">
-                    Запускайте анализ и обновляйте paper прямо отсюда — без консоли.
-                    POST-запросы идут с HTTP Basic (логин ниже). Полный refresh свечей может занять много минут.
+                    Запускайте анализ и обновляйте paper прямо отсюда.
+                    Логин и пароль оператора — в полях ниже (сохраняются только в этом браузере).
+                    Полное скачивание свечей может занять много минут.
                   </p>
                   <div class="busy-bar" id="ops-busy"></div>
                   <div class="ops-grid">
