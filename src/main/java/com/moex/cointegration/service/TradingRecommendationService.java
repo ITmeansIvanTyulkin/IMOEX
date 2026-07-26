@@ -127,6 +127,17 @@ public class TradingRecommendationService {
             signal = TradingSignal.NO_SIGNAL;
             summary = "Не торговать — пара не прошла фильтры качества";
             details = beginnerSkip(pair);
+        } else if (riskPolicyService.regimeBlocksEntries()) {
+            signal = TradingSignal.WATCH;
+            summary = "Режим TREND — mean-reversion отключена (ADX)";
+            details = riskPolicyService.regime().detail()
+                    + "\nПара " + pair.tickerY() + "/" + pair.tickerX()
+                    + " формально прошла качество, но вход блокирован режимным фильтром.";
+        } else if (riskPolicyService.structuralBreak(pair)) {
+            signal = TradingSignal.WATCH;
+            summary = "WATCH — CUSUM structural break на спреде";
+            details = "CUSUM на Z указывает на структурный сдвиг. Не входим, пока спред не стабилизируется. "
+                    + "Пара " + pair.tickerY() + "/" + pair.tickerX() + ".";
         } else if (SignalRules.confirmLongEntry(zPrev, z, zEntry, reversal)) {
             signal = TradingSignal.LONG_SPREAD;
             summary = String.format(

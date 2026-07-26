@@ -99,12 +99,17 @@ public class AnalysisHtmlRenderer {
     /**
      * Главная страница: сводка, сигналы входа, топ-пары.
      */
-    public String renderDashboard(AnalysisReport report, List<TradingRecommendation> recommendations) {
+    public String renderDashboard(
+            AnalysisReport report,
+            List<TradingRecommendation> recommendations,
+            com.moex.cointegration.model.MarketRegimeSnapshot regime
+    ) {
         long actionable = recommendations.stream()
                 .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
                 .count();
 
         StringBuilder body = new StringBuilder();
+        body.append(regimeBanner(regime));
         body.append(summaryBlock(report, recommendations.size(), actionable));
         body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
         body.append("""
@@ -364,6 +369,24 @@ public class AnalysisHtmlRenderer {
                 </article>
                 """;
         return page("TRINITY — описание стратегии", body, nav("strategy"));
+    }
+
+    private String regimeBanner(com.moex.cointegration.model.MarketRegimeSnapshot regime) {
+        if (regime == null) {
+            regime = com.moex.cointegration.model.MarketRegimeSnapshot.unknown();
+        }
+        String css = switch (regime.label()) {
+            case "SIDEWAYS" -> "regime-ok";
+            case "NEUTRAL" -> "regime-warn";
+            case "TREND" -> "regime-bad";
+            default -> "regime-muted";
+        };
+        String adx = Double.isNaN(regime.adx()) ? "—" : String.format("%.1f", regime.adx());
+        return """
+                <div class="regime-banner %s">
+                  <strong>Режим рынка:</strong> %s (ADX=%s) — %s
+                </div>
+                """.formatted(css, escape(regime.label()), escape(adx), escape(regime.detail()));
     }
 
     private String summaryBlock(AnalysisReport report, int recCount, long actionable) {
@@ -741,9 +764,9 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append("""
                 <div class="hint">
-                  <strong>Paper journal — автомат.</strong> Кнопка «Анализ + paper» или daily cron
-                  открывает ENTER/REDUCE, держит позицию с mark-to-market и закрывает
-                  при возврате Z≈0, стопе |Z| или time-stop. PnL — псевдо (1 Z ≈ 1% notional Y), без брокера.
+                  <strong>Paper journal — автомат.</strong> Cash PnL по qty×price (если есть свечи), иначе Z-прокси;
+                  slippage/borrow из конфига. Капитал без плеча при equity &lt; 1M. INTRADAY mode — flatten к 18:30.
+                  Кнопка «Анализ + paper» или daily cron открывает ENTER/REDUCE и закрывает по правилам выхода.
                 </div>
                 """);
         List<PaperTradeEntry> entries = journal.entries() == null ? List.of() : journal.entries();

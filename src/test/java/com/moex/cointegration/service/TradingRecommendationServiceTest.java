@@ -58,7 +58,7 @@ class TradingRecommendationServiceTest {
         TradingRecommendationService service = newService();
         PairAnalysisResult pair = new PairAnalysisResult(
                 "SBER", "LKOH", 1.0, 0.85, -4.0, 0.01,
-                -0.5, 0.1, 12.0, 20, 0.15,
+                -0.5, 0.1, 12.0, 20, 0.15, 0.85,
                 List.of(new SpreadPoint(LocalDate.of(2026, 7, 11), -0.05)),
                 List.of(new SpreadPoint(LocalDate.of(2026, 7, 11), -2.5))
         );
@@ -104,6 +104,7 @@ class TradingRecommendationServiceTest {
                 12.0,
                 20,
                 0.15,
+                0.85,
                 List.of(new SpreadPoint(d0, -0.05), new SpreadPoint(d1, -0.04)),
                 List.of(new SpreadPoint(d0, prevZ), new SpreadPoint(d1, lastZ))
         );

@@ -40,7 +40,7 @@ class CointegrationAnalysisServiceTest {
                 tempDir.resolve("charts").toString(),
                 ImoexProperties.RiskProperties.defaults(),
                 new ImoexProperties.WalkForwardProperties(false, 200, 40, 40),
-                new ImoexProperties.PaperProperties(false, 100_000, "paper.json", false, null),
+                new ImoexProperties.PaperProperties(false, 100_000, "paper.json", false, null, null, null),
                 new ImoexProperties.UniverseProperties(false, 60, 0, 0, 1.0, false, false, false, 0.0, 100.0),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
@@ -59,6 +59,8 @@ class CointegrationAnalysisServiceTest {
         PaperTradingService paperTradingService = mock(PaperTradingService.class);
         WalkForwardService walkForwardService = mock(WalkForwardService.class);
         UniverseFilterService universeFilterService = new UniverseFilterService(storage, props);
+        MarketRegimeService regimeService = mock(MarketRegimeService.class);
+        when(regimeService.refresh()).thenReturn(com.moex.cointegration.model.MarketRegimeSnapshot.unknown());
 
         CointegrationAnalysisService service = new CointegrationAnalysisService(
                 marketDataService,
@@ -69,6 +71,7 @@ class CointegrationAnalysisServiceTest {
                 paperTradingService,
                 walkForwardService,
                 universeFilterService,
+                regimeService,
                 props
         );
 

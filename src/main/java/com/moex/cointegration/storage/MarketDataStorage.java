@@ -104,6 +104,41 @@ public class MarketDataStorage {
     }
 
     /**
+     * Последняя цена close по тикеру или empty.
+     */
+    public Optional<Double> lastClose(String ticker) {
+        try {
+            List<Candle> candles = loadCandles(ticker);
+            if (candles.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(candles.get(candles.size() - 1).close());
+        } catch (IOException ex) {
+            return Optional.empty();
+        }
+    }
+
+    public Path candlesHourlyDir() throws IOException {
+        Path dir = dataDir.resolve("candles-1h");
+        Files.createDirectories(dir);
+        return dir;
+    }
+
+    public void saveHourlyCandles(String ticker, List<Candle> candles) throws IOException {
+        Path file = candlesHourlyDir().resolve(ticker + ".json");
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), candles);
+    }
+
+    public List<Candle> loadHourlyCandles(String ticker) throws IOException {
+        Path file = candlesHourlyDir().resolve(ticker + ".json");
+        if (!Files.exists(file)) {
+            return List.of();
+        }
+        Candle[] candles = objectMapper.readValue(file.toFile(), Candle[].class);
+        return new ArrayList<>(List.of(candles));
+    }
+
+    /**
      * Ищет пару в топ-N последнего отчёта по тикерам Y и X.
      *
      * @return результат анализа пары или пусто, если отчёта/пары нет
