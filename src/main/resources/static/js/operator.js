@@ -9,7 +9,7 @@
 
   function authHeader() {
     const user = ($("ops-user") && $("ops-user").value) || localStorage.getItem(USER_KEY) || "imoex";
-    const pass = ($("ops-pass") && $("ops-pass").value) || localStorage.getItem(PASS_KEY) || "change-me";
+    const pass = ($("ops-pass") && $("ops-pass").value) || localStorage.getItem(PASS_KEY) || "";
     return "Basic " + btoa(unescape(encodeURIComponent(user + ":" + pass)));
   }
 
@@ -20,7 +20,7 @@
 
   function loadCreds() {
     if ($("ops-user")) $("ops-user").value = localStorage.getItem(USER_KEY) || "imoex";
-    if ($("ops-pass")) $("ops-pass").value = localStorage.getItem(PASS_KEY) || "change-me";
+    if ($("ops-pass")) $("ops-pass").value = localStorage.getItem(PASS_KEY) || "";
   }
 
   function appendLog(msg, cls) {
@@ -126,7 +126,7 @@
       });
     }
 
-    appendLog("Операторская панель готова. POST требует Basic Auth (imoex / change-me).", "info");
+    appendLog("Операторская панель готова. POST требует Basic Auth (пароль из application-local.yml).", "info");
   }
 
   if (document.readyState === "loading") {
