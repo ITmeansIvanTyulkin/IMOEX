@@ -24,6 +24,10 @@ imoex:
     lookback-days: 10
     stale-candle-days: 10
     max-news-pages: 8
+    # FA только после техники и только в DAILY; RSS опционально (Interfax + RBC)
+    rss-enabled: true
+    rss-interfax-url: https://www.interfax.ru/rss.asp
+    rss-rbc-url: https://rssexport.rbc.ru/rbcnews/news/30/full.rss
   risk:
     stop-z: 3.5
     max-hold-bars: 40
