@@ -28,7 +28,8 @@ imoex:
     stop-z: 3.5
     max-hold-bars: 40
     reduce-size-factor: 0.5
-    max-open-pairs: 5
+    # профиль ~100к ₽: узкая книга 1–2 пары (multi-day + позже INTRADAY)
+    max-open-pairs: 2
     max-portfolio-gross: 1.0
     min-sharpe: 0.0
     max-half-life-days: 90.0
@@ -61,11 +62,12 @@ imoex:
     reduce-factor: 0.5
     index-board: SNDX
   capital:
+    # операторский профиль: от ~100 тыс. ₽, без плеча до 1M
     equity-rub: 100000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
   session:
-    mode: DAILY          # или INTRADAY
+    mode: DAILY          # затем INTRADAY (тот же pairs-модуль, flatten к close)
     candle-interval: 60
     pre-close-start: "18:30"
     pre-close-end: "18:45"
@@ -80,7 +82,8 @@ imoex:
     step-bars: 63
   paper:
     enabled: true
-    notional-per-leg: 100000
+    # ~30к/нога: 1 пара ≈ 60к gross при β≈1, запас под 2-ю пару / издержки
+    notional-per-leg: 30000
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
@@ -101,9 +104,9 @@ imoex:
     min-pair-turnover-rub: 50000000
     max-turnover-ratio: 20.0
   portfolio:
-    # не больше N открытых paper-пар на один сектор (банки/нефть/…)
+    # при max 2 парах — не больше 1 на сектор
     diversify-by-sector: true
-    max-pairs-per-sector: 2
+    max-pairs-per-sector: 1
   # Секреты НЕ в git: unlock + пароль только из env / application-local.yml
   run:
     unlock: ${IMOEX_UNLOCK:}
