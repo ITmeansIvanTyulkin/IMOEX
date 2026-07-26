@@ -127,8 +127,31 @@ public record ImoexProperties(
             boolean enabled,
             int lookbackDays,
             int staleCandleDays,
-            int maxNewsPages
+            int maxNewsPages,
+            Boolean rssEnabled,
+            String rssInterfaxUrl,
+            String rssRbcUrl
     ) {
+        public NewsProperties {
+            if (rssEnabled == null) {
+                rssEnabled = false;
+            }
+            if (rssInterfaxUrl == null || rssInterfaxUrl.isBlank()) {
+                rssInterfaxUrl = "https://www.interfax.ru/rss.asp";
+            }
+            if (rssRbcUrl == null || rssRbcUrl.isBlank()) {
+                rssRbcUrl = "https://rssexport.rbc.ru/rbcnews/news/30/full.rss";
+            }
+        }
+
+        /** Короткий конструктор для тестов / defaults без RSS. */
+        public NewsProperties(boolean enabled, int lookbackDays, int staleCandleDays, int maxNewsPages) {
+            this(enabled, lookbackDays, staleCandleDays, maxNewsPages, false, null, null);
+        }
+
+        public boolean rssEnabledFlag() {
+            return Boolean.TRUE.equals(rssEnabled);
+        }
     }
 
     /**

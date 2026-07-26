@@ -22,8 +22,8 @@
 | **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются |
 | **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades, лимит открытых пар |
 | **Рекомендации** | Тексты «что купить/продать» + явный блок при тренде + итог ENTER / REDUCE / WATCH / BLOCK |
-| **Новости** | MOEX sitenews + статус бумаги → safety-layer |
-| **Paper journal** | AUTO OPEN → MTM → AUTO CLOSE, PnL по qty×цена (+ slippage/borrow), daily cron |
+| **Новости / FA** | После техники, только DAILY: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
+| **Paper journal** | AUTO OPEN только после FA (в DAILY); MTM → AUTO CLOSE, PnL по qty×цена (+ slippage/borrow) |
 | **Walk-forward** | OOS окна train/test по топ-парам |
 | **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
 | **Auth** | HTTP Basic на mutating API (`POST /api/**`) |
@@ -41,7 +41,7 @@ flowchart LR
   C --> D[Engle–Granger + FDR]
   D --> E[Kalman / спред / rolling Z]
   E --> F[Сигналы + risk + ADX regime]
-  F --> G[Новости]
+  F --> G[Фундамент DAILY]
   G --> H[ENTER · REDUCE · WATCH · BLOCK]
   H --> P[Paper open/hold/close]
   H --> I[HTML / JSON / графики]
@@ -65,7 +65,7 @@ flowchart LR
 | Интернет к `iss.moex.com` | браузер / `curl -I https://iss.moex.com` |
 | Свободный порт **8080** | иначе смените `server.port` в `application.yml` |
 
-Клон / каталог проекта:
+Клон / каталог проекта (**корень репозитория**, не подпапка `moex/`):
 
 ```bash
 cd /path/to/IMOEX          # macOS / Linux
@@ -73,6 +73,7 @@ cd /path/to/IMOEX          # macOS / Linux
 cd C:\path\to\IMOEX        # Windows
 ```
 
+> Если Maven пишет `No plugin found for prefix 'spring-boot'` — вы не в корне: там лежит `pom.xml` с артефактом `trinity-arbitrage`. Подпапка `moex/` — старый пустой модуль IDEA, из неё `spring-boot:run` не работает.
 ### 1. (Опционально) Прогнать тесты
 
 ```bash
@@ -115,23 +116,11 @@ taskkill /PID <PID> /F
 
 ### 3. Локальные секреты (обязательно — иначе приложение не стартует)
 
-В git **нет** паролей и unlock-ключа. Свечи и journal тоже не в репозитории (`/data/` в `.gitignore`).
+В git **нет** паролей и unlock-ключа. Свечи и journal тоже не в репозитории.
 
-```bash
-cp application-local.yml.example application-local.yml
-# отредактируйте imoex.run.unlock и imoex.auth.password
 ```
 
-Либо через env:
-
-```bash
-export IMOEX_UNLOCK='длинная-случайная-строка'
-export IMOEX_AUTH_PASSWORD='сильный-пароль'
-```
-
-Без `imoex.run.unlock` процесс сразу падает с понятной ошибкой — так публичный клон «из коробки» не работает. Это не DRM: исходники открыты, упорный человек может пропатчить guard; цель — не раздавать готовый запуск и не светить секреты.
-
-В пульте `/view` и в `curl` используйте **свой** пароль из `application-local.yml`.
+Без `imoex.run.unlock` процесс сразу падает с понятной ошибкой — так публичный клон «из коробки» не работает. Это не DRM: исходники открыты.
 
 Проверка, что сервер жив (GET без пароля обычно ок):
 
@@ -246,16 +235,20 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 Колонка **«Дата»** у пары — дата **последней общей свечи**.  
 **«Дата анализа»** — когда вы запускали `POST /api/analysis/run`.
 
-### Итог после новостей (`/view/final`)
+### Итог после фундамента (`/view/final`)
+
+Порядок: **техника → фундамент → рекомендация → paper**. FA только в **DAILY / multi-day** (несколько дней); в INTRADAY пропускается.
 
 | Итог | Действие |
 |---|---|
 | **ENTER** | Техника ок, блокеров нет |
-| **REDUCE** | Caution — уменьшенный размер |
+| **REDUCE** | CONFLICT средней силы — уменьшенный размер |
 | **WATCH** | Не входить, наблюдать (в т.ч. тренд / нет разворота) |
-| **BLOCK** | Вход запрещён (делистинг, стоп торгов, stale data, …) |
+| **BLOCK** | CONFLICT / запрет (earnings miss, SPO, делистинг, halt, …) |
 
 На дашборде баннер **«Режим рынка»** (ADX): SIDEWAYS / NEUTRAL / TREND.
+
+Источники FA: MOEX sitenews + опционально RSS Interfax/RBC (`imoex.news.rss-enabled`).
 
 ### Paper journal (`/view/paper`)
 
@@ -429,8 +422,8 @@ IMOEX/
 6. **Режим рынка (ADX):** в TREND — не торговать (стратегия только боковик).  
 7. Симуляция mean-reversion: commission + borrow, stop-z / adaptive / CUSUM, **entry reversal**.  
 8. Топ-N по Sharpe; сигналы по коинтегрированным парам.  
-9. **Новости** → ENTER / REDUCE / WATCH / BLOCK.  
-10. **Paper** sync (cash PnL) + опционально **walk-forward** OOS.
+9. **Фундамент (только DAILY):** MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / WATCH / BLOCK.  
+10. **Paper** sync только после FA (cash PnL) + опционально **walk-forward** OOS.
 
 ### Новостные триггеры (примеры)
 

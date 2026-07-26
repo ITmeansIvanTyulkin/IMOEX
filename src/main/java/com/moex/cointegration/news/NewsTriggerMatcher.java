@@ -13,6 +13,7 @@ import java.util.regex.Pattern;
 
 /**
  * Сопоставляет заголовки новостей с тикером по правилам-триггерам (swing/daily, не tick-by-tick).
+ * Порядок правил важен: более специфичные (CUT/MISS) раньше общих (дивиденд/прибыль).
  */
 @Component
 public class NewsTriggerMatcher {
@@ -42,21 +43,51 @@ public class NewsTriggerMatcher {
             rule(NewsTriggerType.REORGANIZATION_MNA, NewsRiskLevel.BLOCK,
                     "реорганизац|поглощен|присоединен|слиян|m&a|обязательн\\p{L}*\\s+предложен",
                     "M&A/реорганизация меняет экономику одной ноги пары.", true),
+
+            // Корпоративные HIGH/BLOCK — conflict с техсигналом
+            rule(NewsTriggerType.EARNINGS_MISS, NewsRiskLevel.BLOCK,
+                    "(прибыл|чист\\p{L}*\\s+прибыл|earnings|eps).{0,40}(ниже|сниз|упал|паден|убыт|miss|хуже\\s+ожидан)"
+                            + "|(ниже|сниз|упал|паден|хуже\\s+ожидан).{0,40}(прибыл|earnings|eps)"
+                            + "|убыток.{0,20}(квартал|отчет|отчёт)",
+                    "Прибыль/отчёт хуже ожиданий — техника может врать до переоценки.", true),
+            rule(NewsTriggerType.GUIDANCE_DOWN, NewsRiskLevel.BLOCK,
+                    "(прогноз|guidance|outlook).{0,40}(сниз|пониз|ухудш|cut|down)"
+                            + "|(сниз|пониз|ухудш).{0,40}(прогноз|guidance|outlook)"
+                            + "|понизил\\p{L}*\\s+прогноз",
+                    "Снижение прогноза компании — высокий риск слома спреда.", true),
+            rule(NewsTriggerType.DIVIDEND_CUT, NewsRiskLevel.BLOCK,
+                    "(дивиденд).{0,40}(сокра|сниз|отмен|урез|cut)"
+                            + "|(сокра|сниз|отмен|урез).{0,40}(дивиденд)",
+                    "Сокращение/отмена дивидендов бьёт по одной ноге пары.", true),
+            rule(NewsTriggerType.SECONDARY_OFFERING, NewsRiskLevel.BLOCK,
+                    "\\bspo\\b|допэмис|вторичн\\p{L}*\\s+размещ|дополнительн\\p{L}*\\s+выпуск\\p{L}*\\s+акц",
+                    "Допэмиссия/SPO размывает и давит одну бумагу.", true),
+
             rule(NewsTriggerType.MANDATORY_OFFER, NewsRiskLevel.HIGH,
                     "оферт|обязательн\\p{L}*\\s+выкуп",
                     "Оферта/обязательный выкуп искажает цену одной ноги.", true),
             rule(NewsTriggerType.DISCRETE_AUCTION, NewsRiskLevel.HIGH,
                     "дискретн\\p{L}*\\s+аукцион",
                     "Дискретный аукцион — ликвидность и цена временно «ломаются».", true),
+
+            rule(NewsTriggerType.EARNINGS_BEAT, NewsRiskLevel.MEDIUM,
+                    "(прибыл|earnings|eps).{0,40}(выше|рост|вырос|beat|лучше\\s+ожидан)"
+                            + "|(выше|рост|вырос|лучше\\s+ожидан).{0,40}(прибыл|earnings|eps)",
+                    "Отчёт лучше ожиданий — слабое подтверждение техники.", true),
+            rule(NewsTriggerType.GUIDANCE_UP, NewsRiskLevel.MEDIUM,
+                    "(прогноз|guidance).{0,40}(повыс|улучш|up)"
+                            + "|(повыс|улучш).{0,40}(прогноз|guidance)",
+                    "Повышение прогноза — слабое подтверждение.", true),
+            rule(NewsTriggerType.MAJOR_CONTRACT, NewsRiskLevel.MEDIUM,
+                    "крупн\\p{L}*\\s+контракт|заключил\\p{L}*\\s+контракт|госзаказ|подписал\\p{L}*\\s+соглашен",
+                    "Крупный контракт может сдвинуть справедливый уровень.", true),
+
             rule(NewsTriggerType.RISK_PARAMS_CHANGE, NewsRiskLevel.MEDIUM,
                     "риск-параметр|ценового\\s+коридора|дополнительн\\p{L}*\\s+мер\\p{L}*\\s+по\\s+противодействию",
                     "Изменение риск-параметров MOEX — caution по ликвидности/шорту.", true),
             rule(NewsTriggerType.DIVIDEND_EVENT, NewsRiskLevel.MEDIUM,
                     "дивиденд|cutoff|дата\\s+закрытия\\s+реестра",
-                    "Дивидендный событие часто асимметрично для пары.", true),
-            rule(NewsTriggerType.SECONDARY_OFFERING, NewsRiskLevel.HIGH,
-                    "\\bspo\\b|допэмис|вторичн\\p{L}*\\s+размещ|дополнительн\\p{L}*\\s+выпуск\\p{L}*\\s+акц",
-                    "Допэмиссия/SPO обычно давит одну бумагу.", true),
+                    "Дивидендное событие часто асимметрично для пары.", true),
             rule(NewsTriggerType.BUYBACK, NewsRiskLevel.MEDIUM,
                     "buyback|обратн\\p{L}*\\s+выкуп|программ\\p{L}*\\s+выкуп",
                     "Buyback может сдвинуть справедливый уровень спреда.", true),
@@ -97,7 +128,6 @@ public class NewsTriggerMatcher {
         }
         String t = title.toUpperCase(Locale.ROOT);
         String code = ticker.toUpperCase(Locale.ROOT);
-        // слово-граница по-простому: тикер как отдельный токен
         if (containsToken(t, code)) {
             return true;
         }

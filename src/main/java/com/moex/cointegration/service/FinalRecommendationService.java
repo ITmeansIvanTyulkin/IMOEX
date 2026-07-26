@@ -21,8 +21,9 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Хранит итоговые рекомендации (техника + новости) и пишет их на диск.
- * Полный новостной проход — только для LONG/SHORT/WATCH (дневной горизонт).
+ * Хранит итоговые рекомендации (техника + фундамент/новости) и пишет их на диск.
+ * Полный новостной проход — только для LONG/SHORT/WATCH в режиме DAILY (multi-day).
+ * Paper sync вызывается только после этого шага.
  */
 @Service
 public class FinalRecommendationService {

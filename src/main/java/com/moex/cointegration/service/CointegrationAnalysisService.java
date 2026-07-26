@@ -222,6 +222,7 @@ public class CointegrationAnalysisService {
         storage.saveReport(report);
 
         List<TradingRecommendation> recommendations = recommendationService.analyzeAndPrint(cointegratedPairs);
+        // Порядок обязателен: техника → фундамент (DAILY) → итог → paper
         List<FinalTradeRecommendation> finals = finalRecommendationService.rebuildFromTechnical(recommendations);
         paperTradingService.sync(finals, recommendations);
 
