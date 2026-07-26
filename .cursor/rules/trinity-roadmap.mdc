@@ -21,10 +21,12 @@ Target operator profile: equity **from ~100 000 ₽**, book of **1–2 pairs**
 
 Two horizons of the **same** pairs module (both are in scope for strategy 1):
 
-1. **Multi-day** (default `session.mode: DAILY`) — hold a few days with Z exits / stops; small book 1–2 pairs.
-2. **Intraday** (`INTRADAY`) — 1H bars, flatten by session end; same MR logic, no overnight.
+1. **Multi-day / позиционный** (default `session.mode: DAILY`) — hold a few days; FA after tech, then recommendations, then paper.
+2. **Intraday** (`INTRADAY`) — 1H bars, flatten by session end; **no fundamental filter** (news lag).
 
-Do not start calendar/options until pairs (daily short-hold + intraday) is validated on paper/OOS.
+Pipeline order (always): **tech → FA (DAILY only) → final recommendations → paper**. Never open paper before FA on DAILY.
+
+Do not start calendar/options until pairs (multi-day + intraday) is validated on paper/OOS.
 
 ## Config intent (pairs)
 

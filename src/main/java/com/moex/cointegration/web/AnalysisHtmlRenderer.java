@@ -229,7 +229,7 @@ public class AnalysisHtmlRenderer {
                     <span>Пары + коинтеграция</span><i>→</i>
                     <span>Z и бэктест</span><i>→</i>
                     <span>Сигналы</span><i>→</i>
-                    <span>Новости</span><i>→</i>
+                    <span>Фундамент</span><i>→</i>
                     <span>Paper</span>
                   </div>
                   <ol class="pipeline">
@@ -239,8 +239,8 @@ public class AnalysisHtmlRenderer {
                     <li><strong>FDR.</strong> Множественные проверки p-value проходят контроль ложных открытий (Benjamini–Hochberg).</li>
                     <li><strong>Спред и Z.</strong> Хедж (Kalman или OLS), скользящий Z, метрики mean-reversion (Sharpe, half-life…).</li>
                     <li><strong>Техсигнал.</strong> LONG / SHORT / WATCH / HOLD — по порогам Z, развороту и режиму ADX.</li>
-                    <li><strong>Новости.</strong> Итог ENTER / REDUCE / WATCH / BLOCK.</li>
-                    <li><strong>Paper.</strong> Авто-открытие, mark-to-market, умные выходы. Опционально walk-forward OOS.</li>
+                    <li><strong>Фундамент.</strong> Только DAILY: MOEX (+ RSS) → CONFLICT / ENTER / REDUCE / BLOCK.</li>
+                    <li><strong>Paper.</strong> Только после FA. Авто-открытие, MTM, умные выходы. Опционально walk-forward OOS.</li>
                   </ol>
 
                   <h3 id="universe">3. Как отбираются акции в анализ</h3>
@@ -327,21 +327,29 @@ public class AnalysisHtmlRenderer {
                     линия KAMA / спреда.
                   </p>
 
-                  <h3 id="news">7. Новостной фильтр (после техники)</h3>
+                  <h3 id="news">7. Новостной / фундаментальный фильтр (после техники)</h3>
                   <p>
-                    Техсигнал пропускается через новости и простые «структурные» проверки
-                    (устаревшие свечи, бумага не торгуется и т.п.) за короткий lookback.
+                    Порядок жёсткий: <strong>сначала техника</strong>, затем фундамент,
+                    и только потом итоговая рекомендация и paper.
+                    Фильтр работает в режиме <strong>DAILY / multi-day</strong> (удержание несколько дней).
+                    В <strong>INTRADAY</strong> фундамент намеренно пропускается — новости запаздывают.
+                  </p>
+                  <p>
+                    Источники: MOEX sitenews и опционально RSS Interfax / RBC.
+                    Те же правила-триггеры (earnings miss, guidance down, SPO, M&amp;A, санкции…).
+                    При расхождении с LONG/SHORT в «Итоге» будет явный
+                    <strong>CONFLICT: техника vs фундамент</strong>.
                   </p>
                   <table class="params">
                     <thead><tr><th>Итог</th><th>Что это значит</th></tr></thead>
                     <tbody>
-                      <tr><td><strong>ENTER</strong></td><td>Техника ок, новостной риск низкий — можно открывать paper.</td></tr>
-                      <tr><td><strong>REDUCE</strong></td><td>Есть умеренный/высокий риск — размер меньше.</td></tr>
+                      <tr><td><strong>ENTER</strong></td><td>Техника ок, фундаментальных блокеров нет — можно открывать paper.</td></tr>
+                      <tr><td><strong>REDUCE</strong></td><td>CONFLICT средней силы — размер меньше.</td></tr>
                       <tr><td><strong>WATCH</strong></td><td>Следим, но не открываем как полноценный вход.</td></tr>
-                      <tr><td><strong>BLOCK</strong></td><td>Жёсткий стоп: halt, делистинг, санкции, дефолт, тяжёлый M&amp;A и т.п.</td></tr>
+                      <tr><td><strong>BLOCK</strong></td><td>CONFLICT / жёсткий стоп: halt, делистинг, earnings miss, SPO, санкции…</td></tr>
                     </tbody>
                   </table>
-                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет».</p>
+                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет» после FA.</p>
 
                   <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
                   <p>
@@ -674,11 +682,11 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append("""
                 <div class="hint">
-                  <strong>Итог после новостей (дневной горизонт).</strong>
-                  Сначала техника (Z и стрелки) и режим рынка (боковик / тренд), затем фильтр новостей MOEX
-                  и проверка «торгуется ли бумага». Смотрите колонку <em>Итог</em>:
-                  ENTER — можно входить, REDUCE — уменьшенный размер, WATCH / BLOCK — не входить.
-                  При тренде в «Почему» будет явное «НЕ ТОРГОВАТЬ — стратегия только боковик».
+                  <strong>Итог после фундамента (multi-day / DAILY).</strong>
+                  Порядок: техника → фундамент (MOEX + опционально RSS) → рекомендация → paper.
+                  В INTRADAY фундамент пропускается. Смотрите колонку <em>Итог</em>:
+                  ENTER / REDUCE / WATCH / BLOCK. При расхождении — текст
+                  <em>CONFLICT: техника vs фундамент</em>.
                 </div>
                 """);
         body.append("<p class=\"meta\">Строк: ").append(rows.size()).append("</p>");
