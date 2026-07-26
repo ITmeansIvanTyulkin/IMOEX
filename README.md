@@ -2,7 +2,7 @@
 
 **Three Strategies. One Mission.**
 
-Сейчас активен модуль **cointegration** (поиск коинтегрированных пар IMOEX и paper mean-reversion в боковике). Опционы и фьючерсный календарь — в дорожной карте.
+**TRINITY** в замысле — три стратегии: (1) cointegration / pairs, (2) календарный арбитраж фьючерсов, (3) опционы. Сейчас полностью реализуем **п.1**: pairs в боковике на горизонте **нескольких дней** и **интрадей** (узкая книга 1–2 пары, профиль счёта от ~100 тыс. ₽). Пункты 2–3 — в дорожной карте, кода ещё нет.
 
 Система загружает дневные свечи через MOEX ISS, отсекает тонкий рынок, тестирует пары Engle–Granger, считает спред / rolling Z-score (опционально Kalman-hedge), симулирует mean-reversion с risk-стопами, показывает графики, пропускает сигналы через новостной фильтр и ведёт **автоматический paper journal**.
 
@@ -342,7 +342,7 @@ imoex:
   risk:
     stop-z: 3.5
     max-hold-bars: 40
-    max-open-pairs: 5
+    max-open-pairs: 2
     trade-max-half-life-days: 15.0
     min-r-squared: 0.70
     borrow-rate-annual: 0.08
@@ -350,6 +350,9 @@ imoex:
     enabled: true
     adx-reduce: 20.0
     adx-block: 25.0
+  capital:
+    equity-rub: 100000
+    allow-leverage-above-rub: 1000000
   walk-forward:
     enabled: true
     train-bars: 504
@@ -357,7 +360,7 @@ imoex:
     step-bars: 63
   paper:
     enabled: true
-    notional-per-leg: 100000
+    notional-per-leg: 30000
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
