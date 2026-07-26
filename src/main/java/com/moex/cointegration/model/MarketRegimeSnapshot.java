@@ -21,13 +21,19 @@ public record MarketRegimeSnapshot(
         }
         if (adx >= blockTh) {
             return new MarketRegimeSnapshot(adx, "TREND", true, false,
-                    String.format("ADX=%.1f ≥ %.0f — тренд, mean-reversion заблокирована", adx, blockTh));
+                    String.format(
+                            "ADX=%.1f ≥ %.0f — выявлен тренд. Стратегия только боковик: не торговать",
+                            adx, blockTh));
         }
         if (adx >= reduceTh) {
             return new MarketRegimeSnapshot(adx, "NEUTRAL", false, true,
-                    String.format("ADX=%.1f — нейтральный режим, размер уменьшен", adx));
+                    String.format(
+                            "ADX=%.1f — переходный режим: входы разрешены, размер уменьшен",
+                            adx));
         }
         return new MarketRegimeSnapshot(adx, "SIDEWAYS", false, false,
-                String.format("ADX=%.1f < %.0f — боковик, mean-reversion активна", adx, reduceTh));
+                String.format(
+                        "ADX=%.1f < %.0f — боковик: mean-reversion активна",
+                        adx, reduceTh));
     }
 }

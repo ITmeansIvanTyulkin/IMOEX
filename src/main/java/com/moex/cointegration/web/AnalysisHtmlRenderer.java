@@ -51,7 +51,7 @@ public class AnalysisHtmlRenderer {
               <main>
                 {{OPS}}
                 {{BODY}}
-                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — псевдо-метрика.</p>
+                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
               </main>
               <script src="/js/operator.js"></script>
             </body>
@@ -135,6 +135,13 @@ public class AnalysisHtmlRenderer {
     /** Страница всех торговых рекомендаций. */
     public String renderAllRecommendations(List<TradingRecommendation> recommendations) {
         StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Режим рынка.</strong> Стратегия — mean-reversion <em>только в боковике</em>.
+                  Если на дашборде режим TREND (высокий ADX индекса), входы блокируются:
+                  в кратком описании будет «Не торговать! Выявлен тренд — стратегия только боковик».
+                </div>
+                """);
         body.append("<p class=\"meta\">Всего рекомендаций: ").append(recommendations.size()).append("</p>");
         body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Нажмите «Анализ + paper» в пульте выше."));
         return page("TRINITY — рекомендации", body.toString(), nav("recommendations"));
@@ -182,6 +189,7 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#pipeline">Что за чем происходит</a></li>
                       <li><a href="#universe">Как отбираются акции</a></li>
                       <li><a href="#pairs">Как пары попадают в анализ</a></li>
+                      <li><a href="#regime">Режим рынка: только боковик</a></li>
                       <li><a href="#signals">Как появляется сигнал</a></li>
                       <li><a href="#news">Новостной фильтр</a></li>
                       <li><a href="#size">Размер позиции и лимиты</a></li>
@@ -227,7 +235,7 @@ public class AnalysisHtmlRenderer {
                     <li><strong>Пары.</strong> Перебираем допустимые пары (сектор / related), проверяем коинтеграцию Engle–Granger.</li>
                     <li><strong>FDR.</strong> Множественные проверки p-value проходят контроль ложных открытий (Benjamini–Hochberg).</li>
                     <li><strong>Спред и Z.</strong> Хедж (Kalman или OLS), скользящий Z, метрики mean-reversion (Sharpe, half-life…).</li>
-                    <li><strong>Техсигнал.</strong> LONG / SHORT / WATCH / HOLD — по порогам Z и правилу разворота.</li>
+                    <li><strong>Техсигнал.</strong> LONG / SHORT / WATCH / HOLD — по порогам Z, развороту и режиму ADX.</li>
                     <li><strong>Новости.</strong> Итог ENTER / REDUCE / WATCH / BLOCK.</li>
                     <li><strong>Paper.</strong> Авто-открытие, mark-to-market, умные выходы. Опционально walk-forward OOS.</li>
                   </ol>
@@ -277,10 +285,26 @@ public class AnalysisHtmlRenderer {
                   </ol>
                   <div class="callout">
                     На дашборде «Топ-пары по Sharpe» — это уже прошедшие статистику и отобранные для обзора.
-                    Сырой сигнал LONG/SHORT ещё не равен разрешению торговать: дальше новости и лимиты книги.
+                    Сырой сигнал LONG/SHORT ещё не равен разрешению торговать: дальше режим рынка, новости и лимиты книги.
                   </div>
 
-                  <h3 id="signals">5. Как появляется торговый сигнал</h3>
+                  <h3 id="regime">5. Режим рынка: стратегия только боковик</h3>
+                  <p>
+                    Mean-reversion плохо работает в сильном тренде: спред может «уехать» вместе с рынком
+                    и не вернуться к среднему. Поэтому перед входами смотрим <strong>ADX индекса IMOEX</strong>
+                    (баннер «Режим рынка» на дашборде):
+                  </p>
+                  <ul>
+                    <li><strong>SIDEWAYS</strong> (ADX низкий) — боковик, mean-reversion активна;</li>
+                    <li><strong>NEUTRAL</strong> — переходная зона: входы разрешены, размер уменьшен;</li>
+                    <li><strong>TREND</strong> (ADX высокий) — <em>не торговать</em>: новые входы блокируются,
+                      в рекомендациях будет явная формулировка про тренд и боковик.</li>
+                  </ul>
+                  <p>
+                    Трендовой стратегии в модуле cointegration нет — только ставка на сжатие спреда в боковике.
+                  </p>
+
+                  <h3 id="signals">6. Как появляется торговый сигнал</h3>
                   <p>
                     Пороги по умолчанию: вход при |Z| ≥ <strong>2.0</strong>, цель возврата около <strong>Z ≈ 0</strong>.
                     Z считается в скользящем окне (~60 дней), хедж может подстраиваться фильтром Калмана.
@@ -300,7 +324,7 @@ public class AnalysisHtmlRenderer {
                     линия KAMA / спреда.
                   </p>
 
-                  <h3 id="news">6. Новостной фильтр (после техники)</h3>
+                  <h3 id="news">7. Новостной фильтр (после техники)</h3>
                   <p>
                     Техсигнал пропускается через новости и простые «структурные» проверки
                     (устаревшие свечи, бумага не торгуется и т.п.) за короткий lookback.
@@ -316,36 +340,39 @@ public class AnalysisHtmlRenderer {
                   </table>
                   <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет».</p>
 
-                  <h3 id="size">7. Размер позиции и лимиты портфеля</h3>
+                  <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
                   <p>
                     Базовый notional на ногу задаётся в конфиге (по умолчанию 100 000 ₽).
                     Дальше размер масштабируется: волатильность спреда, расстояние до стопа по Z,
-                    и множитель REDUCE.
+                    множитель REDUCE и режимный коэффициент (NEUTRAL).
+                    При капитале ниже порога плечо не используется.
                   </p>
                   <ul>
                     <li>не больше N открытых paper-пар всего;</li>
                     <li>не больше ~2 открытых пар на один сектор (диверсификация книги);</li>
+                    <li>качество пары для входа: R², короткий half-life, минимум сделок в бэктесте;</li>
                     <li>не открываем, если |Z| уже слишком близко к стоп-уровню.</li>
                   </ul>
 
-                  <h3 id="exits">8. Как выходим из позиции</h3>
+                  <h3 id="exits">9. Как выходим из позиции</h3>
                   <p>Выход — не только «дождались Z≈0». В paper работают несколько правил:</p>
                   <ul>
                     <li><strong>Mean-reversion</strong> — спред вернулся к цели около нуля;</li>
                     <li><strong>Partial take-profit</strong> — на полпути к нулю можно зафиксировать часть;</li>
                     <li><strong>Trailing по Z</strong> — отдали от лучшей точки — закрываем;</li>
-                    <li><strong>Stop по |Z|</strong> — спред ушёл ещё дальше против нас;</li>
+                    <li><strong>Stop по |Z|</strong> (в т.ч. адаптивный) — спред ушёл ещё дальше против нас;</li>
                     <li><strong>Time-stop</strong> — слишком долго в позиции без результата;</li>
-                    <li><strong>Слом связи</strong> — сильно изменился β или коинтеграция «развалилась» по p-value;</li>
+                    <li><strong>CUSUM / слом связи</strong> — структурный сдвиг спреда, сильный сдвиг β или коинтеграция «развалилась»;</li>
                     <li><strong>Смена сигнала</strong> — логика пары перевернулась.</li>
                   </ul>
 
-                  <h3 id="paper">9. Paper trading и walk-forward</h3>
+                  <h3 id="paper">10. Paper trading и walk-forward</h3>
                   <p>
                     <a href="/view/paper">Paper journal</a> — учебный журнал без брокера.
                     На каждом анализе система сама открывает ENTER/REDUCE, ведёт mark-to-market
-                    и закрывает по правилам выше. PnL — <strong>псевдо-метрика</strong>
-                    (ориентир: изменение Z ≈ процент от notional), не брокерский результат.
+                    и закрывает по правилам выше. PnL считается по количествам и ценам ног
+                    (с учётом упрощённого slippage и borrow), а не как «1 Z = 1%».
+                    Это всё ещё research-метрика, не брокерский отчёт.
                   </p>
                   <p>
                     <a href="/view/walk-forward">Walk-forward</a> режет историю на train/test окна:
@@ -353,9 +380,9 @@ public class AnalysisHtmlRenderer {
                     Это проверка «не подогнали ли мы всё под прошлый год», а не гарантия прибыли.
                   </p>
 
-                  <h3 id="limits">10. Честные ограничения</h3>
+                  <h3 id="limits">11. Честные ограничения</h3>
                   <ul>
-                    <li>Стратегия классическая (textbook pairs) — уникальность скорее в процессе и дисциплине риска, не в «секретной формуле».</li>
+                    <li>Стратегия классическая (textbook pairs) — только боковик, без трендового модуля.</li>
                     <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
                     <li>Новости по ISS — эвристика, не полный fundamental research.</li>
                     <li>Шорт, borrow, проскальзывание и комиссии в жизни жёстче, чем в модели.</li>
@@ -364,7 +391,7 @@ public class AnalysisHtmlRenderer {
                   <div class="callout">
                     Это research / decision-support, не индивидуальная инвестиционная рекомендация.
                     Параметры порогов живут в <code>application.yml</code> (<code>imoex.cointegration</code>,
-                    <code>universe</code>, <code>risk</code>, <code>news</code>, <code>paper</code>).
+                    <code>universe</code>, <code>risk</code>, <code>regime</code>, <code>news</code>, <code>paper</code>).
                   </div>
                 </article>
                 """;
@@ -642,14 +669,15 @@ public class AnalysisHtmlRenderer {
         body.append("""
                 <div class="hint">
                   <strong>Итог после новостей (дневной горизонт).</strong>
-                  Сначала техника (Z и стрелки), затем фильтр новостей MOEX за последние дни
+                  Сначала техника (Z и стрелки) и режим рынка (боковик / тренд), затем фильтр новостей MOEX
                   и проверка «торгуется ли бумага». Смотрите колонку <em>Итог</em>:
-                  ENTER — можно входить, REDUCE — уменьшенный размер, BLOCK — пропускать.
+                  ENTER — можно входить, REDUCE — уменьшенный размер, WATCH / BLOCK — не входить.
+                  При тренде в «Почему» будет явное «НЕ ТОРГОВАТЬ — стратегия только боковик».
                 </div>
                 """);
         body.append("<p class=\"meta\">Строк: ").append(rows.size()).append("</p>");
         if (rows.isEmpty()) {
-            body.append("<p class=\"empty-msg\">Итоговых рекомендаций нет. Запустите POST /api/analysis/run</p>");
+            body.append("<p class=\"empty-msg\">Итоговых рекомендаций нет.</p>");
             return page("TRINITY — итог", body.toString(), nav("final"));
         }
 
