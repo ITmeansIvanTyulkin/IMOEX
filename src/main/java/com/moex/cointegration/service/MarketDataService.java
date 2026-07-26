@@ -71,6 +71,32 @@ public class MarketDataService {
     }
 
     /**
+     * Скачивает 1H свечи для списка тикеров (INTRADAY mode) → data/candles-1h/.
+     */
+    public List<String> refreshHourlyCandles(List<String> tickers, int lookbackDays) throws IOException {
+        LocalDate till = LocalDate.now();
+        LocalDate from = till.minusDays(Math.max(30, lookbackDays));
+        int interval = 60;
+        List<String> loaded = new ArrayList<>();
+        for (String ticker : tickers) {
+            try {
+                List<Candle> candles = moexClient.fetchShareCandles(ticker, from, till, interval);
+                if (candles.size() < 50) {
+                    log.warn("Skipping hourly {}: only {} bars", ticker, candles.size());
+                    continue;
+                }
+                candles.sort(Comparator.comparing(Candle::date));
+                storage.saveHourlyCandles(ticker, candles);
+                loaded.add(ticker);
+            } catch (Exception ex) {
+                log.warn("Failed hourly {}: {}", ticker, ex.getMessage());
+            }
+        }
+        log.info("Hourly candles saved for {} tickers", loaded.size());
+        return loaded;
+    }
+
+    /**
      * Загружает локальные свечи каждого тикера отдельно (без глобального пересечения дат).
      * Исключённые из индекса бумаги (POLY, QIWI и т.д.) больше не «ломают» общий календарь.
      */

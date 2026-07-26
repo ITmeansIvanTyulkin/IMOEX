@@ -43,6 +43,7 @@ public class CointegrationAnalysisService {
     private final PaperTradingService paperTradingService;
     private final WalkForwardService walkForwardService;
     private final UniverseFilterService universeFilterService;
+    private final MarketRegimeService marketRegimeService;
     private final ImoexProperties properties;
 
     public CointegrationAnalysisService(
@@ -54,6 +55,7 @@ public class CointegrationAnalysisService {
             PaperTradingService paperTradingService,
             WalkForwardService walkForwardService,
             UniverseFilterService universeFilterService,
+            MarketRegimeService marketRegimeService,
             ImoexProperties properties
     ) {
         this.marketDataService = marketDataService;
@@ -64,6 +66,7 @@ public class CointegrationAnalysisService {
         this.paperTradingService = paperTradingService;
         this.walkForwardService = walkForwardService;
         this.universeFilterService = universeFilterService;
+        this.marketRegimeService = marketRegimeService;
         this.properties = properties;
     }
 
@@ -75,6 +78,7 @@ public class CointegrationAnalysisService {
         if (refreshData) {
             marketDataService.refreshMarketData();
         }
+        marketRegimeService.refresh();
 
         Map<String, PriceSeries> loaded = marketDataService.loadAlignedPriceSeries();
         Map<String, PriceSeries> filtered = universeFilterService.filter(loaded);
@@ -173,10 +177,15 @@ public class CointegrationAnalysisService {
                     coint.zScoreEntry(),
                     coint.zScoreExit(),
                     replaceNanZWithZeroForMetrics(zScores),
-                    risk.stopZ(),
+                    risk.adaptiveStopEnabled()
+                            ? com.moex.cointegration.quant.AdaptiveStop.stopZ(
+                            spread, risk.adaptiveStopBase(), risk.adaptiveStopCap(), 20, 252)
+                            : risk.stopZ(),
                     risk.maxHoldBars(),
                     risk.borrowRateAnnual(),
-                    coint.entryReversalRequired()
+                    coint.entryReversalRequired(),
+                    risk.trailZ(),
+                    risk.partialTpFraction()
             );
 
             cointegratedPairs.add(new PairAnalysisResult(
@@ -191,6 +200,7 @@ public class CointegrationAnalysisService {
                     metrics.halfLifeDays(),
                     metrics.tradeCount(),
                     metrics.totalReturn(),
+                    c.eg().rSquared(),
                     SpreadAnalytics.toSeries(c.pairData().dates(), spread),
                     SpreadAnalytics.toSeries(c.pairData().dates(), zScores)
             ));

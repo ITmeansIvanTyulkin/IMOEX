@@ -172,9 +172,10 @@ class PaperTradingServiceTest {
                 tempDir.toString(),
                 tempDir.resolve("charts").toString(),
                 new ImoexProperties.RiskProperties(3.5, 40, 0.5, maxOpen, 1.0, 0.0, 90.0, 1.0, 0.08,
-                        true, 0.02, 0.25, 1.5, null, null, null, null),
+                        true, 0.02, 0.25, 1.5, null, null, null, null,
+                        null, null, null, null, null, null, null, null, null, null),
                 ImoexProperties.WalkForwardProperties.defaults(),
-                new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null),
+                new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null, 0.0, false),
                 ImoexProperties.UniverseProperties.defaults(),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()

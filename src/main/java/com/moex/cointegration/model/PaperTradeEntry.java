@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 
 /**
  * Запись paper-trading журнала (открытие / MTM / partial TP / закрытие).
+ * qty/prices — для cash PnL; если null, UI/сервис падает назад на Z-прокси.
  */
 public record PaperTradeEntry(
         String id,
@@ -32,14 +33,30 @@ public record PaperTradeEntry(
         Double bestZ,
         Boolean partialTaken,
         Double remainingFraction,
-        Double realizedPartialRub
+        Double realizedPartialRub,
+        Double qtyY,
+        Double qtyX,
+        Double entryPriceY,
+        Double entryPriceX,
+        String book
 ) {
+    public PaperTradeEntry {
+        if (book == null || book.isBlank()) {
+            book = "DAILY";
+        }
+    }
+
     public double remainingFracOrOne() {
         return remainingFraction == null || remainingFraction <= 0 ? 1.0 : remainingFraction;
     }
 
     public boolean partialDone() {
         return Boolean.TRUE.equals(partialTaken);
+    }
+
+    public boolean hasCashLegs() {
+        return qtyY != null && qtyX != null && entryPriceY != null && entryPriceX != null
+                && qtyY > 0 && qtyX > 0 && entryPriceY > 0 && entryPriceX > 0;
     }
 
     public PaperTradeEntry withClose(
@@ -53,7 +70,8 @@ public record PaperTradeEntry(
         return new PaperTradeEntry(
                 id, openedAt, asOfDate, tickerY, tickerX, signal, decision, entryZ, hedgeRatio,
                 notionalY, notionalX, sizeMultiplier, "CLOSED", closedAt, exitZ, pnlPct, totalRub,
-                exitZ, null, null, asOfDate, notes, bestZ, partialTaken, 0.0, realizedPartialRub
+                exitZ, null, null, asOfDate, notes, bestZ, partialTaken, 0.0, realizedPartialRub,
+                qtyY, qtyX, entryPriceY, entryPriceX, book
         );
     }
 
@@ -68,11 +86,11 @@ public record PaperTradeEntry(
                 id, openedAt, asOfDate, tickerY, tickerX, signal, decision, entryZ, hedgeRatio,
                 notionalY, notionalX, sizeMultiplier, status, closedAt, exitZ, pnlPct, pnlRub,
                 markZ, unrealizedPct, unrealizedRub, markDate, notes,
-                bestZ, partialTaken, remainingFraction, realizedPartialRub
+                bestZ, partialTaken, remainingFraction, realizedPartialRub,
+                qtyY, qtyX, entryPriceY, entryPriceX, book
         );
     }
 
-    /** Частичный TP: фиксируем половину PnL, оставляем half notional. */
     public PaperTradeEntry withPartialTp(
             LocalDate markDate,
             double markZ,
@@ -82,12 +100,15 @@ public record PaperTradeEntry(
         double rem = remainingFracOrOne() * 0.5;
         double newNy = notionalY * 0.5;
         double newNx = notionalX * 0.5;
+        Double newQtyY = qtyY == null ? null : qtyY * 0.5;
+        Double newQtyX = qtyX == null ? null : qtyX * 0.5;
         double realized = (realizedPartialRub == null ? 0.0 : realizedPartialRub) + partialPnlRub;
         return new PaperTradeEntry(
                 id, openedAt, asOfDate, tickerY, tickerX, signal, decision, entryZ, hedgeRatio,
                 newNy, newNx, sizeMultiplier * 0.5, "OPEN", null, null, null, null,
                 markZ, null, null, markDate, notes,
-                bestZ, true, rem, realized
+                bestZ, true, rem, realized,
+                newQtyY, newQtyX, entryPriceY, entryPriceX, book
         );
     }
 }

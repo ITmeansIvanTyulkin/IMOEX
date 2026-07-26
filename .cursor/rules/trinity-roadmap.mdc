@@ -1,0 +1,29 @@
+---
+description: TRINITY product roadmap and development order
+alwaysApply: true
+---
+
+# TRINITY roadmap
+
+Three strategies under one brand. Do not jump ahead without completing the current stage.
+
+## Active now — Strategy 1: cointegration (pairs MR)
+
+- Mean-reversion on cointegrated IMOEX pairs, **sideways only** (ADX regime gate blocks TREND entries).
+- Default session: **DAILY**. INTRADAY is the same strategy on 1H + session flatten — not a separate product yet.
+- Sequence:
+  1. Harden and validate **daily** (paper track-record, walk-forward OOS).
+  2. Then full **intraday** historical backtest + paper (`session.mode: INTRADAY`).
+  3. Only then consider live/broker wiring.
+
+## Roadmap — not built yet
+
+- **Strategy 2:** futures **calendar** arbitrage (separate module).
+- **Strategy 3:** **options** (separate module).
+
+Do not mix calendar/options work into the cointegration pipeline unless the user explicitly reprioritizes.
+
+## Product truth
+
+- Research / decision-support, not auto-execution.
+- Prefer honest metrics (cash PnL, OOS) over optimistic in-sample Sharpe.

@@ -1,21 +1,39 @@
 package com.moex.cointegration.service;
 
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.config.RegimeProperties;
+import com.moex.cointegration.model.MarketRegimeSnapshot;
 import com.moex.cointegration.model.PairAnalysisResult;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
+import com.moex.cointegration.quant.CusumDetector;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * Risk policy: стопы, лимиты портфеля, динамический размер, фильтры качества.
+ * Risk policy: стопы, лимиты портфеля, динамический размер, фильтры качества, regime.
  */
 @Service
 public class RiskPolicyService {
 
     private final ImoexProperties properties;
+    private final RegimeProperties regimeProperties;
+    private final MarketRegimeService marketRegimeService;
 
-    public RiskPolicyService(ImoexProperties properties) {
+    @Autowired
+    public RiskPolicyService(
+            ImoexProperties properties,
+            RegimeProperties regimeProperties,
+            MarketRegimeService marketRegimeService
+    ) {
         this.properties = properties;
+        this.regimeProperties = regimeProperties;
+        this.marketRegimeService = marketRegimeService;
+    }
+
+    /** Тесты без Spring: regime off. */
+    public RiskPolicyService(ImoexProperties properties) {
+        this(properties, new RegimeProperties(false, 14, 20.0, 25.0, 0.5, "SNDX"), null);
     }
 
     public ImoexProperties.RiskProperties policy() {
@@ -23,15 +41,7 @@ public class RiskPolicyService {
     }
 
     public boolean passesQualityFilters(PairAnalysisResult pair) {
-        ImoexProperties.RiskProperties risk = properties.risk();
-        if (pair.sharpeRatio() < risk.minSharpe()) {
-            return false;
-        }
-        if (Double.isNaN(pair.halfLifeDays())) {
-            return false;
-        }
-        return pair.halfLifeDays() >= risk.minHalfLifeDays()
-                && pair.halfLifeDays() <= risk.maxHalfLifeDays();
+        return qualityRejectReason(pair) == null;
     }
 
     public String qualityRejectReason(PairAnalysisResult pair) {
@@ -43,16 +53,61 @@ public class RiskPolicyService {
             return "half-life не определён (спред не mean-reverting)";
         }
         if (pair.halfLifeDays() > risk.maxHalfLifeDays()) {
-            return String.format("half-life=%.1f дней — слишком медленный возврат", pair.halfLifeDays());
+            return String.format("half-life=%.1f дней — слишком медленный возврат (research)", pair.halfLifeDays());
         }
         if (pair.halfLifeDays() < risk.minHalfLifeDays()) {
             return String.format("half-life=%.2f — подозрительно быстрый (шум)", pair.halfLifeDays());
         }
-        return "неизвестная причина";
+        // Торговый gate для боковика жёстче research maxHalfLife
+        if (pair.halfLifeDays() > risk.tradeMaxHalfLifeDays()) {
+            return String.format("half-life=%.1f > trade-max %.0f дн. (боковик)",
+                    pair.halfLifeDays(), risk.tradeMaxHalfLifeDays());
+        }
+        if (!Double.isNaN(pair.rSquared()) && pair.rSquared() < risk.minRSquared()) {
+            return String.format("R²=%.2f < %.2f", pair.rSquared(), risk.minRSquared());
+        }
+        // tradeCount в симуляции считает ноги (open+close), поэтому порог ×2
+        if (pair.tradeCount() < risk.minTradeCount() * 2) {
+            return String.format("сделок в бэктесте мало (%d < %d)",
+                    pair.tradeCount() / 2, risk.minTradeCount());
+        }
+        return null;
+    }
+
+    public boolean regimeBlocksEntries() {
+        if (!regimeProperties.enabledFlag() || marketRegimeService == null) {
+            return false;
+        }
+        return marketRegimeService.current().blockEntries();
+    }
+
+    public MarketRegimeSnapshot regime() {
+        if (marketRegimeService == null) {
+            return MarketRegimeSnapshot.unknown();
+        }
+        return marketRegimeService.current();
+    }
+
+    public boolean structuralBreak(PairAnalysisResult pair) {
+        ImoexProperties.RiskProperties risk = properties.risk();
+        if (!risk.cusumEnabledFlag() || pair.zScoreSeries() == null || pair.zScoreSeries().isEmpty()) {
+            return false;
+        }
+        double[] z = pair.zScoreSeries().stream().mapToDouble(p -> p.value()).toArray();
+        return CusumDetector.detectTail(z, risk.cusumLookback(), risk.cusumThreshold(), risk.cusumDrift());
+    }
+
+    public double effectiveStopZ(double[] spread) {
+        ImoexProperties.RiskProperties risk = properties.risk();
+        if (!risk.adaptiveStopEnabled() || spread == null) {
+            return risk.stopZ();
+        }
+        return com.moex.cointegration.quant.AdaptiveStop.stopZ(
+                spread, risk.adaptiveStopBase(), risk.adaptiveStopCap(), 20, 252);
     }
 
     /**
-     * Доля notional: REDUCE × динамика (1/σ_spread × room-to-stop).
+     * Доля notional: REDUCE × regime × динамика (1/σ_spread × room-to-stop).
      */
     public double sizeMultiplier(TradingSignal signal, boolean reduce) {
         return sizeMultiplier(signal, reduce, Double.NaN, Double.NaN);
@@ -68,6 +123,10 @@ public class RiskPolicyService {
         }
         ImoexProperties.RiskProperties risk = properties.risk();
         double base = reduce ? risk.reduceSizeFactor() : 1.0;
+        MarketRegimeSnapshot reg = regime();
+        if (reg.reduceSize()) {
+            base *= regimeProperties.reduceFactor();
+        }
         if (!risk.dynamicSizingEnabled()) {
             return base;
         }
@@ -82,7 +141,8 @@ public class RiskPolicyService {
         if (Double.isNaN(zAbs)) {
             zAbs = 0;
         }
-        double room = (risk.stopZ() - zAbs) / risk.stopZ();
+        double stop = risk.stopZ();
+        double room = (stop - zAbs) / stop;
         room = clamp(room, 0.05, 1.0);
 
         return clamp(base * volPart * room, risk.minSizeMult() * (reduce ? risk.reduceSizeFactor() : 0.05),
@@ -98,9 +158,6 @@ public class RiskPolicyService {
         return base * sizeMultiplier(rec, reduce);
     }
 
-    /**
-     * σ ≈ |spread / Z| при осмысленном Z; иначе target σ (нейтральный размер по воле).
-     */
     static double estimateSpreadSigma(double spread, double z) {
         if (!Double.isNaN(spread) && !Double.isNaN(z) && Math.abs(z) >= 0.25) {
             return Math.abs(spread / z);

@@ -160,7 +160,17 @@ public record ImoexProperties(
             Double partialTpFraction,
             Double trailZ,
             Double betaBreakPct,
-            Double cointPBreak
+            Double cointPBreak,
+            Double tradeMaxHalfLifeDays,
+            Double minRSquared,
+            Integer minTradeCount,
+            Boolean adaptiveStop,
+            Double adaptiveStopBase,
+            Double adaptiveStopCap,
+            Boolean cusumEnabled,
+            Double cusumThreshold,
+            Double cusumDrift,
+            Integer cusumLookback
     ) {
         public RiskProperties {
             if (borrowRateAnnual == null || borrowRateAnnual < 0) {
@@ -190,15 +200,54 @@ public record ImoexProperties(
             if (cointPBreak == null || cointPBreak <= 0) {
                 cointPBreak = 0.20;
             }
+            if (tradeMaxHalfLifeDays == null || tradeMaxHalfLifeDays <= 0) {
+                tradeMaxHalfLifeDays = 15.0;
+            }
+            if (minRSquared == null || minRSquared < 0) {
+                minRSquared = 0.70;
+            }
+            if (minTradeCount == null || minTradeCount < 0) {
+                minTradeCount = 8;
+            }
+            if (adaptiveStop == null) {
+                adaptiveStop = true;
+            }
+            if (adaptiveStopBase == null || adaptiveStopBase <= 0) {
+                adaptiveStopBase = 2.5;
+            }
+            if (adaptiveStopCap == null || adaptiveStopCap < adaptiveStopBase) {
+                adaptiveStopCap = 4.0;
+            }
+            if (cusumEnabled == null) {
+                cusumEnabled = true;
+            }
+            if (cusumThreshold == null || cusumThreshold <= 0) {
+                cusumThreshold = 5.0;
+            }
+            if (cusumDrift == null || cusumDrift < 0) {
+                cusumDrift = 0.5;
+            }
+            if (cusumLookback == null || cusumLookback < 5) {
+                cusumLookback = 40;
+            }
         }
 
         public static RiskProperties defaults() {
             return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 1.0, 0.08,
-                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.20);
+                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.20,
+                    15.0, 0.70, 8, true, 2.5, 4.0, true, 5.0, 0.5, 40);
         }
 
         public boolean dynamicSizingEnabled() {
             return Boolean.TRUE.equals(dynamicSizing);
+        }
+
+        public boolean adaptiveStopEnabled() {
+            return Boolean.TRUE.equals(adaptiveStop);
+        }
+
+        public boolean cusumEnabledFlag() {
+            return Boolean.TRUE.equals(cusumEnabled);
         }
     }
 
@@ -252,7 +301,9 @@ public record ImoexProperties(
             double notionalPerLeg,
             String journalFile,
             Boolean autoRunDaily,
-            String dailyCron
+            String dailyCron,
+            Double slippageBps,
+            Boolean applyBorrow
     ) {
         public PaperProperties {
             if (autoRunDaily == null) {
@@ -261,14 +312,30 @@ public record ImoexProperties(
             if (dailyCron == null || dailyCron.isBlank()) {
                 dailyCron = "0 5 19 * * MON-FRI";
             }
+            if (slippageBps == null || slippageBps < 0) {
+                slippageBps = 20.0;
+            }
+            if (applyBorrow == null) {
+                applyBorrow = true;
+            }
         }
 
         public static PaperProperties defaults() {
-            return new PaperProperties(true, 100_000.0, "paper-journal.json", true, "0 5 19 * * MON-FRI");
+            return new PaperProperties(true, 100_000.0, "paper-journal.json", true, "0 5 19 * * MON-FRI",
+                    20.0, true);
         }
 
         public boolean autoRunDailyEnabled() {
             return Boolean.TRUE.equals(autoRunDaily);
+        }
+
+        public boolean applyBorrowEnabled() {
+            return Boolean.TRUE.equals(applyBorrow);
+        }
+
+        /** Доля notional на вход+выход (bps → fraction * 2 legs * 2 sides simplified). */
+        public double slippageFraction() {
+            return slippageBps / 10_000.0;
         }
     }
 

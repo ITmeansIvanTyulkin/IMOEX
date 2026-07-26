@@ -1,4 +1,4 @@
-/* IMOEX Operator UI — calm institutional look */
+/* TRINITY Operator UI — calm institutional look */
 :root {
   --bg: #f3f1ec;
   --bg-deep: #ebe7df;
@@ -10,6 +10,8 @@
   --navy-2: #2a3a44;
   --accent: #0f5c4c;
   --accent-soft: #d8ebe5;
+  --gold: #c4a35a;
+  --slate: #8a939b;
   --warn: #8a5a12;
   --warn-soft: #f3e6cc;
   --danger: #8b2e2e;
@@ -45,18 +47,72 @@ a:hover { color: var(--navy); }
   border-bottom: 1px solid #12191e;
 }
 
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.trinity-logo {
+  position: relative;
+  width: 2.6rem;
+  height: 2.6rem;
+  flex-shrink: 0;
+}
+
+.trinity-logo .ring {
+  position: absolute;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  box-sizing: border-box;
+}
+
+.trinity-logo .ring-a {
+  left: 0.05rem;
+  top: 0.55rem;
+  border-color: #7eb6d4;
+}
+
+.trinity-logo .ring-b {
+  left: 1.15rem;
+  top: 0.55rem;
+  border-color: var(--gold);
+}
+
+.trinity-logo .ring-c {
+  left: 0.6rem;
+  top: 0.05rem;
+  border-color: var(--slate);
+}
+
+.brand-text {
+  min-width: 0;
+}
+
 .site-header .brand {
   font-family: var(--font);
-  font-size: 1.55rem;
+  font-size: 1.65rem;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.06em;
   margin: 0;
+  line-height: 1.1;
+}
+
+.site-header .brand-sub {
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
 }
 
 .site-header .tagline {
-  margin: 0.25rem 0 0;
+  margin: 0.45rem 0 0;
   color: #b9c3ca;
   font-size: 0.88rem;
+  max-width: 52rem;
 }
 
 nav.topnav {
@@ -299,6 +355,18 @@ pre {
   line-height: 1.5;
   color: #3c3a35;
 }
+
+.regime-banner {
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  border: 1px solid var(--line);
+}
+.regime-banner.regime-ok { background: var(--ok-soft); color: var(--ok); border-color: #b7d4c0; }
+.regime-banner.regime-warn { background: var(--warn-soft); color: var(--warn); }
+.regime-banner.regime-bad { background: var(--danger-soft); color: var(--danger); }
+.regime-banner.regime-muted { background: var(--bg-deep); color: var(--muted); }
 
 .table-wrap {
   overflow-x: auto;

@@ -1,10 +1,35 @@
 (function () {
-  const LOG_KEY = "imoex.ops.log";
   const USER_KEY = "imoex.ops.user";
   const PASS_KEY = "imoex.ops.pass";
 
+  const SECTION_TITLES = {
+    "/view": "Дашборд",
+    "/view/": "Дашборд",
+    "/view/recommendations": "Рекомендации",
+    "/view/signals": "Сигналы",
+    "/view/final": "Итог + новости",
+    "/view/paper": "Paper journal",
+    "/view/walk-forward": "Walk-forward",
+    "/view/strategy": "Описание стратегии"
+  };
+
+  const ACTION_START = {
+    "run-fast": "Запускаю: Анализ + paper…",
+    "run-full": "Запускаю: Анализ + скачать свечи…",
+    "news-refresh": "Запускаю: новости и paper…",
+    "data-refresh": "Запускаю: скачивание свечей…",
+    "walk-forward": "Запускаю: Walk-forward…"
+  };
+
   function $(id) {
     return document.getElementById(id);
+  }
+
+  function currentSectionTitle() {
+    const path = (location.pathname || "").replace(/\/+$/, "") || "/view";
+    if (SECTION_TITLES[path]) return SECTION_TITLES[path];
+    if (path.indexOf("/view/charts/") === 0) return "График пары";
+    return "Текущий раздел";
   }
 
   function authHeader() {
@@ -43,10 +68,10 @@
     });
   }
 
-  async function apiPost(path, okMessage) {
+  async function apiPost(path, startMessage, okMessage) {
     saveCreds();
     setBusy(true);
-    appendLog("POST " + path + " …", "info");
+    appendLog(startMessage || "Выполняю запрос…", "info");
     try {
       const res = await fetch(path, {
         method: "POST",
@@ -59,10 +84,17 @@
       let body;
       try { body = JSON.parse(text); } catch (_) { body = text; }
       if (!res.ok) {
-        appendLog("Ошибка " + res.status + ": " + (typeof body === "string" ? body : JSON.stringify(body)), "err");
+        if (res.status === 401 || res.status === 403) {
+          appendLog("Нет доступа — проверьте логин и пароль оператора.", "err");
+        } else {
+          appendLog(
+            "Не удалось выполнить действие (" + res.status + ").",
+            "err"
+          );
+        }
         return;
       }
-      appendLog(okMessage || ("OK " + res.status), "ok");
+      appendLog(okMessage || "Готово.", "ok");
       if (body && typeof body === "object") {
         if (body.tickersAnalyzed != null) {
           appendLog(
@@ -77,10 +109,10 @@
           appendLog("Загружено тикеров: " + body.tickersLoaded, "ok");
         }
         if (Array.isArray(body)) {
-          appendLog("Ответ: " + body.length + " записей", "ok");
+          appendLog("Получено записей: " + body.length, "ok");
         }
       }
-      appendLog("Обновляю страницу…", "info");
+      appendLog("Обновляю раздел…", "info");
       setTimeout(function () { location.reload(); }, 900);
     } catch (e) {
       appendLog(String(e && e.message ? e.message : e), "err");
@@ -93,21 +125,41 @@
     loadCreds();
     const map = {
       "run-fast": function () {
-        return apiPost("/api/analysis/run?refresh=false", "Анализ завершён (без скачивания свечей). Paper sync выполнен.");
+        return apiPost(
+          "/api/analysis/run?refresh=false",
+          ACTION_START["run-fast"],
+          "Анализ завершён. Paper обновлён."
+        );
       },
       "run-full": function () {
         if (!confirm("Полный refresh скачает свечи с MOEX — может занять много минут. Продолжить?")) return;
-        return apiPost("/api/analysis/run?refresh=true", "Полный анализ с refresh завершён.");
+        return apiPost(
+          "/api/analysis/run?refresh=true",
+          ACTION_START["run-full"],
+          "Полный анализ завершён. Paper обновлён."
+        );
       },
       "news-refresh": function () {
-        return apiPost("/api/analysis/news-refresh", "Новости и paper sync обновлены.");
+        return apiPost(
+          "/api/analysis/news-refresh",
+          ACTION_START["news-refresh"],
+          "Новости и paper обновлены."
+        );
       },
       "data-refresh": function () {
         if (!confirm("Скачать свечи IMOEX с биржи?")) return;
-        return apiPost("/api/data/refresh", "Свечи обновлены.");
+        return apiPost(
+          "/api/data/refresh",
+          ACTION_START["data-refresh"],
+          "Свечи обновлены."
+        );
       },
       "walk-forward": function () {
-        return apiPost("/api/analysis/walk-forward?maxPairs=10", "Walk-forward пересчитан.");
+        return apiPost(
+          "/api/analysis/walk-forward?maxPairs=10",
+          ACTION_START["walk-forward"],
+          "Walk-forward пересчитан."
+        );
       }
     };
 
@@ -122,11 +174,12 @@
     if ($("ops-save-creds")) {
       $("ops-save-creds").addEventListener("click", function () {
         saveCreds();
-        appendLog("Логин сохранён в этом браузере (localStorage).", "ok");
+        appendLog("Логин сохранён в этом браузере.", "ok");
       });
     }
 
-    appendLog("Операторская панель готова. POST требует Basic Auth (пароль из application-local.yml).", "info");
+    appendLog("Операторская панель готова.", "info");
+    appendLog("Раздел: " + currentSectionTitle() + ".", "info");
   }
 
   if (document.readyState === "loading") {
