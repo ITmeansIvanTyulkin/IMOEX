@@ -1,0 +1,10 @@
+# Скопируйте в application-local.yml (он в .gitignore) и заполните своими значениями.
+# Без imoex.run.unlock приложение не стартует.
+
+imoex:
+  run:
+    unlock: "paste-your-private-unlock-here"
+  auth:
+    enabled: true
+    username: imoex
+    password: "paste-strong-password-here"

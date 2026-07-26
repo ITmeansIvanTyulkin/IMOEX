@@ -1,4 +1,7 @@
-# Тесты: auth выключен, чтобы MockMvc/unit не требовали Basic.
+# Тесты: auth выключен; run-guard пропускаем.
 imoex:
   auth:
     enabled: false
+  run:
+    skip-guard: true
+    unlock: "test-unlock-not-for-production"
