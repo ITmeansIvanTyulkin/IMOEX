@@ -2,7 +2,9 @@ package com.moex.cointegration.service;
 
 import com.moex.cointegration.client.MoexIssClient;
 import com.moex.cointegration.client.MoexNewsClient;
+import com.moex.cointegration.client.RssNewsClient;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.config.SessionProperties;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.NewsItem;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Тесты без Mockito: на Java 24 inline-mock ByteBuddy из Boot 3.3 ещё не поддерживается.
@@ -74,6 +77,66 @@ class NewsRiskAnalysisServiceTest {
         );
 
         assertEquals(FinalTradeDecision.BLOCK, service.analyze(List.of(tech)).get(0).decision());
+    }
+
+    @Test
+    void conflictBlocksOnEarningsMissWithActionableTech() {
+        FakeMoexNewsClient newsClient = new FakeMoexNewsClient(List.of(
+                new NewsItem(1L, "Сбербанк прибыль снизилась против прогноза", LocalDateTime.now(), "TEST")
+        ));
+        newsClient.status("SBER", tradable("SBER", "Сбербанк"));
+        newsClient.status("LKOH", tradable("LKOH", "ЛУКОЙЛ"));
+
+        NewsRiskAnalysisService service = new NewsRiskAnalysisService(
+                newsClient,
+                new FakeMoexIssClient(List.of("SBER", "LKOH")),
+                new NewsTriggerMatcher(),
+                props(true)
+        );
+
+        TradingRecommendation tech = new TradingRecommendation(
+                "SBER", "LKOH", TradingSignal.LONG_SPREAD,
+                -2.5, LocalDate.now().minusDays(1), -0.1,
+                0.8, 12, 1.1, 0.01,
+                "long", "details"
+        );
+
+        FinalTradeRecommendation out = service.analyze(List.of(tech)).get(0);
+        assertEquals(FinalTradeDecision.BLOCK, out.decision());
+        assertTrue(out.decisionSummary().contains("CONFLICT"));
+    }
+
+    @Test
+    void skipsFundamentalFilterInIntradayMode() {
+        FakeMoexNewsClient newsClient = new FakeMoexNewsClient(List.of(
+                new NewsItem(1L, "О приостановке торгов ценными бумагами SBER", LocalDateTime.now(), "TEST")
+        ));
+        newsClient.status("SBER", tradable("SBER", "Сбербанк"));
+        newsClient.status("LKOH", tradable("LKOH", "ЛУКОЙЛ"));
+
+        SessionProperties intraday = new SessionProperties(
+                "INTRADAY", "18:30", "18:45", "10:00", "18:45", true,
+                "paper-journal-intraday.json", 60
+        );
+        NewsRiskAnalysisService service = new NewsRiskAnalysisService(
+                newsClient,
+                new FakeMoexIssClient(List.of("SBER", "LKOH")),
+                new NewsTriggerMatcher(),
+                props(true),
+                intraday,
+                new RssNewsClient(new RestTemplate(), props(true))
+        );
+
+        TradingRecommendation tech = new TradingRecommendation(
+                "SBER", "LKOH", TradingSignal.SHORT_SPREAD,
+                2.4, LocalDate.now().minusDays(1), 0.1,
+                0.8, 12, 1.1, 0.01,
+                "short", "details"
+        );
+
+        FinalTradeRecommendation out = service.analyze(List.of(tech)).get(0);
+        assertEquals(FinalTradeDecision.ENTER, out.decision());
+        assertTrue(out.news().summary().contains("INTRADAY"));
     }
 
     private static SecurityTradingStatus tradable(String ticker, String shortName) {
