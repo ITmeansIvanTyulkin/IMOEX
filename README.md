@@ -65,7 +65,7 @@ flowchart LR
 | Интернет к `iss.moex.com` | браузер / `curl -I https://iss.moex.com` |
 | Свободный порт **8080** | иначе смените `server.port` в `application.yml` |
 
-Клон / каталог проекта:
+Клон / каталог проекта (**корень репозитория**, не подпапка `moex/`):
 
 ```bash
 cd /path/to/IMOEX          # macOS / Linux
@@ -73,6 +73,7 @@ cd /path/to/IMOEX          # macOS / Linux
 cd C:\path\to\IMOEX        # Windows
 ```
 
+> Если Maven пишет `No plugin found for prefix 'spring-boot'` — вы не в корне: там лежит `pom.xml` с артефактом `trinity-arbitrage`. Подпапка `moex/` — старый пустой модуль IDEA, из неё `spring-boot:run` не работает.
 ### 1. (Опционально) Прогнать тесты
 
 ```bash
@@ -115,23 +116,11 @@ taskkill /PID <PID> /F
 
 ### 3. Локальные секреты (обязательно — иначе приложение не стартует)
 
-В git **нет** паролей и unlock-ключа. Свечи и journal тоже не в репозитории (`/data/` в `.gitignore`).
+В git **нет** паролей и unlock-ключа. Свечи и journal тоже не в репозитории.
 
-```bash
-cp application-local.yml.example application-local.yml
-# отредактируйте imoex.run.unlock и imoex.auth.password
 ```
 
-Либо через env:
-
-```bash
-export IMOEX_UNLOCK='длинная-случайная-строка'
-export IMOEX_AUTH_PASSWORD='сильный-пароль'
-```
-
-Без `imoex.run.unlock` процесс сразу падает с понятной ошибкой — так публичный клон «из коробки» не работает. Это не DRM: исходники открыты, упорный человек может пропатчить guard; цель — не раздавать готовый запуск и не светить секреты.
-
-В пульте `/view` и в `curl` используйте **свой** пароль из `application-local.yml`.
+Без `imoex.run.unlock` процесс сразу падает с понятной ошибкой — так публичный клон «из коробки» не работает. Это не DRM: исходники открыты.
 
 Проверка, что сервер жив (GET без пароля обычно ок):
 
