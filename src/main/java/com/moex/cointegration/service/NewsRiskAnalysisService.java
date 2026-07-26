@@ -2,7 +2,9 @@ package com.moex.cointegration.service;
 
 import com.moex.cointegration.client.MoexIssClient;
 import com.moex.cointegration.client.MoexNewsClient;
+import com.moex.cointegration.client.RssNewsClient;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.config.SessionProperties;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.NewsItem;
@@ -16,7 +18,9 @@ import com.moex.cointegration.model.TradingSignal;
 import com.moex.cointegration.news.NewsTriggerMatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -28,7 +32,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Новостный safety-layer после технического сигнала (горизонт дни/недели, не intraday).
+ * Фундаментальный / новостной safety-layer ПОСЛЕ технического сигнала.
+ * Только multi-day (DAILY). В INTRADAY пропускается — новости запаздывают.
+ * Порядок пайплайна: техника → этот фильтр → итоговые рекомендации → paper.
  */
 @Service
 public class NewsRiskAnalysisService {
@@ -39,17 +45,36 @@ public class NewsRiskAnalysisService {
     private final MoexIssClient moexIssClient;
     private final NewsTriggerMatcher triggerMatcher;
     private final ImoexProperties properties;
+    private final SessionProperties sessionProperties;
+    private final RssNewsClient rssNewsClient;
 
+    @Autowired
+    public NewsRiskAnalysisService(
+            MoexNewsClient newsClient,
+            MoexIssClient moexIssClient,
+            NewsTriggerMatcher triggerMatcher,
+            ImoexProperties properties,
+            SessionProperties sessionProperties,
+            RssNewsClient rssNewsClient
+    ) {
+        this.newsClient = newsClient;
+        this.moexIssClient = moexIssClient;
+        this.triggerMatcher = triggerMatcher;
+        this.properties = properties;
+        this.sessionProperties = sessionProperties;
+        this.rssNewsClient = rssNewsClient;
+    }
+
+    /** Тесты без Spring: DAILY, RSS off. */
     public NewsRiskAnalysisService(
             MoexNewsClient newsClient,
             MoexIssClient moexIssClient,
             NewsTriggerMatcher triggerMatcher,
             ImoexProperties properties
     ) {
-        this.newsClient = newsClient;
-        this.moexIssClient = moexIssClient;
-        this.triggerMatcher = triggerMatcher;
-        this.properties = properties;
+        this(newsClient, moexIssClient, triggerMatcher, properties,
+                SessionProperties.defaults(),
+                new RssNewsClient(new RestTemplate(), properties));
     }
 
     /**
@@ -57,6 +82,14 @@ public class NewsRiskAnalysisService {
      * и возвращает итоговые решения ENTER / REDUCE / WATCH / BLOCK.
      */
     public List<FinalTradeRecommendation> analyze(List<TradingRecommendation> technical) {
+        if (sessionProperties.intradayMode()) {
+            log.info("Fundamental filter skipped: session mode INTRADAY (tech-only)");
+            return technical.stream()
+                    .map(r -> passthrough(r,
+                            "Фундаментальный фильтр пропущен: режим INTRADAY (только техника)."))
+                    .toList();
+        }
+
         ImoexProperties.NewsProperties newsCfg = properties.news();
         if (newsCfg == null || !newsCfg.enabled()) {
             return technical.stream()
@@ -68,7 +101,9 @@ public class NewsRiskAnalysisService {
         int staleDays = Math.max(1, newsCfg.staleCandleDays());
         int maxPages = Math.max(1, newsCfg.maxNewsPages());
 
-        List<NewsItem> news = newsClient.fetchSiteNews(lookback, maxPages);
+        List<NewsItem> news = new ArrayList<>(newsClient.fetchSiteNews(lookback, maxPages));
+        news.addAll(rssNewsClient.fetchConfiguredFeeds(lookback));
+
         Set<String> indexTickers = new HashSet<>(moexIssClient.fetchImoexTickers());
 
         Set<String> tickersNeeded = new HashSet<>();
@@ -102,7 +137,7 @@ public class NewsRiskAnalysisService {
         long enter = result.stream().filter(f -> f.decision() == FinalTradeDecision.ENTER).count();
         long reduce = result.stream().filter(f -> f.decision() == FinalTradeDecision.REDUCE_SIZE).count();
         long block = result.stream().filter(f -> f.decision() == FinalTradeDecision.BLOCK).count();
-        log.info("News filter: {} pairs → ENTER={}, REDUCE={}, BLOCK={}, other={}",
+        log.info("Fundamental filter (after tech, multi-day): {} pairs → ENTER={}, REDUCE={}, BLOCK={}, other={}",
                 result.size(), enter, reduce, block, result.size() - enter - reduce - block);
 
         return result;
@@ -235,7 +270,8 @@ public class NewsRiskAnalysisService {
         boolean actionable = signal == TradingSignal.LONG_SPREAD || signal == TradingSignal.SHORT_SPREAD;
         return switch (risk) {
             case BLOCK -> FinalTradeDecision.BLOCK;
-            case HIGH -> actionable ? FinalTradeDecision.REDUCE_SIZE : FinalTradeDecision.WATCH;
+            // HIGH: жёсткий конфликт с техсигналом → не открываем (CONFLICT)
+            case HIGH -> actionable ? FinalTradeDecision.BLOCK : FinalTradeDecision.WATCH;
             case MEDIUM -> actionable ? FinalTradeDecision.REDUCE_SIZE : FinalTradeDecision.WATCH;
             case LOW -> {
                 if (actionable) {
@@ -250,12 +286,31 @@ public class NewsRiskAnalysisService {
     }
 
     private String decisionSummary(FinalTradeDecision decision, TradingRecommendation rec, PairNewsAssessment news) {
+        boolean actionable = rec.signal() == TradingSignal.LONG_SPREAD
+                || rec.signal() == TradingSignal.SHORT_SPREAD;
+        boolean conflict = actionable
+                && news.riskLevel() != NewsRiskLevel.LOW
+                && (decision == FinalTradeDecision.BLOCK || decision == FinalTradeDecision.REDUCE_SIZE);
+
         return switch (decision) {
-            case ENTER -> "ИТОГ: ВХОД разрешён — техника подтверждена, новостных блокеров нет.";
-            case REDUCE_SIZE -> "ИТОГ: вход только уменьшенным размером — есть caution-новости (" + news.riskLevel() + ").";
+            case ENTER -> "ИТОГ: ВХОД разрешён — техника подтверждена, фундаментальных блокеров нет.";
+            case REDUCE_SIZE -> conflict
+                    ? "CONFLICT: техника vs фундамент — вход только уменьшенным размером ("
+                    + news.riskLevel() + "). " + shortFundHint(news)
+                    : "ИТОГ: вход только уменьшенным размером — caution (" + news.riskLevel() + ").";
             case WATCH -> regimeWatchSummary(rec, news);
-            case BLOCK -> "ИТОГ: ВХОД ЗАПРЕЩЁН — структурный/новостной блокер.";
+            case BLOCK -> conflict
+                    ? "CONFLICT: техника vs фундамент — вход ЗАПРЕЩЁН. " + shortFundHint(news)
+                    : "ИТОГ: ВХОД ЗАПРЕЩЁН — структурный/новостной блокер.";
         };
+    }
+
+    private String shortFundHint(PairNewsAssessment news) {
+        if (news.hits().isEmpty()) {
+            return news.summary();
+        }
+        NewsTriggerHit top = news.hits().get(0);
+        return top.type() + ": " + top.explanation();
     }
 
     private String regimeWatchSummary(TradingRecommendation rec, PairNewsAssessment news) {
@@ -263,15 +318,20 @@ public class NewsRiskAnalysisService {
         if (s.contains("тренд") || s.contains("TREND") || s.contains("боковик")) {
             return "ИТОГ: НЕ ТОРГОВАТЬ — выявлен тренд, стратегия только боковик.";
         }
+        boolean actionable = rec.signal() == TradingSignal.LONG_SPREAD
+                || rec.signal() == TradingSignal.SHORT_SPREAD;
+        if (actionable && news.riskLevel() != NewsRiskLevel.LOW) {
+            return "CONFLICT: техника vs фундамент — наблюдаем, не входим. " + shortFundHint(news);
+        }
         return "ИТОГ: не входить — наблюдать (техника=" + rec.signal()
-                + ", новости=" + news.riskLevel() + ").";
+                + ", фундамент=" + news.riskLevel() + ").";
     }
 
     private String beginnerGuide(FinalTradeDecision decision, TradingRecommendation rec, PairNewsAssessment news) {
         StringBuilder sb = new StringBuilder();
         sb.append(decisionSummary(decision, rec, news)).append("\n\n");
         sb.append("Техника: ").append(rec.summary()).append("\n");
-        sb.append("Новости: ").append(news.summary()).append("\n");
+        sb.append("Фундамент/новости: ").append(news.summary()).append("\n");
         if (!news.hits().isEmpty()) {
             sb.append("\nЧто сработало:\n");
             int i = 1;
@@ -284,10 +344,11 @@ public class NewsRiskAnalysisService {
                         .append(hit.ticker()).append(": ").append(hit.title()).append("\n");
             }
         }
-        sb.append("\nДля новичка: сначала смотрите колонку «Итог». ")
-                .append("ENTER = можно разбирать график и размер. ")
-                .append("REDUCE = идея есть, но риск выше — меньше лотов. ")
-                .append("BLOCK = пропускайте пару, даже если стрелки на графике красивые.");
+        sb.append("\nПорядок: сначала техника, затем фундамент (только multi-day / DAILY), ")
+                .append("и только потом рекомендация и paper. ")
+                .append("ENTER = можно разбирать размер. ")
+                .append("REDUCE = CONFLICT с осторожностью. ")
+                .append("BLOCK = CONFLICT / блокер — не открывать, даже если стрелки красивые.");
         return sb.toString();
     }
 

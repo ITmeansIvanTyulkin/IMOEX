@@ -47,8 +47,29 @@ class NewsTriggerMatcherTest {
     }
 
     @Test
-    void mentionsTickerByShortName() {
-        assertTrue(matcher.mentionsTicker("Дивиденды Сбербанк за 2025 год", "SBER", "Сбербанк", null));
-        assertFalse(matcher.mentionsTicker("Дивиденды Газпром", "SBER", "Сбербанк", null));
+    void detectsEarningsMissAsBlock() {
+        List<NewsItem> news = List.of(new NewsItem(
+                3L,
+                "Сбербанк: прибыль за квартал снизилась на 12%",
+                LocalDateTime.now(),
+                "TEST"
+        ));
+        List<NewsTriggerHit> hits = matcher.match("SBER", "Сбербанк", "Сбербанк России", news);
+        assertEquals(1, hits.size());
+        assertEquals(NewsTriggerType.EARNINGS_MISS, hits.get(0).type());
+        assertEquals(NewsRiskLevel.BLOCK, hits.get(0).severity());
+    }
+
+    @Test
+    void detectsDividendCutBeforeGenericDividend() {
+        List<NewsItem> news = List.of(new NewsItem(
+                4L,
+                "Сбербанк сократил дивиденды за год",
+                LocalDateTime.now(),
+                "TEST"
+        ));
+        List<NewsTriggerHit> hits = matcher.match("SBER", "Сбербанк", null, news);
+        assertEquals(NewsTriggerType.DIVIDEND_CUT, hits.get(0).type());
+        assertEquals(NewsRiskLevel.BLOCK, hits.get(0).severity());
     }
 }
