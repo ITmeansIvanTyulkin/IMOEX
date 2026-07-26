@@ -45,7 +45,7 @@ public class AnalysisHtmlRenderer {
                     <p class="brand-sub">Multi-Strategy Arbitrage</p>
                   </div>
                 </div>
-                <p class="tagline">Three Strategies. One Mission. — mean-reversion research, paper и риск на IMOEX</p>
+                <p class="tagline">Three Strategies. One Mission.</p>
               </header>
               {{NAV}}
               <main>
