@@ -57,6 +57,7 @@ public class PaperTradingService {
     private final MarketDataStorage storage;
     private final PaperAlertService alertService;
     private final EventCalendarRiskService eventCalendarRiskService;
+    private final MicrostructureExecutionService microstructureExecutionService;
     private final ObjectMapper objectMapper;
     private final List<PaperTradeEntry> entries = new CopyOnWriteArrayList<>();
 
@@ -69,7 +70,8 @@ public class PaperTradingService {
             PairLookupService pairLookupService,
             MarketDataStorage storage,
             PaperAlertService alertService,
-            EventCalendarRiskService eventCalendarRiskService
+            EventCalendarRiskService eventCalendarRiskService,
+            MicrostructureExecutionService microstructureExecutionService
     ) {
         this.properties = properties;
         this.capitalProperties = capitalProperties;
@@ -79,6 +81,7 @@ public class PaperTradingService {
         this.storage = storage;
         this.alertService = alertService;
         this.eventCalendarRiskService = eventCalendarRiskService;
+        this.microstructureExecutionService = microstructureExecutionService;
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     }
 
@@ -89,7 +92,7 @@ public class PaperTradingService {
             PairLookupService pairLookupService
     ) {
         this(properties, CapitalProperties.defaults(), SessionProperties.defaults(),
-                riskPolicyService, pairLookupService, null, null, null);
+                riskPolicyService, pairLookupService, null, null, null, null);
     }
 
     /** Исторический replay: подмена «сейчас» для bar-by-bar прогона. */
@@ -317,6 +320,22 @@ public class PaperTradingService {
             if (Math.abs(z) >= stopZ - 0.5) {
                 log.info("Paper skip {}/{}: |Z| too close to stop", f.technical().tickerY(), f.technical().tickerX());
                 continue;
+            }
+            if (microstructureExecutionService != null) {
+                TradingSignal sig = f.technical().signal();
+                MicrostructureExecutionService.MicrostructureVerdict verdict =
+                        microstructureExecutionService.evaluateEntry(
+                                f.technical().tickerY(),
+                                f.technical().tickerX(),
+                                sig,
+                                book,
+                                now()
+                        );
+                if (!verdict.allowed()) {
+                    log.info("Paper skip {}/{} [{}]: {}", f.technical().tickerY(), f.technical().tickerX(),
+                            book, verdict.reason());
+                    continue;
+                }
             }
             boolean reduce = f.decision() == FinalTradeDecision.REDUCE_SIZE;
             double notionalY = riskPolicyService.suggestedNotional(f.technical(), reduce);

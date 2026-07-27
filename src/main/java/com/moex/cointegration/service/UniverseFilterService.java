@@ -1,10 +1,12 @@
 package com.moex.cointegration.service;
 
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.Candle;
 import com.moex.cointegration.model.PriceSeries;
 import com.moex.cointegration.storage.MarketDataStorage;
 import com.moex.cointegration.universe.SectorCatalog;
+import com.moex.cointegration.universe.TierOneCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -39,6 +41,10 @@ public class UniverseFilterService {
      * Оставляет только тикеры, прошедшие {@code imoex.universe.*} (тикерный уровень).
      */
     public Map<String, PriceSeries> filter(Map<String, PriceSeries> seriesByTicker) throws IOException {
+        return filter(seriesByTicker, BookKind.DAILY);
+    }
+
+    public Map<String, PriceSeries> filter(Map<String, PriceSeries> seriesByTicker, BookKind book) throws IOException {
         metricsCache.clear();
         ImoexProperties.UniverseProperties u = properties.universe();
         if (!u.enabled() || seriesByTicker == null || seriesByTicker.isEmpty()) {
@@ -47,9 +53,14 @@ public class UniverseFilterService {
 
         Map<String, PriceSeries> kept = new LinkedHashMap<>();
         List<String> rejected = new ArrayList<>();
+        boolean tierOne = book == BookKind.INTRADAY && u.intradayTierOneOnlyEnabled();
 
         for (Map.Entry<String, PriceSeries> e : seriesByTicker.entrySet()) {
             String ticker = e.getKey();
+            if (tierOne && !TierOneCatalog.isTierOne(ticker)) {
+                rejected.add(ticker + " (не 1-й эшелон INTRADAY)");
+                continue;
+            }
             Metrics m = metrics(ticker);
             String reason = rejectReason(ticker, m, u);
             if (reason == null) {
@@ -63,8 +74,8 @@ public class UniverseFilterService {
             }
         }
 
-        log.info("Universe filter: {} → {} tickers (rejected {}), sectorsMapped={}",
-                seriesByTicker.size(), kept.size(), rejected.size(), SectorCatalog.size());
+        log.info("Universe filter [{}]: {} → {} tickers (rejected {}), tier1={}, sectorsMapped={}",
+                book, seriesByTicker.size(), kept.size(), rejected.size(), tierOne, SectorCatalog.size());
         if (!rejected.isEmpty()) {
             int show = Math.min(12, rejected.size());
             log.info("Rejected sample: {}", rejected.subList(0, show));
@@ -78,9 +89,16 @@ public class UniverseFilterService {
      * @return null если пара ок, иначе причина отказа
      */
     public String pairRejectReason(String tickerY, String tickerX) throws IOException {
+        return pairRejectReason(tickerY, tickerX, BookKind.DAILY);
+    }
+
+    public String pairRejectReason(String tickerY, String tickerX, BookKind book) throws IOException {
         ImoexProperties.UniverseProperties u = properties.universe();
         if (!u.enabled()) {
             return null;
+        }
+        if (book == BookKind.INTRADAY && u.intradayTierOneOnlyEnabled() && !TierOneCatalog.pairTierOne(tickerY, tickerX)) {
+            return "не 1-й эшелон (INTRADAY whitelist)";
         }
         if (u.sameSectorOnlyEnabled()) {
             boolean ok = u.allowRelatedSectorsEnabled()
@@ -116,10 +134,21 @@ public class UniverseFilterService {
     }
 
     public boolean allowPair(String tickerY, String tickerX) throws IOException {
-        return pairRejectReason(tickerY, tickerX) == null;
+        return allowPair(tickerY, tickerX, BookKind.DAILY);
+    }
+
+    public boolean allowPair(String tickerY, String tickerX, BookKind book) throws IOException {
+        return pairRejectReason(tickerY, tickerX, book) == null;
     }
 
     String rejectReason(String ticker, Metrics m, ImoexProperties.UniverseProperties u) {
+        return rejectReason(ticker, m, u, BookKind.DAILY);
+    }
+
+    String rejectReason(String ticker, Metrics m, ImoexProperties.UniverseProperties u, BookKind book) {
+        if (book == BookKind.INTRADAY && u.intradayTierOneOnlyEnabled() && !TierOneCatalog.isTierOne(ticker)) {
+            return "не 1-й эшелон";
+        }
         if (m == null) {
             return "нет свечей для метрик";
         }
