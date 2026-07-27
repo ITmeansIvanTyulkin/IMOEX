@@ -330,7 +330,10 @@ public record ImoexProperties(
             Boolean autoRunIntraday,
             String intradayCron,
             Double slippageBps,
-            Boolean applyBorrow
+            Boolean applyBorrow,
+            Double notionalPerLegPct,
+            Double slippageBpsDaily,
+            Double slippageBpsIntraday
     ) {
         public PaperProperties {
             if (autoRunDaily == null) {
@@ -351,11 +354,14 @@ public record ImoexProperties(
             if (applyBorrow == null) {
                 applyBorrow = true;
             }
+            if (notionalPerLegPct == null || notionalPerLegPct <= 0) {
+                notionalPerLegPct = 0.30;
+            }
         }
 
         public static PaperProperties defaults() {
             return new PaperProperties(true, 100_000.0, "paper-journal.json", true, "0 5 19 * * MON-FRI",
-                    true, "0 5 10-18 * * MON-FRI", 20.0, true);
+                    true, "0 5 10-18 * * MON-FRI", 20.0, true, 0.30, 20.0, 40.0);
         }
 
         public boolean autoRunDailyEnabled() {
@@ -370,9 +376,26 @@ public record ImoexProperties(
             return Boolean.TRUE.equals(applyBorrow);
         }
 
-        /** Доля notional на вход+выход (bps → fraction * 2 legs * 2 sides simplified). */
+        /** Базовый notional на ногу Y: % от equity или фикс из конфига. */
+        public double baseNotionalPerLeg(double equityRub) {
+            if (notionalPerLegPct != null && notionalPerLegPct > 0) {
+                return equityRub * notionalPerLegPct;
+            }
+            return notionalPerLeg;
+        }
+
+        /** Slippage в долях для книги (DAILY / INTRADAY). */
+        public double slippageFraction(com.moex.cointegration.model.BookKind book) {
+            double bps = switch (book) {
+                case DAILY -> slippageBpsDaily != null ? slippageBpsDaily : slippageBps;
+                case INTRADAY -> slippageBpsIntraday != null ? slippageBpsIntraday : slippageBps * 2.0;
+            };
+            return bps / 10_000.0;
+        }
+
+        /** Доля notional на вход+выход (bps → fraction). */
         public double slippageFraction() {
-            return slippageBps / 10_000.0;
+            return slippageFraction(com.moex.cointegration.model.BookKind.DAILY);
         }
     }
 

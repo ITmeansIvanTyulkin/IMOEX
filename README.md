@@ -24,6 +24,9 @@
 | **Рекомендации** | Тексты «что купить/продать» + явный блок при тренде + итог ENTER / REDUCE / WATCH / BLOCK |
 | **Новости / FA** | После техники, **только DAILY-книга**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
 | **Paper journal** | Два журнала: `paper-journal.json` (DAILY) и `paper-journal-intraday.json` (flatten ~18:30) |
+| **Sizing / slippage** | Notional **% от equity**; slippage **отдельно** DAILY (20 bps) / INTRADAY (40 bps) |
+| **Event calendar** | INTRADAY: flatten/block перед макро/отчётностью (`data/event-calendar.json`) |
+| **Historical replay** | Bar-by-bar прогон paper на локальных свечах (`POST /api/analysis/historical-replay`) |
 | **Walk-forward** | OOS окна train/test по топ-парам (daily) |
 | **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
 | **Auth** | HTTP Basic на mutating API (`POST /api/**`) |
@@ -258,8 +261,38 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 3. **Главные экраны** — `/view/final` (разрешено ли после FA), `/view/paper` (что открылось), дашборд (режим ADX).
 4. **Автопрогоны** — DAILY ~19:05, INTRADAY :05 каждый час 10–18 (пн–пт), пока сервер работает.
 5. **Алерты** — баннер справа сверху в браузере + опционально уведомление ОС (на Windows обычно снизу справа).
+6. **Исторический replay** — `POST /api/analysis/historical-replay?tickerY=SBER&tickerX=LKOH&from=2023-01-01&to=2025-12-31` — bar-by-bar прогон paper на локальных свечах (нужен предварительный `refresh`).
 
 Теория стратегии — `/view/strategy`. Пустой paper journal нормален, если нет ENTER/LONG/SHORT с разворотом Z.
+
+### Sizing и издержки (честнее к live)
+
+| Параметр | Значение по умолчанию | Смысл |
+|---|---|---|
+| `imoex.paper.notional-per-leg-pct` | `0.30` | Notional на ногу Y = **30% equity** (масштабируется с капиталом) |
+| `imoex.paper.slippage-bps-daily` | `20` | Slippage DAILY (0.2% от gross ног) |
+| `imoex.paper.slippage-bps-intraday` | `40` | Slippage INTRADAY (stress, 0.4%) |
+| `imoex.session.event-calendar-file` | `data/event-calendar.json` | События для INTRADAY: flatten/block за N минут до события |
+| `imoex.session.event-flatten-minutes-before` | `45` | Окно flatten/block перед событием (минуты) |
+
+Подробнее — раздел [Валидация на истории](#валидация-на-истории-replay) и страница `/view/strategy`.
+
+---
+
+## Валидация на истории (replay)
+
+Помимо unit-тестов и walk-forward OOS, TRINITY умеет **исторический replay**: на каждом баре доступны только свечи ≤ as-of, затем сигнал → paper sync — «как если бы торговали» day-by-day.
+
+**Требования:** локальные свечи в `data/candles/` (сначала `POST /api/analysis/run?refresh=true`).
+
+```bash
+curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
+  "http://localhost:8080/api/analysis/historical-replay?tickerY=SBER&tickerX=LKOH&from=2023-01-01&to=2025-12-31&book=DAILY"
+```
+
+**Ответ** (`HistoricalReplayReport`): список сделок, net/realized PnL ₽, win rate, max drawdown, equity start/end.
+
+Пример календаря событий для INTRADAY — скопируйте `event-calendar.example.json` → `data/event-calendar.json` и допишите даты отчётности / макро.
 
 ---
 
@@ -326,6 +359,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | `POST` | `/analysis/run?refresh=true\|false` | Полный анализ (+ paper + walk-forward) |
 | `POST` | `/analysis/news-refresh` | Новости + paper sync |
 | `POST` | `/analysis/walk-forward?maxPairs=10` | Пересчёт OOS |
+| `POST` | `/analysis/historical-replay?tickerY=&tickerX=&from=&to=` | Исторический bar-by-bar replay paper |
 | `GET` | `/analysis/walk-forward` | Последний WF-отчёт |
 | `GET` | `/paper/journal` | Paper track-record |
 | `GET` | `/risk/policy` | Risk policy |

@@ -20,7 +20,10 @@ public record SessionProperties(
         Integer intradayRollingZWindow,
         Integer intradayMaxHoldBars,
         Double intradayMinHalfLifeDays,
-        Double intradayTradeMaxHalfLifeDays
+        Double intradayTradeMaxHalfLifeDays,
+        Boolean eventCalendarEnabled,
+        Integer eventFlattenMinutesBefore,
+        String eventCalendarFile
 ) {
     public SessionProperties {
         if (mode == null || mode.isBlank()) {
@@ -65,19 +68,33 @@ public record SessionProperties(
         if (intradayTradeMaxHalfLifeDays == null || intradayTradeMaxHalfLifeDays <= 0) {
             intradayTradeMaxHalfLifeDays = 3.0;
         }
+        if (eventCalendarEnabled == null) {
+            eventCalendarEnabled = true;
+        }
+        if (eventFlattenMinutesBefore == null || eventFlattenMinutesBefore < 0) {
+            eventFlattenMinutesBefore = 45;
+        }
+        if (eventCalendarFile == null || eventCalendarFile.isBlank()) {
+            eventCalendarFile = "data/event-calendar.json";
+        }
     }
 
     public static SessionProperties defaults() {
         return new SessionProperties(
                 "DUAL", "18:30", "18:45", "10:00", "18:45", true,
                 "paper-journal-intraday.json", 60,
-                7, 90, 48, 7, 0.25, 3.0
+                7, 90, 48, 7, 0.25, 3.0,
+                true, 45, "data/event-calendar.json"
         );
     }
 
     /** Legacy: true только если явно INTRADAY-only (не используется dual-book). */
     public boolean intradayMode() {
         return "INTRADAY".equalsIgnoreCase(mode);
+    }
+
+    public boolean isEventCalendarEnabled() {
+        return Boolean.TRUE.equals(eventCalendarEnabled);
     }
 
     public double barsPerYearIntraday() {
