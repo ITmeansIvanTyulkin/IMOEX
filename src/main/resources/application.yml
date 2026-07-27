@@ -88,7 +88,8 @@ imoex:
     session-open: "10:00"
     session-close: "18:45"
     prevent-weekend-hold: true
-    intraday-journal-file: paper-journal-intraday.json  walk-forward:
+    intraday-journal-file: paper-journal-intraday.json
+  walk-forward:
     enabled: true
     train-bars: 504
     test-bars: 63
