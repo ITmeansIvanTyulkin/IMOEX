@@ -3,6 +3,7 @@ package com.moex.cointegration.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.PairAnalysisResult;
 import com.moex.cointegration.model.SpreadPoint;
 import com.moex.cointegration.model.TradingRecommendation;
@@ -37,6 +38,14 @@ public class TradingRecommendationService {
     private final RiskPolicyService riskPolicyService;
     private final ObjectMapper objectMapper;
     private final List<TradingRecommendation> lastRecommendations = new CopyOnWriteArrayList<>();
+    private final List<TradingRecommendation> lastIntradayRecommendations = new CopyOnWriteArrayList<>();
+    private final ThreadLocal<QualityCtx> qualityCtx = ThreadLocal.withInitial(QualityCtx::daily);
+
+    private record QualityCtx(double barsPerDay, Double minHlDays, Double tradeMaxHlDays) {
+        static QualityCtx daily() {
+            return new QualityCtx(1.0, null, null);
+        }
+    }
 
     public TradingRecommendationService(ImoexProperties properties, RiskPolicyService riskPolicyService) {
         this.properties = properties;
@@ -47,14 +56,21 @@ public class TradingRecommendationService {
     /** Подгружает сохранённые рекомендации после рестарта приложения. */
     @PostConstruct
     void loadFromDisk() {
-        Path file = recommendationsFile();
+        loadRecommendationsFile(recommendationsFile(), lastRecommendations);
+        loadRecommendationsFile(
+                Path.of(properties.dataDir(), "trading-recommendations-intraday.json"),
+                lastIntradayRecommendations
+        );
+    }
+
+    private void loadRecommendationsFile(Path file, List<TradingRecommendation> target) {
         if (!Files.exists(file)) {
             return;
         }
         try {
             TradingRecommendation[] loaded = objectMapper.readValue(file.toFile(), TradingRecommendation[].class);
-            lastRecommendations.clear();
-            lastRecommendations.addAll(List.of(loaded));
+            target.clear();
+            target.addAll(List.of(loaded));
             log.info("Loaded {} trading recommendations from {}", loaded.length, file);
         } catch (Exception ex) {
             log.warn("Could not load recommendations from {}: {}", file, ex.getMessage());
@@ -63,21 +79,42 @@ public class TradingRecommendationService {
 
     public List<TradingRecommendation> analyzeAndPrint(List<PairAnalysisResult> cointegratedPairs)
             throws IOException {
-        List<TradingRecommendation> recommendations = new ArrayList<>();
+        return analyzeAndPrint(cointegratedPairs, BookKind.DAILY, 1.0, null, null);
+    }
 
-        for (PairAnalysisResult pair : cointegratedPairs) {
-            recommendations.add(buildRecommendation(pair));
+    public List<TradingRecommendation> analyzeAndPrint(
+            List<PairAnalysisResult> cointegratedPairs,
+            BookKind book,
+            double barsPerDay,
+            Double minHalfLifeDays,
+            Double tradeMaxHalfLifeDays
+    ) throws IOException {
+        qualityCtx.set(new QualityCtx(barsPerDay, minHalfLifeDays, tradeMaxHalfLifeDays));
+        try {
+            List<TradingRecommendation> recommendations = new ArrayList<>();
+            for (PairAnalysisResult pair : cointegratedPairs) {
+                recommendations.add(buildRecommendation(pair));
+            }
+            recommendations.sort(recommendationPriority());
+
+            if (book == BookKind.INTRADAY) {
+                lastIntradayRecommendations.clear();
+                lastIntradayRecommendations.addAll(recommendations);
+                saveToFile(recommendations, "trading-recommendations-intraday.json");
+            } else {
+                lastRecommendations.clear();
+                lastRecommendations.addAll(recommendations);
+                saveToFile(recommendations, "trading-recommendations.json");
+            }
+            printToConsole(recommendations, cointegratedPairs.size());
+            return List.copyOf(recommendations);
+        } finally {
+            qualityCtx.set(QualityCtx.daily());
         }
+    }
 
-        recommendations.sort(recommendationPriority());
-
-        lastRecommendations.clear();
-        lastRecommendations.addAll(recommendations);
-
-        saveToFile(recommendations);
-        printToConsole(recommendations, cointegratedPairs.size());
-
-        return List.copyOf(recommendations);
+    public List<TradingRecommendation> getLastIntradayRecommendations() {
+        return List.copyOf(lastIntradayRecommendations);
     }
 
     public List<TradingRecommendation> getLastRecommendations() {
@@ -106,7 +143,14 @@ public class TradingRecommendationService {
 
         double zEntry = properties.cointegration().zScoreEntry();
         double zExit = properties.cointegration().zScoreExit();
-        boolean qualityOk = riskPolicyService.passesQualityFilters(pair);
+        boolean qualityOk;
+        QualityCtx ctx = qualityCtx.get();
+        if (ctx == null || ctx.barsPerDay() <= 1.0000001 && ctx.minHlDays() == null) {
+            qualityOk = riskPolicyService.passesQualityFilters(pair);
+        } else {
+            qualityOk = riskPolicyService.passesQualityFilters(
+                    pair, ctx.barsPerDay(), ctx.minHlDays(), ctx.tradeMaxHlDays());
+        }
         boolean reversal = properties.cointegration().entryReversalRequired();
 
         double zPrev = Double.NaN;
@@ -320,7 +364,12 @@ public class TradingRecommendationService {
     }
 
     private String beginnerSkip(PairAnalysisResult pair) {
-        return "Пара отфильтрована: " + riskPolicyService.qualityRejectReason(pair)
+        QualityCtx ctx = qualityCtx.get();
+        String reason = ctx == null
+                ? riskPolicyService.qualityRejectReason(pair)
+                : riskPolicyService.qualityRejectReason(
+                pair, ctx.barsPerDay(), ctx.minHlDays(), ctx.tradeMaxHlDays());
+        return "Пара отфильтрована: " + reason
                 + ". Для новичка это значит: даже при «красивом» Z лучше пропустить — "
                 + "история возврата спреда выглядит слабой или слишком шумной.";
     }
@@ -419,7 +468,11 @@ public class TradingRecommendationService {
     }
 
     private void saveToFile(List<TradingRecommendation> recommendations) throws IOException {
-        Path file = recommendationsFile();
+        saveToFile(recommendations, "trading-recommendations.json");
+    }
+
+    private void saveToFile(List<TradingRecommendation> recommendations, String fileName) throws IOException {
+        Path file = Path.of(properties.dataDir(), fileName);
         Files.createDirectories(file.getParent());
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), recommendations);
     }

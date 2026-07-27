@@ -159,6 +159,24 @@ class PaperTradingServiceTest {
         assertEquals("GAZP", service.getOpenTrades().get(0).tickerY());
     }
 
+    @Test
+    void respectsPerBookOpenCapFromAllocator() throws Exception {
+        PaperTradingService service = newService(mockLookup());
+        var alloc = com.moex.cointegration.config.CapitalProperties.defaults().allocation();
+        // 100k → dailyMax=1
+        assertEquals(1, alloc.dailyMaxPairs());
+
+        service.sync(List.of(
+                finalRec("SBER", "LKOH", TradingSignal.LONG_SPREAD, FinalTradeDecision.ENTER, -2.5,
+                        LocalDate.of(2026, 7, 10)),
+                finalRec("GAZP", "ROSN", TradingSignal.SHORT_SPREAD, FinalTradeDecision.ENTER, 2.4,
+                        LocalDate.of(2026, 7, 10))
+        ), List.of(), com.moex.cointegration.model.BookKind.DAILY,
+                alloc.dailyMaxPairs(), alloc.dailyGrossCap());
+
+        assertEquals(1, service.getOpenTrades(com.moex.cointegration.model.BookKind.DAILY).size());
+    }
+
     private PaperTradingService newService(PairLookupService lookup) {
         ImoexProperties props = propsWithMaxOpen(5);
         return new PaperTradingService(props, new RiskPolicyService(props), lookup);
@@ -175,7 +193,7 @@ class PaperTradingServiceTest {
                         true, 0.02, 0.25, 1.5, null, null, null, null,
                         null, null, null, null, null, null, null, null, null, null),
                 ImoexProperties.WalkForwardProperties.defaults(),
-                new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null, 0.0, false),
+                new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null, false, null, 0.0, false),
                 ImoexProperties.UniverseProperties.defaults(),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()

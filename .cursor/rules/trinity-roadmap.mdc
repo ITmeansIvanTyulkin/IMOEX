@@ -17,20 +17,22 @@ Three strategies under one brand. Do not jump ahead without completing the curre
 
 Mean-reversion on cointegrated IMOEX pairs, **sideways only** (ADX blocks TREND).
 
-Target operator profile: equity **from ~100 000 ₽**, book of **1–2 pairs**, not a wide multi-pair portfolio.
+Target operator profile: equity **from ~100 000 ₽**, dual books sized by equity (no leverage below 1M).
 
-Two horizons of the **same** pairs module (both are in scope for strategy 1):
+Two horizons of the **same** pairs module run **together** (not a manual mode switch):
 
-1. **Multi-day / позиционный** (default `session.mode: DAILY`) — hold a few days; FA after tech, then recommendations, then paper.
-2. **Intraday** (`INTRADAY`) — 1H bars, flatten by session end; **no fundamental filter** (news lag).
+1. **Multi-day / DAILY book** — hold a few days; FA after tech, then recommendations, then paper.
+2. **Intraday / INTRADAY book** — 1H bars (MOEX ISS), flatten by session end; **no fundamental filter**.
 
-Pipeline order (always): **tech → FA (DAILY only) → final recommendations → paper**. Never open paper before FA on DAILY.
+Capital: auto-split (~40% daily / 60% intraday gross); slots from equity (`floor(equity/100k)`).
 
-Do not start calendar/options until pairs (multi-day + intraday) is validated on paper/OOS.
+Pipeline order per book: **tech → FA (DAILY only) → final recommendations → paper**. Never open DAILY paper before FA.
+
+Do not start calendar/options until pairs (daily + intraday together) is validated on paper/OOS.
 
 ## Config intent (pairs)
 
-- `max-open-pairs` ≈ 2, notional per leg sized for ~100k equity (no leverage below 1M).
+- Dual-book caps from `CapitalAllocator`, notional per leg sized for ~100k equity.
 - Prefer honest cash PnL and regime discipline over optimistic in-sample Sharpe.
 
 ## Product truth

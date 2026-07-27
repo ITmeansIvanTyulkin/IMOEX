@@ -7,7 +7,7 @@ import com.moex.cointegration.model.PriceSeries;
 import com.moex.cointegration.quant.AdfTest;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -22,7 +22,7 @@ import java.util.Set;
 @Service
 public class PreprocessingService {
 
-    private static final int MIN_PAIR_DAYS = 100;
+    private static final int MIN_PAIR_BARS = 100;
 
     /**
      * Применяет LOCF ко всем тикерам в наборе рядов.
@@ -50,41 +50,41 @@ public class PreprocessingService {
     }
 
     /**
-     * Выравнивает два ряда по пересечению торговых дат и возвращает log-цены для коинтеграции.
-     * Если общих дней меньше {@link #MIN_PAIR_DAYS}, пара пропускается.
+     * Выравнивает два ряда по пересечению меток времени и возвращает log-цены для коинтеграции.
+     * Если общих баров меньше {@link #MIN_PAIR_BARS}, пара пропускается.
      */
     public Optional<AlignedPairData> alignPair(PriceSeries seriesY, PriceSeries seriesX) {
-        Map<LocalDate, Double> yByDate = toDateMap(seriesY);
-        Map<LocalDate, Double> xByDate = toDateMap(seriesX);
+        Map<LocalDateTime, Double> yByTs = toTsMap(seriesY);
+        Map<LocalDateTime, Double> xByTs = toTsMap(seriesX);
 
-        Set<LocalDate> commonDates = new HashSet<>(yByDate.keySet());
-        commonDates.retainAll(xByDate.keySet());
+        Set<LocalDateTime> common = new HashSet<>(yByTs.keySet());
+        common.retainAll(xByTs.keySet());
 
-        List<LocalDate> sortedDates = commonDates.stream().sorted().toList();
-        if (sortedDates.size() < MIN_PAIR_DAYS) {
+        List<LocalDateTime> sorted = common.stream().sorted().toList();
+        if (sorted.size() < MIN_PAIR_BARS) {
             return Optional.empty();
         }
 
-        double[] logY = new double[sortedDates.size()];
-        double[] logX = new double[sortedDates.size()];
-        LocalDate[] dates = new LocalDate[sortedDates.size()];
+        double[] logY = new double[sorted.size()];
+        double[] logX = new double[sorted.size()];
+        LocalDateTime[] begins = new LocalDateTime[sorted.size()];
 
-        for (int i = 0; i < sortedDates.size(); i++) {
-            LocalDate date = sortedDates.get(i);
-            dates[i] = date;
-            logY[i] = Math.log(yByDate.get(date));
-            logX[i] = Math.log(xByDate.get(date));
+        for (int i = 0; i < sorted.size(); i++) {
+            LocalDateTime ts = sorted.get(i);
+            begins[i] = ts;
+            logY[i] = Math.log(yByTs.get(ts));
+            logX[i] = Math.log(xByTs.get(ts));
         }
 
-        return Optional.of(new AlignedPairData(logY, logX, dates));
+        return Optional.of(new AlignedPairData(logY, logX, begins));
     }
 
-    private Map<LocalDate, Double> toDateMap(PriceSeries series) {
-        Map<LocalDate, Double> byDate = new HashMap<>();
+    private Map<LocalDateTime, Double> toTsMap(PriceSeries series) {
+        Map<LocalDateTime, Double> byTs = new HashMap<>();
         for (PricePoint point : series.points()) {
-            byDate.put(point.date(), point.close());
+            byTs.put(point.begin(), point.close());
         }
-        return byDate;
+        return byTs;
     }
 
     /**
@@ -106,7 +106,7 @@ public class PreprocessingService {
             } else {
                 lastValid = value;
             }
-            filled.add(new PricePoint(point.date(), value));
+            filled.add(new PricePoint(point.begin(), value));
         }
 
         return new PriceSeries(series.ticker(), filled);
@@ -119,16 +119,5 @@ public class PreprocessingService {
         return series.points().stream()
                 .mapToDouble(p -> Math.log(p.close()))
                 .toArray();
-    }
-
-    /**
-     * Извлекает массив дат, синхронизированный с ценовым рядом (для графиков спреда).
-     */
-    public LocalDateArray dates(PriceSeries series) {
-        return new LocalDateArray(series.points().stream().map(PricePoint::date).toArray(LocalDate[]::new));
-    }
-
-    /** Обёртка над массивом дат для передачи в аналитику спреда. */
-    public record LocalDateArray(LocalDate[] values) {
     }
 }

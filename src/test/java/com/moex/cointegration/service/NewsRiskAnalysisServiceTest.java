@@ -107,16 +107,57 @@ class NewsRiskAnalysisServiceTest {
     }
 
     @Test
-    void skipsFundamentalFilterInIntradayMode() {
+    void skipsFundamentalFilterForIntradayBook() {
         FakeMoexNewsClient newsClient = new FakeMoexNewsClient(List.of(
                 new NewsItem(1L, "О приостановке торгов ценными бумагами SBER", LocalDateTime.now(), "TEST")
         ));
         newsClient.status("SBER", tradable("SBER", "Сбербанк"));
         newsClient.status("LKOH", tradable("LKOH", "ЛУКОЙЛ"));
 
-        SessionProperties intraday = new SessionProperties(
-                "INTRADAY", "18:30", "18:45", "10:00", "18:45", true,
-                "paper-journal-intraday.json", 60
+        NewsRiskAnalysisService service = new NewsRiskAnalysisService(
+                newsClient,
+                new FakeMoexIssClient(List.of("SBER", "LKOH")),
+                new NewsTriggerMatcher(),
+                props(true)
+        );
+
+        TradingRecommendation tech = new TradingRecommendation(
+                "SBER", "LKOH", TradingSignal.SHORT_SPREAD,
+                2.4, LocalDate.now().minusDays(1), 0.1,
+                0.8, 12, 1.1, 0.01,
+                "short", "details"
+        );
+
+        FinalTradeRecommendation out = service.analyze(List.of(tech),
+                com.moex.cointegration.model.BookKind.INTRADAY).get(0);
+        assertEquals(FinalTradeDecision.ENTER, out.decision());
+        assertTrue(out.news().summary().contains("INTRADAY"));
+    }
+
+    @Test
+    void skipsFundamentalFilterInLegacyIntradayMode() {
+        FakeMoexNewsClient newsClient = new FakeMoexNewsClient(List.of(
+                new NewsItem(1L, "О приостановке торгов ценными бумагами SBER", LocalDateTime.now(), "TEST")
+        ));
+        newsClient.status("SBER", tradable("SBER", "Сбербанк"));
+        newsClient.status("LKOH", tradable("LKOH", "ЛУКОЙЛ"));
+
+        SessionProperties intraday = SessionProperties.defaults();
+        intraday = new SessionProperties(
+                "INTRADAY",
+                intraday.preCloseStart(),
+                intraday.preCloseEnd(),
+                intraday.sessionOpen(),
+                intraday.sessionClose(),
+                intraday.preventWeekendHold(),
+                intraday.intradayJournalFile(),
+                intraday.candleInterval(),
+                intraday.hoursPerSession(),
+                intraday.hourlyLookbackDays(),
+                intraday.intradayRollingZWindow(),
+                intraday.intradayMaxHoldBars(),
+                intraday.intradayMinHalfLifeDays(),
+                intraday.intradayTradeMaxHalfLifeDays()
         );
         NewsRiskAnalysisService service = new NewsRiskAnalysisService(
                 newsClient,

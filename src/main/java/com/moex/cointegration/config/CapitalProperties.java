@@ -3,13 +3,15 @@ package com.moex.cointegration.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Капитал оператора: без плеча до порога.
+ * Капитал оператора: без плеча до порога; dual-book split daily/intraday.
  */
 @ConfigurationProperties(prefix = "imoex.capital")
 public record CapitalProperties(
         Double equityRub,
         Double allowLeverageAboveRub,
-        Double maxGrossWhenNoLeverage
+        Double maxGrossWhenNoLeverage,
+        Double dailyGrossShare,
+        Double intradayGrossShare
 ) {
     public CapitalProperties {
         if (equityRub == null || equityRub <= 0) {
@@ -21,19 +23,29 @@ public record CapitalProperties(
         if (maxGrossWhenNoLeverage == null || maxGrossWhenNoLeverage <= 0) {
             maxGrossWhenNoLeverage = 1.0;
         }
+        if (dailyGrossShare == null || dailyGrossShare <= 0) {
+            dailyGrossShare = 0.40;
+        }
+        if (intradayGrossShare == null || intradayGrossShare <= 0) {
+            intradayGrossShare = 0.60;
+        }
     }
 
     public static CapitalProperties defaults() {
-        return new CapitalProperties(100_000.0, 1_000_000.0, 1.0);
+        return new CapitalProperties(100_000.0, 1_000_000.0, 1.0, 0.40, 0.60);
     }
 
     public boolean leverageAllowed() {
         return equityRub >= allowLeverageAboveRub;
     }
 
-    /** Максимальный суммарный notional (обе ноги) при текущем equity. */
+    /** Максимальный суммарный notional (обе книги) при текущем equity. */
     public double maxGrossNotional() {
         double mult = leverageAllowed() ? Math.max(1.0, maxGrossWhenNoLeverage) : maxGrossWhenNoLeverage;
         return equityRub * mult;
+    }
+
+    public CapitalAllocator.Allocation allocation() {
+        return CapitalAllocator.allocate(this);
     }
 }

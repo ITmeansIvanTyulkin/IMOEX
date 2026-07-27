@@ -5,6 +5,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.moex.cointegration.config.CapitalProperties;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.config.SessionProperties;
+import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.PairAnalysisResult;
@@ -53,6 +54,7 @@ public class PaperTradingService {
     private final RiskPolicyService riskPolicyService;
     private final PairLookupService pairLookupService;
     private final MarketDataStorage storage;
+    private final PaperAlertService alertService;
     private final ObjectMapper objectMapper;
     private final List<PaperTradeEntry> entries = new CopyOnWriteArrayList<>();
 
@@ -63,7 +65,8 @@ public class PaperTradingService {
             SessionProperties sessionProperties,
             RiskPolicyService riskPolicyService,
             PairLookupService pairLookupService,
-            MarketDataStorage storage
+            MarketDataStorage storage,
+            PaperAlertService alertService
     ) {
         this.properties = properties;
         this.capitalProperties = capitalProperties;
@@ -71,6 +74,7 @@ public class PaperTradingService {
         this.riskPolicyService = riskPolicyService;
         this.pairLookupService = pairLookupService;
         this.storage = storage;
+        this.alertService = alertService;
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     }
 
@@ -81,22 +85,28 @@ public class PaperTradingService {
             PairLookupService pairLookupService
     ) {
         this(properties, CapitalProperties.defaults(), SessionProperties.defaults(),
-                riskPolicyService, pairLookupService, null);
+                riskPolicyService, pairLookupService, null, null);
     }
 
     @PostConstruct
     void load() {
-        Path file = journalFile();
+        entries.clear();
+        loadJournalFile(journalFile(BookKind.DAILY));
+        loadJournalFile(journalFile(BookKind.INTRADAY));
+        log.info("Loaded {} paper trades (daily+intraday journals)", entries.size());
+    }
+
+    private void loadJournalFile(Path file) {
         if (!Files.exists(file)) {
             return;
         }
         try {
             PaperJournal journal = objectMapper.readValue(file.toFile(), PaperJournal.class);
-            entries.clear();
             if (journal.entries() != null) {
                 entries.addAll(journal.entries());
             }
-            log.info("Loaded {} paper trades from {}", entries.size(), file);
+            log.info("Loaded {} paper trades from {}",
+                    journal.entries() == null ? 0 : journal.entries().size(), file);
         } catch (Exception ex) {
             log.warn("Could not load paper journal {}: {}", file, ex.getMessage());
         }
@@ -106,24 +116,51 @@ public class PaperTradingService {
         return List.copyOf(entries);
     }
 
+    public List<PaperTradeEntry> getJournal(BookKind book) {
+        String bookName = book.name();
+        return entries.stream()
+                .filter(e -> bookName.equalsIgnoreCase(e.book() == null ? "DAILY" : e.book()))
+                .toList();
+    }
+
     public List<PaperTradeEntry> getOpenTrades() {
-        String book = currentBook();
+        return getOpenTrades(BookKind.DAILY);
+    }
+
+    public List<PaperTradeEntry> getOpenTrades(BookKind book) {
+        String bookName = book.name();
         return entries.stream()
                 .filter(e -> "OPEN".equals(e.status()))
-                .filter(e -> book.equalsIgnoreCase(e.book() == null ? "DAILY" : e.book()))
+                .filter(e -> bookName.equalsIgnoreCase(e.book() == null ? "DAILY" : e.book()))
                 .toList();
+    }
+
+    public List<PaperTradeEntry> getAllOpenTrades() {
+        return entries.stream().filter(e -> "OPEN".equals(e.status())).toList();
     }
 
     public synchronized List<PaperTradeEntry> syncFromFinals(List<FinalTradeRecommendation> finals)
             throws IOException {
+        var alloc = capitalProperties.allocation();
         List<TradingRecommendation> quotes = finals == null ? List.of()
                 : finals.stream().map(FinalTradeRecommendation::technical).toList();
-        return sync(finals, quotes);
+        return sync(finals, quotes, BookKind.DAILY, alloc.dailyMaxPairs(), alloc.dailyGrossCap());
     }
 
     public synchronized List<PaperTradeEntry> sync(
             List<FinalTradeRecommendation> finals,
             List<TradingRecommendation> technicalQuotes
+    ) throws IOException {
+        var alloc = capitalProperties.allocation();
+        return sync(finals, technicalQuotes, BookKind.DAILY, alloc.dailyMaxPairs(), alloc.dailyGrossCap());
+    }
+
+    public synchronized List<PaperTradeEntry> sync(
+            List<FinalTradeRecommendation> finals,
+            List<TradingRecommendation> technicalQuotes,
+            BookKind book,
+            int maxPairs,
+            double grossCap
     ) throws IOException {
         if (!properties.paper().enabled()) {
             return List.of();
@@ -136,35 +173,38 @@ public class PaperTradingService {
             }
         }
 
-        if (sessionProperties.intradayMode()) {
+        if (book == BookKind.INTRADAY) {
             MarketSession.Phase phase = MarketSession.current(LocalDateTime.now(), sessionProperties);
             if (phase == MarketSession.Phase.PRE_CLOSE) {
-                int flat = flattenAll(quotes, "PRE_CLOSE flatten — без овернайта в INTRADAY");
-                save();
-                log.info("Paper PRE_CLOSE flattened {}", flat);
+                int flat = flattenAll(quotes, book, "PRE_CLOSE flatten — без овернайта в INTRADAY");
+                save(book);
+                log.info("Paper PRE_CLOSE flattened {} ({})", flat, book);
                 return List.of();
             }
             if (phase == MarketSession.Phase.CLOSED || phase == MarketSession.Phase.OVERNIGHT) {
-                log.info("Paper skip opens: session {}", phase);
-                int closed = markAndCloseOpen(quotes);
-                save();
+                log.info("Paper skip opens: session {} ({})", phase, book);
+                markAndCloseOpen(quotes, book);
+                save(book);
                 return List.of();
             }
         }
 
-        int closed = markAndCloseOpen(quotes);
-        List<PaperTradeEntry> opened = openNew(finals == null ? List.of() : finals);
-        save();
-        log.info("Paper sync: opened={}, closed={}, openNow={}, realized≈{} ₽, unrealized≈{} ₽",
-                opened.size(), closed, getOpenTrades().size(),
+        int closed = markAndCloseOpen(quotes, book);
+        List<PaperTradeEntry> opened = openNew(finals == null ? List.of() : finals, book, maxPairs, grossCap);
+        save(book);
+        if (alertService != null && !opened.isEmpty()) {
+            alertService.recordNewOpens(opened);
+        }
+        log.info("Paper sync [{}]: opened={}, closed={}, openNow={}, realized≈{} ₽, unrealized≈{} ₽",
+                book, opened.size(), closed, getOpenTrades(book).size(),
                 round(sumRealizedRub()), round(sumUnrealizedRub()));
         return opened;
     }
 
-    private int flattenAll(Map<String, TradingRecommendation> quotes, String reason) {
+    private int flattenAll(Map<String, TradingRecommendation> quotes, BookKind book, String reason) {
         List<PaperTradeEntry> updated = new ArrayList<>();
-        for (PaperTradeEntry open : getOpenTrades()) {
-            Quote q = resolveQuote(open, quotes);
+        for (PaperTradeEntry open : getOpenTrades(book)) {
+            Quote q = resolveQuote(open, quotes, book);
             double z = q == null ? (open.markZ() == null ? open.entryZ() : open.markZ()) : q.z();
             LocalDate asOf = q == null ? open.asOfDate() : q.asOf();
             double[] pnl = computePnl(open, z, asOf, q == null ? null : q.priceY(), q == null ? null : q.priceX());
@@ -176,25 +216,30 @@ public class PaperTradingService {
         return updated.size();
     }
 
-    private List<PaperTradeEntry> openNew(List<FinalTradeRecommendation> finals) {
+    private List<PaperTradeEntry> openNew(
+            List<FinalTradeRecommendation> finals,
+            BookKind book,
+            int maxPairs,
+            double grossCap
+    ) {
         List<PaperTradeEntry> opened = new ArrayList<>();
-        int openCount = getOpenTrades().size();
-        int capacity = riskPolicyService.maxOpenPairs() - openCount;
+        int openCount = getOpenTrades(book).size();
+        int capacity = Math.max(0, maxPairs - openCount);
         if (capacity <= 0 || finals.isEmpty()) {
             return opened;
         }
 
-        if (sessionProperties.intradayMode()
+        if (book == BookKind.INTRADAY
                 && Boolean.TRUE.equals(sessionProperties.preventWeekendHold())
                 && MarketSession.isWeekend(LocalDate.now())) {
             return opened;
         }
 
-        Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> openBySector = countOpenBySector();
-        double openGross = getOpenTrades().stream()
+        Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> openBySector = countOpenBySector(book);
+        double openGross = getOpenTrades(book).stream()
                 .mapToDouble(e -> e.notionalY() + e.notionalX())
                 .sum();
-        double maxGross = capitalProperties.maxGrossNotional();
+        double maxGross = grossCap > 0 ? grossCap : capitalProperties.maxGrossNotional();
 
         List<FinalTradeRecommendation> candidates = finals.stream()
                 .filter(f -> f.decision() == FinalTradeDecision.ENTER
@@ -214,7 +259,7 @@ public class PaperTradingService {
             if (opened.size() >= capacity) {
                 break;
             }
-            if (alreadyOpen(f.technical().tickerY(), f.technical().tickerX())) {
+            if (alreadyOpen(f.technical().tickerY(), f.technical().tickerX(), book)) {
                 continue;
             }
             if (!allowSectorSlot(f.technical().tickerY(), f.technical().tickerX(), openBySector)) {
@@ -232,20 +277,20 @@ public class PaperTradingService {
             double beta = Math.abs(f.technical().hedgeRatio());
             double notionalX = notionalY * beta;
             if (openGross + notionalY + notionalX > maxGross + 1e-6) {
-                log.info("Paper skip {}/{}: capital gross cap {} (equity={})",
-                        f.technical().tickerY(), f.technical().tickerX(),
+                log.info("Paper skip {}/{} [{}]: capital gross cap {} (equity={})",
+                        f.technical().tickerY(), f.technical().tickerX(), book,
                         String.format(Locale.ROOT, "%.0f", maxGross),
                         String.format(Locale.ROOT, "%.0f", capitalProperties.equityRub()));
                 continue;
             }
 
-            Double priceY = lastPrice(f.technical().tickerY());
-            Double priceX = lastPrice(f.technical().tickerX());
+            Double priceY = lastPrice(f.technical().tickerY(), book);
+            Double priceX = lastPrice(f.technical().tickerX(), book);
             Double qtyY = priceY != null && priceY > 0 ? notionalY / priceY : null;
             Double qtyX = priceX != null && priceX > 0 ? notionalX / priceX : null;
 
             double slipCost = (notionalY + notionalX) * properties.paper().slippageFraction();
-            String notes = "AUTO OPEN: " + f.decisionSummary()
+            String notes = "AUTO OPEN [" + book + "]: " + f.decisionSummary()
                     + (capitalProperties.leverageAllowed() ? "" : " [no-leverage]");
             if (slipCost > 0) {
                 notes += String.format(Locale.ROOT, "; slip≈%.0f₽", slipCost);
@@ -276,7 +321,7 @@ public class PaperTradingService {
                     1.0,
                     0.0,
                     qtyY, qtyX, priceY, priceX,
-                    currentBook()
+                    book.name()
             );
             entries.add(entry);
             opened.add(entry);
@@ -286,9 +331,9 @@ public class PaperTradingService {
         return opened;
     }
 
-    private Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> countOpenBySector() {
+    private Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> countOpenBySector(BookKind book) {
         Map<com.moex.cointegration.universe.SectorCatalog.Sector, Integer> map = new HashMap<>();
-        for (PaperTradeEntry e : getOpenTrades()) {
+        for (PaperTradeEntry e : getOpenTrades(book)) {
             bumpSector(e.tickerY(), map);
         }
         return map;
@@ -327,16 +372,18 @@ public class PaperTradingService {
                 openBySector.merge(s, 1, Integer::sum));
     }
 
-    private int markAndCloseOpen(Map<String, TradingRecommendation> quotes) {
+    private int markAndCloseOpen(Map<String, TradingRecommendation> quotes, BookKind book) {
         double zExit = properties.cointegration().zScoreExit();
         var risk = properties.risk();
-        int maxHold = risk.maxHoldBars();
+        int maxHold = book == BookKind.INTRADAY
+                ? sessionProperties.intradayMaxHoldBars()
+                : risk.maxHoldBars();
         List<PaperTradeEntry> updated = new ArrayList<>();
 
-        for (PaperTradeEntry open : getOpenTrades()) {
-            Quote q = resolveQuote(open, quotes);
+        for (PaperTradeEntry open : getOpenTrades(book)) {
+            Quote q = resolveQuote(open, quotes, book);
             if (q == null) {
-                log.warn("Paper: no Z quote for open {}/{}", open.tickerY(), open.tickerX());
+                log.warn("Paper: no Z quote for open {}/{} [{}]", open.tickerY(), open.tickerX(), book);
                 continue;
             }
 
@@ -347,7 +394,7 @@ public class PaperTradingService {
             double[] pnl = computePnl(open, q.z(), q.asOf(), q.priceY(), q.priceX());
             double pnlPct = pnl[0];
             double pnlRub = pnl[1];
-            int barsHeld = (int) ChronoUnit.DAYS.between(open.asOfDate(), q.asOf());
+            int barsHeld = barsHeld(open, q.asOf(), book);
             if (barsHeld < 0) {
                 barsHeld = 0;
             }
@@ -378,6 +425,14 @@ public class PaperTradingService {
             replace(e);
         }
         return (int) updated.stream().filter(e -> "CLOSED".equals(e.status())).count();
+    }
+
+    private static int barsHeld(PaperTradeEntry open, LocalDate quoteAsOf, BookKind book) {
+        if (book == BookKind.INTRADAY) {
+            // часы удержания от открытия сделки (1H-книга)
+            return (int) ChronoUnit.HOURS.between(open.openedAt(), LocalDateTime.now());
+        }
+        return (int) ChronoUnit.DAYS.between(open.asOfDate(), quoteAsOf);
     }
 
     private String closeReason(
@@ -455,9 +510,13 @@ public class PaperTradingService {
     }
 
     private Quote resolveQuote(PaperTradeEntry open, Map<String, TradingRecommendation> quotes) {
+        return resolveQuote(open, quotes, BookKind.DAILY);
+    }
+
+    private Quote resolveQuote(PaperTradeEntry open, Map<String, TradingRecommendation> quotes, BookKind book) {
         TradingRecommendation fromMap = quotes.get(key(open.tickerY(), open.tickerX()));
-        Double py = lastPrice(open.tickerY());
-        Double px = lastPrice(open.tickerX());
+        Double py = lastPrice(open.tickerY(), book);
+        Double px = lastPrice(open.tickerX(), book);
         if (fromMap != null && !Double.isNaN(fromMap.currentZScore())) {
             boolean cusum = false;
             double stop = properties.risk().stopZ();
@@ -504,20 +563,43 @@ public class PaperTradingService {
     }
 
     private Double lastPrice(String ticker) {
+        return lastPrice(ticker, BookKind.DAILY);
+    }
+
+    private Double lastPrice(String ticker, BookKind book) {
         if (storage == null) {
             return null;
+        }
+        if (book == BookKind.INTRADAY) {
+            try {
+                List<com.moex.cointegration.model.Candle> candles = storage.loadHourlyCandles(ticker);
+                if (candles != null && !candles.isEmpty()) {
+                    return candles.get(candles.size() - 1).close();
+                }
+            } catch (Exception ignored) {
+                // fall through to daily
+            }
         }
         return storage.lastClose(ticker).orElse(null);
     }
 
     public PaperJournal summary() {
+        return summary(null);
+    }
+
+    public PaperJournal summary(BookKind book) {
+        List<PaperTradeEntry> journal = book == null ? getJournal() : getJournal(book);
+        List<PaperTradeEntry> opens = book == null ? getAllOpenTrades() : getOpenTrades(book);
+        double realized = book == null ? sumRealizedRub() : sumRealizedRub(book);
+        double unrealized = book == null ? sumUnrealizedRub() : sumUnrealizedRub(book);
+        int closed = (int) journal.stream().filter(e -> "CLOSED".equals(e.status())).count();
         return new PaperJournal(
                 LocalDateTime.now(),
-                getJournal(),
-                round(sumRealizedRub()),
-                round(sumUnrealizedRub()),
-                getOpenTrades().size(),
-                (int) entries.stream().filter(e -> "CLOSED".equals(e.status())).count()
+                journal,
+                round(realized),
+                round(unrealized),
+                opens.size(),
+                closed
         );
     }
 
@@ -530,11 +612,17 @@ public class PaperTradingService {
     }
 
     private double sumRealizedRub() {
-        double closed = entries.stream()
+        return sumRealizedRub(null);
+    }
+
+    private double sumRealizedRub(BookKind book) {
+        List<PaperTradeEntry> scope = book == null ? entries : getJournal(book);
+        double closed = scope.stream()
                 .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
                 .mapToDouble(PaperTradeEntry::pnlRub)
                 .sum();
-        double partialOpen = getOpenTrades().stream()
+        List<PaperTradeEntry> opens = book == null ? getAllOpenTrades() : getOpenTrades(book);
+        double partialOpen = opens.stream()
                 .filter(e -> e.realizedPartialRub() != null)
                 .mapToDouble(PaperTradeEntry::realizedPartialRub)
                 .sum();
@@ -542,7 +630,12 @@ public class PaperTradingService {
     }
 
     private double sumUnrealizedRub() {
-        return getOpenTrades().stream()
+        return sumUnrealizedRub(null);
+    }
+
+    private double sumUnrealizedRub(BookKind book) {
+        List<PaperTradeEntry> opens = book == null ? getAllOpenTrades() : getOpenTrades(book);
+        return opens.stream()
                 .filter(e -> e.unrealizedPnlRub() != null)
                 .mapToDouble(PaperTradeEntry::unrealizedPnlRub)
                 .sum();
@@ -567,8 +660,8 @@ public class PaperTradingService {
         return y.toUpperCase(Locale.ROOT) + "/" + x.toUpperCase(Locale.ROOT);
     }
 
-    private boolean alreadyOpen(String y, String x) {
-        return getOpenTrades().stream()
+    private boolean alreadyOpen(String y, String x, BookKind book) {
+        return getOpenTrades(book).stream()
                 .anyMatch(e -> e.tickerY().equalsIgnoreCase(y) && e.tickerX().equalsIgnoreCase(x));
     }
 
@@ -581,25 +674,27 @@ public class PaperTradingService {
         }
     }
 
-    private void save() throws IOException {
-        Path file = journalFile();
+    private void save(BookKind book) throws IOException {
+        Path file = journalFile(book);
         Files.createDirectories(file.getParent() == null ? Path.of(".") : file.getParent());
         objectMapper.writerWithDefaultPrettyPrinter()
-                .writeValue(file.toFile(), summary());
+                .writeValue(file.toFile(), summary(book));
     }
 
-    private Path journalFile() {
-        String name = sessionProperties.intradayMode()
-                ? sessionProperties.intradayJournalFile()
-                : properties.paper().journalFile();
-        if (name == null || name.isBlank()) {
-            name = sessionProperties.intradayMode() ? "paper-journal-intraday.json" : "paper-journal.json";
+    private Path journalFile(BookKind book) {
+        String name;
+        if (book == BookKind.INTRADAY) {
+            name = sessionProperties.intradayJournalFile();
+            if (name == null || name.isBlank()) {
+                name = "paper-journal-intraday.json";
+            }
+        } else {
+            name = properties.paper().journalFile();
+            if (name == null || name.isBlank()) {
+                name = "paper-journal.json";
+            }
         }
         return Path.of(properties.dataDir(), name);
-    }
-
-    private String currentBook() {
-        return sessionProperties.intradayMode() ? "INTRADAY" : "DAILY";
     }
 
     private record Quote(

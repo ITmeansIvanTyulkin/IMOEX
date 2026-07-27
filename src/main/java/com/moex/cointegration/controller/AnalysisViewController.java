@@ -93,7 +93,11 @@ public class AnalysisViewController {
     @GetMapping(value = "/paper", produces = MediaType.TEXT_HTML_VALUE)
     public String paperJournal() {
         PaperJournal journal = paperTradingService.summary();
-        return htmlRenderer.renderPaperJournal(journal);
+        return htmlRenderer.renderPaperJournal(
+                journal,
+                recommendationService.getLastRecommendations(),
+                recommendationService.getLastIntradayRecommendations()
+        );
     }
 
     @GetMapping(value = "/walk-forward", produces = MediaType.TEXT_HTML_VALUE)
@@ -112,6 +116,11 @@ public class AnalysisViewController {
     @GetMapping(value = "/strategy", produces = MediaType.TEXT_HTML_VALUE)
     public String strategy() {
         return htmlRenderer.renderStrategy();
+    }
+
+    @GetMapping(value = "/guide", produces = MediaType.TEXT_HTML_VALUE)
+    public String guide() {
+        return htmlRenderer.renderGuide();
     }
 
     @GetMapping(value = "/charts/{tickerY}/{tickerX}", produces = MediaType.TEXT_HTML_VALUE)
