@@ -10,7 +10,9 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -24,6 +26,7 @@ public class MoexIssClient {
 
     private static final Logger log = LoggerFactory.getLogger(MoexIssClient.class);
     private static final DateTimeFormatter MOEX_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter MOEX_DT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int PAGE_SIZE = 500;
 
     private final RestTemplate restTemplate;
@@ -179,9 +182,9 @@ public class MoexIssClient {
             int beginIdx = indexOf(columns, "begin");
 
             for (JsonNode row : data) {
-                LocalDate date = LocalDate.parse(row.get(beginIdx).asText().substring(0, 10));
+                LocalDateTime begin = parseBarBegin(row.get(beginIdx).asText());
                 candles.add(new Candle(
-                        date,
+                        begin,
                         row.get(openIdx).asDouble(),
                         row.get(highIdx).asDouble(),
                         row.get(lowIdx).asDouble(),
@@ -197,6 +200,21 @@ public class MoexIssClient {
         }
 
         return candles;
+    }
+
+    private static LocalDateTime parseBarBegin(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("Empty candle begin");
+        }
+        String v = raw.trim();
+        if (v.length() >= 19) {
+            try {
+                return LocalDateTime.parse(v.substring(0, 19), MOEX_DT);
+            } catch (DateTimeParseException ignored) {
+                // fall through
+            }
+        }
+        return LocalDate.parse(v.substring(0, 10), MOEX_DATE).atStartOfDay();
     }
 
     /** Возвращает индекс колонки в ISS-таблице по имени (без учёта регистра). */
