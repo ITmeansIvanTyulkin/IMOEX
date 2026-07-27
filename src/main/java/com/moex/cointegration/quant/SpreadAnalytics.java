@@ -6,6 +6,7 @@ import com.moex.cointegration.model.TradingMetrics;
 import org.apache.commons.math3.stat.regression.SimpleRegression;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,16 +32,28 @@ public final class SpreadAnalytics {
         return spread;
     }
 
-    /** Преобразует массив значений и дат в список точек для API и графиков. */
+    /** Преобразует массив значений и меток времени в список точек для API и графиков. */
+    public static List<SpreadPoint> toSeries(LocalDateTime[] begins, double[] values) {
+        if (begins.length != values.length) {
+            throw new IllegalArgumentException("begins and values must have the same length");
+        }
+        List<SpreadPoint> points = new ArrayList<>(values.length);
+        for (int i = 0; i < values.length; i++) {
+            points.add(new SpreadPoint(begins[i], values[i]));
+        }
+        return points;
+    }
+
+    /** Совместимость: дневные даты → begin atStartOfDay. */
     public static List<SpreadPoint> toSeries(LocalDate[] dates, double[] values) {
         if (dates.length != values.length) {
             throw new IllegalArgumentException("dates and values must have the same length");
         }
-        List<SpreadPoint> points = new ArrayList<>(values.length);
-        for (int i = 0; i < values.length; i++) {
-            points.add(new SpreadPoint(dates[i], values[i]));
+        LocalDateTime[] begins = new LocalDateTime[dates.length];
+        for (int i = 0; i < dates.length; i++) {
+            begins[i] = dates[i].atStartOfDay();
         }
-        return points;
+        return toSeries(begins, values);
     }
 
     /**
@@ -193,6 +206,25 @@ public final class SpreadAnalytics {
             double trailZ,
             double partialTpFraction
     ) {
+        return simulateMeanReversion(
+                spread, commissionRate, zEntry, zExit, zScoreSeries, stopZ, maxHoldBars,
+                borrowRateAnnual, requireEntryReversal, trailZ, partialTpFraction, 252.0);
+    }
+
+    public static TradingMetrics simulateMeanReversion(
+            double[] spread,
+            double commissionRate,
+            double zEntry,
+            double zExit,
+            double[] zScoreSeries,
+            double stopZ,
+            int maxHoldBars,
+            double borrowRateAnnual,
+            boolean requireEntryReversal,
+            double trailZ,
+            double partialTpFraction,
+            double barsPerYear
+    ) {
         if (spread.length != zScoreSeries.length) {
             throw new IllegalArgumentException("spread and zScoreSeries length mismatch");
         }
@@ -201,7 +233,8 @@ public final class SpreadAnalytics {
         }
 
         double scale = Math.max(sampleStd(spread, mean(spread)), 1e-6);
-        double dailyBorrow = Math.max(0.0, borrowRateAnnual) / 252.0;
+        double bpy = barsPerYear > 0 ? barsPerYear : 252.0;
+        double barBorrow = Math.max(0.0, borrowRateAnnual) / bpy;
         List<Double> strategyReturns = new ArrayList<>();
         int position = 0; // +1 long, -1 short
         double posScale = 1.0;
@@ -221,7 +254,7 @@ public final class SpreadAnalytics {
             double dailyReturn = 0.0;
             if (position != 0) {
                 dailyReturn = position * posScale * (spread[i] - spread[i - 1]) / scale;
-                dailyReturn -= dailyBorrow * posScale;
+                dailyReturn -= barBorrow * posScale;
                 barsInTrade++;
             }
 
@@ -296,7 +329,7 @@ public final class SpreadAnalytics {
                 .average()
                 .orElse(0.0);
         double std = Math.sqrt(variance);
-        double sharpe = std > 1e-12 ? (meanRet / std) * Math.sqrt(252.0) : 0.0;
+        double sharpe = std > 1e-12 ? (meanRet / std) * Math.sqrt(bpy) : 0.0;
 
         return new TradingMetrics(
                 sharpe,
