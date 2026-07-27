@@ -9,6 +9,7 @@ import com.moex.cointegration.model.TradingRecommendation;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -37,6 +38,7 @@ public class EventCalendarRiskService {
     private final ObjectMapper objectMapper;
     private List<EventCalendarEntry> events = List.of();
 
+    @Autowired
     public EventCalendarRiskService(SessionProperties sessionProperties, ImoexProperties properties) {
         this.sessionProperties = sessionProperties;
         this.properties = properties;
