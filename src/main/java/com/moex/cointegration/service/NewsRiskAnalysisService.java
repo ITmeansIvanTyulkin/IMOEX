@@ -48,6 +48,7 @@ public class NewsRiskAnalysisService {
     private final ImoexProperties properties;
     private final SessionProperties sessionProperties;
     private final RssNewsClient rssNewsClient;
+    private final EventCalendarRiskService eventCalendarRiskService;
 
     @Autowired
     public NewsRiskAnalysisService(
@@ -56,7 +57,8 @@ public class NewsRiskAnalysisService {
             NewsTriggerMatcher triggerMatcher,
             ImoexProperties properties,
             SessionProperties sessionProperties,
-            RssNewsClient rssNewsClient
+            RssNewsClient rssNewsClient,
+            EventCalendarRiskService eventCalendarRiskService
     ) {
         this.newsClient = newsClient;
         this.moexIssClient = moexIssClient;
@@ -64,6 +66,7 @@ public class NewsRiskAnalysisService {
         this.properties = properties;
         this.sessionProperties = sessionProperties;
         this.rssNewsClient = rssNewsClient;
+        this.eventCalendarRiskService = eventCalendarRiskService;
     }
 
     /** Тесты без Spring: DAILY, RSS off. */
@@ -75,7 +78,8 @@ public class NewsRiskAnalysisService {
     ) {
         this(newsClient, moexIssClient, triggerMatcher, properties,
                 SessionProperties.defaults(),
-                new RssNewsClient(new RestTemplate(), properties));
+                new RssNewsClient(new RestTemplate(), properties),
+                new EventCalendarRiskService(SessionProperties.defaults(), List.of()));
     }
 
     /**
@@ -89,10 +93,9 @@ public class NewsRiskAnalysisService {
 
     public List<FinalTradeRecommendation> analyze(List<TradingRecommendation> technical, BookKind book) {
         if (book == BookKind.INTRADAY) {
-            log.info("Fundamental filter skipped: INTRADAY book (tech-only)");
+            log.info("Fundamental filter skipped: INTRADAY book (tech-only + event calendar)");
             return technical.stream()
-                    .map(r -> passthrough(r,
-                            "Фундаментальный фильтр пропущен: книга INTRADAY (только техника)."))
+                    .map(r -> intradayWithEventOverlay(r))
                     .toList();
         }
 
@@ -365,6 +368,24 @@ public class NewsRiskAnalysisService {
                 .append("REDUCE = CONFLICT с осторожностью. ")
                 .append("BLOCK = CONFLICT / блокер — не открывать, даже если стрелки красивые.");
         return sb.toString();
+    }
+
+    private FinalTradeRecommendation intradayWithEventOverlay(TradingRecommendation rec) {
+        if (eventCalendarRiskService != null
+                && eventCalendarRiskService.shouldBlockNewEntry(rec, java.time.LocalDateTime.now())) {
+            String reason = eventCalendarRiskService.eventReason(rec.tickerY(), rec.tickerX(),
+                            java.time.LocalDateTime.now())
+                    .orElse("Событие в календаре — вход запрещён");
+            PairNewsAssessment news = new PairNewsAssessment(
+                    NewsRiskLevel.BLOCK, true, reason, List.of(), 0);
+            FinalTradeDecision decision = (rec.signal() == TradingSignal.LONG_SPREAD
+                    || rec.signal() == TradingSignal.SHORT_SPREAD)
+                    ? FinalTradeDecision.BLOCK
+                    : FinalTradeDecision.WATCH;
+            return new FinalTradeRecommendation(rec, news, decision,
+                    decisionSummary(decision, rec, news), beginnerGuide(decision, rec, news));
+        }
+        return passthrough(rec, "Фундаментальный фильтр пропущен: книга INTRADAY (только техника).");
     }
 
     private FinalTradeRecommendation passthrough(TradingRecommendation rec, String reason) {

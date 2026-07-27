@@ -157,7 +157,10 @@ class NewsRiskAnalysisServiceTest {
                 intraday.intradayRollingZWindow(),
                 intraday.intradayMaxHoldBars(),
                 intraday.intradayMinHalfLifeDays(),
-                intraday.intradayTradeMaxHalfLifeDays()
+                intraday.intradayTradeMaxHalfLifeDays(),
+                intraday.eventCalendarEnabled(),
+                intraday.eventFlattenMinutesBefore(),
+                intraday.eventCalendarFile()
         );
         NewsRiskAnalysisService service = new NewsRiskAnalysisService(
                 newsClient,
@@ -165,7 +168,8 @@ class NewsRiskAnalysisServiceTest {
                 new NewsTriggerMatcher(),
                 props(true),
                 intraday,
-                new RssNewsClient(new RestTemplate(), props(true))
+                new RssNewsClient(new RestTemplate(), props(true)),
+                new EventCalendarRiskService(intraday, List.of())
         );
 
         TradingRecommendation tech = new TradingRecommendation(

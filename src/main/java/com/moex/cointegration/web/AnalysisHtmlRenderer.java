@@ -205,6 +205,8 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#size">Размер позиции и лимиты</a></li>
                       <li><a href="#exits">Как выходим</a></li>
                       <li><a href="#paper">Paper и проверка на истории</a></li>
+                      <li><a href="#validation">Валидация: replay и издержки</a></li>
+                      <li><a href="#intraday-events">INTRADAY: календарь событий</a></li>
                       <li><a href="#limits">Честные ограничения</a></li>
                     </ol>
                   </nav>
@@ -358,10 +360,10 @@ public class AnalysisHtmlRenderer {
                   <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
                   <p>
                     Профиль оператора: счёт <strong>от ~100 000 ₽</strong>, узкая книга
-                    <strong>1–2 пары</strong> (не широкий портфель). Базовый notional на ногу
-                    в конфиге по умолчанию ~30 000 ₽ — чтобы одна пара с двумя ногами
-                    помещалась в капитал без плеча. Дальше размер масштабируется:
-                    волатильность спреда, расстояние до стопа по Z, REDUCE и режим NEUTRAL.
+                    <strong>1–2 пары</strong> (не широкий портфель). Базовый notional на ногу Y
+                    считается как <strong>доля equity</strong> (<code>notional-per-leg-pct</code>, по умолчанию 30%):
+                    при 100k ≈ 30k на ногу, при 200k ≈ 60k. Дальше размер уменьшается или увеличивается
+                    через dynamic sizing: волатильность спреда, расстояние до стопа по Z, REDUCE и режим NEUTRAL.
                     Плечо в модели не используется, пока equity ниже порога (~1 млн ₽).
                   </p>
                   <ul>
@@ -391,8 +393,9 @@ public class AnalysisHtmlRenderer {
                     <a href="/view/paper">Paper journal</a> — учебный журнал без брокера.
                     На каждом анализе система сама открывает ENTER/REDUCE, ведёт mark-to-market
                     и закрывает по правилам выше. PnL считается по количествам и ценам ног
-                    (с учётом упрощённого slippage и borrow), а не как «1 Z = 1%».
-                    Это всё ещё research-метрика, не брокерский отчёт.
+                    (с учётом slippage и borrow), а не как «1 Z = 1%».
+                    Slippage задаётся <strong>отдельно по книгам</strong>: DAILY ~20 bps, INTRADAY ~40 bps (stress).
+                    Это research-метрика, не брокерский отчёт.
                   </p>
                   <p>
                     <a href="/view/walk-forward">Walk-forward</a> режет историю на train/test окна:
@@ -400,12 +403,39 @@ public class AnalysisHtmlRenderer {
                     Это проверка «не подогнали ли мы всё под прошлый год», а не гарантия прибыли.
                   </p>
 
-                  <h3 id="limits">11. Честные ограничения</h3>
+                  <h3 id="validation">11. Валидация на истории (historical replay)</h3>
+                  <p>
+                    Дополнительно к walk-forward есть <strong>bar-by-bar replay</strong> всего paper-пайплайна
+                    на сохранённых свечах: на каждом баре система «видит» только историю ≤ as-of,
+                    строит Z/сигнал и синхронизирует paper — как если бы вы торговали день за днём.
+                  </p>
+                  <p>Запуск через API (нужны локальные свечи в <code>data/candles/</code>):</p>
+                  <pre class="code-block">POST /api/analysis/historical-replay?tickerY=SBER&amp;tickerX=LKOH&amp;from=2023-01-01&amp;to=2025-12-31&amp;book=DAILY</pre>
+                  <p>
+                    Ответ: сделки, net/realized PnL ₽, win rate, max drawdown.
+                    Подробнее в <a href="/view/guide">Как пользоваться системой</a>.
+                  </p>
+
+                  <h3 id="intraday-events">12. INTRADAY: календарь событий</h3>
+                  <p>
+                    Фундаментальный фильтр для INTRADAY намеренно отключён (новости запаздывают),
+                    но добавлен <strong>event overlay</strong>: файл <code>data/event-calendar.json</code>
+                    (шаблон — <code>event-calendar.example.json</code> в корне репозитория).
+                  </p>
+                  <ul>
+                    <li>за <strong>45 минут</strong> до события (отчётность, макро, дивиденды) — блок новых входов INTRADAY;</li>
+                    <li>открытые INTRADAY-позиции по затронутым тикерам — принудительный flatten;</li>
+                    <li>тикер <code>*</code> — событие для всего рынка.</li>
+                  </ul>
+                  <p>Конфиг: <code>imoex.session.event-calendar-enabled</code>, <code>event-flatten-minutes-before</code>.</p>
+
+                  <h3 id="limits">13. Честные ограничения</h3>
                   <ul>
                     <li>Стратегия классическая (textbook pairs) — только боковик, без трендового модуля.</li>
                     <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
                     <li>Новости по ISS — эвристика, не полный fundamental research.</li>
-                    <li>Шорт, borrow, проскальзывание и комиссии в жизни жёстче, чем в модели.</li>
+                    <li>Slippage в paper — модельный (bps), не стакан MOEX; INTRADAY может быть хуже 40 bps.</li>
+                    <li>Historical replay не заменяет брокерский demo (T-Invest sandbox) — следующий шаг к live.</li>
                     <li>Нужны месяцы чистого paper track-record, прежде чем судить об alpha.</li>
                   </ul>
                   <div class="callout">
