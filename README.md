@@ -15,7 +15,8 @@
 | Модуль | Что делает |
 |---|---|
 | **Данные** | MOEX ISS: дневные + 1H OHLCV (`data/candles/`, `data/candles-1h/`) — без TradingView |
-| **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P` (proxy шорта) |
+| **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P`; **INTRADAY tier-1** (~30 голубых фишек) |
+| **ATAS внутри TRINITY** | Microstructure gate на 1H: relative volume, spread proxy, delta ног, value area, session edges — без внешнего терминала |
 | **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) — отдельно по книгам DAILY / INTRADAY |
 | **Хедж** | Статический β или **Kalman** динамический hedge ratio |
 | **Сигналы** | Rolling Z, вход после **разворота** за ±entry, выход ≈ 0, stop / time-stop |
@@ -45,7 +46,8 @@ flowchart TB
   DTech --> FA[FA news]
   FA --> DPaper[paper-journal.json]
   IntraBook --> HTech[1H EG Z]
-  HTech --> SkipFA[No FA]
+  HTech --> ATAS[ATAS microstructure gate]
+  ATAS --> SkipFA[No FA]
   SkipFA --> IPaper[paper-journal-intraday.json]
 ```
 
@@ -274,8 +276,34 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | `imoex.paper.slippage-bps-intraday` | `40` | Slippage INTRADAY (stress, 0.4%) |
 | `imoex.session.event-calendar-file` | `data/event-calendar.json` | События для INTRADAY: flatten/block за N минут до события |
 | `imoex.session.event-flatten-minutes-before` | `45` | Окно flatten/block перед событием (минуты) |
+| `imoex.universe.intraday-tier-one-only` | `true` | INTRADAY: только whitelist 1-го эшелона (DAILY шире) |
+| `imoex.microstructure.min-relative-volume` | `0.60` | Мин. relative volume на 1H для входа |
+| `imoex.microstructure.max-spread-proxy-bps` | `35` | Макс. spread proxy (H–L)/close в bps |
 
-Подробнее — раздел [Валидация на истории](#валидация-на-истории-replay) и страница `/view/strategy`.
+Подробнее — разделы [ATAS внутри TRINITY](#atas-внутри-trinity) и [Валидация на истории](#валидация-на-истории-replay), страница `/view/strategy`.
+
+---
+
+## ATAS внутри TRINITY
+
+> **Коммерческое отличие.** Идеи профессионального order-flow (ATAS) встроены в продукт — отдельный терминал не нужен.
+
+Pairs mean-reversion на Z-score часто «красива» в backtest, но ломается в live: одна нога набирается, вторая — нет; спред proxy шире модели; вход на мёртвом часовом баре. TRINITY добавляет **execution-слой** поверх сигнала (только **INTRADAY**):
+
+| Механизм | Зачем |
+|---|---|
+| **Relative volume** | Не входить, когда объём часа сильно ниже медианы |
+| **Spread proxy** | Отсечь часы с широким H–L относительно цены (bps) |
+| **Delta proxy + leg sync** | Проверить, что order-flow обеих ног не противоречит LONG/SHORT spread |
+| **Volume profile (POC / VA)** | Цена ноги в зоне справедливого объёма |
+| **Session edges** | Skip первых/последних минут MOEX-сессии |
+| **INTRADAY tier-1** | Universe только из ~30 ликвиднейших тикеров (SBER, LKOH, GAZP, …) |
+
+Gate срабатывает в **рекомендациях** (сигнал → WATCH + причина) и в **paper** перед OPEN. Historical replay использует те же правила.
+
+**Задел под тренд (roadmap #2):** в коде уже есть `quant/trend` — delta momentum, breakout из value area, absorption (`imoex.microstructure.trend`, по умолчанию `enabled: false`).
+
+**Честно:** сейчас это прокси по **OHLCV MOEX ISS**, не полная лента сделок. С T-Invest sandbox точность исполнения можно калибровать дальше.
 
 ---
 
@@ -409,6 +437,16 @@ imoex:
     min-price: 5.0
     max-zero-volume-fraction: 0.15
     exclude-preferred: true            # SBERP, SNGSP, …
+    intraday-tier-one-only: true       # INTRADAY: только 1-й эшелон
+  microstructure:
+    enabled: true
+    intraday-enabled: true
+    min-relative-volume: 0.60
+    max-spread-proxy-bps: 35
+    min-leg-delta-alignment: 0.15
+    block-outside-value-area: true
+    trend:
+      enabled: false                   # задел для трендовой стратегии
   risk:
     stop-z: 3.5
     max-hold-bars: 40
@@ -446,6 +484,7 @@ imoex:
 | Модуль | Конфиг | Где видно |
 |---|---|---|
 | Universe filter | `imoex.universe.*` | до EG в `/analysis/run` |
+| ATAS microstructure | `imoex.microstructure.*` | INTRADAY: рекомендации WATCH + paper skip |
 | Entry reversal | `require-entry-reversal` | сигналы + график |
 | Kalman / rolling Z / FDR | `use-kalman-hedge`, `use-rolling-z`, `fdr-q` | метрики пар |
 | Regime (ADX) | `imoex.regime.*` | баннер на дашборде, блок входов |
@@ -466,9 +505,9 @@ IMOEX/
 │   ├── controller/      # REST + HTML
 │   ├── model/           # DTO / records
 │   ├── news/            # триггеры заголовков
-│   ├── quant/           # ADF, EG, OLS, Spread, KAMA, Kalman, SignalRules, WF
+│   ├── quant/           # ADF, EG, OLS, Spread, KAMA, Kalman, SignalRules, WF, microstructure/, trend/
 │   ├── scheduler/       # daily + intraday paper cron
-│   ├── service/         # анализ, paper, universe filter, …
+│   ├── service/         # анализ, paper, universe filter, MicrostructureExecutionService, …
 │   ├── storage/         # JSON-кэш
 │   └── web/             # HTML-рендер
 ├── src/main/resources/application.yml
@@ -522,6 +561,7 @@ mvn verify   # + JaCoCo gate
 Отчёт: `target/site/jacoco/index.html`.
 
 Покрыты ADF / EG / SpreadAnalytics / Kalman / SignalRules / universe filter /
+microstructure (volume profile, ATAS gate) / trend quant facade /
 walk-forward / FDR / рекомендации / news / clients / controllers / paper / pipeline.
 
 ---
