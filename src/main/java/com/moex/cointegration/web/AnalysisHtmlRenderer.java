@@ -802,6 +802,14 @@ public class AnalysisHtmlRenderer {
      * Paper track-record таблица.
      */
     public String renderPaperJournal(PaperJournal journal) {
+        return renderPaperJournal(journal, List.of(), List.of());
+    }
+
+    public String renderPaperJournal(
+            PaperJournal journal,
+            List<TradingRecommendation> dailyRecs,
+            List<TradingRecommendation> intradayRecs
+    ) {
         StringBuilder body = new StringBuilder();
         body.append("""
                 <div class="hint">
@@ -833,10 +841,20 @@ public class AnalysisHtmlRenderer {
         body.append("</div>");
 
         if (entries.isEmpty()) {
-            body.append("<p class=\"empty\">Журнал пуст. Нажмите «Анализ + paper» — появятся AUTO OPEN сделки.</p>");
+            body.append("<div class=\"callout\">");
+            body.append("<p><strong>Журнал пуст</strong> — за последний прогон нечего открывать в paper.</p>");
+            body.append("<p>Paper создаёт сделки только при <strong>ENTER</strong> / <strong>REDUCE_SIZE</strong> ");
+            body.append("(после техники и FA для DAILY; для INTRADAY — только техника).</p>");
+            body.append("<ul>");
+            body.append("<li>").append(bookDiag("DAILY", dailyRecs)).append("</li>");
+            body.append("<li>").append(bookDiag("INTRADAY", intradayRecs)).append("</li>");
+            body.append("</ul>");
+            body.append("<p class=\"meta\">Типичные причины: |Z| &lt; 2, half-life вне порога, режим TREND (ADX), ");
+            body.append("нет коинтегрированных пар после FDR. Это нормально — стратегия не форсирует входы.</p>");
+            body.append("</div>");
         } else {
             body.append("<div class=\"table-wrap\"><table><thead><tr>");
-            body.append("<th>Статус</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
+            body.append("<th>Статус</th><th>Книга</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
             body.append("<th class=\"num\">Entry Z</th><th class=\"num\">Mark/Exit Z</th>");
             body.append("<th class=\"num\">Notional Y</th>");
             body.append("<th class=\"num\">PnL %*</th><th class=\"num\">PnL ₽*</th>");
@@ -848,6 +866,7 @@ public class AnalysisHtmlRenderer {
                 Double rub = e.pnlRub() != null ? e.pnlRub() : e.unrealizedPnlRub();
                 body.append("<tr>");
                 body.append("<td>").append(escape(e.status())).append("</td>");
+                body.append("<td>").append(escape(e.book() == null ? "DAILY" : e.book())).append("</td>");
                 body.append("<td>").append(escape(e.tickerY())).append(" / ").append(escape(e.tickerX())).append("</td>");
                 body.append("<td>").append(signalBadge(e.signal())).append("</td>");
                 body.append("<td>").append(decisionBadge(e.decision())).append("</td>");
@@ -962,6 +981,25 @@ public class AnalysisHtmlRenderer {
 
     private String formatPct(double v) {
         return Double.isNaN(v) ? "—" : String.format("%.1f%%", v * 100);
+    }
+
+    private static String bookDiag(String book, List<TradingRecommendation> recs) {
+        if (recs == null || recs.isEmpty()) {
+            return "<strong>" + book + "</strong>: нет технических рекомендаций (книга не прогонялась или нет коинтеграции)";
+        }
+        long actionable = recs.stream()
+                .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
+                .count();
+        long watch = recs.stream().filter(r -> r.signal() == TradingSignal.WATCH).count();
+        double maxZ = recs.stream().mapToDouble(r -> Math.abs(r.currentZScore())).max().orElse(0);
+        String top = recs.stream()
+                .max(java.util.Comparator.comparingDouble(r -> Math.abs(r.currentZScore())))
+                .map(r -> r.tickerY() + "/" + r.tickerX() + " " + r.signal() + " |Z|=" + String.format("%.2f", Math.abs(r.currentZScore())))
+                .orElse("—");
+        return String.format(
+                "<strong>%s</strong>: пар %d, LONG/SHORT %d, WATCH %d, max |Z|=%.2f; лидер: %s",
+                book, recs.size(), actionable, watch, maxZ, top
+        );
     }
 
     private String escape(String text) {
