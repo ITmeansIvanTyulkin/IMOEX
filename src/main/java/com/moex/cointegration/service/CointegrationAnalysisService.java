@@ -4,21 +4,14 @@ import com.moex.cointegration.config.CapitalAllocator;
 import com.moex.cointegration.config.CapitalProperties;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.config.SessionProperties;
-import com.moex.cointegration.model.AdfResult;
-import com.moex.cointegration.model.AlignedPairData;
 import com.moex.cointegration.model.AnalysisReport;
+import com.moex.cointegration.model.AdfResult;
 import com.moex.cointegration.model.BookKind;
-import com.moex.cointegration.model.EngleGrangerResult;
+import com.moex.cointegration.model.ClusterReviewReport;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.PairAnalysisResult;
-import com.moex.cointegration.model.PairCoverage;
 import com.moex.cointegration.model.PriceSeries;
-import com.moex.cointegration.model.TradingMetrics;
 import com.moex.cointegration.model.TradingRecommendation;
-import com.moex.cointegration.quant.EngleGrangerTest;
-import com.moex.cointegration.quant.KalmanHedgeFilter;
-import com.moex.cointegration.quant.SpreadAnalytics;
-import com.moex.cointegration.quant.WalkForwardAnalyzer;
 import com.moex.cointegration.storage.MarketDataStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,14 +19,12 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
- * Оркестрация dual-book анализа: DAILY (FA) + INTRADAY (1H, без FA) в одном цикле.
+ * Оркестрация dual-book анализа: DAILY (FA + paper) + INTRADAY research (без paper при research-only).
  */
 @Service
 public class CointegrationAnalysisService {
@@ -48,7 +39,9 @@ public class CointegrationAnalysisService {
     private final PaperTradingService paperTradingService;
     private final WalkForwardService walkForwardService;
     private final UniverseFilterService universeFilterService;
+    private final PairUniverseScanService pairUniverseScanService;
     private final MarketRegimeService marketRegimeService;
+    private final MonthlyClusterReviewService monthlyClusterReviewService;
     private final ImoexProperties properties;
     private final SessionProperties sessionProperties;
     private final CapitalProperties capitalProperties;
@@ -62,7 +55,9 @@ public class CointegrationAnalysisService {
             PaperTradingService paperTradingService,
             WalkForwardService walkForwardService,
             UniverseFilterService universeFilterService,
+            PairUniverseScanService pairUniverseScanService,
             MarketRegimeService marketRegimeService,
+            MonthlyClusterReviewService monthlyClusterReviewService,
             ImoexProperties properties,
             SessionProperties sessionProperties,
             CapitalProperties capitalProperties
@@ -75,15 +70,16 @@ public class CointegrationAnalysisService {
         this.paperTradingService = paperTradingService;
         this.walkForwardService = walkForwardService;
         this.universeFilterService = universeFilterService;
+        this.pairUniverseScanService = pairUniverseScanService;
         this.marketRegimeService = marketRegimeService;
+        this.monthlyClusterReviewService = monthlyClusterReviewService;
         this.properties = properties;
         this.sessionProperties = sessionProperties;
         this.capitalProperties = capitalProperties;
     }
 
     /**
-     * Dual-book pipeline: daily tech→FA→paper, затем 1H tech→(skip FA)→paper.
-     * Капитал режется {@link CapitalAllocator}.
+     * Dual-book pipeline: daily tech→FA→paper, затем 1H research (paper только если не research-only).
      */
     public AnalysisReport runFullAnalysis(boolean refreshData) throws IOException {
         if (refreshData) {
@@ -119,7 +115,7 @@ public class CointegrationAnalysisService {
     }
 
     /**
-     * Только INTRADAY-книга: refresh 1H → EG/Z → paper (без FA). Для часового cron.
+     * Только INTRADAY: refresh 1H → EG/Z → (paper только если не research-only). Для часового cron.
      */
     public void runIntradayOnly(boolean refreshHourly) throws IOException {
         marketRegimeService.refresh();
@@ -136,8 +132,14 @@ public class CointegrationAnalysisService {
         long nonStationary = stationarity.values().stream().filter(r -> !r.stationary()).count();
         log.info("DAILY price stationarity: {} of {} non-stationary", nonStationary, stationarity.size());
 
-        BookParams params = BookParams.daily(properties);
+        PairScanParams params = PairScanParams.daily(properties);
         List<PairAnalysisResult> cointegratedPairs = scanPairs(processed, params);
+        LocalDate asOf = LocalDate.now();
+        ClusterReviewReport clusterReview = monthlyClusterReviewService.review(
+                paperTradingService.getJournal(BookKind.DAILY), BookKind.DAILY, asOf);
+        cointegratedPairs = monthlyClusterReviewService.filterPairs(
+                cointegratedPairs, clusterReview,
+                paperTradingService.getJournal(BookKind.DAILY), BookKind.DAILY, asOf);
 
         List<PairAnalysisResult> topPairs = cointegratedPairs.stream()
                 .sorted(Comparator.comparingDouble(PairAnalysisResult::sharpeRatio).reversed())
@@ -145,9 +147,9 @@ public class CointegrationAnalysisService {
                 .toList();
 
         AnalysisReport report = new AnalysisReport(
-                LocalDate.now(),
+                asOf,
                 processed.size(),
-                params.lastPairsTested,
+                params.lastPairsTested(),
                 cointegratedPairs.size(),
                 topPairs
         );
@@ -160,8 +162,8 @@ public class CointegrationAnalysisService {
         paperTradingService.sync(finals, recommendations, BookKind.DAILY,
                 alloc.dailyMaxPairs(), alloc.dailyGrossCap());
 
-        log.info("DAILY book: {} tickers, {} tested, {} FDR-pass, top {}, {} tech, {} final",
-                processed.size(), params.lastPairsTested, cointegratedPairs.size(), topPairs.size(),
+        log.info("DAILY book: {} tickers, {} tested, {} cluster-pass, top {}, {} tech, {} final",
+                processed.size(), params.lastPairsTested(), cointegratedPairs.size(), topPairs.size(),
                 recommendations.size(), finals.size());
         return report;
     }
@@ -181,7 +183,7 @@ public class CointegrationAnalysisService {
         Map<String, PriceSeries> filtered = universeFilterService.filter(loaded, BookKind.INTRADAY);
         Map<String, PriceSeries> processed = preprocessingService.preprocess(filtered);
 
-        BookParams params = BookParams.intraday(properties, sessionProperties);
+        PairScanParams params = PairScanParams.intraday(properties, sessionProperties);
         List<PairAnalysisResult> cointegratedPairs = scanPairs(processed, params);
 
         List<TradingRecommendation> recommendations = recommendationService.analyzeAndPrint(
@@ -194,196 +196,24 @@ public class CointegrationAnalysisService {
         // без FA
         List<FinalTradeRecommendation> finals = finalRecommendationService.rebuildFromTechnical(
                 recommendations, BookKind.INTRADAY);
+        if (properties.paper().intradayResearchOnlyFlag()) {
+            log.info("INTRADAY research-only: {} tickers, {} tested, {} FDR-pass, {} tech — no paper trading",
+                    processed.size(), params.lastPairsTested(), cointegratedPairs.size(),
+                    recommendations.size());
+            return;
+        }
         paperTradingService.sync(finals, recommendations, BookKind.INTRADAY,
                 alloc.intradayMaxPairs(), alloc.intradayGrossCap());
 
         log.info("INTRADAY book: {} tickers, {} tested, {} FDR-pass, {} tech, {} final",
-                processed.size(), params.lastPairsTested, cointegratedPairs.size(),
+                processed.size(), params.lastPairsTested(), cointegratedPairs.size(),
                 recommendations.size(), finals.size());
     }
 
-    private List<PairAnalysisResult> scanPairs(Map<String, PriceSeries> processed, BookParams params)
+    private List<PairAnalysisResult> scanPairs(Map<String, PriceSeries> processed, PairScanParams params)
             throws IOException {
-        List<String> tickers = processed.keySet().stream().sorted().toList();
-        List<Candidate> candidates = new ArrayList<>();
-        int pairsTested = 0;
-        int pairsSkipped = 0;
-
-        ImoexProperties.CointegrationProperties coint = properties.cointegration();
-
-        for (int i = 0; i < tickers.size(); i++) {
-            for (int j = i + 1; j < tickers.size(); j++) {
-                String tickerY = tickers.get(i);
-                String tickerX = tickers.get(j);
-
-                Optional<AlignedPairData> aligned = preprocessingService.alignPair(
-                        processed.get(tickerY), processed.get(tickerX));
-                if (aligned.isEmpty()) {
-                    pairsSkipped++;
-                    continue;
-                }
-                if (!universeFilterService.allowPair(tickerY, tickerX, params.book)) {
-                    pairsSkipped++;
-                    continue;
-                }
-
-                pairsTested++;
-                EngleGrangerResult eg = EngleGrangerTest.test(
-                        tickerY,
-                        tickerX,
-                        aligned.get().logY(),
-                        aligned.get().logX(),
-                        coint.pValueThreshold()
-                );
-                candidates.add(new Candidate(tickerY, tickerX, aligned.get(), eg));
-            }
-        }
-
-        params.lastPairsTested = pairsTested;
-        params.lastPairsSkipped = pairsSkipped;
-
-        double[] pValues = candidates.stream().mapToDouble(c -> c.eg().pValue()).toArray();
-        boolean[] passFdr = WalkForwardAnalyzer.benjaminiHochberg(pValues, coint.fdrQ());
-
-        List<PairAnalysisResult> cointegratedPairs = new ArrayList<>();
-        ImoexProperties.RiskProperties risk = properties.risk();
-
-        for (int idx = 0; idx < candidates.size(); idx++) {
-            if (!passFdr[idx]) {
-                continue;
-            }
-            Candidate c = candidates.get(idx);
-            if (!c.eg().cointegrated()) {
-                continue;
-            }
-
-            double[] spread;
-            double intercept;
-            double hedgeRatio;
-            if (coint.kalmanEnabled()) {
-                KalmanHedgeFilter.Result kf = KalmanHedgeFilter.filter(
-                        c.pairData().logY(),
-                        c.pairData().logX(),
-                        c.eg().intercept(),
-                        c.eg().hedgeRatio(),
-                        coint.kalmanDelta(),
-                        coint.kalmanVe()
-                );
-                spread = kf.spread();
-                intercept = kf.lastIntercept();
-                hedgeRatio = kf.lastBeta();
-            } else {
-                intercept = c.eg().intercept();
-                hedgeRatio = c.eg().hedgeRatio();
-                spread = SpreadAnalytics.computeSpread(
-                        c.pairData().logY(), c.pairData().logX(), intercept, hedgeRatio);
-            }
-
-            int rollingWindow = params.rollingZWindow;
-            double[] zScores = coint.rollingZEnabled()
-                    ? SpreadAnalytics.rollingZScores(spread, rollingWindow)
-                    : SpreadAnalytics.zScores(spread);
-
-            double stopZ = risk.adaptiveStopEnabled()
-                    ? com.moex.cointegration.quant.AdaptiveStop.stopZ(
-                    spread, risk.adaptiveStopBase(), risk.adaptiveStopCap(), 20, params.adaptiveLongWin)
-                    : risk.stopZ();
-
-            TradingMetrics metrics = SpreadAnalytics.simulateMeanReversion(
-                    spread,
-                    properties.commissionRate(),
-                    coint.zScoreEntry(),
-                    coint.zScoreExit(),
-                    replaceNanZWithZeroForMetrics(zScores),
-                    stopZ,
-                    params.maxHoldBars,
-                    risk.borrowRateAnnual(),
-                    coint.entryReversalRequired(),
-                    risk.trailZ(),
-                    risk.partialTpFraction(),
-                    params.barsPerYear
-            );
-
-            int barsY = processed.get(c.tickerY()).points().size();
-            int barsX = processed.get(c.tickerX()).points().size();
-            PairCoverage coverage = PairCoverage.of(barsY, barsX, c.pairData().begins().length);
-
-            cointegratedPairs.add(new PairAnalysisResult(
-                    c.tickerY(),
-                    c.tickerX(),
-                    intercept,
-                    hedgeRatio,
-                    c.eg().adfStatistic(),
-                    c.eg().pValue(),
-                    metrics.sharpeRatio(),
-                    metrics.maxDrawdown(),
-                    metrics.halfLifeDays(),
-                    metrics.tradeCount(),
-                    metrics.totalReturn(),
-                    c.eg().rSquared(),
-                    SpreadAnalytics.toSeries(c.pairData().begins(), spread),
-                    SpreadAnalytics.toSeries(c.pairData().begins(), zScores),
-                    coverage.coveragePercent(),
-                    coverage.warning()
-            ));
-        }
-        return cointegratedPairs;
-    }
-
-    private static double[] replaceNanZWithZeroForMetrics(double[] z) {
-        double[] copy = z.clone();
-        for (int i = 0; i < copy.length; i++) {
-            if (Double.isNaN(copy[i])) {
-                copy[i] = 0.0;
-            }
-        }
-        return copy;
-    }
-
-    private static final class BookParams {
-        final BookKind book;
-        final int rollingZWindow;
-        final int maxHoldBars;
-        final double barsPerYear;
-        final int adaptiveLongWin;
-        int lastPairsTested;
-        int lastPairsSkipped;
-
-        private BookParams(BookKind book, int rollingZWindow, int maxHoldBars, double barsPerYear, int adaptiveLongWin) {
-            this.book = book;
-            this.rollingZWindow = rollingZWindow;
-            this.maxHoldBars = maxHoldBars;
-            this.barsPerYear = barsPerYear;
-            this.adaptiveLongWin = adaptiveLongWin;
-        }
-
-        static BookParams daily(ImoexProperties properties) {
-            return new BookParams(
-                    BookKind.DAILY,
-                    properties.cointegration().rollingZWindow(),
-                    properties.risk().maxHoldBars(),
-                    252.0,
-                    252
-            );
-        }
-
-        static BookParams intraday(ImoexProperties properties, SessionProperties session) {
-            int hours = session.hoursPerSession();
-            return new BookParams(
-                    BookKind.INTRADAY,
-                    session.intradayRollingZWindow(),
-                    session.intradayMaxHoldBars(),
-                    session.barsPerYearIntraday(),
-                    Math.max(60, hours * 20)
-            );
-        }
-    }
-
-    private record Candidate(
-            String tickerY,
-            String tickerX,
-            AlignedPairData pairData,
-            EngleGrangerResult eg
-    ) {
+        Map<String, List<com.moex.cointegration.model.Candle>> candlesByTicker =
+                universeFilterService.loadCandlesForTickers(processed.keySet(), params.book());
+        return pairUniverseScanService.scan(processed, candlesByTicker, params);
     }
 }

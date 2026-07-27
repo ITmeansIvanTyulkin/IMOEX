@@ -45,6 +45,34 @@ public class MarketRegimeService {
         return last.get();
     }
 
+    /** Для bar-by-bar replay: публикует снимок режима на as-of бар. */
+    public void publish(MarketRegimeSnapshot snapshot) {
+        last.set(snapshot);
+    }
+
+    /**
+     * ADX по индексу на конце среза свечей (inclusive end index).
+     */
+    public MarketRegimeSnapshot evaluateAt(List<Candle> indexCandles, int inclusiveEndIndex) {
+        if (!regimeProperties.enabledFlag()) {
+            return new MarketRegimeSnapshot(Double.NaN, "OFF", false, false,
+                    "Режимный фильтр выключен");
+        }
+        if (indexCandles == null || indexCandles.isEmpty() || inclusiveEndIndex < 0) {
+            return MarketRegimeSnapshot.unknown();
+        }
+        int end = Math.min(inclusiveEndIndex, indexCandles.size() - 1);
+        if (end + 1 < regimeProperties.adxPeriod() * 2 + 5) {
+            return MarketRegimeSnapshot.unknown();
+        }
+        List<Candle> slice = indexCandles.subList(0, end + 1);
+        double[] high = slice.stream().mapToDouble(Candle::high).toArray();
+        double[] low = slice.stream().mapToDouble(Candle::low).toArray();
+        double[] close = slice.stream().mapToDouble(Candle::close).toArray();
+        double adx = AdxCalculator.lastAdx(high, low, close, regimeProperties.adxPeriod());
+        return MarketRegimeSnapshot.of(adx, regimeProperties.adxReduce(), regimeProperties.adxBlock());
+    }
+
     /** Обновить ADX (из кэша индекса или с ISS). */
     public MarketRegimeSnapshot refresh() {
         if (!regimeProperties.enabledFlag()) {

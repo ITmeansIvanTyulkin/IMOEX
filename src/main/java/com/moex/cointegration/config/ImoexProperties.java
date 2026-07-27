@@ -28,7 +28,7 @@ public record ImoexProperties(
             news = new NewsProperties(true, 10, 10, 8);
         }
         if (cointegration == null) {
-            cointegration = new CointegrationProperties(0.05, 2.0, 0.0, 10, true, 60, 0.10, true, 1e-5, 1e-3, true);
+            cointegration = new CointegrationProperties(0.05, 2.0, 0.0, 10, true, 60, 0.10, true, 1e-5, 1e-3, true, true);
         }
         if (risk == null) {
             risk = RiskProperties.defaults();
@@ -79,7 +79,8 @@ public record ImoexProperties(
             Boolean useKalmanHedge,
             Double kalmanDelta,
             Double kalmanVe,
-            Boolean requireEntryReversal
+            Boolean requireEntryReversal,
+            Boolean useFdr
     ) {
         public CointegrationProperties {
             if (useRollingZ == null) {
@@ -103,11 +104,38 @@ public record ImoexProperties(
             if (requireEntryReversal == null) {
                 requireEntryReversal = true;
             }
+            if (useFdr == null) {
+                useFdr = true;
+            }
         }
 
         public static CointegrationProperties of(double pValueThreshold, double zScoreEntry, double zScoreExit, int topN) {
             return new CointegrationProperties(pValueThreshold, zScoreEntry, zScoreExit, topN,
-                    true, 60, 0.10, true, 1e-5, 1e-3, true);
+                    true, 60, 0.10, true, 1e-5, 1e-3, true, true);
+        }
+
+        /**
+         * OSS-совместимый research: вход на касании (без reversal), выход |Z|≤0.5, окно Z=30.
+         * entry 1.5 — как в sensitivity-grid OSS (на IMOEX |Z|≥2 почти не встречается у quality-пар).
+         */
+        public static CointegrationProperties ossResearchDefaults() {
+            return new CointegrationProperties(
+                    0.05, 1.5, 0.5, 10, true, 30, 0.20, true, 1e-4, 1e-3, false, true);
+        }
+
+        /**
+         * Whitelist research: жёстче entry/hold, без FDR (пары заданы снаружи), CUSUM on.
+         * entry 1.75 / maxHold 12 / exit 0.5 — меньше шума, чем focus-soft.
+         */
+        public static CointegrationProperties whitelistResearchDefaults() {
+            return new CointegrationProperties(
+                    0.05, 1.75, 0.5, 5, true, 30, 0.10, true, 1e-4, 1e-3, false, false);
+        }
+
+        /** Whitelist INTRADAY: entry 1.5, короче rolling Z. */
+        public static CointegrationProperties whitelistIntradayResearchDefaults() {
+            return new CointegrationProperties(
+                    0.05, 1.5, 0.5, 5, true, 24, 0.10, true, 1e-4, 1e-3, false, false);
         }
 
         public boolean rollingZEnabled() {
@@ -120,6 +148,10 @@ public record ImoexProperties(
 
         public boolean entryReversalRequired() {
             return Boolean.TRUE.equals(requireEntryReversal);
+        }
+
+        public boolean fdrEnabled() {
+            return Boolean.TRUE.equals(useFdr);
         }
     }
 
@@ -265,6 +297,54 @@ public record ImoexProperties(
                     15.0, 0.70, 8, true, 2.5, 4.0, true, 5.0, 0.5, 40, 85.0);
         }
 
+        /**
+         * Research / OOS validation: мягче HL и coverage, чтобы набрать статистику сделок.
+         * ADX / same-sector / reversal / slots остаются снаружи (regime + universe + coint).
+         */
+        public static RiskProperties researchDefaults() {
+            return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 0.25, 0.08,
+                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.20,
+                    15.0, 0.65, 6, true, 2.5, 4.0, true, 5.0, 0.5, 40, 50.0);
+        }
+
+        /**
+         * Как у open-source pairs engines по сигналу (exit 0.5, slow HL),
+         * с калибровкой min HL под AR(1) на Kalman-спреде IMOEX (строгое [5,60] даёт пустой юниверс).
+         */
+        public static RiskProperties ossResearchDefaults() {
+            return new RiskProperties(3.5, 30, 0.5, 5, 1.0, 0.0, 60.0, 0.35, 0.08,
+                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.20,
+                    60.0, 0.60, 4, true, 2.5, 4.0, true, 5.0, 0.5, 40, 45.0);
+        }
+
+        /**
+         * Ещё мягче HL/R²/coverage — только research focus-сектора (не live).
+         * Цель: не резать FDR-кандидатов шумовым minHL на Kalman AR(1).
+         */
+        public static RiskProperties focusResearchDefaults() {
+            return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 0.10, 0.08,
+                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.25,
+                    90.0, 0.40, 2, true, 2.5, 4.0, false, 5.0, 0.5, 40, 30.0);
+        }
+
+        /**
+         * Whitelist research: короче hold, чуть жёстче R²/HL, CUSUM on.
+         */
+        public static RiskProperties whitelistResearchDefaults() {
+            return new RiskProperties(3.5, 12, 0.5, 5, 1.0, 0.0, 30.0, 0.20, 0.08,
+                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.20,
+                    15.0, 0.55, 2, true, 2.5, 4.0, true, 5.0, 0.5, 40, 40.0);
+        }
+
+        /**
+         * Whitelist INTRADAY: CUSUM off (на 1H слишком часто ложные break), мягче HL floor снаружи.
+         */
+        public static RiskProperties whitelistIntradayResearchDefaults() {
+            return new RiskProperties(3.5, 5, 0.5, 5, 1.0, 0.0, 30.0, 0.05, 0.08,
+                    true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.25,
+                    3.0, 0.45, 2, true, 2.5, 4.0, false, 5.0, 0.5, 40, 30.0);
+        }
+
         public boolean dynamicSizingEnabled() {
             return Boolean.TRUE.equals(dynamicSizing);
         }
@@ -322,8 +402,9 @@ public record ImoexProperties(
      *
      * @param autoRunDaily    при true планировщик каждый торговый день гоняет анализ + paper sync
      * @param dailyCron       cron (по умолчанию пн–пт 19:05 Europe/Moscow wall clock JVM)
-     * @param autoRunIntraday при true — часовой INTRADAY прогон в сессию (1H → paper)
-     * @param intradayCron    cron (по умолчанию пн–пт :05 10–18)
+     * @param autoRunIntraday      при true — часовой INTRADAY прогон в сессию
+     * @param intradayCron         cron (по умолчанию пн–пт :05 10–18)
+     * @param intradayResearchOnly при true — INTRADAY только research (техника/метрики), без paper-открытий
      */
     public record PaperProperties(
             boolean enabled,
@@ -337,7 +418,8 @@ public record ImoexProperties(
             Boolean applyBorrow,
             Double notionalPerLegPct,
             Double slippageBpsDaily,
-            Double slippageBpsIntraday
+            Double slippageBpsIntraday,
+            Boolean intradayResearchOnly
     ) {
         public PaperProperties {
             if (autoRunDaily == null) {
@@ -347,7 +429,7 @@ public record ImoexProperties(
                 dailyCron = "0 5 19 * * MON-FRI";
             }
             if (autoRunIntraday == null) {
-                autoRunIntraday = true;
+                autoRunIntraday = false;
             }
             if (intradayCron == null || intradayCron.isBlank()) {
                 intradayCron = "0 5 10-18 * * MON-FRI";
@@ -361,11 +443,14 @@ public record ImoexProperties(
             if (notionalPerLegPct == null || notionalPerLegPct <= 0) {
                 notionalPerLegPct = 0.30;
             }
+            if (intradayResearchOnly == null) {
+                intradayResearchOnly = true;
+            }
         }
 
         public static PaperProperties defaults() {
             return new PaperProperties(true, 100_000.0, "paper-journal.json", true, "0 5 19 * * MON-FRI",
-                    true, "0 5 10-18 * * MON-FRI", 20.0, true, 0.30, 20.0, 40.0);
+                    false, "0 5 10-18 * * MON-FRI", 20.0, true, 0.30, 20.0, 40.0, true);
         }
 
         public boolean autoRunDailyEnabled() {
@@ -374,6 +459,10 @@ public record ImoexProperties(
 
         public boolean autoRunIntradayEnabled() {
             return Boolean.TRUE.equals(autoRunIntraday);
+        }
+
+        public boolean intradayResearchOnlyFlag() {
+            return Boolean.TRUE.equals(intradayResearchOnly);
         }
 
         public boolean applyBorrowEnabled() {
@@ -422,7 +511,8 @@ public record ImoexProperties(
             Boolean allowRelatedSectors,
             Double minPairTurnoverRub,
             Double maxTurnoverRatio,
-            Boolean intradayTierOneOnly
+            Boolean intradayTierOneOnly,
+            Boolean researchFocusSectorsOnly
     ) {
         public UniverseProperties {
             if (sameSectorOnly == null) {
@@ -440,12 +530,26 @@ public record ImoexProperties(
             if (intradayTierOneOnly == null) {
                 intradayTierOneOnly = true;
             }
+            if (researchFocusSectorsOnly == null) {
+                researchFocusSectorsOnly = false;
+            }
         }
 
         public static UniverseProperties defaults() {
             return new UniverseProperties(
                     true, 60, 50_000_000.0, 5.0, 0.15, true,
-                    true, true, 50_000_000.0, 20.0, true
+                    true, true, 50_000_000.0, 20.0, true, false
+            );
+        }
+
+        /**
+         * Research: мягче ADV (20M), строгий same-sector (без related), фокус банки/нефть/металлы/ритейл.
+         * Live остаётся {@link #defaults()}.
+         */
+        public static UniverseProperties researchDefaults() {
+            return new UniverseProperties(
+                    true, 60, 20_000_000.0, 5.0, 0.20, true,
+                    true, false, 20_000_000.0, 15.0, true, true
             );
         }
 
@@ -459,6 +563,10 @@ public record ImoexProperties(
 
         public boolean allowRelatedSectorsEnabled() {
             return Boolean.TRUE.equals(allowRelatedSectors);
+        }
+
+        public boolean researchFocusSectorsOnlyEnabled() {
+            return Boolean.TRUE.equals(researchFocusSectorsOnly);
         }
     }
 

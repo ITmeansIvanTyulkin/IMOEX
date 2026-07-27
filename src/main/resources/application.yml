@@ -71,9 +71,9 @@ imoex:
     equity-rub: 100000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
-    # dual-book: 40% gross daily / 60% intraday
-    daily-gross-share: 0.40
-    intraday-gross-share: 0.60
+    # DAILY paper live; INTRADAY — research-only (доля 0)
+    daily-gross-share: 1.0
+    intraday-gross-share: 0.0
   session:
     # DUAL = оба горизонта в одном analysis cycle (не exclusive switch)
     mode: DUAL
@@ -106,13 +106,21 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
-    # INTRADAY: :05 каждого часа 10–18 (пн–пт), после закрытия 1H-бара
-    auto-run-intraday: true
+    # INTRADAY: research-only (без paper-торговли); cron выключен
+    auto-run-intraday: false
+    intraday-research-only: true
     intraday-cron: "0 5 10-18 * * MON-FRI"
     slippage-bps: 20
     slippage-bps-daily: 20
     slippage-bps-intraday: 40
     apply-borrow: true
+  # Ежемесячный пересмотр кластеров (секторный cash PnL / PF)
+  cluster-review:
+    enabled: true
+    lookback-months: 6
+    min-profit-factor: 1.10
+    min-closed-trades: 4
+    exclude-oil-gas: true
   # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
   universe:
     enabled: true

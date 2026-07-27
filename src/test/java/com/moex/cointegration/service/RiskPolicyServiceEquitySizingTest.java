@@ -27,7 +27,7 @@ class RiskPolicyServiceEquitySizingTest {
                 props.risk(), props.walkForward(),
                 new ImoexProperties.PaperProperties(
                         true, 30_000, "paper.json", false, null, false, null, 20.0, true,
-                        0.25, 20.0, 40.0),
+                        0.25, 20.0, 40.0, true),
                 props.universe(), props.portfolio(), props.auth()
         );
         CapitalProperties capital200k = new CapitalProperties(200_000.0, 1_000_000.0, 1.0, 0.40, 0.60);

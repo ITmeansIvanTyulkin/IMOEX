@@ -1,6 +1,7 @@
 package com.moex.cointegration.service;
 
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.AlignedPairData;
 import com.moex.cointegration.model.Candle;
 import com.moex.cointegration.model.EngleGrangerResult;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -59,9 +61,19 @@ public class PairLookupService {
 
     /** Пересчёт Engle–Granger + спред/Z по локальным OHLC. */
     public Optional<PairAnalysisResult> analyzeFromCandles(String tickerY, String tickerX) throws IOException {
-        PriceSeries seriesY = toPriceSeries(tickerY);
-        PriceSeries seriesX = toPriceSeries(tickerX);
-        if (seriesY.points().size() < 100 || seriesX.points().size() < 100) {
+        return analyzeFromCandles(tickerY, tickerX, BookKind.DAILY);
+    }
+
+    public Optional<PairAnalysisResult> analyzeFromCandles(
+            String tickerY,
+            String tickerX,
+            BookKind book
+    ) throws IOException {
+        boolean hourly = book == BookKind.INTRADAY;
+        PriceSeries seriesY = toPriceSeries(tickerY, hourly);
+        PriceSeries seriesX = toPriceSeries(tickerX, hourly);
+        int minBars = hourly ? 80 : 100;
+        if (seriesY.points().size() < minBars || seriesX.points().size() < minBars) {
             return Optional.empty();
         }
 
@@ -173,11 +185,18 @@ public class PairLookupService {
     }
 
     private PriceSeries toPriceSeries(String ticker) throws IOException {
-        List<Candle> candles = storage.loadCandles(ticker).stream()
-                .sorted(Comparator.comparing(Candle::date))
+        return toPriceSeries(ticker, false);
+    }
+
+    private PriceSeries toPriceSeries(String ticker, boolean hourly) throws IOException {
+        List<Candle> candles = hourly
+                ? storage.loadHourlyCandles(ticker)
+                : storage.loadCandles(ticker);
+        candles = candles.stream()
+                .sorted(Comparator.comparing(Candle::begin))
                 .toList();
         List<PricePoint> points = candles.stream()
-                .map(c -> new PricePoint(c.date(), c.close()))
+                .map(c -> new PricePoint(c.begin(), c.close()))
                 .toList();
         return new PriceSeries(ticker, points);
     }

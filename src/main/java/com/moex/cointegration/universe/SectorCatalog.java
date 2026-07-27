@@ -30,17 +30,17 @@ public final class SectorCatalog {
     private static final Map<String, Sector> BY_TICKER = new HashMap<>();
 
     static {
-        // Банки / финансы
+        // Банки / финансы — ликвидный 1-й эшелон + крупные
         put(Sector.BANKS, "SBER", "VTBR", "TCSG", "T", "CBOM", "BSPB", "SVCB", "SFIN", "RENI", "DOMRF", "MOEX");
         // Нефть / газ
         put(Sector.OIL_GAS, "GAZP", "LKOH", "ROSN", "NVTK", "SNGS", "TATN", "SIBN", "BANE", "RNFT", "TRNFP", "SNGSP");
-        // Металлы / добыча
+        // Металлы / добыча — ликвидные
         put(Sector.METALS_MINING,
                 "NLMK", "MAGN", "CHMF", "GMKN", "ALRS", "PLZL", "RUAL", "MTLR", "VSMO", "SELG",
                 "UGLD", "TRMK", "RASP", "POLY", "POGR");
         // Энергетика / сети
         put(Sector.UTILITIES, "FEES", "HYDR", "IRAO", "MSNG", "OGKB", "UPRO", "ENPG", "IRGZ", "MSRS", "RSTI", "SAGO");
-        // Ритейл / потреб
+        // Ритейл / потреб — ликвидные
         put(Sector.RETAIL, "MGNT", "FIVE", "X5", "LENT", "MVID", "LNTA", "FIXP", "DSKY");
         // Телеком
         put(Sector.TELECOM, "MTSS", "RTKM");
@@ -91,6 +91,18 @@ public final class SectorCatalog {
             return false;
         }
         return relatedGroup(a.get()).equals(relatedGroup(b.get()));
+    }
+
+    /**
+     * Фокус research-юниверса: ликвидные same-sector кластеры без 2–3 эшелона «всего подряд».
+     */
+    public static boolean isEquityResearchFocus(String ticker) {
+        return sectorOf(ticker)
+                .map(s -> s == Sector.BANKS
+                        || s == Sector.OIL_GAS
+                        || s == Sector.METALS_MINING
+                        || s == Sector.RETAIL)
+                .orElse(false);
     }
 
     private static String relatedGroup(Sector s) {

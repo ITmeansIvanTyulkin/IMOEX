@@ -79,13 +79,23 @@ public class HistoricalReplayService {
             LocalDate to,
             BookKind book
     ) throws IOException {
+        if (book == BookKind.INTRADAY) {
+            AlignedHourlyCandles aligned = alignHourlyFromStorage(tickerY, tickerX);
+            List<Integer> indices = barIndicesHourly(aligned.begins(), from, to);
+            if (indices.size() < 80) {
+                throw new IllegalArgumentException(
+                        "Недостаточно часовых баров для replay " + tickerY + "/" + tickerX + " ("
+                                + indices.size() + ")");
+            }
+            return replayHourlyAligned(tickerY, tickerX, aligned, indices, book);
+        }
         PairLookupService.AlignedCandles aligned = alignFromStorage(tickerY, tickerX);
         List<Integer> indices = barIndices(aligned.dates(), from, to);
         if (indices.size() < 80) {
             throw new IllegalArgumentException(
                     "Недостаточно баров для replay " + tickerY + "/" + tickerX + " (" + indices.size() + ")");
         }
-        return replayAligned(tickerY, tickerX, aligned, indices, book);
+        return replayDailyAligned(tickerY, tickerX, aligned, indices, book);
     }
 
     /** Синтетика / фикстура для тестов. */
@@ -113,11 +123,11 @@ public class HistoricalReplayService {
         for (int i = fromIndex; i <= toIndex && i < dates.length; i++) {
             indices.add(i);
         }
-        return replayAligned(tickerY, tickerX,
+        return replayDailyAligned(tickerY, tickerX,
                 new PairLookupService.AlignedCandles(dateList, cy, cx), indices, book);
     }
 
-    private HistoricalReplayReport replayAligned(
+    private HistoricalReplayReport replayDailyAligned(
             String tickerY,
             String tickerX,
             PairLookupService.AlignedCandles aligned,
@@ -148,16 +158,17 @@ public class HistoricalReplayService {
         int maxPairs = book == BookKind.DAILY ? alloc.dailyMaxPairs() : alloc.intradayMaxPairs();
         double grossCap = book == BookKind.DAILY ? alloc.dailyGrossCap() : alloc.intradayGrossCap();
 
+        int warmup = 60;
         int tradesBefore = paper.getJournal(book).size();
         for (int idx : barIndices) {
-            if (idx < 60) {
+            if (idx < warmup) {
                 continue;
             }
             writeSlice(candlesDir, tickerY, aligned.candlesY(), idx);
             writeSlice(candlesDir, tickerX, aligned.candlesX(), idx);
 
             Optional<com.moex.cointegration.model.PairAnalysisResult> pairOpt =
-                    pairLookup.analyzeFromCandles(tickerY, tickerX);
+                    pairLookup.analyzeFromCandles(tickerY, tickerX, book);
             if (pairOpt.isEmpty()) {
                 continue;
             }
@@ -181,6 +192,89 @@ public class HistoricalReplayService {
             });
         }
 
+        return buildReport(tickerY, tickerX, book, aligned.dates().get(barIndices.get(0)),
+                aligned.dates().get(barIndices.get(barIndices.size() - 1)),
+                barIndices.size(), tradesBefore, paper);
+    }
+
+    private HistoricalReplayReport replayHourlyAligned(
+            String tickerY,
+            String tickerX,
+            AlignedHourlyCandles aligned,
+            List<Integer> barIndices,
+            BookKind book
+    ) throws IOException {
+        Path tempDir = Files.createTempDirectory("trinity-replay-1h-");
+        ImoexProperties replayProps = replayProperties(tempDir);
+        MarketDataStorage replayStorage = new MarketDataStorage(replayProps);
+        PairLookupService pairLookup = new PairLookupService(replayStorage, preprocessingService, replayProps);
+        MicrostructureExecutionService replayMicro = new MicrostructureExecutionService(
+                microstructureProperties, sessionProperties, replayStorage);
+        PaperTradingService paper = new PaperTradingService(
+                replayProps,
+                capitalProperties,
+                sessionProperties,
+                riskPolicyService,
+                pairLookup,
+                replayStorage,
+                null,
+                eventCalendarRiskService,
+                replayMicro
+        );
+
+        var alloc = capitalProperties.allocation();
+        int maxPairs = alloc.intradayMaxPairs();
+        double grossCap = alloc.intradayGrossCap();
+        int warmup = Math.max(48, sessionProperties.intradayRollingZWindow());
+
+        int tradesBefore = paper.getJournal(book).size();
+        for (int idx : barIndices) {
+            if (idx < warmup) {
+                continue;
+            }
+            writeHourlySlice(replayStorage, tickerY, aligned.candlesY(), idx);
+            writeHourlySlice(replayStorage, tickerX, aligned.candlesX(), idx);
+
+            Optional<com.moex.cointegration.model.PairAnalysisResult> pairOpt =
+                    pairLookup.analyzeFromCandles(tickerY, tickerX, BookKind.INTRADAY);
+            if (pairOpt.isEmpty()) {
+                continue;
+            }
+            var pair = pairOpt.get();
+            var zSeries = pair.zScoreSeries();
+            if (zSeries.size() < 2) {
+                continue;
+            }
+            double zCur = zSeries.get(zSeries.size() - 1).value();
+            double zPrev = zSeries.get(zSeries.size() - 2).value();
+            LocalDateTime barAt = aligned.begins().get(idx);
+            LocalDate asOf = barAt.toLocalDate();
+            TradingRecommendation tech = buildTech(tickerY, tickerX, zPrev, zCur, asOf, pair);
+            FinalTradeRecommendation fin = toFinal(tech, book);
+            PaperTradingService.runAt(barAt, () -> {
+                try {
+                    paper.sync(List.of(fin), List.of(tech), book, maxPairs, grossCap);
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+        }
+
+        LocalDate from = aligned.begins().get(barIndices.get(0)).toLocalDate();
+        LocalDate to = aligned.begins().get(barIndices.get(barIndices.size() - 1)).toLocalDate();
+        return buildReport(tickerY, tickerX, book, from, to, barIndices.size(), tradesBefore, paper);
+    }
+
+    private HistoricalReplayReport buildReport(
+            String tickerY,
+            String tickerX,
+            BookKind book,
+            LocalDate from,
+            LocalDate to,
+            int barsProcessed,
+            int tradesBefore,
+            PaperTradingService paper
+    ) {
         List<PaperTradeEntry> journal = paper.getJournal(book);
         var summary = paper.summary(book);
         double net = summary.realizedPnlRub() + summary.unrealizedPnlRub();
@@ -188,16 +282,16 @@ public class HistoricalReplayService {
         int closed = (int) journal.stream().filter(e -> "CLOSED".equals(e.status())).count();
 
         log.info("Replay {} [{}]: bars={}, opened={}, closed={}, net≈{} ₽",
-                tickerY + "/" + tickerX, book, barIndices.size(), opened, closed,
+                tickerY + "/" + tickerX, book, barsProcessed, opened, closed,
                 String.format("%.0f", net));
 
         return new HistoricalReplayReport(
                 tickerY,
                 tickerX,
                 book,
-                aligned.dates().get(barIndices.get(0)),
-                aligned.dates().get(barIndices.get(barIndices.size() - 1)),
-                barIndices.size(),
+                from,
+                to,
+                barsProcessed,
                 opened,
                 closed,
                 net,
@@ -209,6 +303,9 @@ public class HistoricalReplayService {
                 LocalDateTime.now(),
                 List.copyOf(journal)
         );
+    }
+
+    private record AlignedHourlyCandles(List<LocalDateTime> begins, List<Candle> candlesY, List<Candle> candlesX) {
     }
 
     private TradingRecommendation buildTech(
@@ -247,6 +344,12 @@ public class HistoricalReplayService {
                 .writeValue(candlesDir.resolve(ticker + ".json").toFile(), slice);
     }
 
+    private void writeHourlySlice(MarketDataStorage replayStorage, String ticker, List<Candle> all, int idx)
+            throws IOException {
+        List<Candle> slice = all.subList(0, idx + 1);
+        replayStorage.saveHourlyCandles(ticker, slice);
+    }
+
     private ImoexProperties replayProperties(Path tempDir) {
         var paper = properties.paper();
         var replayPaper = new ImoexProperties.PaperProperties(
@@ -261,7 +364,8 @@ public class HistoricalReplayService {
                 paper.applyBorrow(),
                 paper.notionalPerLegPct(),
                 paper.slippageBpsDaily(),
-                paper.slippageBpsIntraday()
+                paper.slippageBpsIntraday(),
+                false
         );
         return new ImoexProperties(
                 properties.baseUrl(),
@@ -297,6 +401,27 @@ public class HistoricalReplayService {
         return new FinalTradeRecommendation(tech, news, decision, decision.name(), "replay", "replay");
     }
 
+    private AlignedHourlyCandles alignHourlyFromStorage(String y, String x) throws IOException {
+        List<Candle> rawY = storage.loadHourlyCandles(y).stream()
+                .sorted(Comparator.comparing(Candle::begin)).toList();
+        List<Candle> rawX = storage.loadHourlyCandles(x).stream()
+                .sorted(Comparator.comparing(Candle::begin)).toList();
+        Map<LocalDateTime, Candle> yMap = new HashMap<>();
+        for (Candle c : rawY) {
+            yMap.put(c.begin(), c);
+        }
+        Map<LocalDateTime, Candle> xMap = new HashMap<>();
+        for (Candle c : rawX) {
+            xMap.put(c.begin(), c);
+        }
+        List<LocalDateTime> begins = yMap.keySet().stream().filter(xMap::containsKey).sorted().toList();
+        return new AlignedHourlyCandles(
+                begins,
+                begins.stream().map(yMap::get).toList(),
+                begins.stream().map(xMap::get).toList()
+        );
+    }
+
     private PairLookupService.AlignedCandles alignFromStorage(String y, String x) throws IOException {
         List<Candle> rawY = storage.loadCandles(y).stream().sorted(Comparator.comparing(Candle::date)).toList();
         List<Candle> rawX = storage.loadCandles(x).stream().sorted(Comparator.comparing(Candle::date)).toList();
@@ -314,6 +439,17 @@ public class HistoricalReplayService {
                 dates.stream().map(yMap::get).toList(),
                 dates.stream().map(xMap::get).toList()
         );
+    }
+
+    private static List<Integer> barIndicesHourly(List<LocalDateTime> begins, LocalDate from, LocalDate to) {
+        List<Integer> out = new ArrayList<>();
+        for (int i = 0; i < begins.size(); i++) {
+            LocalDate d = begins.get(i).toLocalDate();
+            if (!d.isBefore(from) && !d.isAfter(to)) {
+                out.add(i);
+            }
+        }
+        return out;
     }
 
     private static List<Integer> barIndices(List<LocalDate> dates, LocalDate from, LocalDate to) {

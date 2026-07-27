@@ -76,6 +76,14 @@ public class MarketDataService {
     public List<String> refreshHourlyCandles(List<String> tickers, int lookbackDays) throws IOException {
         LocalDate till = LocalDate.now();
         LocalDate from = till.minusDays(Math.max(30, lookbackDays));
+        return refreshHourlyCandles(tickers, from, till);
+    }
+
+    /**
+     * Скачивает 1H свечи за произвольный период (для исторического replay).
+     */
+    public List<String> refreshHourlyCandles(List<String> tickers, LocalDate from, LocalDate till)
+            throws IOException {
         int interval = 60;
         List<String> loaded = new ArrayList<>();
         for (String ticker : tickers) {
@@ -85,14 +93,15 @@ public class MarketDataService {
                     log.warn("Skipping hourly {}: only {} bars", ticker, candles.size());
                     continue;
                 }
-                candles.sort(Comparator.comparing(Candle::date));
+                candles.sort(Comparator.comparing(Candle::begin));
                 storage.saveHourlyCandles(ticker, candles);
                 loaded.add(ticker);
+                log.info("Saved {} hourly bars for {} ({} — {})", candles.size(), ticker, from, till);
             } catch (Exception ex) {
                 log.warn("Failed hourly {}: {}", ticker, ex.getMessage());
             }
         }
-        log.info("Hourly candles saved for {} tickers", loaded.size());
+        log.info("Hourly candles saved for {} tickers ({} — {})", loaded.size(), from, till);
         return loaded;
     }
 

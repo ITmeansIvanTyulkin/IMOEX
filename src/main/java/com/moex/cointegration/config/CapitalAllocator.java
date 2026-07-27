@@ -24,19 +24,19 @@ public final class CapitalAllocator {
         boolean lev = capital.leverageAllowed();
         double totalGross = capital.maxGrossNotional();
 
-        int dailyMax = clamp((int) Math.floor(equity / 100_000.0), 1, 2);
-        int intradayMax = clamp((int) Math.floor(equity / 100_000.0) + 1, 1, 3);
-
         double dailyShare = capital.dailyGrossShare();
         double intradayShare = capital.intradayGrossShare();
         double sum = dailyShare + intradayShare;
         if (sum <= 0) {
-            dailyShare = 0.40;
-            intradayShare = 0.60;
+            dailyShare = 1.0;
+            intradayShare = 0.0;
             sum = 1.0;
         }
         dailyShare /= sum;
         intradayShare /= sum;
+
+        int dailyMax = dailyShare <= 0 ? 0 : clamp((int) Math.floor(equity / 100_000.0), 1, 2);
+        int intradayMax = intradayShare <= 0 ? 0 : clamp((int) Math.floor(equity / 100_000.0) + 1, 1, 3);
 
         return new Allocation(
                 equity,
