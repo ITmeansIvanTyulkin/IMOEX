@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Pre-filter юниверса и пар: ликвидность, цена, preferred, same-sector, баланс ADV ног.
@@ -61,8 +62,12 @@ public class UniverseFilterService {
                 rejected.add(ticker + " (не 1-й эшелон INTRADAY)");
                 continue;
             }
+            if (u.researchFocusSectorsOnlyEnabled() && !SectorCatalog.isEquityResearchFocus(ticker)) {
+                rejected.add(ticker + " (вне research focus sectors)");
+                continue;
+            }
             Metrics m = metrics(ticker);
-            String reason = rejectReason(ticker, m, u);
+            String reason = rejectReason(ticker, m, u, book);
             if (reason == null) {
                 if (u.sameSectorOnlyEnabled() && SectorCatalog.sectorOf(ticker).isEmpty()) {
                     rejected.add(ticker + " (нет сектора в каталоге)");
@@ -74,13 +79,101 @@ public class UniverseFilterService {
             }
         }
 
+        logFilterResult(book, seriesByTicker.size(), kept.size(), rejected, tierOne);
+        return kept;
+    }
+
+    /**
+     * Фильтр юниверса по as-of срезам свечей (исторический replay без записи в storage).
+     */
+    public Map<String, PriceSeries> filterFromCandles(
+            Map<String, List<Candle>> candlesByTicker,
+            BookKind book
+    ) {
+        metricsCache.clear();
+        ImoexProperties.UniverseProperties u = properties.universe();
+        if (!u.enabled() || candlesByTicker == null || candlesByTicker.isEmpty()) {
+            return toPriceSeriesMap(candlesByTicker);
+        }
+
+        Map<String, PriceSeries> kept = new LinkedHashMap<>();
+        List<String> rejected = new ArrayList<>();
+        boolean tierOne = book == BookKind.INTRADAY && u.intradayTierOneOnlyEnabled();
+
+        for (Map.Entry<String, List<Candle>> e : candlesByTicker.entrySet()) {
+            String ticker = e.getKey();
+            if (tierOne && !TierOneCatalog.isTierOne(ticker)) {
+                rejected.add(ticker + " (не 1-й эшелон INTRADAY)");
+                continue;
+            }
+            if (u.researchFocusSectorsOnlyEnabled() && !SectorCatalog.isEquityResearchFocus(ticker)) {
+                rejected.add(ticker + " (вне research focus sectors)");
+                continue;
+            }
+            Metrics m = metricsFromCandles(e.getValue());
+            String reason = rejectReason(ticker, m, u, book);
+            if (reason == null) {
+                if (u.sameSectorOnlyEnabled() && SectorCatalog.sectorOf(ticker).isEmpty()) {
+                    rejected.add(ticker + " (нет сектора в каталоге)");
+                    continue;
+                }
+                kept.put(ticker, toPriceSeries(ticker, e.getValue()));
+            } else {
+                rejected.add(ticker + " (" + reason + ")");
+            }
+        }
+
+        logFilterResult(book, candlesByTicker.size(), kept.size(), rejected, tierOne);
+        return kept;
+    }
+
+    /**
+     * Загружает свечи из storage для live-скана (текущий as-of).
+     */
+    public Map<String, List<Candle>> loadCandlesForTickers(Set<String> tickers, BookKind book) throws IOException {
+        Map<String, List<Candle>> out = new LinkedHashMap<>();
+        for (String ticker : tickers) {
+            List<Candle> candles = book == BookKind.INTRADAY
+                    ? storage.loadHourlyCandles(ticker)
+                    : storage.loadCandles(ticker);
+            if (candles != null && !candles.isEmpty()) {
+                out.put(ticker, candles);
+            }
+        }
+        return out;
+    }
+
+    private void logFilterResult(
+            BookKind book,
+            int inputSize,
+            int keptSize,
+            List<String> rejected,
+            boolean tierOne
+    ) {
         log.info("Universe filter [{}]: {} → {} tickers (rejected {}), tier1={}, sectorsMapped={}",
-                book, seriesByTicker.size(), kept.size(), rejected.size(), tierOne, SectorCatalog.size());
+                book, inputSize, keptSize, rejected.size(), tierOne, SectorCatalog.size());
         if (!rejected.isEmpty()) {
             int show = Math.min(12, rejected.size());
             log.info("Rejected sample: {}", rejected.subList(0, show));
         }
-        return kept;
+    }
+
+    private Map<String, PriceSeries> toPriceSeriesMap(Map<String, List<Candle>> candlesByTicker) {
+        Map<String, PriceSeries> out = new LinkedHashMap<>();
+        if (candlesByTicker == null) {
+            return out;
+        }
+        for (Map.Entry<String, List<Candle>> e : candlesByTicker.entrySet()) {
+            out.put(e.getKey(), toPriceSeries(e.getKey(), e.getValue()));
+        }
+        return out;
+    }
+
+    private PriceSeries toPriceSeries(String ticker, List<Candle> candles) {
+        List<com.moex.cointegration.model.PricePoint> points = candles.stream()
+                .map(c -> new com.moex.cointegration.model.PricePoint(c.begin(), c.close()))
+                .toList();
+        return new PriceSeries(ticker, points);
     }
 
     /**
@@ -111,6 +204,37 @@ public class UniverseFilterService {
 
         Metrics my = metrics(tickerY);
         Metrics mx = metrics(tickerX);
+        return pairLiquidityReject(my, mx, u);
+    }
+
+    public String pairRejectReason(
+            String tickerY,
+            String tickerX,
+            Map<String, List<Candle>> candlesByTicker,
+            BookKind book
+    ) {
+        ImoexProperties.UniverseProperties u = properties.universe();
+        if (!u.enabled()) {
+            return null;
+        }
+        if (book == BookKind.INTRADAY && u.intradayTierOneOnlyEnabled() && !TierOneCatalog.pairTierOne(tickerY, tickerX)) {
+            return "не 1-й эшелон (INTRADAY whitelist)";
+        }
+        if (u.sameSectorOnlyEnabled()) {
+            boolean ok = u.allowRelatedSectorsEnabled()
+                    ? SectorCatalog.sameOrRelatedSector(tickerY, tickerX)
+                    : SectorCatalog.sameSector(tickerY, tickerX);
+            if (!ok) {
+                return "разные сектора / неизвестный сектор";
+            }
+        }
+
+        Metrics my = metricsFromCandles(candlesByTicker.get(tickerY));
+        Metrics mx = metricsFromCandles(candlesByTicker.get(tickerX));
+        return pairLiquidityReject(my, mx, u);
+    }
+
+    private String pairLiquidityReject(Metrics my, Metrics mx, ImoexProperties.UniverseProperties u) {
         if (my == null || mx == null) {
             return "нет метрик ликвидности";
         }
@@ -139,6 +263,15 @@ public class UniverseFilterService {
 
     public boolean allowPair(String tickerY, String tickerX, BookKind book) throws IOException {
         return pairRejectReason(tickerY, tickerX, book) == null;
+    }
+
+    public boolean allowPair(
+            String tickerY,
+            String tickerX,
+            Map<String, List<Candle>> candlesByTicker,
+            BookKind book
+    ) {
+        return pairRejectReason(tickerY, tickerX, candlesByTicker, book) == null;
     }
 
     String rejectReason(String ticker, Metrics m, ImoexProperties.UniverseProperties u) {
@@ -175,6 +308,33 @@ public class UniverseFilterService {
         }
         String t = ticker.toUpperCase(Locale.ROOT);
         return t.endsWith("P") && t.length() >= 4;
+    }
+
+    Metrics metricsFromCandles(List<Candle> candles) {
+        if (candles == null || candles.isEmpty()) {
+            return null;
+        }
+        int lookback = Math.max(5, properties.universe().lookbackDays());
+        int from = Math.max(0, candles.size() - lookback);
+        List<Candle> window = candles.subList(from, candles.size());
+
+        double[] turnovers = new double[window.size()];
+        int zeros = 0;
+        for (int i = 0; i < window.size(); i++) {
+            Candle c = window.get(i);
+            double vol = c.volume();
+            if (vol <= 0 || Double.isNaN(vol)) {
+                zeros++;
+                turnovers[i] = 0;
+            } else {
+                turnovers[i] = c.close() * vol;
+            }
+        }
+        Arrays.sort(turnovers);
+        double median = turnovers[turnovers.length / 2];
+        double lastClose = window.get(window.size() - 1).close();
+        double zeroFrac = (double) zeros / window.size();
+        return new Metrics(median, lastClose, zeroFrac);
     }
 
     Metrics metrics(String ticker) throws IOException {

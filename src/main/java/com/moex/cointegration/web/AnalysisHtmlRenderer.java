@@ -186,10 +186,10 @@ public class AnalysisHtmlRenderer {
                 <article class="strategy-doc">
                   <h2>Описание торговой стратегии</h2>
                   <p class="lead">
-                    TRINITY сейчас полностью реализует модуль cointegration: парный трейдинг в боковике
-                    на горизонте нескольких дней и интрадей (узкая книга 1–2 пары, профиль от ~100 тыс. ₽).
-                    Мы не угадываем, вырастет ли рынок. Ищем две акции, которые обычно «ходят вместе»,
-                    и торгуем их временный разрыв — ставку на то, что разрыв снова сожмётся.
+                    TRINITY сейчас в live paper ведёт <strong>DAILY</strong> pairs mean-reversion в боковике
+                    (фокус — металлы / mining; нефть в equities-парах отложена на фьючерсы/опционы).
+                    <strong>INTRADAY</strong> — только research (1H EG/Z/метрики), без paper-торговли.
+                    Мы не угадываем направление рынка: ищем временный разрыв связанной пары и ставим на сжатие.
                     Календарный арбитраж и опционы — следующие стратегии бренда, пока в дорожной карте.
                   </p>
 
@@ -232,6 +232,7 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#pipeline">Что за чем происходит</a></li>
                       <li><a href="#universe">Как отбираются акции</a></li>
                       <li><a href="#pairs">Как пары попадают в анализ</a></li>
+                      <li><a href="#clusters">Ежемесячный пересмотр кластеров</a></li>
                       <li><a href="#regime">Режим рынка: только боковик</a></li>
                       <li><a href="#signals">Как появляется сигнал</a></li>
                       <li><a href="#news">Новостной фильтр</a></li>
@@ -266,20 +267,22 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="pipeline">2. Что за чем происходит в одном прогоне</h3>
                   <div class="flow" aria-hidden="true">
-                    <span>MOEX daily+1H</span><i>→</i>
-                    <span>Capital split</span><i>→</i>
-                    <span>DAILY tech→FA→paper</span><i>→</i>
-                    <span>INTRADAY tech→paper</span>
+                    <span>MOEX daily</span><i>→</i>
+                    <span>Capital → DAILY</span><i>→</i>
+                    <span>EG/FDR + cluster</span><i>→</i>
+                    <span>FA → paper</span><i>→</i>
+                    <span>INTRADAY research</span>
                   </div>
                   <ol class="pipeline">
-                    <li><strong>Капитал.</strong> Equity → слоты и gross: ~40% DAILY / ~60% INTRADAY (без плеча до 1M). Доли <em>фиксированы</em>: пустой DAILY не отдаёт лимит INTRADAY.</li>
-                    <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → фундамент (MOEX+RSS) → paper-journal.json.</li>
-                    <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/FDR/Z (окна ~48 баров, max-hold ~7ч) → <strong>ATAS microstructure gate</strong> → без FA → paper-journal-intraday.json, flatten ~18:30.</li>
-                    <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы в обеих книгах при TREND.</li>
+                    <li><strong>Капитал.</strong> Equity → слоты DAILY (INTRADAY share = 0 при research-only). Без плеча до 1M.</li>
+                    <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → monthly cluster gate → фундамент (MOEX+RSS) → paper-journal.json.</li>
+                    <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/Z/метрики (и ATAS-gate в коде) → <strong>без paper-открытий</strong>. Cron выключен.</li>
+                    <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы DAILY при TREND.</li>
                   </ol>
                   <div class="callout">
-                    Нет ручного переключателя «сегодня daily / сегодня intraday» — оба горизонта в одном автоматическом цикле
-                    (кнопка «Анализ + paper» или cron). Источник свечей — только MOEX ISS (TradingView не подключаем).
+                    Торговый фокус — DAILY metals. INTRADAY остаётся в пайплайне как research-слой
+                    (`imoex.paper.intraday-research-only`), не как вторая торговая книга.
+                    Источник свечей — только MOEX ISS.
                   </div>
 
                   <h3 id="universe">3. Как отбираются акции в анализ</h3>
@@ -338,6 +341,19 @@ public class AnalysisHtmlRenderer {
                     На дашборде «Топ-пары по Sharpe» — это уже прошедшие статистику и отобранные для обзора.
                     Сырой сигнал LONG/SHORT ещё не равен разрешению торговать: дальше режим рынка, новости и лимиты книги.
                   </div>
+
+                  <h3 id="clusters">4a. Ежемесячный пересмотр кластеров</h3>
+                  <p>
+                    Раз в месяц (на стыке месяца в replay / при live-прогоне) поверх EG/FDR/quality
+                    считается <strong>секторный rolling cash PnL и profit factor</strong> по закрытым paper-сделкам
+                    за lookback (<code>imoex.cluster-review.lookback-months</code>, по умолчанию 6).
+                  </p>
+                  <ul>
+                    <li>в слоты — только сектора с <strong>net &gt; 0</strong> и <strong>PF ≥ 1.1</strong> (при ≥ N закрытий);</li>
+                    <li>мало истории — сектор допускается временно (cold start), кроме нефти;</li>
+                    <li><strong>OIL_GAS</strong> всегда вне DAILY pairs (нефть → roadmap фьючерсы/опционы);</li>
+                    <li>пары с достаточной собственной историей дополнительно режутся тем же net/PF-порогом.</li>
+                  </ul>
 
                   <h3 id="regime">5. Режим рынка: стратегия только боковик</h3>
                   <p>

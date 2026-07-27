@@ -21,11 +21,14 @@ class SignalRulesTest {
         assertFalse(SignalRules.confirmShortEntry(2.5, 3.0, 2.0, true));
         // Turning down while above entry — enter
         assertTrue(SignalRules.confirmShortEntry(3.0, 2.7, 2.0, true));
+        // Already crossed through zero — too late
+        assertFalse(SignalRules.confirmShortEntry(3.0, -0.1, 2.0, true));
     }
 
     @Test
     void longReversalSymmetry() {
         assertFalse(SignalRules.confirmLongEntry(-1.9, -2.5, 2.0, true));
         assertTrue(SignalRules.confirmLongEntry(-2.8, -2.4, 2.0, true));
+        assertFalse(SignalRules.confirmLongEntry(-2.8, 0.16, 2.0, true));
     }
 }

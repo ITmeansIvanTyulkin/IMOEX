@@ -12,7 +12,7 @@ public final class SignalRules {
     private SignalRules() {
     }
 
-    /** Short spread: Z был ≥ +entry и начал снижаться. */
+    /** Short spread: Z был ≥ +entry и начал снижаться, ещё не перешёл через 0. */
     public static boolean confirmShortEntry(double zPrev, double zCur, double zEntry, boolean requireReversal) {
         if (Double.isNaN(zPrev) || Double.isNaN(zCur)) {
             return false;
@@ -20,10 +20,11 @@ public final class SignalRules {
         if (!requireReversal) {
             return zPrev < zEntry && zCur >= zEntry;
         }
-        return zPrev >= zEntry && zCur < zPrev;
+        // fade: ещё на short-стороне (Z>0), иначе mean-reversion уже отыграна
+        return zPrev >= zEntry && zCur < zPrev && zCur > 0;
     }
 
-    /** Long spread: Z был ≤ −entry и начал расти. */
+    /** Long spread: Z был ≤ −entry и начал расти, ещё не перешёл через 0. */
     public static boolean confirmLongEntry(double zPrev, double zCur, double zEntry, boolean requireReversal) {
         if (Double.isNaN(zPrev) || Double.isNaN(zCur)) {
             return false;
@@ -31,7 +32,8 @@ public final class SignalRules {
         if (!requireReversal) {
             return zPrev > -zEntry && zCur <= -zEntry;
         }
-        return zPrev <= -zEntry && zCur > zPrev;
+        // fade: ещё на long-стороне (Z<0), иначе вход после факта
+        return zPrev <= -zEntry && zCur > zPrev && zCur < 0;
     }
 
     public static boolean exitLong(double zPrev, double zCur, double zExit) {

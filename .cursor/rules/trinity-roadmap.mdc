@@ -9,30 +9,27 @@ Three strategies under one brand. Do not jump ahead without completing the curre
 
 ## Product shape
 
-1. **Cointegration / pairs** — active now (implement fully).
-2. **Futures calendar** arbitrage — roadmap only, no code yet.
+1. **Cointegration / pairs** — active now (DAILY live; INTRADAY research-only).
+2. **Futures calendar** arbitrage — roadmap only, no code yet (oil/energy equities deferred here).
 3. **Options** — roadmap only, no code yet.
 
-## Strategy 1 — complete this first (full scope)
+## Strategy 1 — current scope
 
 Mean-reversion on cointegrated IMOEX pairs, **sideways only** (ADX blocks TREND).
 
-Target operator profile: equity **from ~100 000 ₽**, dual books sized by equity (no leverage below 1M).
+Target operator profile: equity **from ~100 000 ₽**, capital on **DAILY** (no leverage below 1M).
 
-Two horizons of the **same** pairs module run **together** (not a manual mode switch):
+1. **Multi-day / DAILY book** — live paper; FA after tech; monthly cluster review (sector cash PnL/PF); metals focus; **OIL_GAS out of pairs**.
+2. **Intraday / INTRADAY book** — **research only** (1H EG/Z/metrics, no paper opens). Re-enable trading only after OOS validation.
 
-1. **Multi-day / DAILY book** — hold a few days; FA after tech, then recommendations, then paper.
-2. **Intraday / INTRADAY book** — 1H bars (MOEX ISS), flatten by session end; **no fundamental filter**.
+Pipeline DAILY: **tech → cluster gate → FA → final recommendations → paper**. Never open DAILY paper before FA.
 
-Capital: auto-split (~40% daily / 60% intraday gross); slots from equity (`floor(equity/100k)`).
-
-Pipeline order per book: **tech → FA (DAILY only) → final recommendations → paper**. Never open DAILY paper before FA.
-
-Do not start calendar/options until pairs (daily + intraday together) is validated on paper/OOS.
+Do not start calendar/options until DAILY pairs is validated on paper/OOS; do not treat INTRADAY as a second live book while research-only.
 
 ## Config intent (pairs)
 
-- Dual-book caps from `CapitalAllocator`, notional per leg sized for ~100k equity.
+- Caps from `CapitalAllocator` (default: DAILY 100%, INTRADAY 0%).
+- `imoex.cluster-review.*` — monthly sector eligibility (net>0, PF≥1.1).
 - Prefer honest cash PnL and regime discipline over optimistic in-sample Sharpe.
 
 ## Product truth
