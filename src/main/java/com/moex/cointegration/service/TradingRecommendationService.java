@@ -56,14 +56,21 @@ public class TradingRecommendationService {
     /** Подгружает сохранённые рекомендации после рестарта приложения. */
     @PostConstruct
     void loadFromDisk() {
-        Path file = recommendationsFile();
+        loadRecommendationsFile(recommendationsFile(), lastRecommendations);
+        loadRecommendationsFile(
+                Path.of(properties.dataDir(), "trading-recommendations-intraday.json"),
+                lastIntradayRecommendations
+        );
+    }
+
+    private void loadRecommendationsFile(Path file, List<TradingRecommendation> target) {
         if (!Files.exists(file)) {
             return;
         }
         try {
             TradingRecommendation[] loaded = objectMapper.readValue(file.toFile(), TradingRecommendation[].class);
-            lastRecommendations.clear();
-            lastRecommendations.addAll(List.of(loaded));
+            target.clear();
+            target.addAll(List.of(loaded));
             log.info("Loaded {} trading recommendations from {}", loaded.length, file);
         } catch (Exception ex) {
             log.warn("Could not load recommendations from {}: {}", file, ex.getMessage());
