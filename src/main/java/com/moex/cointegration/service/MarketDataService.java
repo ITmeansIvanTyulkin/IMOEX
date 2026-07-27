@@ -110,12 +110,34 @@ public class MarketDataService {
                 continue;
             }
             List<PricePoint> points = candles.stream()
-                    .map(c -> new PricePoint(c.date(), c.close()))
+                    .map(c -> new PricePoint(c.begin(), c.close()))
                     .toList();
             seriesByTicker.put(ticker, new PriceSeries(ticker, points));
         }
 
         log.info("Loaded {} tickers with at least {} candles each", seriesByTicker.size(), MIN_CANDLES);
+        return seriesByTicker;
+    }
+
+    /**
+     * Загружает локальные 1H свечи для INTRADAY-книги.
+     */
+    public Map<String, PriceSeries> loadAlignedHourlyPriceSeries() throws IOException {
+        List<String> tickers = storage.listStoredHourlyTickers();
+        Map<String, PriceSeries> seriesByTicker = new HashMap<>();
+        int minBars = 50;
+        for (String ticker : tickers) {
+            List<Candle> candles = storage.loadHourlyCandles(ticker);
+            if (candles.size() < minBars) {
+                continue;
+            }
+            candles.sort(Comparator.comparing(Candle::begin));
+            List<PricePoint> points = candles.stream()
+                    .map(c -> new PricePoint(c.begin(), c.close()))
+                    .toList();
+            seriesByTicker.put(ticker, new PriceSeries(ticker, points));
+        }
+        log.info("Loaded {} hourly tickers with at least {} bars each", seriesByTicker.size(), minBars);
         return seriesByTicker;
     }
 }

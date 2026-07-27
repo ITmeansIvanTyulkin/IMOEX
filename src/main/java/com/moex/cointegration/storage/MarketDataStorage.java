@@ -129,6 +129,17 @@ public class MarketDataStorage {
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), candles);
     }
 
+    public List<String> listStoredHourlyTickers() throws IOException {
+        Path dir = candlesHourlyDir();
+        try (var stream = Files.list(dir)) {
+            return stream
+                    .filter(p -> p.getFileName().toString().endsWith(".json"))
+                    .map(p -> p.getFileName().toString().replace(".json", ""))
+                    .sorted()
+                    .toList();
+        }
+    }
+
     public List<Candle> loadHourlyCandles(String ticker) throws IOException {
         Path file = candlesHourlyDir().resolve(ticker + ".json");
         if (!Files.exists(file)) {
