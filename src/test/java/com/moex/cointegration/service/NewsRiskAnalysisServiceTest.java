@@ -46,7 +46,7 @@ class NewsRiskAnalysisServiceTest {
                 "SBER", "LKOH", TradingSignal.LONG_SPREAD,
                 -2.5, LocalDate.of(2022, 1, 10), -0.1,
                 0.8, 12, 1.1, 0.01,
-                "long", "details"
+                "long", "details", null, null
         );
 
         List<FinalTradeRecommendation> result = service.analyze(List.of(tech));
@@ -73,7 +73,7 @@ class NewsRiskAnalysisServiceTest {
                 "SBER", "LKOH", TradingSignal.SHORT_SPREAD,
                 2.4, LocalDate.now().minusDays(1), 0.1,
                 0.8, 12, 1.1, 0.01,
-                "short", "details"
+                "short", "details", null, null
         );
 
         assertEquals(FinalTradeDecision.BLOCK, service.analyze(List.of(tech)).get(0).decision());
@@ -98,7 +98,7 @@ class NewsRiskAnalysisServiceTest {
                 "SBER", "LKOH", TradingSignal.LONG_SPREAD,
                 -2.5, LocalDate.now().minusDays(1), -0.1,
                 0.8, 12, 1.1, 0.01,
-                "long", "details"
+                "long", "details", null, null
         );
 
         FinalTradeRecommendation out = service.analyze(List.of(tech)).get(0);
@@ -125,7 +125,7 @@ class NewsRiskAnalysisServiceTest {
                 "SBER", "LKOH", TradingSignal.SHORT_SPREAD,
                 2.4, LocalDate.now().minusDays(1), 0.1,
                 0.8, 12, 1.1, 0.01,
-                "short", "details"
+                "short", "details", null, null
         );
 
         FinalTradeRecommendation out = service.analyze(List.of(tech),
@@ -169,14 +169,17 @@ class NewsRiskAnalysisServiceTest {
                 props(true),
                 intraday,
                 new RssNewsClient(new RestTemplate(), props(true)),
-                new EventCalendarRiskService(intraday, List.of())
+                new EventCalendarRiskService(intraday, List.of()),
+                new RecommendationRationaleService(
+                        new RiskPolicyService(props(true)),
+                        com.moex.cointegration.config.CapitalProperties.defaults())
         );
 
         TradingRecommendation tech = new TradingRecommendation(
                 "SBER", "LKOH", TradingSignal.SHORT_SPREAD,
                 2.4, LocalDate.now().minusDays(1), 0.1,
                 0.8, 12, 1.1, 0.01,
-                "short", "details"
+                "short", "details", null, null
         );
 
         FinalTradeRecommendation out = service.analyze(List.of(tech)).get(0);

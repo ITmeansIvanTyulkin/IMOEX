@@ -36,7 +36,7 @@ class RiskPolicyServiceEquitySizingTest {
 
         TradingRecommendation rec = new TradingRecommendation(
                 "SBER", "LKOH", TradingSignal.LONG_SPREAD, -2.2,
-                LocalDate.of(2026, 7, 1), -0.1, 1.1, 5, 1.0, 0.01, "s", "d"
+                LocalDate.of(2026, 7, 1), -0.1, 1.1, 5, 1.0, 0.01, "s", "d", null, null
         );
         assertEquals(50_000.0, props.paper().baseNotionalPerLeg(200_000.0), 1.0);
         assertTrue(risk.suggestedNotional(rec, false) > 0);
