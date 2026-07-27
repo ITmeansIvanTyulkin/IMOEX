@@ -1,6 +1,10 @@
 (function () {
   const USER_KEY = "imoex.ops.user";
   const PASS_KEY = "imoex.ops.pass";
+  const ALERTS_ENABLED_KEY = "imoex.alerts.enabled";
+  const ALERTS_SOUND_KEY = "imoex.alerts.sound";
+  const SEEN_IDS_KEY = "imoex.alerts.seenIds";
+  const POLL_MS = 60000;
 
   const SECTION_TITLES = {
     "/view": "Дашборд",
@@ -10,7 +14,8 @@
     "/view/final": "Итог + новости",
     "/view/paper": "Paper journal",
     "/view/walk-forward": "Walk-forward",
-    "/view/strategy": "Описание стратегии"
+    "/view/strategy": "Описание стратегии",
+    "/view/guide": "Как пользоваться системой"
   };
 
   const ACTION_START = {
@@ -68,6 +73,208 @@
     });
   }
 
+  function alertsEnabled() {
+    const el = $("ops-alerts-enabled");
+    if (el) return el.checked;
+    return localStorage.getItem(ALERTS_ENABLED_KEY) !== "off";
+  }
+
+  function soundEnabled() {
+    const el = $("ops-alerts-sound");
+    if (el) return el.checked;
+    return localStorage.getItem(ALERTS_SOUND_KEY) !== "off";
+  }
+
+  function loadSeenIds() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(SEEN_IDS_KEY) || "[]"));
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function saveSeenIds(set) {
+    const arr = Array.from(set).slice(-120);
+    localStorage.setItem(SEEN_IDS_KEY, JSON.stringify(arr));
+  }
+
+  function playAlertSound() {
+    if (!soundEnabled()) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      function beep(freq, start, dur) {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sine";
+        o.frequency.value = freq;
+        g.gain.value = 0.12;
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start(start);
+        o.stop(start + dur);
+      }
+      beep(880, ctx.currentTime, 0.18);
+      beep(1100, ctx.currentTime + 0.22, 0.22);
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  function showNativeNotification(alert) {
+    if (!("Notification" in window) || Notification.permission !== "granted") {
+      return;
+    }
+    try {
+      const body = alert.summary || (alert.tickerY + "/" + alert.tickerX);
+      new Notification("TRINITY — новая paper-сделка", {
+        body: body,
+        tag: alert.id,
+        requireInteraction: false
+      });
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  function showToast(alert) {
+    const stack = $("trinity-toast-stack");
+    if (!stack) return;
+
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.setAttribute("role", "alert");
+
+    const y = alert.tickerY || "?";
+    const x = alert.tickerX || "?";
+    const book = alert.book || "DAILY";
+    const sig = alert.signal || "?";
+    const z = typeof alert.entryZ === "number" ? alert.entryZ.toFixed(2) : "?";
+
+    el.innerHTML =
+      '<button type="button" class="toast-close" aria-label="Закрыть">&times;</button>' +
+      "<strong>Новая paper-сделка · " + book + "</strong>" +
+      "<div>" + sig + " " + y + " / " + x + " · Z=" + z + "</div>" +
+      '<div class="toast-meta"><a href="/view/paper">Paper journal</a> · ' +
+      '<a href="/view/charts/' + encodeURIComponent(y) + "/" + encodeURIComponent(x) + '">График</a></div>';
+
+    el.querySelector(".toast-close").addEventListener("click", function () {
+      el.remove();
+    });
+
+    stack.prepend(el);
+    setTimeout(function () {
+      if (el.parentNode) el.remove();
+    }, 20000);
+  }
+
+  function handleNewAlert(alert) {
+    if (!alertsEnabled()) return;
+    playAlertSound();
+    showToast(alert);
+    showNativeNotification(alert);
+    appendLog("Новая paper: " + (alert.summary || alert.tickerY + "/" + alert.tickerX), "ok");
+  }
+
+  async function seedSeenFromJournal() {
+    if (localStorage.getItem(SEEN_IDS_KEY)) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/paper/journal", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const journal = await res.json();
+      const ids = (journal.entries || []).map(function (e) { return e.id; });
+      localStorage.setItem(SEEN_IDS_KEY, JSON.stringify(ids));
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  async function pollPaperAlerts() {
+    if (!alertsEnabled()) return;
+    try {
+      const res = await fetch("/api/ops/paper-alerts", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const alerts = await res.json();
+      if (!Array.isArray(alerts)) return;
+
+      const seen = loadSeenIds();
+      let anyNew = false;
+      alerts.forEach(function (alert) {
+        if (!alert || !alert.id || seen.has(alert.id)) return;
+        seen.add(alert.id);
+        anyNew = true;
+        handleNewAlert(alert);
+      });
+      if (anyNew) {
+        saveSeenIds(seen);
+      }
+    } catch (_) {
+      // ignore transient network errors
+    }
+  }
+
+  async function pollAutoRunStatus() {
+    try {
+      const res = await fetch("/api/ops/auto-run/status", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const st = await res.json();
+      if (st && st.lastIntradayRunAt && st.lastIntradayRunStatus) {
+        const key = "imoex.lastIntraLog";
+        const msg = st.lastIntradayRunAt + " " + st.lastIntradayRunStatus;
+        if (localStorage.getItem(key) !== msg && st.lastIntradayRunStatus !== "RUNNING") {
+          localStorage.setItem(key, msg);
+          appendLog("INTRADAY cron: " + st.lastIntradayRunStatus + " @ " + st.lastIntradayRunAt, "info");
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  function bindAlertPrefs() {
+    const en = $("ops-alerts-enabled");
+    const snd = $("ops-alerts-sound");
+    const perm = $("ops-notify-permission");
+
+    if (en) {
+      en.checked = localStorage.getItem(ALERTS_ENABLED_KEY) !== "off";
+      en.addEventListener("change", function () {
+        localStorage.setItem(ALERTS_ENABLED_KEY, en.checked ? "on" : "off");
+      });
+    }
+    if (snd) {
+      snd.checked = localStorage.getItem(ALERTS_SOUND_KEY) !== "off";
+      snd.addEventListener("change", function () {
+        localStorage.setItem(ALERTS_SOUND_KEY, snd.checked ? "on" : "off");
+      });
+    }
+    if (perm) {
+      perm.addEventListener("click", function () {
+        if (!("Notification" in window)) {
+          appendLog("Браузер не поддерживает системные уведомления.", "err");
+          return;
+        }
+        Notification.requestPermission().then(function (p) {
+          appendLog("Уведомления ОС: " + p, p === "granted" ? "ok" : "info");
+        });
+      });
+    }
+  }
+
+  function startAlertPolling() {
+    if (!$("ops-panel")) return;
+    bindAlertPrefs();
+    seedSeenFromJournal().then(function () {
+      pollPaperAlerts();
+      pollAutoRunStatus();
+    });
+    setInterval(pollPaperAlerts, POLL_MS);
+    setInterval(pollAutoRunStatus, POLL_MS * 5);
+  }
+
   async function apiPost(path, startMessage, okMessage) {
     saveCreds();
     setBusy(true);
@@ -112,6 +319,7 @@
           appendLog("Получено записей: " + body.length, "ok");
         }
       }
+      await pollPaperAlerts();
       appendLog("Обновляю раздел…", "info");
       setTimeout(function () { location.reload(); }, 900);
     } catch (e) {
@@ -180,6 +388,7 @@
 
     appendLog("Операторская панель готова.", "info");
     appendLog("Раздел: " + currentSectionTitle() + ".", "info");
+    startAlertPolling();
   }
 
   if (document.readyState === "loading") {

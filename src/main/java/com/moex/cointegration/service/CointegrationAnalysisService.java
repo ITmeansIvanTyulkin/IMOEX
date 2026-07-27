@@ -117,6 +117,15 @@ public class CointegrationAnalysisService {
         return dailyReport;
     }
 
+    /**
+     * Только INTRADAY-книга: refresh 1H → EG/Z → paper (без FA). Для часового cron.
+     */
+    public void runIntradayOnly(boolean refreshHourly) throws IOException {
+        marketRegimeService.refresh();
+        CapitalAllocator.Allocation alloc = capitalProperties.allocation();
+        runIntradayBook(refreshHourly, alloc);
+    }
+
     private AnalysisReport runDailyBook(CapitalAllocator.Allocation alloc) throws IOException {
         Map<String, PriceSeries> loaded = marketDataService.loadAlignedPriceSeries();
         Map<String, PriceSeries> filtered = universeFilterService.filter(loaded);

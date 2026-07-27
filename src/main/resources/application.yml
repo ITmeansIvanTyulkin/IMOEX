@@ -101,6 +101,9 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
+    # INTRADAY: :05 каждого часа 10–18 (пн–пт), после закрытия 1H-бара
+    auto-run-intraday: true
+    intraday-cron: "0 5 10-18 * * MON-FRI"
     slippage-bps: 20
     apply-borrow: true
   # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора

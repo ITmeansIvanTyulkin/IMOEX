@@ -51,6 +51,7 @@ public class AnalysisHtmlRenderer {
               <main>
                 {{OPS}}
                 {{BODY}}
+                <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
               </main>
               <script src="/js/operator.js"></script>
@@ -64,9 +65,15 @@ public class AnalysisHtmlRenderer {
                   <h2>Пульт оператора</h2>
                   <p class="ops-lead">
                     Запускайте анализ и обновляйте paper прямо отсюда.
+                    <strong>INTRADAY</strong> обновляется автоматически в :05 каждого часа 10–18 (пн–пт), пока приложение запущено.
                     Логин и пароль оператора — в полях ниже (сохраняются только в этом браузере).
-                    Полное скачивание свечей может занять много минут.
                   </p>
+                  <div class="alert-prefs">
+                    <label class="check-label"><input type="checkbox" id="ops-alerts-enabled" checked> Алерты при новой paper-сделке</label>
+                    <label class="check-label"><input type="checkbox" id="ops-alerts-sound" checked> Звук</label>
+                    <button type="button" class="btn btn-ghost" id="ops-notify-permission">Уведомления macOS / Windows</button>
+                  </div>
+                  <p class="meta alert-hint">Баннер справа сверху в браузере + системное уведомление (если разрешено). На Windows позиция задаётся ОС (обычно правый нижний угол).</p>
                   <div class="busy-bar" id="ops-busy"></div>
                   <div class="ops-grid">
                     <div>
@@ -409,6 +416,180 @@ public class AnalysisHtmlRenderer {
                 </article>
                 """;
         return page("TRINITY — описание стратегии", body, nav("strategy"));
+    }
+
+    /**
+     * Инструкция для оператора: запуск, пульт, разделы UI, автопрогоны и алерты.
+     */
+    public String renderGuide() {
+        String body = """
+                <article class="strategy-doc">
+                  <h2>Как пользоваться системой</h2>
+                  <p class="lead">
+                    Краткая инструкция для оператора TRINITY: от первого запуска до ежедневного мониторинга paper,
+                    автопрогонов и уведомлений о новых сделках. Подробная теория стратегии — на странице
+                    <a href="/view/strategy">Описание торговой стратегии</a>.
+                  </p>
+
+                  <nav class="strategy-toc" aria-label="Содержание">
+                    <strong>Содержание</strong>
+                    <ol>
+                      <li><a href="#start">Первый запуск</a></li>
+                      <li><a href="#ops">Пульт оператора</a></li>
+                      <li><a href="#pages">Разделы меню</a></li>
+                      <li><a href="#daily">Ежедневный цикл</a></li>
+                      <li><a href="#auto">Автопрогоны (cron)</a></li>
+                      <li><a href="#alerts">Алерты и звук</a></li>
+                      <li><a href="#dual">Две книги: DAILY и INTRADAY</a></li>
+                      <li><a href="#empty">Пустой journal — это нормально?</a></li>
+                      <li><a href="#checklist">Чеклист</a></li>
+                    </ol>
+                  </nav>
+
+                  <h3 id="start">1. Первый запуск</h3>
+                  <ol class="pipeline">
+                    <li><strong>Java 17+</strong> и <strong>Maven 3.9+</strong> установлены; вы в корне репозитория (там, где <code>pom.xml</code>).</li>
+                    <li>Создайте <code>src/main/resources/application-local.yml</code> с паролем API и ключом <code>imoex.run.unlock</code> (без них приложение не стартует).</li>
+                    <li>Запустите: <code>mvn spring-boot:run</code> и дождитесь <code>Started CointegrationApplication</code>.</li>
+                    <li>Откройте <a href="/view">http://localhost:8080/view</a> — дашборд и пульт оператора.</li>
+                    <li>Первый раз нажмите <strong>«Анализ + скачать свечи»</strong> — скачает историю с MOEX ISS (может занять много минут).</li>
+                    <li>Дальше обычно достаточно <strong>«Анализ + paper»</strong> — пересчёт без полного скачивания.</li>
+                  </ol>
+                  <div class="callout">
+                    GET-страницы <code>/view/*</code> открываются без пароля. Кнопки пульта шлют POST на API —
+                    нужны логин и пароль из <code>application-local.yml</code> (по умолчанию user <code>imoex</code>).
+                  </div>
+
+                  <h3 id="ops">2. Пульт оператора</h3>
+                  <p>На каждой странице <code>/view/*</code> сверху — блок «Пульт оператора»:</p>
+                  <table class="params">
+                    <thead><tr><th>Кнопка</th><th>Что делает</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>Анализ + paper</strong></td><td>Полный цикл обеих книг (DAILY → INTRADAY) без скачивания свечей. Типичный будний пересчёт.</td></tr>
+                      <tr><td><strong>Анализ + скачать свечи</strong></td><td>То же, но с <code>refresh=true</code> — обновляет дневные и часовые свечи с биржи.</td></tr>
+                      <tr><td><strong>Только новости / paper</strong></td><td>Быстро: новости MOEX/RSS + синхронизация paper без полного Engle–Granger.</td></tr>
+                      <tr><td><strong>Walk-forward</strong></td><td>Пересчёт OOS-отчёта по топ-парам (daily).</td></tr>
+                      <tr><td><strong>Скачать свечи</strong></td><td>Только загрузка данных, без анализа.</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    Логин и пароль сохраняются в <em>этом браузере</em> (localStorage). Журнал действий пульта — в блоке «Лог» под кнопками.
+                  </p>
+
+                  <h3 id="pages">3. Разделы верхнего меню</h3>
+                  <table class="params">
+                    <thead><tr><th>Раздел</th><th>Зачем открывать</th></tr></thead>
+                    <tbody>
+                      <tr><td><a href="/view">Дашборд</a></td><td>Сводка: режим рынка (ADX), топ-пары, последний прогон.</td></tr>
+                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY).</td></tr>
+                      <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
+                      <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>
+                      <tr><td><a href="/view/paper">Paper</a></td><td>Журнал бумажных сделок: OPEN / CLOSED, PnL ₽, колонка «Книга» (DAILY / INTRADAY).</td></tr>
+                      <tr><td><a href="/view/walk-forward">Walk-forward</a></td><td>Out-of-sample проверка на истории (не гарантия будущего).</td></tr>
+                      <tr><td><a href="/view/strategy">Описание стратегии</a></td><td>Теория: коинтеграция, Z-score, режим боковика, выходы.</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    График пары: <code>/view/charts/ТИКЕР_Y/ТИКЕР_X</code> (ссылки есть из таблиц и paper).
+                  </p>
+
+                  <h3 id="daily">4. Ежедневный цикл оператора</h3>
+                  <p>Рекомендуемый порядок после закрытия сессии или утром перед решением:</p>
+                  <ol class="pipeline">
+                    <li>Убедиться, что приложение запущено (<code>mvn spring-boot:run</code>).</li>
+                    <li>Нажать «Анализ + paper» (или дождаться вечернего cron — см. ниже).</li>
+                    <li>Открыть <a href="/view/final">Итог + новости</a> — что разрешено по DAILY после FA.</li>
+                    <li>Открыть <a href="/view/paper">Paper</a> — что реально открылось в обеих книгах.</li>
+                    <li>При сомнениях — график пары и баннер «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
+                  </ol>
+
+                  <h3 id="auto">5. Автопрогоны (cron)</h3>
+                  <p>
+                    Пока сервер работает, планировщик сам гоняет анализ — ручная кнопка не обязательна каждый раз.
+                    Статус последних прогонов пишется в лог пульта (строки <code>INTRADAY cron: …</code>).
+                  </p>
+                  <table class="params">
+                    <thead><tr><th>Книга</th><th>Расписание (по умолчанию)</th><th>Что внутри</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>DAILY</strong></td><td>Пн–Пт <strong>19:05</strong></td><td>Дневные свечи → техника → FA → paper (<code>paper-journal.json</code>)</td></tr>
+                      <tr><td><strong>INTRADAY</strong></td><td>Пн–Пт <strong>:05</strong> с 10:00 до 18:00</td><td>1H свечи ISS → техника → paper без FA (<code>paper-journal-intraday.json</code>), flatten ~18:30</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    Включение/выключение и cron — в <code>application.yml</code>:
+                    <code>imoex.paper.auto-run-daily</code>, <code>auto-run-intraday</code>,
+                    <code>daily-cron</code>, <code>intraday-cron</code>.
+                  </p>
+                  <div class="callout">
+                    На выходных новых дневных свечей нет — вечерний DAILY почти ничего не меняет.
+                    INTRADAY в нерабочие дни не запускается.
+                  </div>
+
+                  <h3 id="alerts">6. Алерты при новой paper-сделке</h3>
+                  <p>
+                    Если открыта <em>любая</em> страница <code>/view/*</code>, браузер раз в минуту опрашивает сервер.
+                    При новом OPEN в paper вы получите:
+                  </p>
+                  <ul>
+                    <li><strong>Баннер справа сверху</strong> в окне браузера (на macOS, Windows и Linux одинаково) + короткий звук (два тона);</li>
+                    <li><strong>Системное уведомление ОС</strong> — если нажали «Уведомления macOS / Windows» и разрешили в браузере.</li>
+                  </ul>
+                  <table class="params">
+                    <thead><tr><th>Платформа</th><th>Баннер в браузере</th><th>Уведомление ОС</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>macOS</strong></td><td>Правый верхний угол страницы</td><td>Notification Center — справа сверху (как у почты / Slack)</td></tr>
+                      <tr><td><strong>Windows</strong></td><td>Правый верхний угол страницы</td><td>Центр уведомлений — обычно <strong>правый нижний</strong> угол (позицию задаёт Windows, не TRINITY)</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    В пульте: чекбоксы «Алерты при новой paper-сделке» и «Звук».
+                    После ручного «Анализ + paper» опрос срабатывает сразу.
+                    Вкладка может быть в фоне, но <strong>браузер должен быть запущен</strong> — это не push с сервера без открытой страницы.
+                  </p>
+                  <div class="callout">
+                    Первый визит: уже существующие сделки в journal не спамят алертами — их id запоминаются автоматически.
+                  </div>
+
+                  <h3 id="dual">7. Две книги: DAILY и INTRADAY</h3>
+                  <p>
+                    Один цикл «Анализ + paper» всегда гоняет <strong>обе</strong> книги подряд. Ручного переключателя «сегодня daily / intraday» нет.
+                  </p>
+                  <ul>
+                    <li><strong>DAILY</strong> — удержание несколько дней, проходит фундамент (новости), ~40% gross капитала.</li>
+                    <li><strong>INTRADAY</strong> — 1H бары, без FA, закрытие к концу сессии, ~60% gross.</li>
+                    <li>Лимиты <strong>независимы</strong>: если DAILY пустой, его доля <em>не перетекает</em> в INTRADAY.</li>
+                  </ul>
+
+                  <h3 id="empty">8. Пустой journal — это нормально?</h3>
+                  <p>Да, если сейчас нет подходящих сигналов. Paper открывается только при:</p>
+                  <ul>
+                    <li>LONG / SHORT с подтверждённым разворотом Z (не WATCH);</li>
+                    <li>для DAILY — итог ENTER или REDUCE после FA;</li>
+                    <li>режим не TREND (ADX);</li>
+                    <li>пара проходит фильтры качества (half-life, R², |Z| не у стопа);</li>
+                    <li>есть свободный слот в книге.</li>
+                  </ul>
+                  <p>
+                    На странице <a href="/view/paper">Paper</a> в пустом журнале показывается диагностика по каждой книге
+                    (сколько пар, max |Z|, лидер).
+                  </p>
+
+                  <h3 id="checklist">9. Чеклист «всё работает»</h3>
+                  <ul>
+                    <li>В логе терминала: <code>Started CointegrationApplication</code></li>
+                    <li>Кнопка «Анализ + paper» завершается без 401 (логин/пароль верные)</li>
+                    <li>В <code>data/candles/</code> есть JSON тикеров (после первого refresh)</li>
+                    <li><a href="/view/final">Итог + новости</a> показывает таблицу (может быть пустой — нет ENTER)</li>
+                    <li>На дашборде виден баннер режима рынка (SIDEWAYS / NEUTRAL / TREND)</li>
+                    <li>При тестовом OPEN — баннер и звук в браузере (алерты включены)</li>
+                  </ul>
+                  <div class="callout">
+                    TRINITY — research / decision-support, не автоисполнение у брокера и не гарантия прибыли.
+                    Перед реальными деньгами — свой paper track-record и учёт издержек шорта.
+                  </div>
+                </article>
+                """;
+        return page("TRINITY — как пользоваться", body, nav("guide"));
     }
 
     private String regimeBanner(com.moex.cointegration.model.MarketRegimeSnapshot regime) {
@@ -945,6 +1126,7 @@ public class AnalysisHtmlRenderer {
         return """
                 <nav class="topnav">
                   <a href="/view" class="%s">Дашборд</a>
+                  <a href="/view/guide" class="%s">Как пользоваться системой</a>
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
                   <a href="/view/recommendations" class="%s">Все рекомендации</a>
@@ -954,6 +1136,7 @@ public class AnalysisHtmlRenderer {
                 </nav>
                 """.formatted(
                 active.equals("dashboard") ? "active" : "",
+                active.equals("guide") ? "active" : "",
                 active.equals("final") ? "active" : "",
                 active.equals("signals") ? "active" : "",
                 active.equals("recommendations") ? "active" : "",
