@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -36,21 +37,32 @@ public class TradingRecommendationService {
 
     private final ImoexProperties properties;
     private final RiskPolicyService riskPolicyService;
+    private final MicrostructureExecutionService microstructureExecutionService;
     private final ObjectMapper objectMapper;
     private final List<TradingRecommendation> lastRecommendations = new CopyOnWriteArrayList<>();
     private final List<TradingRecommendation> lastIntradayRecommendations = new CopyOnWriteArrayList<>();
     private final ThreadLocal<QualityCtx> qualityCtx = ThreadLocal.withInitial(QualityCtx::daily);
 
-    private record QualityCtx(double barsPerDay, Double minHlDays, Double tradeMaxHlDays) {
+    private record QualityCtx(double barsPerDay, Double minHlDays, Double tradeMaxHlDays, BookKind book) {
         static QualityCtx daily() {
-            return new QualityCtx(1.0, null, null);
+            return new QualityCtx(1.0, null, null, BookKind.DAILY);
         }
     }
 
-    public TradingRecommendationService(ImoexProperties properties, RiskPolicyService riskPolicyService) {
+    public TradingRecommendationService(
+            ImoexProperties properties,
+            RiskPolicyService riskPolicyService,
+            MicrostructureExecutionService microstructureExecutionService
+    ) {
         this.properties = properties;
         this.riskPolicyService = riskPolicyService;
+        this.microstructureExecutionService = microstructureExecutionService;
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    }
+
+    /** Тесты без microstructure gate. */
+    public TradingRecommendationService(ImoexProperties properties, RiskPolicyService riskPolicyService) {
+        this(properties, riskPolicyService, null);
     }
 
     /** Подгружает сохранённые рекомендации после рестарта приложения. */
@@ -89,7 +101,7 @@ public class TradingRecommendationService {
             Double minHalfLifeDays,
             Double tradeMaxHalfLifeDays
     ) throws IOException {
-        qualityCtx.set(new QualityCtx(barsPerDay, minHalfLifeDays, tradeMaxHalfLifeDays));
+        qualityCtx.set(new QualityCtx(barsPerDay, minHalfLifeDays, tradeMaxHalfLifeDays, book));
         try {
             List<TradingRecommendation> recommendations = new ArrayList<>();
             for (PairAnalysisResult pair : cointegratedPairs) {
@@ -225,7 +237,7 @@ public class TradingRecommendationService {
 
         details = appendStaleDataWarning(details, date);
 
-        return new TradingRecommendation(
+        return applyMicrostructureGate(new TradingRecommendation(
                 pair.tickerY(),
                 pair.tickerX(),
                 signal,
@@ -238,6 +250,37 @@ public class TradingRecommendationService {
                 pair.pValue(),
                 summary,
                 details
+        ));
+    }
+
+    private TradingRecommendation applyMicrostructureGate(TradingRecommendation rec) {
+        QualityCtx ctx = qualityCtx.get();
+        if (microstructureExecutionService == null || ctx == null || ctx.book() != BookKind.INTRADAY) {
+            return rec;
+        }
+        if (rec.signal() != TradingSignal.LONG_SPREAD && rec.signal() != TradingSignal.SHORT_SPREAD) {
+            return rec;
+        }
+        LocalDateTime at = rec.asOfDate().atTime(12, 0);
+        MicrostructureExecutionService.MicrostructureVerdict verdict =
+                microstructureExecutionService.evaluateEntry(
+                        rec.tickerY(), rec.tickerX(), rec.signal(), BookKind.INTRADAY, at);
+        if (verdict.allowed()) {
+            return rec;
+        }
+        return new TradingRecommendation(
+                rec.tickerY(),
+                rec.tickerX(),
+                TradingSignal.WATCH,
+                rec.currentZScore(),
+                rec.asOfDate(),
+                rec.currentSpread(),
+                rec.hedgeRatio(),
+                rec.halfLifeDays(),
+                rec.sharpeRatio(),
+                rec.pValue(),
+                "WATCH — microstructure gate (ATAS proxy)",
+                verdict.reason() + "\nZ-сигнал формально есть, но исполнение на 1H не прошло фильтр ликвидности/order-flow."
         );
     }
 

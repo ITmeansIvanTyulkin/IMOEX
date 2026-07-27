@@ -126,6 +126,26 @@ imoex:
     # обе ноги ≥ этого ADV; и ADV ratio ≤ max-turnover-ratio
     min-pair-turnover-rub: 50000000
     max-turnover-ratio: 20.0
+    intraday-tier-one-only: true
+  microstructure:
+    enabled: true
+    intraday-enabled: true
+    min-relative-volume: 0.60
+    max-spread-proxy-bps: 35
+    min-leg-delta-alignment: 0.15
+    max-leg-volume-ratio: 5.0
+    session-open-skip-minutes: 15
+    session-close-skip-minutes: 30
+    volume-profile-lookback: 20
+    block-outside-value-area: true
+    trend:
+      enabled: false
+      delta-momentum-threshold: 0.55
+      value-area-breakout-min-bars: 3
+      absorption-volume-mult: 2.5
+      absorption-range-max-bps: 15
+      breakout-delta-min: 0.60
+      footprint-lookback-bars: 24
   portfolio:
     # при max 2 парах — не больше 1 на сектор
     diversify-by-sector: true
