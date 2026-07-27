@@ -118,6 +118,11 @@ public class AnalysisViewController {
         return htmlRenderer.renderStrategy();
     }
 
+    @GetMapping(value = "/guide", produces = MediaType.TEXT_HTML_VALUE)
+    public String guide() {
+        return htmlRenderer.renderGuide();
+    }
+
     @GetMapping(value = "/charts/{tickerY}/{tickerX}", produces = MediaType.TEXT_HTML_VALUE)
     public String pairChart(
             @PathVariable String tickerY,

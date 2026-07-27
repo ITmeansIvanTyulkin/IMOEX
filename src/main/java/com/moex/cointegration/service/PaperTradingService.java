@@ -54,6 +54,7 @@ public class PaperTradingService {
     private final RiskPolicyService riskPolicyService;
     private final PairLookupService pairLookupService;
     private final MarketDataStorage storage;
+    private final PaperAlertService alertService;
     private final ObjectMapper objectMapper;
     private final List<PaperTradeEntry> entries = new CopyOnWriteArrayList<>();
 
@@ -64,7 +65,8 @@ public class PaperTradingService {
             SessionProperties sessionProperties,
             RiskPolicyService riskPolicyService,
             PairLookupService pairLookupService,
-            MarketDataStorage storage
+            MarketDataStorage storage,
+            PaperAlertService alertService
     ) {
         this.properties = properties;
         this.capitalProperties = capitalProperties;
@@ -72,6 +74,7 @@ public class PaperTradingService {
         this.riskPolicyService = riskPolicyService;
         this.pairLookupService = pairLookupService;
         this.storage = storage;
+        this.alertService = alertService;
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     }
 
@@ -82,7 +85,7 @@ public class PaperTradingService {
             PairLookupService pairLookupService
     ) {
         this(properties, CapitalProperties.defaults(), SessionProperties.defaults(),
-                riskPolicyService, pairLookupService, null);
+                riskPolicyService, pairLookupService, null, null);
     }
 
     @PostConstruct
@@ -189,6 +192,9 @@ public class PaperTradingService {
         int closed = markAndCloseOpen(quotes, book);
         List<PaperTradeEntry> opened = openNew(finals == null ? List.of() : finals, book, maxPairs, grossCap);
         save(book);
+        if (alertService != null && !opened.isEmpty()) {
+            alertService.recordNewOpens(opened);
+        }
         log.info("Paper sync [{}]: opened={}, closed={}, openNow={}, realized≈{} ₽, unrealized≈{} ₽",
                 book, opened.size(), closed, getOpenTrades(book).size(),
                 round(sumRealizedRub()), round(sumUnrealizedRub()));

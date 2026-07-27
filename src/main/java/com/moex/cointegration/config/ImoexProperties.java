@@ -316,8 +316,10 @@ public record ImoexProperties(
     /**
      * Paper trading journal.
      *
-     * @param autoRunDaily при true планировщик каждый торговый день гоняет анализ + paper sync
-     * @param dailyCron    cron (по умолчанию пн–пт 19:05 Europe/Moscow wall clock JVM)
+     * @param autoRunDaily    при true планировщик каждый торговый день гоняет анализ + paper sync
+     * @param dailyCron       cron (по умолчанию пн–пт 19:05 Europe/Moscow wall clock JVM)
+     * @param autoRunIntraday при true — часовой INTRADAY прогон в сессию (1H → paper)
+     * @param intradayCron    cron (по умолчанию пн–пт :05 10–18)
      */
     public record PaperProperties(
             boolean enabled,
@@ -325,6 +327,8 @@ public record ImoexProperties(
             String journalFile,
             Boolean autoRunDaily,
             String dailyCron,
+            Boolean autoRunIntraday,
+            String intradayCron,
             Double slippageBps,
             Boolean applyBorrow
     ) {
@@ -334,6 +338,12 @@ public record ImoexProperties(
             }
             if (dailyCron == null || dailyCron.isBlank()) {
                 dailyCron = "0 5 19 * * MON-FRI";
+            }
+            if (autoRunIntraday == null) {
+                autoRunIntraday = true;
+            }
+            if (intradayCron == null || intradayCron.isBlank()) {
+                intradayCron = "0 5 10-18 * * MON-FRI";
             }
             if (slippageBps == null || slippageBps < 0) {
                 slippageBps = 20.0;
@@ -345,11 +355,15 @@ public record ImoexProperties(
 
         public static PaperProperties defaults() {
             return new PaperProperties(true, 100_000.0, "paper-journal.json", true, "0 5 19 * * MON-FRI",
-                    20.0, true);
+                    true, "0 5 10-18 * * MON-FRI", 20.0, true);
         }
 
         public boolean autoRunDailyEnabled() {
             return Boolean.TRUE.equals(autoRunDaily);
+        }
+
+        public boolean autoRunIntradayEnabled() {
+            return Boolean.TRUE.equals(autoRunIntraday);
         }
 
         public boolean applyBorrowEnabled() {
