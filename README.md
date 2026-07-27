@@ -14,17 +14,17 @@
 
 | Модуль | Что делает |
 |---|---|
-| **Данные** | Состав IMOEX + дневные OHLCV с MOEX ISS, кэш в `data/candles/` |
+| **Данные** | MOEX ISS: дневные + 1H OHLCV (`data/candles/`, `data/candles-1h/`) — без TradingView |
 | **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P` (proxy шорта) |
-| **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) |
+| **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) — отдельно по книгам DAILY / INTRADAY |
 | **Хедж** | Статический β или **Kalman** динамический hedge ratio |
 | **Сигналы** | Rolling Z, вход после **разворота** за ±entry, выход ≈ 0, stop / time-stop |
-| **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются |
-| **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades, лимит открытых пар |
+| **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются в обеих книгах |
+| **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades; **CapitalAllocator** слоты/gross по equity |
 | **Рекомендации** | Тексты «что купить/продать» + явный блок при тренде + итог ENTER / REDUCE / WATCH / BLOCK |
-| **Новости / FA** | После техники, только DAILY: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
-| **Paper journal** | AUTO OPEN только после FA (в DAILY); MTM → AUTO CLOSE, PnL по qty×цена (+ slippage/borrow) |
-| **Walk-forward** | OOS окна train/test по топ-парам |
+| **Новости / FA** | После техники, **только DAILY-книга**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
+| **Paper journal** | Два журнала: `paper-journal.json` (DAILY) и `paper-journal-intraday.json` (flatten ~18:30) |
+| **Walk-forward** | OOS окна train/test по топ-парам (daily) |
 | **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
 | **Auth** | HTTP Basic на mutating API (`POST /api/**`) |
 | **UI** | HTML-дашборд TRINITY (операторский пульт) |
@@ -34,19 +34,24 @@
 ## Архитектура пайплайна
 
 ```mermaid
-flowchart LR
-  A[MOEX ISS] --> B[Свечи]
-  B --> U[Universe filter]
-  U --> C[LOCF + align]
-  C --> D[Engle–Granger + FDR]
-  D --> E[Kalman / спред / rolling Z]
-  E --> F[Сигналы + risk + ADX regime]
-  F --> G[Фундамент DAILY]
-  G --> H[ENTER · REDUCE · WATCH · BLOCK]
-  H --> P[Paper open/hold/close]
-  H --> I[HTML / JSON / графики]
-  H --> W[Walk-forward OOS]
+flowchart TB
+  Equity[equityRub] --> Alloc[CapitalAllocator]
+  Alloc --> DailyBook[DAILY book]
+  Alloc --> IntraBook[INTRADAY book]
+  DailyBook --> DTech[Daily EG Z]
+  DTech --> FA[FA news]
+  FA --> DPaper[paper-journal.json]
+  IntraBook --> HTech[1H EG Z]
+  HTech --> SkipFA[No FA]
+  SkipFA --> IPaper[paper-journal-intraday.json]
 ```
+
+Один операторский цикл (`Анализ + paper`) гоняет **обе книги**. Капитал режется автоматически (~40% daily / 60% intraday); при equity &lt; 1M — без плеча. `session.mode: DUAL` — метка dual-book, не exclusive switch.
+
+| Equity | max open DAILY | max open INTRADAY |
+|--------|----------------|-------------------|
+| ~100k  | 1              | 2                 |
+| ~200k  | 2              | 3                 |
 
 **Идея стратегии:** две акции обычно движутся вместе; если спред аномально расширился и Z **развернулся** к нулю — ставка на схождение (long одной ноги + short другой). Модуль рассчитан **только на боковик**: при высоком ADX индекса (режим TREND) новые входы блокируются.
 
@@ -237,7 +242,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 ### Итог после фундамента (`/view/final`)
 
-Порядок: **техника → фундамент → рекомендация → paper**. FA только в **DAILY / multi-day** (несколько дней); в INTRADAY пропускается.
+Порядок: **техника → фундамент → рекомендация → paper**. FA только в **DAILY-книге**; в **INTRADAY** пропускается. Обе книги в одном analysis cycle.
 
 | Итог | Действие |
 |---|---|
