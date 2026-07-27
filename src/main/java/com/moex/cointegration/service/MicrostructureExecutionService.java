@@ -13,6 +13,7 @@ import com.moex.cointegration.quant.microstructure.VolumeProfileCalculator;
 import com.moex.cointegration.storage.MarketDataStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -33,6 +34,7 @@ public class MicrostructureExecutionService {
     private final SessionProperties sessionProperties;
     private final MarketDataStorage storage;
 
+    @Autowired
     public MicrostructureExecutionService(
             MicrostructureProperties properties,
             SessionProperties sessionProperties,
