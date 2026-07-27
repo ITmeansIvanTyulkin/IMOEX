@@ -8,6 +8,7 @@ import com.moex.cointegration.service.ChartDataService;
 import com.moex.cointegration.service.ChartService;
 import com.moex.cointegration.service.CointegrationAnalysisService;
 import com.moex.cointegration.service.FinalRecommendationService;
+import com.moex.cointegration.service.HistoricalReplayService;
 import com.moex.cointegration.service.MarketDataService;
 import com.moex.cointegration.service.PaperTradingService;
 import com.moex.cointegration.service.RiskPolicyService;
@@ -60,6 +61,8 @@ class AnalysisControllerTest {
     PaperTradingService paperTradingService;
     @MockBean
     RiskPolicyService riskPolicyService;
+    @MockBean
+    HistoricalReplayService historicalReplayService;
     @MockBean
     ImoexProperties imoexProperties;
 

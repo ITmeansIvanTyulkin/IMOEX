@@ -89,6 +89,9 @@ imoex:
     session-close: "18:45"
     prevent-weekend-hold: true
     intraday-journal-file: paper-journal-intraday.json
+    event-calendar-enabled: true
+    event-flatten-minutes-before: 45
+    event-calendar-file: data/event-calendar.json
   walk-forward:
     enabled: true
     train-bars: 504
@@ -98,6 +101,7 @@ imoex:
     enabled: true
     # ~30к/нога: 1 пара ≈ 60к gross при β≈1, запас под 2-ю пару / издержки
     notional-per-leg: 30000
+    notional-per-leg-pct: 0.30
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
@@ -105,6 +109,8 @@ imoex:
     auto-run-intraday: true
     intraday-cron: "0 5 10-18 * * MON-FRI"
     slippage-bps: 20
+    slippage-bps-daily: 20
+    slippage-bps-intraday: 40
     apply-borrow: true
   # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
   universe:

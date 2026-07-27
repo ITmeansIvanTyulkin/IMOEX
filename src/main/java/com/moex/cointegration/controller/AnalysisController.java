@@ -2,8 +2,10 @@ package com.moex.cointegration.controller;
 
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.AnalysisReport;
+import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.ChartPayload;
 import com.moex.cointegration.model.FinalTradeRecommendation;
+import com.moex.cointegration.model.HistoricalReplayReport;
 import com.moex.cointegration.model.PairAnalysisResult;
 import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.TradingRecommendation;
@@ -13,6 +15,7 @@ import com.moex.cointegration.service.ChartDataService;
 import com.moex.cointegration.service.ChartService;
 import com.moex.cointegration.service.CointegrationAnalysisService;
 import com.moex.cointegration.service.FinalRecommendationService;
+import com.moex.cointegration.service.HistoricalReplayService;
 import com.moex.cointegration.service.MarketDataService;
 import com.moex.cointegration.service.PaperTradingService;
 import com.moex.cointegration.service.RiskPolicyService;
@@ -30,6 +33,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -53,6 +57,7 @@ public class AnalysisController {
     private final WalkForwardService walkForwardService;
     private final PaperTradingService paperTradingService;
     private final RiskPolicyService riskPolicyService;
+    private final HistoricalReplayService historicalReplayService;
 
     public AnalysisController(
             CointegrationAnalysisService analysisService,
@@ -64,7 +69,8 @@ public class AnalysisController {
             FinalRecommendationService finalRecommendationService,
             WalkForwardService walkForwardService,
             PaperTradingService paperTradingService,
-            RiskPolicyService riskPolicyService
+            RiskPolicyService riskPolicyService,
+            HistoricalReplayService historicalReplayService
     ) {
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
@@ -76,6 +82,7 @@ public class AnalysisController {
         this.walkForwardService = walkForwardService;
         this.paperTradingService = paperTradingService;
         this.riskPolicyService = riskPolicyService;
+        this.historicalReplayService = historicalReplayService;
     }
 
     /**
@@ -183,6 +190,28 @@ public class AnalysisController {
     @GetMapping("/risk/policy")
     public ImoexProperties.RiskProperties riskPolicy() {
         return riskPolicyService.policy();
+    }
+
+    /**
+     * POST /api/analysis/historical-replay — bar-by-bar прогон paper на сохранённых свечах пары.
+     */
+    @PostMapping("/analysis/historical-replay")
+    public HistoricalReplayReport historicalReplay(
+            @RequestParam String tickerY,
+            @RequestParam String tickerX,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to,
+            @RequestParam(defaultValue = "DAILY") BookKind book
+    ) throws IOException {
+        LocalDate end = to != null ? to : LocalDate.now().minusDays(1);
+        LocalDate start = from != null ? from : end.minusYears(2);
+        return historicalReplayService.replayFromStorage(
+                tickerY.toUpperCase(),
+                tickerX.toUpperCase(),
+                start,
+                end,
+                book
+        );
     }
 
     /**
