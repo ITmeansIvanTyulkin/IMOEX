@@ -47,6 +47,7 @@ public class PaperTradingService {
 
     private static final Logger log = LoggerFactory.getLogger(PaperTradingService.class);
     private static final double Z_TO_PCT = 0.01;
+    private static final ThreadLocal<LocalDateTime> SIMULATION_CLOCK = new ThreadLocal<>();
 
     private final ImoexProperties properties;
     private final CapitalProperties capitalProperties;
@@ -55,6 +56,7 @@ public class PaperTradingService {
     private final PairLookupService pairLookupService;
     private final MarketDataStorage storage;
     private final PaperAlertService alertService;
+    private final EventCalendarRiskService eventCalendarRiskService;
     private final ObjectMapper objectMapper;
     private final List<PaperTradeEntry> entries = new CopyOnWriteArrayList<>();
 
@@ -66,7 +68,8 @@ public class PaperTradingService {
             RiskPolicyService riskPolicyService,
             PairLookupService pairLookupService,
             MarketDataStorage storage,
-            PaperAlertService alertService
+            PaperAlertService alertService,
+            EventCalendarRiskService eventCalendarRiskService
     ) {
         this.properties = properties;
         this.capitalProperties = capitalProperties;
@@ -75,6 +78,7 @@ public class PaperTradingService {
         this.pairLookupService = pairLookupService;
         this.storage = storage;
         this.alertService = alertService;
+        this.eventCalendarRiskService = eventCalendarRiskService;
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     }
 
@@ -85,7 +89,22 @@ public class PaperTradingService {
             PairLookupService pairLookupService
     ) {
         this(properties, CapitalProperties.defaults(), SessionProperties.defaults(),
-                riskPolicyService, pairLookupService, null, null);
+                riskPolicyService, pairLookupService, null, null, null);
+    }
+
+    /** Исторический replay: подмена «сейчас» для bar-by-bar прогона. */
+    public static void runAt(LocalDateTime at, Runnable action) {
+        SIMULATION_CLOCK.set(at);
+        try {
+            action.run();
+        } finally {
+            SIMULATION_CLOCK.remove();
+        }
+    }
+
+    private LocalDateTime now() {
+        LocalDateTime sim = SIMULATION_CLOCK.get();
+        return sim != null ? sim : LocalDateTime.now();
     }
 
     @PostConstruct
@@ -174,7 +193,7 @@ public class PaperTradingService {
         }
 
         if (book == BookKind.INTRADAY) {
-            MarketSession.Phase phase = MarketSession.current(LocalDateTime.now(), sessionProperties);
+            MarketSession.Phase phase = MarketSession.current(now(), sessionProperties);
             if (phase == MarketSession.Phase.PRE_CLOSE) {
                 int flat = flattenAll(quotes, book, "PRE_CLOSE flatten — без овернайта в INTRADAY");
                 save(book);
@@ -189,6 +208,10 @@ public class PaperTradingService {
             }
         }
 
+        if (book == BookKind.INTRADAY) {
+            flattenForUpcomingEvents(quotes, book);
+        }
+
         int closed = markAndCloseOpen(quotes, book);
         List<PaperTradeEntry> opened = openNew(finals == null ? List.of() : finals, book, maxPairs, grossCap);
         save(book);
@@ -201,6 +224,30 @@ public class PaperTradingService {
         return opened;
     }
 
+    private int flattenForUpcomingEvents(Map<String, TradingRecommendation> quotes, BookKind book) {
+        if (eventCalendarRiskService == null || !eventCalendarRiskService.enabled()) {
+            return 0;
+        }
+        List<PaperTradeEntry> updated = new ArrayList<>();
+        for (PaperTradeEntry open : getOpenTrades(book)) {
+            if (!eventCalendarRiskService.shouldFlattenNow(open.tickerY(), open.tickerX(), now())) {
+                continue;
+            }
+            String reason = eventCalendarRiskService.eventReason(open.tickerY(), open.tickerX(), now())
+                    .orElse("EVENT flatten");
+            Quote q = resolveQuote(open, quotes, book);
+            double z = q == null ? (open.markZ() == null ? open.entryZ() : open.markZ()) : q.z();
+            LocalDate asOf = q == null ? open.asOfDate() : q.asOf();
+            double[] pnl = computePnl(open, z, asOf, q == null ? null : q.priceY(), q == null ? null : q.priceX());
+            double slip = (open.notionalY() + open.notionalX()) * properties.paper().slippageFraction(book);
+            updated.add(open.withClose(now(), z, pnl[0], pnl[1] - slip, reason));
+        }
+        for (PaperTradeEntry e : updated) {
+            replace(e);
+        }
+        return updated.size();
+    }
+
     private int flattenAll(Map<String, TradingRecommendation> quotes, BookKind book, String reason) {
         List<PaperTradeEntry> updated = new ArrayList<>();
         for (PaperTradeEntry open : getOpenTrades(book)) {
@@ -208,7 +255,7 @@ public class PaperTradingService {
             double z = q == null ? (open.markZ() == null ? open.entryZ() : open.markZ()) : q.z();
             LocalDate asOf = q == null ? open.asOfDate() : q.asOf();
             double[] pnl = computePnl(open, z, asOf, q == null ? null : q.priceY(), q == null ? null : q.priceX());
-            updated.add(open.withClose(LocalDateTime.now(), z, pnl[0], pnl[1], reason));
+            updated.add(open.withClose(now(), z, pnl[0], pnl[1], reason));
         }
         for (PaperTradeEntry e : updated) {
             replace(e);
@@ -231,7 +278,7 @@ public class PaperTradingService {
 
         if (book == BookKind.INTRADAY
                 && Boolean.TRUE.equals(sessionProperties.preventWeekendHold())
-                && MarketSession.isWeekend(LocalDate.now())) {
+                && MarketSession.isWeekend(now().toLocalDate())) {
             return opened;
         }
 
@@ -272,8 +319,7 @@ public class PaperTradingService {
                 continue;
             }
             boolean reduce = f.decision() == FinalTradeDecision.REDUCE_SIZE;
-            double mult = riskPolicyService.sizeMultiplier(f.technical(), reduce);
-            double notionalY = properties.paper().notionalPerLeg() * mult;
+            double notionalY = riskPolicyService.suggestedNotional(f.technical(), reduce);
             double beta = Math.abs(f.technical().hedgeRatio());
             double notionalX = notionalY * beta;
             if (openGross + notionalY + notionalX > maxGross + 1e-6) {
@@ -289,7 +335,8 @@ public class PaperTradingService {
             Double qtyY = priceY != null && priceY > 0 ? notionalY / priceY : null;
             Double qtyX = priceX != null && priceX > 0 ? notionalX / priceX : null;
 
-            double slipCost = (notionalY + notionalX) * properties.paper().slippageFraction();
+            double mult = riskPolicyService.sizeMultiplier(f.technical(), reduce);
+            double slipCost = (notionalY + notionalX) * properties.paper().slippageFraction(book);
             String notes = "AUTO OPEN [" + book + "]: " + f.decisionSummary()
                     + (capitalProperties.leverageAllowed() ? "" : " [no-leverage]");
             if (slipCost > 0) {
@@ -298,7 +345,7 @@ public class PaperTradingService {
 
             PaperTradeEntry entry = new PaperTradeEntry(
                     UUID.randomUUID().toString(),
-                    LocalDateTime.now(),
+                    now(),
                     f.technical().asOfDate(),
                     f.technical().tickerY(),
                     f.technical().tickerX(),
@@ -406,8 +453,8 @@ public class PaperTradingService {
             }
 
             if (closeReason != null) {
-                double slip = (open.notionalY() + open.notionalX()) * properties.paper().slippageFraction();
-                updated.add(open.withClose(LocalDateTime.now(), q.z(), pnlPct, pnlRub - slip, closeReason));
+                double slip = (open.notionalY() + open.notionalX()) * properties.paper().slippageFraction(book);
+                updated.add(open.withClose(now(), q.z(), pnlPct, pnlRub - slip, closeReason));
             } else if (barsHeld >= 1
                     && !open.partialDone()
                     && ExitRules.halfwayToZero(open.entryZ(), q.z(), risk.partialTpFraction())) {
@@ -427,10 +474,9 @@ public class PaperTradingService {
         return (int) updated.stream().filter(e -> "CLOSED".equals(e.status())).count();
     }
 
-    private static int barsHeld(PaperTradeEntry open, LocalDate quoteAsOf, BookKind book) {
+    private int barsHeld(PaperTradeEntry open, LocalDate quoteAsOf, BookKind book) {
         if (book == BookKind.INTRADAY) {
-            // часы удержания от открытия сделки (1H-книга)
-            return (int) ChronoUnit.HOURS.between(open.openedAt(), LocalDateTime.now());
+            return (int) ChronoUnit.HOURS.between(open.openedAt(), now());
         }
         return (int) ChronoUnit.DAYS.between(open.asOfDate(), quoteAsOf);
     }
@@ -594,7 +640,7 @@ public class PaperTradingService {
         double unrealized = book == null ? sumUnrealizedRub() : sumUnrealizedRub(book);
         int closed = (int) journal.stream().filter(e -> "CLOSED".equals(e.status())).count();
         return new PaperJournal(
-                LocalDateTime.now(),
+                now(),
                 journal,
                 round(realized),
                 round(unrealized),

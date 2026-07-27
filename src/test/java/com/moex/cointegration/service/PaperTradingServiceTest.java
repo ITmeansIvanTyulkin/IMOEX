@@ -193,7 +193,7 @@ class PaperTradingServiceTest {
                         true, 0.02, 0.25, 1.5, null, null, null, null,
                         null, null, null, null, null, null, null, null, null, null),
                 ImoexProperties.WalkForwardProperties.defaults(),
-                new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null, false, null, 0.0, false),
+                new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null, false, null, 0.0, false, 0.30, 20.0, 40.0),
                 ImoexProperties.UniverseProperties.defaults(),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()

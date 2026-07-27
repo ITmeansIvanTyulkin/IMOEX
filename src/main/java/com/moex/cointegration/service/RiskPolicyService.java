@@ -1,5 +1,6 @@
 package com.moex.cointegration.service;
 
+import com.moex.cointegration.config.CapitalProperties;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.config.RegimeProperties;
 import com.moex.cointegration.model.MarketRegimeSnapshot;
@@ -17,23 +18,26 @@ import org.springframework.stereotype.Service;
 public class RiskPolicyService {
 
     private final ImoexProperties properties;
+    private final CapitalProperties capitalProperties;
     private final RegimeProperties regimeProperties;
     private final MarketRegimeService marketRegimeService;
 
     @Autowired
     public RiskPolicyService(
             ImoexProperties properties,
+            CapitalProperties capitalProperties,
             RegimeProperties regimeProperties,
             MarketRegimeService marketRegimeService
     ) {
         this.properties = properties;
+        this.capitalProperties = capitalProperties;
         this.regimeProperties = regimeProperties;
         this.marketRegimeService = marketRegimeService;
     }
 
     /** Тесты без Spring: regime off. */
     public RiskPolicyService(ImoexProperties properties) {
-        this(properties, new RegimeProperties(false, 14, 20.0, 25.0, 0.5, "SNDX"), null);
+        this(properties, CapitalProperties.defaults(), new RegimeProperties(false, 14, 20.0, 25.0, 0.5, "SNDX"), null);
     }
 
     public ImoexProperties.RiskProperties policy() {
@@ -181,7 +185,8 @@ public class RiskPolicyService {
     }
 
     public double suggestedNotional(TradingRecommendation rec, boolean reduce) {
-        double base = properties.paper().notionalPerLeg();
+        double equity = capitalProperties == null ? 100_000.0 : capitalProperties.equityRub();
+        double base = properties.paper().baseNotionalPerLeg(equity);
         return base * sizeMultiplier(rec, reduce);
     }
 
