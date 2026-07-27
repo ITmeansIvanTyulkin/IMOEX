@@ -14,39 +14,46 @@
 
 | Модуль | Что делает |
 |---|---|
-| **Данные** | Состав IMOEX + дневные OHLCV с MOEX ISS, кэш в `data/candles/` |
+| **Данные** | MOEX ISS: дневные + 1H OHLCV (`data/candles/`, `data/candles-1h/`) — без TradingView |
 | **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P` (proxy шорта) |
-| **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) |
+| **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) — отдельно по книгам DAILY / INTRADAY |
 | **Хедж** | Статический β или **Kalman** динамический hedge ratio |
 | **Сигналы** | Rolling Z, вход после **разворота** за ±entry, выход ≈ 0, stop / time-stop |
-| **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются |
-| **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades, лимит открытых пар |
+| **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются в обеих книгах |
+| **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades; **CapitalAllocator** слоты/gross по equity |
 | **Рекомендации** | Тексты «что купить/продать» + явный блок при тренде + итог ENTER / REDUCE / WATCH / BLOCK |
-| **Новости / FA** | После техники, только DAILY: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
-| **Paper journal** | AUTO OPEN только после FA (в DAILY); MTM → AUTO CLOSE, PnL по qty×цена (+ slippage/borrow) |
-| **Walk-forward** | OOS окна train/test по топ-парам |
+| **Новости / FA** | После техники, **только DAILY-книга**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
+| **Paper journal** | Два журнала: `paper-journal.json` (DAILY) и `paper-journal-intraday.json` (flatten ~18:30) |
+| **Walk-forward** | OOS окна train/test по топ-парам (daily) |
 | **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
 | **Auth** | HTTP Basic на mutating API (`POST /api/**`) |
-| **UI** | HTML-дашборд TRINITY (операторский пульт) |
+| **UI** | HTML-дашборд TRINITY (операторский пульт) + инструкция `/view/guide` |
 
 ---
 
 ## Архитектура пайплайна
 
 ```mermaid
-flowchart LR
-  A[MOEX ISS] --> B[Свечи]
-  B --> U[Universe filter]
-  U --> C[LOCF + align]
-  C --> D[Engle–Granger + FDR]
-  D --> E[Kalman / спред / rolling Z]
-  E --> F[Сигналы + risk + ADX regime]
-  F --> G[Фундамент DAILY]
-  G --> H[ENTER · REDUCE · WATCH · BLOCK]
-  H --> P[Paper open/hold/close]
-  H --> I[HTML / JSON / графики]
-  H --> W[Walk-forward OOS]
+flowchart TB
+  Equity[equityRub] --> Alloc[CapitalAllocator]
+  Alloc --> DailyBook[DAILY book]
+  Alloc --> IntraBook[INTRADAY book]
+  DailyBook --> DTech[Daily EG Z]
+  DTech --> FA[FA news]
+  FA --> DPaper[paper-journal.json]
+  IntraBook --> HTech[1H EG Z]
+  HTech --> SkipFA[No FA]
+  SkipFA --> IPaper[paper-journal-intraday.json]
 ```
+
+Один операторский цикл (`Анализ + paper`) **автоматически** гоняет **обе книги** подряд: сначала DAILY (техника → FA → paper), затем INTRADAY (1H техника → paper, без FA). Ручного переключателя «сегодня daily / сегодня intraday» нет.
+
+Капитал режется **фиксированно** по equity: ~**40% gross** на DAILY и ~**60%** на INTRADAY; при equity &lt; 1M — без плеча. Лимиты **независимы**: если по DAILY нет сигналов, неиспользованная daily-доля **не перетекает** в INTRADAY — intraday работает только в своих слотах и своём gross. `session.mode: DUAL` — метка dual-book, не exclusive switch.
+
+| Equity | max open DAILY | max open INTRADAY | gross DAILY | gross INTRADAY |
+|--------|----------------|-------------------|-------------|----------------|
+| ~100k  | 1              | 2                 | ~40k        | ~60k           |
+| ~200k  | 2              | 3                 | ~80k        | ~120k          |
 
 **Идея стратегии:** две акции обычно движутся вместе; если спред аномально расширился и Z **развернулся** к нулю — ставка на схождение (long одной ноги + short другой). Модуль рассчитан **только на боковик**: при высоком ADX индекса (режим TREND) новые входы блокируются.
 
@@ -180,11 +187,12 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | Шаг | URL | Зачем |
 |---|---|---|
 | 1 | http://localhost:8080/view | Дашборд + пульт |
-| 2 | http://localhost:8080/view/final | Итог ENTER / REDUCE / BLOCK |
-| 3 | http://localhost:8080/view/paper | Paper: открытые / закрытые, Net ₽ |
-| 4 | http://localhost:8080/view/walk-forward | OOS Sharpe по окнам |
-| 5 | http://localhost:8080/view/signals | Сырые LONG / SHORT |
-| 6 | http://localhost:8080/view/charts/SBER/LKOH | График конкретной пары (подставьте тикеры) |
+| 2 | http://localhost:8080/view/guide | **Как пользоваться** — запуск, cron, алерты |
+| 3 | http://localhost:8080/view/final | Итог ENTER / REDUCE / BLOCK |
+| 4 | http://localhost:8080/view/paper | Paper: открытые / закрытые, Net ₽ |
+| 5 | http://localhost:8080/view/walk-forward | OOS Sharpe по окнам |
+| 6 | http://localhost:8080/view/signals | Сырые LONG / SHORT |
+| 7 | http://localhost:8080/view/charts/SBER/LKOH | График конкретной пары (подставьте тикеры) |
 
 Корень `/` → редирект на `/view`.
 
@@ -199,9 +207,28 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 Затем откройте `/view/paper` и `/view/final`.
 
-**Вариант B — автомат:** при `imoex.paper.auto-run-daily: true` (по умолчанию) планировщик в **пн–пт ~19:05** сам гоняет полный цикл (свечи → анализ → paper), пока `mvn spring-boot:run` запущен.
+**Вариант B — автомат:** пока `mvn spring-boot:run` запущен, планировщики сами гоняют анализ:
 
-На выходных новых дневных свечей нет — повтор почти ничего не меняет. Paper **не закрывает** стопом на той же свече, что и вход (защита от шума пересчёта Z).
+| Книга | Cron (по умолчанию) | Что внутри |
+|---|---|---|
+| **DAILY** | пн–пт **19:05** (`imoex.paper.auto-run-daily: true`) | Дневные свечи → техника → FA → `paper-journal.json` |
+| **INTRADAY** | пн–пт **:05** с 10:00 до 18:00 (`imoex.paper.auto-run-intraday: true`) | 1H ISS → техника → paper без FA → `paper-journal-intraday.json` |
+
+На выходных новых дневных свечей нет — вечерний DAILY почти ничего не меняет. Paper **не закрывает** стопом на той же свече, что и вход (защита от шума пересчёта Z).
+
+### 7a. Алерты при новой paper-сделке
+
+Пока открыта **любая** страница `/view/*`, браузер раз в минуту опрашивает `GET /api/ops/paper-alerts`. При новом OPEN:
+
+- **баннер справа сверху** в окне браузера + короткий звук (на macOS, Windows, Linux одинаково);
+- **системное уведомление ОС** — если в пульте нажать «Уведомления macOS / Windows» и разрешить в браузере.
+
+| Платформа | Баннер в браузере | Уведомление ОС |
+|---|---|---|
+| macOS | правый верхний угол страницы | Notification Center — справа сверху |
+| Windows | правый верхний угол страницы | Центр уведомлений — обычно **правый нижний** угол (позицию задаёт Windows) |
+
+Чекбоксы «Алерты» и «Звук» — в пульте оператора. После ручного «Анализ + paper» опрос срабатывает сразу. Подробнее: **http://localhost:8080/view/guide**.
 
 ### 8. Сброс paper journal (чистый track-record)
 
@@ -217,6 +244,22 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 - [ ] `/view/final` показывает пары и решения  
 - [ ] `/view/paper` не пустой после ENTER (или пустой осознанно — нет сигналов / близко к стопу)  
 - [ ] На графике Z стрелки входа только после разворота к нулю  
+
+---
+
+## Как пользоваться системой
+
+Полная инструкция в UI: **http://localhost:8080/view/guide** (пункт верхнего меню «Как пользоваться системой»).
+
+Кратко:
+
+1. **Запуск** — `mvn spring-boot:run`, секреты в `application-local.yml`, первый раз «Анализ + скачать свечи».
+2. **Пульт** — на любой `/view/*`: кнопки анализа, логин API, алерты и звук.
+3. **Главные экраны** — `/view/final` (разрешено ли после FA), `/view/paper` (что открылось), дашборд (режим ADX).
+4. **Автопрогоны** — DAILY ~19:05, INTRADAY :05 каждый час 10–18 (пн–пт), пока сервер работает.
+5. **Алерты** — баннер справа сверху в браузере + опционально уведомление ОС (на Windows обычно снизу справа).
+
+Теория стратегии — `/view/strategy`. Пустой paper journal нормален, если нет ENTER/LONG/SHORT с разворотом Z.
 
 ---
 
@@ -237,7 +280,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 ### Итог после фундамента (`/view/final`)
 
-Порядок: **техника → фундамент → рекомендация → paper**. FA только в **DAILY / multi-day** (несколько дней); в INTRADAY пропускается.
+Порядок: **техника → фундамент → рекомендация → paper**. FA только в **DAILY-книге**; в **INTRADAY** пропускается. Обе книги в одном analysis cycle.
 
 | Итог | Действие |
 |---|---|
@@ -357,6 +400,8 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
+    auto-run-intraday: true
+    intraday-cron: "0 5 10-18 * * MON-FRI"
     slippage-bps: 20
   auth:
     enabled: true
@@ -388,7 +433,7 @@ IMOEX/
 │   ├── model/           # DTO / records
 │   ├── news/            # триггеры заголовков
 │   ├── quant/           # ADF, EG, OLS, Spread, KAMA, Kalman, SignalRules, WF
-│   ├── scheduler/       # weekly + daily paper cron
+│   ├── scheduler/       # daily + intraday paper cron
 │   ├── service/         # анализ, paper, universe filter, …
 │   ├── storage/         # JSON-кэш
 │   └── web/             # HTML-рендер

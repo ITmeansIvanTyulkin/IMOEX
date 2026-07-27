@@ -3,6 +3,7 @@ package com.moex.cointegration.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.TradingRecommendation;
@@ -34,6 +35,7 @@ public class FinalRecommendationService {
     private final ImoexProperties properties;
     private final ObjectMapper objectMapper;
     private final List<FinalTradeRecommendation> lastFinal = new CopyOnWriteArrayList<>();
+    private final List<FinalTradeRecommendation> lastIntradayFinal = new CopyOnWriteArrayList<>();
 
     public FinalRecommendationService(
             NewsRiskAnalysisService newsRiskAnalysisService,
@@ -62,24 +64,41 @@ public class FinalRecommendationService {
 
     public List<FinalTradeRecommendation> rebuildFromTechnical(List<TradingRecommendation> technical)
             throws IOException {
+        return rebuildFromTechnical(technical, BookKind.DAILY);
+    }
+
+    public List<FinalTradeRecommendation> rebuildFromTechnical(
+            List<TradingRecommendation> technical,
+            BookKind book
+    ) throws IOException {
         List<TradingRecommendation> forNews = technical.stream()
                 .filter(r -> r.signal() == TradingSignal.LONG_SPREAD
                         || r.signal() == TradingSignal.SHORT_SPREAD
                         || r.signal() == TradingSignal.WATCH)
                 .toList();
 
-        List<FinalTradeRecommendation> analyzed = new ArrayList<>(newsRiskAnalysisService.analyze(forNews));
+        List<FinalTradeRecommendation> analyzed = new ArrayList<>(
+                newsRiskAnalysisService.analyze(forNews, book));
 
-        // HOLD/SKIP — без сетевого новостного прохода, в итоговую таблицу сигналов не тащим
         analyzed.sort(Comparator
                 .comparingInt((FinalTradeRecommendation f) -> decisionRank(f.decision()))
                 .thenComparing(f -> Math.abs(f.technical().currentZScore()), Comparator.reverseOrder()));
 
-        lastFinal.clear();
-        lastFinal.addAll(analyzed);
-        save(analyzed);
+        if (book == BookKind.INTRADAY) {
+            lastIntradayFinal.clear();
+            lastIntradayFinal.addAll(analyzed);
+            save(analyzed, "final-recommendations-intraday.json");
+        } else {
+            lastFinal.clear();
+            lastFinal.addAll(analyzed);
+            save(analyzed, "final-recommendations.json");
+        }
         printSummary(analyzed);
         return List.copyOf(analyzed);
+    }
+
+    public List<FinalTradeRecommendation> getLastIntradayFinal() {
+        return List.copyOf(lastIntradayFinal);
     }
 
     /** Ручной пересчёт новостей по уже сохранённым техническим рекомендациям. */
@@ -100,7 +119,11 @@ public class FinalRecommendationService {
     }
 
     private void save(List<FinalTradeRecommendation> rows) throws IOException {
-        Path file = finalFile();
+        save(rows, "final-recommendations.json");
+    }
+
+    private void save(List<FinalTradeRecommendation> rows, String fileName) throws IOException {
+        Path file = Path.of(properties.dataDir(), fileName);
         Files.createDirectories(file.getParent());
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), rows);
     }

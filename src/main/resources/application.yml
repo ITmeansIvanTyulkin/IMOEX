@@ -32,7 +32,7 @@ imoex:
     stop-z: 3.5
     max-hold-bars: 40
     reduce-size-factor: 0.5
-    # профиль ~100к ₽: узкая книга 1–2 пары (multi-day + позже INTRADAY)
+    # dual-book: слоты считает CapitalAllocator от equity (не этот ключ)
     max-open-pairs: 2
     max-portfolio-gross: 1.0
     min-sharpe: 0.0
@@ -70,9 +70,19 @@ imoex:
     equity-rub: 100000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
+    # dual-book: 40% gross daily / 60% intraday
+    daily-gross-share: 0.40
+    intraday-gross-share: 0.60
   session:
-    mode: DAILY          # затем INTRADAY (тот же pairs-модуль, flatten к close)
+    # DUAL = оба горизонта в одном analysis cycle (не exclusive switch)
+    mode: DUAL
     candle-interval: 60
+    hours-per-session: 7
+    hourly-lookback-days: 90
+    intraday-rolling-z-window: 48
+    intraday-max-hold-bars: 7
+    intraday-min-half-life-days: 0.25
+    intraday-trade-max-half-life-days: 3.0
     pre-close-start: "18:30"
     pre-close-end: "18:45"
     session-open: "10:00"
@@ -91,6 +101,9 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
+    # INTRADAY: :05 каждого часа 10–18 (пн–пт), после закрытия 1H-бара
+    auto-run-intraday: true
+    intraday-cron: "0 5 10-18 * * MON-FRI"
     slippage-bps: 20
     apply-borrow: true
   # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
