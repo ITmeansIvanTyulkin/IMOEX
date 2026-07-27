@@ -41,32 +41,59 @@ public class RiskPolicyService {
     }
 
     public boolean passesQualityFilters(PairAnalysisResult pair) {
-        return qualityRejectReason(pair) == null;
+        return qualityRejectReason(pair, 1.0, null, null) == null;
+    }
+
+    public boolean passesQualityFilters(
+            PairAnalysisResult pair,
+            double barsPerDay,
+            Double minHalfLifeDaysOverride,
+            Double tradeMaxHalfLifeDaysOverride
+    ) {
+        return qualityRejectReason(pair, barsPerDay, minHalfLifeDaysOverride, tradeMaxHalfLifeDaysOverride) == null;
     }
 
     public String qualityRejectReason(PairAnalysisResult pair) {
+        return qualityRejectReason(pair, 1.0, null, null);
+    }
+
+    /**
+     * @param barsPerDay сколько баров в одном торговом дне (1 для daily, ~7 для 1H)
+     */
+    public String qualityRejectReason(
+            PairAnalysisResult pair,
+            double barsPerDay,
+            Double minHalfLifeDaysOverride,
+            Double tradeMaxHalfLifeDaysOverride
+    ) {
         ImoexProperties.RiskProperties risk = properties.risk();
+        double bpDay = barsPerDay > 0 ? barsPerDay : 1.0;
         if (pair.sharpeRatio() < risk.minSharpe()) {
             return String.format("Sharpe=%.2f < %.1f", pair.sharpeRatio(), risk.minSharpe());
         }
         if (Double.isNaN(pair.halfLifeDays())) {
             return "half-life не определён (спред не mean-reverting)";
         }
-        if (pair.halfLifeDays() > risk.maxHalfLifeDays()) {
-            return String.format("half-life=%.1f дней — слишком медленный возврат (research)", pair.halfLifeDays());
+        // halfLifeDays() считает half-life в барах; переводим в дни
+        double hlDays = pair.halfLifeDays() / bpDay;
+        double minHl = minHalfLifeDaysOverride != null ? minHalfLifeDaysOverride : risk.minHalfLifeDays();
+        double maxHlResearch = risk.maxHalfLifeDays();
+        double tradeMaxHl = tradeMaxHalfLifeDaysOverride != null
+                ? tradeMaxHalfLifeDaysOverride
+                : risk.tradeMaxHalfLifeDays();
+
+        if (hlDays > maxHlResearch) {
+            return String.format("half-life=%.1f дней — слишком медленный возврат (research)", hlDays);
         }
-        if (pair.halfLifeDays() < risk.minHalfLifeDays()) {
-            return String.format("half-life=%.2f — подозрительно быстрый (шум)", pair.halfLifeDays());
+        if (hlDays < minHl) {
+            return String.format("half-life=%.2f — подозрительно быстрый (шум)", hlDays);
         }
-        // Торговый gate для боковика жёстче research maxHalfLife
-        if (pair.halfLifeDays() > risk.tradeMaxHalfLifeDays()) {
-            return String.format("half-life=%.1f > trade-max %.0f дн. (боковик)",
-                    pair.halfLifeDays(), risk.tradeMaxHalfLifeDays());
+        if (hlDays > tradeMaxHl) {
+            return String.format("half-life=%.1f > trade-max %.0f дн. (боковик)", hlDays, tradeMaxHl);
         }
         if (!Double.isNaN(pair.rSquared()) && pair.rSquared() < risk.minRSquared()) {
             return String.format("R²=%.2f < %.2f", pair.rSquared(), risk.minRSquared());
         }
-        // tradeCount в симуляции считает ноги (open+close), поэтому порог ×2
         if (pair.tradeCount() < risk.minTradeCount() * 2) {
             return String.format("сделок в бэктесте мало (%d < %d)",
                     pair.tradeCount() / 2, risk.minTradeCount());

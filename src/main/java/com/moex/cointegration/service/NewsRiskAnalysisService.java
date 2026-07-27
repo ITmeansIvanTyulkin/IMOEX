@@ -5,6 +5,7 @@ import com.moex.cointegration.client.MoexNewsClient;
 import com.moex.cointegration.client.RssNewsClient;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.config.SessionProperties;
+import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.NewsItem;
@@ -80,8 +81,22 @@ public class NewsRiskAnalysisService {
     /**
      * Оценивает новости/структурный риск по списку технических рекомендаций
      * и возвращает итоговые решения ENTER / REDUCE / WATCH / BLOCK.
+     * Для {@link BookKind#INTRADAY} фундамент пропускается (новости запаздывают).
      */
     public List<FinalTradeRecommendation> analyze(List<TradingRecommendation> technical) {
+        return analyze(technical, BookKind.DAILY);
+    }
+
+    public List<FinalTradeRecommendation> analyze(List<TradingRecommendation> technical, BookKind book) {
+        if (book == BookKind.INTRADAY) {
+            log.info("Fundamental filter skipped: INTRADAY book (tech-only)");
+            return technical.stream()
+                    .map(r -> passthrough(r,
+                            "Фундаментальный фильтр пропущен: книга INTRADAY (только техника)."))
+                    .toList();
+        }
+
+        // legacy exclusive mode — тоже без FA
         if (sessionProperties.intradayMode()) {
             log.info("Fundamental filter skipped: session mode INTRADAY (tech-only)");
             return technical.stream()

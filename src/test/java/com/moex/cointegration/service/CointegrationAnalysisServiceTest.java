@@ -56,6 +56,8 @@ class CointegrationAnalysisServiceTest {
                 new TradingRecommendationService(props, riskPolicyService);
         FinalRecommendationService finalRecommendationService = mock(FinalRecommendationService.class);
         when(finalRecommendationService.rebuildFromTechnical(anyList())).thenReturn(List.of());
+        when(finalRecommendationService.rebuildFromTechnical(anyList(), any())).thenReturn(List.of());
+        when(marketDataService.loadAlignedHourlyPriceSeries()).thenReturn(Map.of());
         PaperTradingService paperTradingService = mock(PaperTradingService.class);
         WalkForwardService walkForwardService = mock(WalkForwardService.class);
         UniverseFilterService universeFilterService = new UniverseFilterService(storage, props);
@@ -72,14 +74,16 @@ class CointegrationAnalysisServiceTest {
                 walkForwardService,
                 universeFilterService,
                 regimeService,
-                props
+                props,
+                com.moex.cointegration.config.SessionProperties.defaults(),
+                com.moex.cointegration.config.CapitalProperties.defaults()
         );
 
         AnalysisReport report = service.runFullAnalysis(false);
 
         assertTrue(report.pairsTested() >= 1);
         assertTrue(report.tickersAnalyzed() >= 2);
-        verify(finalRecommendationService).rebuildFromTechnical(anyList());
+        verify(finalRecommendationService).rebuildFromTechnical(anyList(), any());
         assertTrue(storage.loadReport().isPresent());
     }
 
