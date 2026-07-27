@@ -23,16 +23,17 @@ public record CapitalProperties(
         if (maxGrossWhenNoLeverage == null || maxGrossWhenNoLeverage <= 0) {
             maxGrossWhenNoLeverage = 1.0;
         }
-        if (dailyGrossShare == null || dailyGrossShare <= 0) {
-            dailyGrossShare = 0.40;
+        if (dailyGrossShare == null || dailyGrossShare < 0) {
+            dailyGrossShare = 1.0;
         }
-        if (intradayGrossShare == null || intradayGrossShare <= 0) {
-            intradayGrossShare = 0.60;
+        if (intradayGrossShare == null || intradayGrossShare < 0) {
+            // 0 = INTRADAY research-only (капитал на DAILY)
+            intradayGrossShare = 0.0;
         }
     }
 
     public static CapitalProperties defaults() {
-        return new CapitalProperties(100_000.0, 1_000_000.0, 1.0, 0.40, 0.60);
+        return new CapitalProperties(100_000.0, 1_000_000.0, 1.0, 1.0, 0.0);
     }
 
     public boolean leverageAllowed() {

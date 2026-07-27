@@ -34,14 +34,14 @@ class CointegrationAnalysisServiceTest {
     void runFullAnalysisFindsCointegratedSyntheticPairAndPersists() throws Exception {
         ImoexProperties props = new ImoexProperties(
                 "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
-                new ImoexProperties.CointegrationProperties(0.05, 2.0, 0.0, 5, true, 40, 0.20, true, 1e-5, 1e-3, true),
+                new ImoexProperties.CointegrationProperties(0.05, 2.0, 0.0, 5, true, 40, 0.20, true, 1e-5, 1e-3, true, true),
                 new ImoexProperties.NewsProperties(false, 10, 10, 1),
                 tempDir.toString(),
                 tempDir.resolve("charts").toString(),
                 ImoexProperties.RiskProperties.defaults(),
                 new ImoexProperties.WalkForwardProperties(false, 200, 40, 40),
-                new ImoexProperties.PaperProperties(false, 100_000, "paper.json", false, null, false, null, null, null, 0.30, 20.0, 40.0),
-                new ImoexProperties.UniverseProperties(false, 60, 0, 0, 1.0, false, false, false, 0.0, 100.0, false),
+                new ImoexProperties.PaperProperties(false, 100_000, "paper.json", false, null, false, null, null, null, 0.30, 20.0, 40.0, true),
+                new ImoexProperties.UniverseProperties(false, 60, 0, 0, 1.0, false, false, false, 0.0, 100.0, false, false),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );
@@ -61,6 +61,8 @@ class CointegrationAnalysisServiceTest {
         PaperTradingService paperTradingService = mock(PaperTradingService.class);
         WalkForwardService walkForwardService = mock(WalkForwardService.class);
         UniverseFilterService universeFilterService = new UniverseFilterService(storage, props);
+        PairUniverseScanService pairUniverseScanService =
+                new PairUniverseScanService(props, preprocessingService, universeFilterService);
         MarketRegimeService regimeService = mock(MarketRegimeService.class);
         when(regimeService.refresh()).thenReturn(com.moex.cointegration.model.MarketRegimeSnapshot.unknown());
 
@@ -73,7 +75,9 @@ class CointegrationAnalysisServiceTest {
                 paperTradingService,
                 walkForwardService,
                 universeFilterService,
+                pairUniverseScanService,
                 regimeService,
+                new MonthlyClusterReviewService(),
                 props,
                 com.moex.cointegration.config.SessionProperties.defaults(),
                 com.moex.cointegration.config.CapitalProperties.defaults()
