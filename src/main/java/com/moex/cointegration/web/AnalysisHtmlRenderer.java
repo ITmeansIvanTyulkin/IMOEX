@@ -224,24 +224,21 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="pipeline">2. Что за чем происходит в одном прогоне</h3>
                   <div class="flow" aria-hidden="true">
-                    <span>Свечи IMOEX</span><i>→</i>
-                    <span>Фильтр тикеров</span><i>→</i>
-                    <span>Пары + коинтеграция</span><i>→</i>
-                    <span>Z и бэктест</span><i>→</i>
-                    <span>Сигналы</span><i>→</i>
-                    <span>Фундамент</span><i>→</i>
-                    <span>Paper</span>
+                    <span>MOEX daily+1H</span><i>→</i>
+                    <span>Capital split</span><i>→</i>
+                    <span>DAILY tech→FA→paper</span><i>→</i>
+                    <span>INTRADAY tech→paper</span>
                   </div>
                   <ol class="pipeline">
-                    <li><strong>Данные.</strong> Дневные свечи состава индекса IMOEX (или уже скачанные локально).</li>
-                    <li><strong>Юниверс.</strong> Отсекаем неликвидное, слишком дешёвое, привилегированные и «дыры» в обороте.</li>
-                    <li><strong>Пары.</strong> Перебираем допустимые пары (сектор / related), проверяем коинтеграцию Engle–Granger.</li>
-                    <li><strong>FDR.</strong> Множественные проверки p-value проходят контроль ложных открытий (Benjamini–Hochberg).</li>
-                    <li><strong>Спред и Z.</strong> Хедж (Kalman или OLS), скользящий Z, метрики mean-reversion (Sharpe, half-life…).</li>
-                    <li><strong>Техсигнал.</strong> LONG / SHORT / WATCH / HOLD — по порогам Z, развороту и режиму ADX.</li>
-                    <li><strong>Фундамент.</strong> Только DAILY: MOEX (+ RSS) → CONFLICT / ENTER / REDUCE / BLOCK.</li>
-                    <li><strong>Paper.</strong> Только после FA. Авто-открытие, MTM, умные выходы. Опционально walk-forward OOS.</li>
+                    <li><strong>Капитал.</strong> Equity → слоты и gross: ~40% DAILY / ~60% INTRADAY (без плеча до 1M).</li>
+                    <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → фундамент (MOEX+RSS) → paper-journal.json.</li>
+                    <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/FDR/Z (окна ~48 баров, max-hold ~7ч) → без FA → paper-journal-intraday.json, flatten ~18:30.</li>
+                    <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы в обеих книгах при TREND.</li>
                   </ol>
+                  <div class="callout">
+                    Нет ручного переключателя «сегодня daily / сегодня intraday» — оба горизонта в одном цикле.
+                    Источник свечей — только MOEX ISS (TradingView не подключаем).
+                  </div>
 
                   <h3 id="universe">3. Как отбираются акции в анализ</h3>
                   <p>До любых статистических тестов тикер должен пройти простой «рыночный» фильтр:</p>
@@ -361,11 +358,12 @@ public class AnalysisHtmlRenderer {
                     Плечо в модели не используется, пока equity ниже порога (~1 млн ₽).
                   </p>
                   <ul>
-                    <li>не больше 2 открытых paper-пар всего;</li>
-                    <li>не больше 1 открытой пары на сектор;</li>
-                    <li>качество пары для входа: R², короткий half-life, минимум сделок в бэктесте;</li>
-                    <li>не открываем, если |Z| уже слишком близко к стоп-уровню;</li>
-                    <li>горизонты модуля pairs: несколько дней (DAILY) и интрадей (flatten к close).</li>
+                    <li>dual-book: слоты от equity (~100k → 1 daily + 2 intraday); gross 40/60;</li>
+                    <li>без плеча при equity &lt; 1M;</li>
+                    <li>не больше 1 открытой пары на сектор внутри книги;</li>
+                    <li>DAILY: удержание несколько дней + FA; INTRADAY: flatten к close, без FA;</li>
+                    <li>качество пары для входа: R², half-life в разумных границах, минимум сделок в бэктесте;</li>
+                    <li>не открываем, если |Z| уже слишком близко к стоп-уровню.</li>
                   </ul>
 
                   <h3 id="exits">9. Как выходим из позиции</h3>
@@ -806,9 +804,9 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append("""
                 <div class="hint">
-                  <strong>Paper journal — автомат.</strong> Cash PnL по qty×price (если есть свечи), иначе Z-прокси;
-                  slippage/borrow из конфига. Капитал без плеча при equity &lt; 1M. INTRADAY mode — flatten к 18:30.
-                  Кнопка «Анализ + paper» или daily cron открывает ENTER/REDUCE и закрывает по правилам выхода.
+                  <strong>Paper journal — dual-book.</strong> DAILY и INTRADAY в одном цикле; cash PnL по qty×price,
+                  slippage/borrow из конфига. Капитал без плеча при equity &lt; 1M; слоты/gross из CapitalAllocator.
+                  INTRADAY flatten к ~18:30. Отдельные файлы journal; на этой странице — объединённый взгляд.
                 </div>
                 """);
         List<PaperTradeEntry> entries = journal.entries() == null ? List.of() : journal.entries();
