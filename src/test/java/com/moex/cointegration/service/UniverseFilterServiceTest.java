@@ -65,7 +65,7 @@ class UniverseFilterServiceTest {
                 ImoexProperties.RiskProperties.defaults(),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 ImoexProperties.PaperProperties.defaults(),
-                new ImoexProperties.UniverseProperties(true, 60, 10_000_000.0, 1.0, 0.15, true, true, false, 20_000_000.0, 5.0),
+                new ImoexProperties.UniverseProperties(true, 60, 10_000_000.0, 1.0, 0.15, true, true, false, 20_000_000.0, 5.0, true),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );
@@ -85,6 +85,36 @@ class UniverseFilterServiceTest {
         assertFalse(filter.allowPair("SBER", "LKOH")); // cross sector
     }
 
+    @Test
+    void intradayTierOneFiltersTickers() throws Exception {
+        ImoexProperties props = new ImoexProperties(
+                "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
+                ImoexProperties.CointegrationProperties.of(0.05, 2.0, 0.0, 10),
+                new ImoexProperties.NewsProperties(false, 10, 10, 1),
+                tempDir.toString(),
+                tempDir.resolve("charts").toString(),
+                ImoexProperties.RiskProperties.defaults(),
+                ImoexProperties.WalkForwardProperties.defaults(),
+                ImoexProperties.PaperProperties.defaults(),
+                new ImoexProperties.UniverseProperties(
+                        true, 60, 1_000_000.0, 1.0, 0.15, true, false, false, 0.0, 100.0, true),
+                ImoexProperties.PortfolioProperties.defaults(),
+                ImoexProperties.AuthProperties.defaults()
+        );
+        MarketDataStorage storage = new MarketDataStorage(props);
+        storage.saveCandles("SBER", liquidCandles(300, 200_000));
+        storage.saveCandles("SAGO", liquidCandles(2.0, 200_000));
+
+        UniverseFilterService filter = new UniverseFilterService(storage, props);
+        var out = filter.filter(Map.of(
+                "SBER", series("SBER"),
+                "SAGO", series("SAGO")
+        ), com.moex.cointegration.model.BookKind.INTRADAY);
+
+        assertTrue(out.containsKey("SBER"));
+        assertFalse(out.containsKey("SAGO"));
+    }
+
     private ImoexProperties props(boolean enabled, double minAdv, double minPrice, boolean exclPref) {
         return new ImoexProperties(
                 "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
@@ -95,7 +125,7 @@ class UniverseFilterServiceTest {
                 ImoexProperties.RiskProperties.defaults(),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 ImoexProperties.PaperProperties.defaults(),
-                new ImoexProperties.UniverseProperties(enabled, 60, minAdv, minPrice, 0.15, exclPref, false, false, 0.0, 100.0),
+                new ImoexProperties.UniverseProperties(enabled, 60, minAdv, minPrice, 0.15, exclPref, false, false, 0.0, 100.0, false),
                 ImoexProperties.PortfolioProperties.defaults(),
                 ImoexProperties.AuthProperties.defaults()
         );

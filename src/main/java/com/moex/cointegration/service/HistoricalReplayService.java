@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.moex.cointegration.config.CapitalProperties;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.config.MicrostructureProperties;
 import com.moex.cointegration.config.SessionProperties;
 import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.Candle;
@@ -47,6 +48,7 @@ public class HistoricalReplayService {
     private final PreprocessingService preprocessingService;
     private final RiskPolicyService riskPolicyService;
     private final EventCalendarRiskService eventCalendarRiskService;
+    private final MicrostructureProperties microstructureProperties;
     private final MarketDataStorage storage;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
@@ -57,6 +59,7 @@ public class HistoricalReplayService {
             PreprocessingService preprocessingService,
             RiskPolicyService riskPolicyService,
             EventCalendarRiskService eventCalendarRiskService,
+            MicrostructureProperties microstructureProperties,
             MarketDataStorage storage
     ) {
         this.properties = properties;
@@ -65,6 +68,7 @@ public class HistoricalReplayService {
         this.preprocessingService = preprocessingService;
         this.riskPolicyService = riskPolicyService;
         this.eventCalendarRiskService = eventCalendarRiskService;
+        this.microstructureProperties = microstructureProperties;
         this.storage = storage;
     }
 
@@ -126,6 +130,8 @@ public class HistoricalReplayService {
         ImoexProperties replayProps = replayProperties(tempDir);
         MarketDataStorage replayStorage = new MarketDataStorage(replayProps);
         PairLookupService pairLookup = new PairLookupService(replayStorage, preprocessingService, replayProps);
+        MicrostructureExecutionService replayMicro = new MicrostructureExecutionService(
+                microstructureProperties, sessionProperties, replayStorage);
         PaperTradingService paper = new PaperTradingService(
                 replayProps,
                 capitalProperties,
@@ -134,7 +140,8 @@ public class HistoricalReplayService {
                 pairLookup,
                 replayStorage,
                 null,
-                eventCalendarRiskService
+                eventCalendarRiskService,
+                replayMicro
         );
 
         var alloc = capitalProperties.allocation();

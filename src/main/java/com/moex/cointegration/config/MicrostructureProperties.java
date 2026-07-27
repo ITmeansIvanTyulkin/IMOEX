@@ -1,0 +1,124 @@
+package com.moex.cointegration.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+/**
+ * ATAS-inspired microstructure gates (ISS OHLCV) + foundation for future trend strategy.
+ */
+@ConfigurationProperties(prefix = "imoex.microstructure")
+public record MicrostructureProperties(
+        Boolean enabled,
+        Boolean intradayEnabled,
+        Double minRelativeVolume,
+        Double maxSpreadProxyBps,
+        Double minLegDeltaAlignment,
+        Double maxLegVolumeRatio,
+        Integer sessionOpenSkipMinutes,
+        Integer sessionCloseSkipMinutes,
+        Integer volumeProfileLookback,
+        Boolean blockOutsideValueArea,
+        TrendMicrostructureProperties trend
+) {
+    public MicrostructureProperties {
+        if (enabled == null) {
+            enabled = true;
+        }
+        if (intradayEnabled == null) {
+            intradayEnabled = true;
+        }
+        if (minRelativeVolume == null || minRelativeVolume <= 0) {
+            minRelativeVolume = 0.60;
+        }
+        if (maxSpreadProxyBps == null || maxSpreadProxyBps <= 0) {
+            maxSpreadProxyBps = 35.0;
+        }
+        if (minLegDeltaAlignment == null || minLegDeltaAlignment < 0) {
+            minLegDeltaAlignment = 0.15;
+        }
+        if (maxLegVolumeRatio == null || maxLegVolumeRatio < 1) {
+            maxLegVolumeRatio = 5.0;
+        }
+        if (sessionOpenSkipMinutes == null || sessionOpenSkipMinutes < 0) {
+            sessionOpenSkipMinutes = 15;
+        }
+        if (sessionCloseSkipMinutes == null || sessionCloseSkipMinutes < 0) {
+            sessionCloseSkipMinutes = 30;
+        }
+        if (volumeProfileLookback == null || volumeProfileLookback < 5) {
+            volumeProfileLookback = 20;
+        }
+        if (blockOutsideValueArea == null) {
+            blockOutsideValueArea = true;
+        }
+        if (trend == null) {
+            trend = TrendMicrostructureProperties.defaults();
+        }
+    }
+
+    public static MicrostructureProperties defaults() {
+        return new MicrostructureProperties(
+                true, true, 0.60, 35.0, 0.15, 5.0,
+                15, 30, 20, true,
+                TrendMicrostructureProperties.defaults()
+        );
+    }
+
+    public boolean enabledFlag() {
+        return Boolean.TRUE.equals(enabled);
+    }
+
+    public boolean intradayEnabledFlag() {
+        return Boolean.TRUE.equals(intradayEnabled);
+    }
+
+    public boolean blockOutsideValueAreaEnabled() {
+        return Boolean.TRUE.equals(blockOutsideValueArea);
+    }
+
+    /**
+     * Параметры order-flow / value-area для будущей трендовой стратегии (roadmap #2).
+     */
+    public record TrendMicrostructureProperties(
+            Boolean enabled,
+            Double deltaMomentumThreshold,
+            Integer valueAreaBreakoutMinBars,
+            Double absorptionVolumeMult,
+            Double absorptionRangeMaxBps,
+            Double breakoutDeltaMin,
+            Integer footprintLookbackBars
+    ) {
+        public TrendMicrostructureProperties {
+            if (enabled == null) {
+                enabled = false;
+            }
+            if (deltaMomentumThreshold == null || deltaMomentumThreshold <= 0) {
+                deltaMomentumThreshold = 0.55;
+            }
+            if (valueAreaBreakoutMinBars == null || valueAreaBreakoutMinBars < 1) {
+                valueAreaBreakoutMinBars = 3;
+            }
+            if (absorptionVolumeMult == null || absorptionVolumeMult < 1) {
+                absorptionVolumeMult = 2.5;
+            }
+            if (absorptionRangeMaxBps == null || absorptionRangeMaxBps <= 0) {
+                absorptionRangeMaxBps = 15.0;
+            }
+            if (breakoutDeltaMin == null || breakoutDeltaMin <= 0) {
+                breakoutDeltaMin = 0.60;
+            }
+            if (footprintLookbackBars == null || footprintLookbackBars < 5) {
+                footprintLookbackBars = 24;
+            }
+        }
+
+        public static TrendMicrostructureProperties defaults() {
+            return new TrendMicrostructureProperties(
+                    false, 0.55, 3, 2.5, 15.0, 0.60, 24
+            );
+        }
+
+        public boolean enabledFlag() {
+            return Boolean.TRUE.equals(enabled);
+        }
+    }
+}

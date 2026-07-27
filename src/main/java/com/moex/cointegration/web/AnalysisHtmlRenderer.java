@@ -192,9 +192,37 @@ public class AnalysisHtmlRenderer {
                     Календарный арбитраж и опционы — следующие стратегии бренда, пока в дорожной карте.
                   </p>
 
+                  <aside class="atas-plaque" id="atas" aria-labelledby="atas-title">
+                    <span class="atas-badge">Встроено в TRINITY</span>
+                    <h3 id="atas-title">Функционал ATAS внутри TRINITY</h3>
+                    <p>
+                      Отдельный терминал ATAS не нужен: ключевые идеи order-flow и volume profile
+                      встроены в пайплайн как <strong>execution-слой</strong> поверх Z-score.
+                      Это не «ещё один индикатор», а проверка: можно ли <em>реально</em> набрать обе ноги
+                      пары на 1H без ложного входа на тонком рынке.
+                    </p>
+                    <ul>
+                      <li><strong>Relative volume</strong> — бар не «мёртвый», объём сопоставим с медианой.</li>
+                      <li><strong>Spread proxy</strong> — ширина H–L относительно цены (bps): отсев illiquid часов.</li>
+                      <li><strong>Delta proxy ног</strong> — направление закрытия бара; согласованность с LONG/SHORT spread.</li>
+                      <li><strong>Volume profile (POC / value area)</strong> — цена ноги в зоне справедливого объёма.</li>
+                      <li><strong>Session edges</strong> — блок первых/последних минут сессии (тонкий рынок MOEX).</li>
+                      <li><strong>INTRADAY tier-1</strong> — только ~30 ликвиднейших голубых фишек (SBER, LKOH, GAZP…).</li>
+                    </ul>
+                    <p class="atas-why">
+                      <strong>Зачем это добавлено.</strong>
+                      Классический pairs-backtest часто красив на бумаге, но ломается в live из‑за проскальзывания
+                      и асимметрии ног. TRINITY отсекает сигналы, где Z «есть», а исполнение на MOEX — сомнительное.
+                      Для оператора — меньше ложных входов; для продукта — честнее paper и ближе к live.
+                      Задел под трендовую стратегию (breakout VA, delta momentum, absorption) уже в коде
+                      (<code>quant/trend</code>, <code>imoex.microstructure.trend</code>), включается на roadmap #2.
+                    </p>
+                  </aside>
+
                   <nav class="strategy-toc" aria-label="Содержание">
                     <strong>Содержание</strong>
                     <ol>
+                      <li><a href="#atas">Функционал ATAS внутри TRINITY</a></li>
                       <li><a href="#idea">Идея простыми словами</a></li>
                       <li><a href="#pipeline">Что за чем происходит</a></li>
                       <li><a href="#universe">Как отбираются акции</a></li>
@@ -241,7 +269,7 @@ public class AnalysisHtmlRenderer {
                   <ol class="pipeline">
                     <li><strong>Капитал.</strong> Equity → слоты и gross: ~40% DAILY / ~60% INTRADAY (без плеча до 1M). Доли <em>фиксированы</em>: пустой DAILY не отдаёт лимит INTRADAY.</li>
                     <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → фундамент (MOEX+RSS) → paper-journal.json.</li>
-                    <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/FDR/Z (окна ~48 баров, max-hold ~7ч) → без FA → paper-journal-intraday.json, flatten ~18:30.</li>
+                    <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/FDR/Z (окна ~48 баров, max-hold ~7ч) → <strong>ATAS microstructure gate</strong> → без FA → paper-journal-intraday.json, flatten ~18:30.</li>
                     <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы в обеих книгах при TREND.</li>
                   </ol>
                   <div class="callout">
@@ -258,6 +286,9 @@ public class AnalysisHtmlRenderer {
                     <li>мало дней с нулевым объёмом;</li>
                     <li>привилегированные акции (<code>*P</code>) обычно исключены;</li>
                     <li>тикер должен быть в секторном каталоге, если включён секторный режим.</li>
+                    <li><strong>только INTRADAY:</strong> дополнительно whitelist <strong>1-го эшелона</strong>
+                      (~30 голубых фишек) — <code>imoex.universe.intraday-tier-one-only</code>.
+                      DAILY может оставаться шире при том же ADV-фильтре.</li>
                   </ul>
                   <p>
                     Смысл: не тестировать illiquid «мусор», где спред нельзя нормально набрать и закрыть.
@@ -327,6 +358,8 @@ public class AnalysisHtmlRenderer {
                     <li><strong>LONG / SHORT</strong> — есть подтверждённый вход.</li>
                     <li><strong>WATCH</strong> — спред экстремальный, но разворота ещё нет (или зона внимания).</li>
                     <li><strong>HOLD / NO_SIGNAL</strong> — сейчас не входим.</li>
+                    <li><strong>WATCH (microstructure)</strong> — Z и разворот ок, но INTRADAY gate ATAS заблокировал вход
+                      (тонкий объём, широкий spread proxy, несогласованность ног).</li>
                   </ul>
                   <p>
                     Смотреть картинку удобнее на странице пары: стрелки входа, зона «ждём разворот»,
@@ -435,13 +468,14 @@ public class AnalysisHtmlRenderer {
                     <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
                     <li>Новости по ISS — эвристика, не полный fundamental research.</li>
                     <li>Slippage в paper — модельный (bps), не стакан MOEX; INTRADAY может быть хуже 40 bps.</li>
+                    <li>ATAS-слой в TRINITY — прокси по OHLCV ISS, не полная лента сделок; с T-Invest sandbox точность исполнения вырастет.</li>
                     <li>Historical replay не заменяет брокерский demo (T-Invest sandbox) — следующий шаг к live.</li>
                     <li>Нужны месяцы чистого paper track-record, прежде чем судить об alpha.</li>
                   </ul>
                   <div class="callout">
                     Это research / decision-support, не индивидуальная инвестиционная рекомендация.
                     Параметры порогов живут в <code>application.yml</code> (<code>imoex.cointegration</code>,
-                    <code>universe</code>, <code>risk</code>, <code>regime</code>, <code>news</code>, <code>paper</code>).
+                    <code>universe</code>, <code>microstructure</code>, <code>risk</code>, <code>regime</code>, <code>news</code>, <code>paper</code>).
                   </div>
                 </article>
                 """;
