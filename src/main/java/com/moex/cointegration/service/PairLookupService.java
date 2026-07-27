@@ -121,6 +121,10 @@ public class PairLookupService {
                 risk.partialTpFraction()
         );
 
+        int barsY = seriesY.points().size();
+        int barsX = seriesX.points().size();
+        var coverage = com.moex.cointegration.model.PairCoverage.of(barsY, barsX, pairData.begins().length);
+
         return Optional.of(new PairAnalysisResult(
                 tickerY,
                 tickerX,
@@ -135,7 +139,9 @@ public class PairLookupService {
                 metrics.totalReturn(),
                 eg.rSquared(),
                 SpreadAnalytics.toSeries(pairData.dates(), spread),
-                SpreadAnalytics.toSeries(pairData.dates(), zScores)
+                SpreadAnalytics.toSeries(pairData.dates(), zScores),
+                coverage.coveragePercent(),
+                coverage.warning()
         ));
     }
 

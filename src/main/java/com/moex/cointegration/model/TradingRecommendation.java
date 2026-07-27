@@ -17,6 +17,8 @@ import java.time.LocalDate;
  * @param pValue        p-value коинтеграции
  * @param summary       краткая рекомендация на русском
  * @param details       пояснение с конкретными действиями
+ * @param coveragePercent доля общих баров пары, %
+ * @param coverageWarning предупреждение о низком покрытии
  */
 public record TradingRecommendation(
         String tickerY,
@@ -30,6 +32,8 @@ public record TradingRecommendation(
         double sharpeRatio,
         double pValue,
         String summary,
-        String details
+        String details,
+        Double coveragePercent,
+        String coverageWarning
 ) {
 }

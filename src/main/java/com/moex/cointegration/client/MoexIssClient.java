@@ -3,6 +3,7 @@ package com.moex.cointegration.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.Candle;
+import com.moex.cointegration.model.OrderBookSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -200,6 +201,60 @@ public class MoexIssClient {
         }
 
         return candles;
+    }
+
+    /**
+     * Стакан TQBR (DOM) — top levels для microstructure gate.
+     */
+    public OrderBookSnapshot fetchOrderBook(String ticker) {
+        String url = UriComponentsBuilder
+                .fromHttpUrl(properties.baseUrl())
+                .path("/engines/stock/markets/shares/boards/{board}/securities/{ticker}/orderbook.json")
+                .queryParam("iss.meta", "off")
+                .buildAndExpand(properties.board(), ticker.toUpperCase())
+                .toUriString();
+        try {
+            JsonNode root = restTemplate.getForObject(url, JsonNode.class);
+            JsonNode table = root.path("orderbook");
+            JsonNode columns = table.path("columns");
+            JsonNode data = table.path("data");
+            if (!columns.isArray() || !data.isArray() || data.isEmpty()) {
+                return new OrderBookSnapshot(ticker, 0, 0, 0, 0, Double.POSITIVE_INFINITY);
+            }
+            int sideIdx = indexOf(columns, "BUYSELL");
+            int priceIdx = indexOf(columns, "PRICE");
+            int qtyIdx = indexOf(columns, "QUANTITY");
+            double bestBid = 0;
+            double bestAsk = Double.POSITIVE_INFINITY;
+            double bidRub = 0;
+            double askRub = 0;
+            for (JsonNode row : data) {
+                String side = row.get(sideIdx).asText("");
+                double price = row.get(priceIdx).asDouble();
+                double qty = row.get(qtyIdx).asDouble();
+                double rub = price * qty;
+                if ("B".equalsIgnoreCase(side)) {
+                    if (price > bestBid) {
+                        bestBid = price;
+                    }
+                    bidRub += rub;
+                } else if ("S".equalsIgnoreCase(side)) {
+                    if (price < bestAsk) {
+                        bestAsk = price;
+                    }
+                    askRub += rub;
+                }
+            }
+            if (bestAsk == Double.POSITIVE_INFINITY) {
+                bestAsk = 0;
+            }
+            double mid = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2.0 : Math.max(bestBid, bestAsk);
+            double spreadBps = mid <= 0 ? Double.POSITIVE_INFINITY : (bestAsk - bestBid) / mid * 10_000.0;
+            return new OrderBookSnapshot(ticker, bestBid, bestAsk, bidRub, askRub, spreadBps);
+        } catch (Exception ex) {
+            log.warn("Order book {} unavailable: {}", ticker, ex.getMessage());
+            return new OrderBookSnapshot(ticker, 0, 0, 0, 0, Double.POSITIVE_INFINITY);
+        }
     }
 
     private static LocalDateTime parseBarBegin(String raw) {

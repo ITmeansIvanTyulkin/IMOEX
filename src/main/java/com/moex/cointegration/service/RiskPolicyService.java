@@ -102,6 +102,10 @@ public class RiskPolicyService {
             return String.format("сделок в бэктесте мало (%d < %d)",
                     pair.tradeCount() / 2, risk.minTradeCount());
         }
+        if (pair.coveragePercent() < risk.minCoveragePercent()) {
+            return String.format("coverage=%.1f%% < %.0f%% (низкое пересечение истории)",
+                    pair.coveragePercent(), risk.minCoveragePercent());
+        }
         return null;
     }
 

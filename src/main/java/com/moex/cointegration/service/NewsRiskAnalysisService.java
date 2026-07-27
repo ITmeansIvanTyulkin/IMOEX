@@ -3,6 +3,7 @@ package com.moex.cointegration.service;
 import com.moex.cointegration.client.MoexIssClient;
 import com.moex.cointegration.client.MoexNewsClient;
 import com.moex.cointegration.client.RssNewsClient;
+import com.moex.cointegration.config.CapitalProperties;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.config.SessionProperties;
 import com.moex.cointegration.model.BookKind;
@@ -49,6 +50,7 @@ public class NewsRiskAnalysisService {
     private final SessionProperties sessionProperties;
     private final RssNewsClient rssNewsClient;
     private final EventCalendarRiskService eventCalendarRiskService;
+    private final RecommendationRationaleService rationaleService;
 
     @Autowired
     public NewsRiskAnalysisService(
@@ -58,7 +60,8 @@ public class NewsRiskAnalysisService {
             ImoexProperties properties,
             SessionProperties sessionProperties,
             RssNewsClient rssNewsClient,
-            EventCalendarRiskService eventCalendarRiskService
+            EventCalendarRiskService eventCalendarRiskService,
+            RecommendationRationaleService rationaleService
     ) {
         this.newsClient = newsClient;
         this.moexIssClient = moexIssClient;
@@ -67,6 +70,7 @@ public class NewsRiskAnalysisService {
         this.sessionProperties = sessionProperties;
         this.rssNewsClient = rssNewsClient;
         this.eventCalendarRiskService = eventCalendarRiskService;
+        this.rationaleService = rationaleService;
     }
 
     /** Тесты без Spring: DAILY, RSS off. */
@@ -79,7 +83,8 @@ public class NewsRiskAnalysisService {
         this(newsClient, moexIssClient, triggerMatcher, properties,
                 SessionProperties.defaults(),
                 new RssNewsClient(new RestTemplate(), properties),
-                new EventCalendarRiskService(SessionProperties.defaults(), List.of()));
+                new EventCalendarRiskService(SessionProperties.defaults(), List.of()),
+                new RecommendationRationaleService(new RiskPolicyService(properties), CapitalProperties.defaults()));
     }
 
     /**
@@ -144,7 +149,8 @@ public class NewsRiskAnalysisService {
                     assessment,
                     decision,
                     decisionSummary(decision, rec, assessment),
-                    beginnerGuide(decision, rec, assessment)
+                    beginnerGuide(decision, rec, assessment),
+                    rationaleService.build(rec, decision, assessment, BookKind.DAILY)
             ));
         }
 
@@ -383,15 +389,23 @@ public class NewsRiskAnalysisService {
                     ? FinalTradeDecision.BLOCK
                     : FinalTradeDecision.WATCH;
             return new FinalTradeRecommendation(rec, news, decision,
-                    decisionSummary(decision, rec, news), beginnerGuide(decision, rec, news));
+                    decisionSummary(decision, rec, news), beginnerGuide(decision, rec, news),
+                    rationaleService.build(rec, decision, news, BookKind.INTRADAY));
         }
-        return passthrough(rec, "Фундаментальный фильтр пропущен: книга INTRADAY (только техника).");
+        return passthrough(rec, "Фундаментальный фильтр пропущен: книга INTRADAY (только техника).",
+                BookKind.INTRADAY);
     }
 
     private FinalTradeRecommendation passthrough(TradingRecommendation rec, String reason) {
+        return passthrough(rec, reason, BookKind.DAILY);
+    }
+
+    private FinalTradeRecommendation passthrough(TradingRecommendation rec, String reason, BookKind book) {
         PairNewsAssessment news = new PairNewsAssessment(NewsRiskLevel.LOW, false, reason, List.of(), 0);
         FinalTradeDecision decision = decide(rec.signal(), NewsRiskLevel.LOW);
-        return new FinalTradeRecommendation(rec, news, decision, decisionSummary(decision, rec, news), beginnerGuide(decision, rec, news));
+        return new FinalTradeRecommendation(rec, news, decision,
+                decisionSummary(decision, rec, news), beginnerGuide(decision, rec, news),
+                rationaleService.build(rec, decision, news, book));
     }
 
     private int riskRank(NewsRiskLevel level) {

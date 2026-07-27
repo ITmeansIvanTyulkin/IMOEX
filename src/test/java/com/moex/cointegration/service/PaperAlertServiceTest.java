@@ -33,6 +33,7 @@ class PaperAlertServiceTest {
                 "test",
                 -2.4, false, 1.0, 0.0,
                 null, null, null, null,
+                null,
                 "INTRADAY"
         )));
 

@@ -55,7 +55,8 @@ class PaperTradingServiceTest {
                 new PairNewsAssessment(NewsRiskLevel.LOW, false, "ok", List.of(), 10),
                 FinalTradeDecision.WATCH,
                 "skip",
-                "guide"
+                "guide",
+                ""
         );
         service.sync(List.of(stillListed), List.of(flat));
 
@@ -65,6 +66,7 @@ class PaperTradingServiceTest {
         assertTrue(closed.pnlPct() > 0);
         assertTrue(closed.pnlRub() > 0);
         assertTrue(closed.notes().contains("AUTO CLOSE"));
+        assertEquals("mean-reversion", closed.closeComment());
     }
 
     @Test
@@ -82,7 +84,8 @@ class PaperTradingServiceTest {
                 new PairNewsAssessment(NewsRiskLevel.LOW, false, "ok", List.of(), 10),
                 FinalTradeDecision.WATCH,
                 "w",
-                "g"
+                "g",
+                ""
         );
         service.sync(List.of(listed), List.of(worse));
 
@@ -113,7 +116,8 @@ class PaperTradingServiceTest {
                 new PairNewsAssessment(NewsRiskLevel.LOW, false, "ok", List.of(), 10),
                 FinalTradeDecision.WATCH,
                 "skip",
-                "guide"
+                "guide",
+                ""
         );
         service.sync(List.of(hold), List.of(stillShort));
 
@@ -146,7 +150,7 @@ class PaperTradingServiceTest {
                         new FinalTradeRecommendation(
                                 flat,
                                 new PairNewsAssessment(NewsRiskLevel.LOW, false, "ok", List.of(), 10),
-                                FinalTradeDecision.WATCH, "skip", "g"
+                                FinalTradeDecision.WATCH, "skip", "g", ""
                         ),
                         otherEnter
                 ),
@@ -191,7 +195,7 @@ class PaperTradingServiceTest {
                 tempDir.resolve("charts").toString(),
                 new ImoexProperties.RiskProperties(3.5, 40, 0.5, maxOpen, 1.0, 0.0, 90.0, 1.0, 0.08,
                         true, 0.02, 0.25, 1.5, null, null, null, null,
-                        null, null, null, null, null, null, null, null, null, null),
+                        null, null, null, null, null, null, null, null, null, null, null),
                 ImoexProperties.WalkForwardProperties.defaults(),
                 new ImoexProperties.PaperProperties(true, 50_000, "paper.json", false, null, false, null, 0.0, false, 0.30, 20.0, 40.0),
                 ImoexProperties.UniverseProperties.defaults(),
@@ -221,7 +225,8 @@ class PaperTradingServiceTest {
                 new PairNewsAssessment(NewsRiskLevel.LOW, false, "ok", List.of(), 10),
                 decision,
                 decision.name().toLowerCase(),
-                "guide"
+                "guide",
+                "test rationale"
         );
     }
 
@@ -233,7 +238,7 @@ class PaperTradingServiceTest {
             String y, String x, TradingSignal signal, double z, LocalDate asOf
     ) {
         return new TradingRecommendation(
-                y, x, signal, z, asOf, -0.1, 0.8, 10, 1.1, 0.01, "sum", "details"
+                y, x, signal, z, asOf, -0.1, 0.8, 10, 1.1, 0.01, "sum", "details", null, null
         );
     }
 }
