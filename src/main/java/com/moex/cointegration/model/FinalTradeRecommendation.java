@@ -8,7 +8,8 @@ public record FinalTradeRecommendation(
         PairNewsAssessment news,
         FinalTradeDecision decision,
         String decisionSummary,
-        String beginnerGuide
+        String beginnerGuide,
+        String rationale
 ) {
     public String tickerY() {
         return technical.tickerY();

@@ -17,6 +17,14 @@ public record MicrostructureProperties(
         Integer sessionCloseSkipMinutes,
         Integer volumeProfileLookback,
         Boolean blockOutsideValueArea,
+        Boolean domEnabled,
+        Double minDomDepthRub,
+        Double maxDomSpreadBps,
+        Double minFootprintAlignment,
+        Double clusterVolumeMult,
+        Boolean blockIcebergSuspect,
+        Boolean pocPartialTpEnabled,
+        Double pocProximityBps,
         TrendMicrostructureProperties trend
 ) {
     public MicrostructureProperties {
@@ -50,6 +58,30 @@ public record MicrostructureProperties(
         if (blockOutsideValueArea == null) {
             blockOutsideValueArea = true;
         }
+        if (domEnabled == null) {
+            domEnabled = true;
+        }
+        if (minDomDepthRub == null || minDomDepthRub <= 0) {
+            minDomDepthRub = 300_000.0;
+        }
+        if (maxDomSpreadBps == null || maxDomSpreadBps <= 0) {
+            maxDomSpreadBps = 25.0;
+        }
+        if (minFootprintAlignment == null || minFootprintAlignment < 0) {
+            minFootprintAlignment = 0.20;
+        }
+        if (clusterVolumeMult == null || clusterVolumeMult < 1) {
+            clusterVolumeMult = 2.0;
+        }
+        if (blockIcebergSuspect == null) {
+            blockIcebergSuspect = true;
+        }
+        if (pocPartialTpEnabled == null) {
+            pocPartialTpEnabled = true;
+        }
+        if (pocProximityBps == null || pocProximityBps <= 0) {
+            pocProximityBps = 15.0;
+        }
         if (trend == null) {
             trend = TrendMicrostructureProperties.defaults();
         }
@@ -59,8 +91,21 @@ public record MicrostructureProperties(
         return new MicrostructureProperties(
                 true, true, 0.60, 35.0, 0.15, 5.0,
                 15, 30, 20, true,
+                true, 300_000.0, 25.0, 0.20, 2.0, true, true, 15.0,
                 TrendMicrostructureProperties.defaults()
         );
+    }
+
+    public boolean domEnabledFlag() {
+        return Boolean.TRUE.equals(domEnabled);
+    }
+
+    public boolean blockIcebergSuspectEnabled() {
+        return Boolean.TRUE.equals(blockIcebergSuspect);
+    }
+
+    public boolean pocPartialTpEnabledFlag() {
+        return Boolean.TRUE.equals(pocPartialTpEnabled);
     }
 
     public boolean enabledFlag() {

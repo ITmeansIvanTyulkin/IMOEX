@@ -38,6 +38,7 @@ public record PaperTradeEntry(
         Double qtyX,
         Double entryPriceY,
         Double entryPriceX,
+        String closeComment,
         String book
 ) {
     public PaperTradeEntry {
@@ -64,14 +65,18 @@ public record PaperTradeEntry(
             double exitZ,
             double pnlPct,
             double pnlRub,
-            String notes
+            String closeReason
     ) {
         double totalRub = pnlRub + (realizedPartialRub == null ? 0.0 : realizedPartialRub);
+        String comment = CloseComment.categorize(closeReason);
+        String mergedNotes = notes == null || notes.isBlank()
+                ? closeReason
+                : notes + " | " + closeReason;
         return new PaperTradeEntry(
                 id, openedAt, asOfDate, tickerY, tickerX, signal, decision, entryZ, hedgeRatio,
                 notionalY, notionalX, sizeMultiplier, "CLOSED", closedAt, exitZ, pnlPct, totalRub,
-                exitZ, null, null, asOfDate, notes, bestZ, partialTaken, 0.0, realizedPartialRub,
-                qtyY, qtyX, entryPriceY, entryPriceX, book
+                exitZ, null, null, asOfDate, mergedNotes, bestZ, partialTaken, 0.0, realizedPartialRub,
+                qtyY, qtyX, entryPriceY, entryPriceX, comment, book
         );
     }
 
@@ -87,7 +92,7 @@ public record PaperTradeEntry(
                 notionalY, notionalX, sizeMultiplier, status, closedAt, exitZ, pnlPct, pnlRub,
                 markZ, unrealizedPct, unrealizedRub, markDate, notes,
                 bestZ, partialTaken, remainingFraction, realizedPartialRub,
-                qtyY, qtyX, entryPriceY, entryPriceX, book
+                qtyY, qtyX, entryPriceY, entryPriceX, closeComment, book
         );
     }
 
@@ -108,7 +113,7 @@ public record PaperTradeEntry(
                 newNy, newNx, sizeMultiplier * 0.5, "OPEN", null, null, null, null,
                 markZ, null, null, markDate, notes,
                 bestZ, true, rem, realized,
-                newQtyY, newQtyX, entryPriceY, entryPriceX, book
+                newQtyY, newQtyX, entryPriceY, entryPriceX, closeComment, book
         );
     }
 }

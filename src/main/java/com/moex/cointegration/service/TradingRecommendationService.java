@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -238,6 +239,10 @@ public class TradingRecommendationService {
         }
 
         details = appendStaleDataWarning(details, date);
+        if (pair.coverageWarning() != null) {
+            details = details + String.format(Locale.ROOT,
+                    "%n%nData coverage: %.1f%%. %s", pair.coveragePercent(), pair.coverageWarning());
+        }
 
         return applyMicrostructureGate(new TradingRecommendation(
                 pair.tickerY(),
@@ -251,7 +256,9 @@ public class TradingRecommendationService {
                 pair.sharpeRatio(),
                 pair.pValue(),
                 summary,
-                details
+                details,
+                pair.coveragePercent(),
+                pair.coverageWarning()
         ));
     }
 
@@ -282,7 +289,9 @@ public class TradingRecommendationService {
                 rec.sharpeRatio(),
                 rec.pValue(),
                 "WATCH — microstructure gate (ATAS proxy)",
-                verdict.reason() + "\nZ-сигнал формально есть, но исполнение на 1H не прошло фильтр ликвидности/order-flow."
+                verdict.reason() + "\nZ-сигнал формально есть, но исполнение на 1H не прошло фильтр ликвидности/order-flow.",
+                rec.coveragePercent(),
+                rec.coverageWarning()
         );
     }
 
@@ -293,7 +302,8 @@ public class TradingRecommendationService {
                 : pair.spreadSeries().get(pair.spreadSeries().size() - 1).value();
         TradingRecommendation tmp = new TradingRecommendation(
                 pair.tickerY(), pair.tickerX(), TradingSignal.LONG_SPREAD, z, date,
-                lastSpread, pair.hedgeRatio(), pair.halfLifeDays(), pair.sharpeRatio(), pair.pValue(), "", ""
+                lastSpread, pair.hedgeRatio(), pair.halfLifeDays(), pair.sharpeRatio(), pair.pValue(), "", "",
+                null, null
         );
         double notionalY = riskPolicyService.suggestedNotional(tmp, false);
         double notionalX = notionalY * beta;
@@ -338,7 +348,8 @@ public class TradingRecommendationService {
                 : pair.spreadSeries().get(pair.spreadSeries().size() - 1).value();
         TradingRecommendation tmp = new TradingRecommendation(
                 pair.tickerY(), pair.tickerX(), TradingSignal.SHORT_SPREAD, z, date,
-                lastSpread, pair.hedgeRatio(), pair.halfLifeDays(), pair.sharpeRatio(), pair.pValue(), "", ""
+                lastSpread, pair.hedgeRatio(), pair.halfLifeDays(), pair.sharpeRatio(), pair.pValue(), "", "",
+                null, null
         );
         double notionalY = riskPolicyService.suggestedNotional(tmp, false);
         double notionalX = notionalY * beta;

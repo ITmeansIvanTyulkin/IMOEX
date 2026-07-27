@@ -58,6 +58,7 @@ class MicrostructureExecutionServiceTest {
 
         MicrostructureProperties ms = new MicrostructureProperties(
                 true, true, 0.60, 35.0, 0.15, 5.0, 15, 30, 20, false,
+                false, 300_000.0, 25.0, 0.05, 50.0, false, false, 15.0,
                 MicrostructureProperties.TrendMicrostructureProperties.defaults());
         MicrostructureExecutionService svc = new MicrostructureExecutionService(ms, storage);
 

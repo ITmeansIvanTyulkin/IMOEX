@@ -236,7 +236,8 @@ public class HistoricalReplayService {
         return new TradingRecommendation(
                 y, x, signal, zCur, asOf, spread, pair.hedgeRatio(),
                 pair.halfLifeDays(), pair.sharpeRatio(), pair.pValue(),
-                "replay " + signal, "historical bar"
+                "replay " + signal, "historical bar",
+                pair.coveragePercent(), pair.coverageWarning()
         );
     }
 
@@ -287,13 +288,13 @@ public class HistoricalReplayService {
                 && eventCalendarRiskService != null
                 && eventCalendarRiskService.shouldBlockNewEntry(tech, at)) {
             var news = new PairNewsAssessment(NewsRiskLevel.BLOCK, true, "event window", List.of(), 0);
-            return new FinalTradeRecommendation(tech, news, FinalTradeDecision.BLOCK, "BLOCK event", "replay");
+            return new FinalTradeRecommendation(tech, news, FinalTradeDecision.BLOCK, "BLOCK event", "replay", "replay");
         }
         boolean actionable = tech.signal() == TradingSignal.LONG_SPREAD
                 || tech.signal() == TradingSignal.SHORT_SPREAD;
         FinalTradeDecision decision = actionable ? FinalTradeDecision.ENTER : FinalTradeDecision.WATCH;
         var news = new PairNewsAssessment(NewsRiskLevel.LOW, false, "replay", List.of(), 0);
-        return new FinalTradeRecommendation(tech, news, decision, decision.name(), "replay");
+        return new FinalTradeRecommendation(tech, news, decision, decision.name(), "replay", "replay");
     }
 
     private PairLookupService.AlignedCandles alignFromStorage(String y, String x) throws IOException {
