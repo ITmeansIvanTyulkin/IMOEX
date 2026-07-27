@@ -16,15 +16,16 @@
 |---|---|
 | **Данные** | MOEX ISS: дневные + 1H OHLCV (`data/candles/`, `data/candles-1h/`) — без TradingView |
 | **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P`; **INTRADAY tier-1** (~30 голубых фишек) |
-| **ATAS внутри TRINITY** | Microstructure gate на 1H: relative volume, spread proxy, delta ног, value area, session edges — без внешнего терминала |
+| **ATAS внутри TRINITY** | INTRADAY execution-слой: volume/spread/delta, **footprint, clusters, DOM, iceberg**, POC/VA, session edges; partial TP у POC |
+| **Data coverage** | `coveragePercent` + `warning` в `analysis-report.json`; пары с покрытием &lt; 85% отсекаются risk-фильтром |
 | **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) — отдельно по книгам DAILY / INTRADAY |
 | **Хедж** | Статический β или **Kalman** динамический hedge ratio |
 | **Сигналы** | Rolling Z, вход после **разворота** за ±entry, выход ≈ 0, stop / time-stop |
 | **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются в обеих книгах |
 | **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades; **CapitalAllocator** слоты/gross по equity |
-| **Рекомендации** | Тексты «что купить/продать» + явный блок при тренде + итог ENTER / REDUCE / WATCH / BLOCK |
+| **Рекомендации** | Тексты «что купить/продать» + **`rationale`** в `final-recommendations.json` (техника / FA / режим / риск) |
 | **Новости / FA** | После техники, **только DAILY-книга**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
-| **Paper journal** | Два журнала: `paper-journal.json` (DAILY) и `paper-journal-intraday.json` (flatten ~18:30) |
+| **Paper journal** | Два журнала + колонка **«Комментарий к закрытию»** (stop / mean-reversion / time-stop / flatten / partial-tp) |
 | **Sizing / slippage** | Notional **% от equity**; slippage **отдельно** DAILY (20 bps) / INTRADAY (40 bps) |
 | **Event calendar** | INTRADAY: flatten/block перед макро/отчётностью (`data/event-calendar.json`) |
 | **Historical replay** | Bar-by-bar прогон paper на локальных свечах (`POST /api/analysis/historical-replay`) |
@@ -279,6 +280,9 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | `imoex.universe.intraday-tier-one-only` | `true` | INTRADAY: только whitelist 1-го эшелона (DAILY шире) |
 | `imoex.microstructure.min-relative-volume` | `0.60` | Мин. relative volume на 1H для входа |
 | `imoex.microstructure.max-spread-proxy-bps` | `35` | Макс. spread proxy (H–L)/close в bps |
+| `imoex.microstructure.dom-enabled` | `true` | DOM gate: глубина стакана MOEX ISS |
+| `imoex.microstructure.poc-partial-tp-enabled` | `true` | INTRADAY: partial TP при подходе ноги к POC |
+| `imoex.risk.min-coverage-percent` | `85` | Мин. доля общих баров пары, % |
 
 Подробнее — разделы [ATAS внутри TRINITY](#atas-внутри-trinity) и [Валидация на истории](#валидация-на-истории-replay), страница `/view/strategy`.
 
@@ -295,7 +299,11 @@ Pairs mean-reversion на Z-score часто «красива» в backtest, н�
 | **Relative volume** | Не входить, когда объём часа сильно ниже медианы |
 | **Spread proxy** | Отсечь часы с широким H–L относительно цены (bps) |
 | **Delta proxy + leg sync** | Проверить, что order-flow обеих ног не противоречит LONG/SHORT spread |
-| **Volume profile (POC / VA)** | Цена ноги в зоне справедливого объёма |
+| **Volume profile (POC / VA)** | Цена ноги в зоне справедливого объёма; **partial TP у POC** на INTRADAY |
+| **Footprint proxy** | Buy/sell imbalance внутри бара (volume-weighted) — подтверждение направления |
+| **Volume clusters** | Аномальный объём на краю VA — риск ложного mean-reversion, вход отложен |
+| **DOM (depth of market)** | Snapshot стакана MOEX ISS: глубина bid/ask, spread bps, imbalance ноги |
+| **Iceberg proxy** | Повторяющийся высокий объём при узком диапазоне — скрытая ликвидность |
 | **Session edges** | Skip первых/последних минут MOEX-сессии |
 | **INTRADAY tier-1** | Universe только из ~30 ликвиднейших тикеров (SBER, LKOH, GAZP, …) |
 
@@ -303,7 +311,32 @@ Gate срабатывает в **рекомендациях** (сигнал → 
 
 **Задел под тренд (roadmap #2):** в коде уже есть `quant/trend` — delta momentum, breakout из value area, absorption (`imoex.microstructure.trend`, по умолчанию `enabled: false`).
 
-**Честно:** сейчас это прокси по **OHLCV MOEX ISS**, не полная лента сделок. С T-Invest sandbox точность исполнения можно калибровать дальше.
+**Честно:** сейчас footprint/clusters/iceberg — прокси по **OHLCV MOEX ISS**, DOM — snapshot стакана ISS, не полная лента сделок ATAS. С T-Invest sandbox точность исполнения можно калибровать дальше.
+
+### Data coverage (качество истории пары)
+
+Для каждой пары в `analysis-report.json`:
+
+```json
+{
+  "tickerY": "SBER",
+  "tickerX": "VTBR",
+  "coveragePercent": 87.4,
+  "warning": "Низкое покрытие — 12.6% общих баров отсутствуют"
+}
+```
+
+`coveragePercent` = общие бары / max(ряд Y, ряд X). При значении ниже `imoex.risk.min-coverage-percent` (по умолчанию 85%) пара не даёт входной сигнал — отсекается «мусор» с дырявой историей (делистинг, пропуски котировок).
+
+### Объяснимые рекомендации (`rationale`)
+
+В `final-recommendations.json` у каждой строки поле **`rationale`** — краткое «почему» для оператора и API:
+
+```json
+"rationale": "Техника: Z = -2.10, разворот вверх (LONG spread). Фундаментал: нет блокеров. Режим: SIDEWAYS. Риск: ENTER, ~1 слот(ов)."
+```
+
+На `/view/final` rationale показывается в колонке «Почему».
 
 ---
 
@@ -343,6 +376,8 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 Порядок: **техника → фундамент → рекомендация → paper**. FA только в **DAILY-книге**; в **INTRADAY** пропускается. Обе книги в одном analysis cycle.
 
+Поле **`rationale`** в JSON и UI — одной строкой: Z, FA (или «пропущен INTRADAY»), режим ADX, итоговое решение и слоты.
+
 | Итог | Действие |
 |---|---|
 | **ENTER** | Техника ок, блокеров нет |
@@ -359,7 +394,8 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | Поле | Смысл |
 |---|---|
 | **OPEN** | Бумажная позиция открыта |
-| **CLOSED** | Закрыта (mean-reversion / stop / time-stop / разворот сигнала) |
+| **CLOSED** | Закрыта (mean-reversion / stop / time-stop / flatten / …) |
+| **Комментарий к закрытию** | Категория: `mean-reversion`, `stop`, `time-stop`, `flatten`, `partial-tp` (полный текст — в Notes) |
 | **Realized ₽** | PnL закрытых сделок (qty×цена ног, − slippage/borrow) |
 | **Unrealized ₽** | Mark-to-market открытых |
 | **Net ₽** | Realized + Unrealized |
@@ -445,6 +481,11 @@ imoex:
     max-spread-proxy-bps: 35
     min-leg-delta-alignment: 0.15
     block-outside-value-area: true
+    dom-enabled: true
+    min-footprint-alignment: 0.20
+    block-iceberg-suspect: true
+    poc-partial-tp-enabled: true
+    poc-proximity-bps: 15
     trend:
       enabled: false                   # задел для трендовой стратегии
   risk:
@@ -453,6 +494,7 @@ imoex:
     max-open-pairs: 2
     trade-max-half-life-days: 15.0
     min-r-squared: 0.70
+    min-coverage-percent: 85.0
     borrow-rate-annual: 0.08
   regime:
     enabled: true
@@ -521,10 +563,10 @@ IMOEX/
 | Файл / папка | Содержимое |
 |---|---|
 | `candles/*.json` | Дневные OHLCV |
-| `analysis-report.json` | Отчёт + топ-пары |
+| `analysis-report.json` | Отчёт + топ-пары (`coveragePercent`, `warning`, Sharpe, half-life, R²) |
 | `trading-recommendations.json` | Техрекомендации |
-| `final-recommendations.json` | Итог после новостей |
-| `paper-journal.json` | Paper track-record |
+| `final-recommendations.json` | Итог после новостей + поле **`rationale`** |
+| `paper-journal.json` | Paper track-record (+ `closeComment` на закрытых сделках) |
 | `walk-forward-report.json` | OOS отчёт |
 | `charts/` | PNG (запасной формат) |
 
@@ -533,7 +575,7 @@ IMOEX/
 ## Методология (кратко)
 
 1. **Загрузка** тикеров IMOEX и дневных свечей за `history-years`.  
-2. **Universe filter:** медианный оборот, мин. цена, без preferred `*P`.  
+2. **Universe filter:** медианный оборот, мин. цена, без preferred `*P`; **data coverage** пары ≥ порога.  
 3. **LOCF**; выравнивание **попарно** по общим датам.  
 4. **Engle–Granger** + **FDR** по p-value.  
 5. Спред (статический или **Kalman** β), **rolling Z**.  

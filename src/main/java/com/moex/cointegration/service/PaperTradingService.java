@@ -387,6 +387,7 @@ public class PaperTradingService {
                     1.0,
                     0.0,
                     qtyY, qtyX, priceY, priceX,
+                    null,
                     book.name()
             );
             entries.add(entry);
@@ -476,6 +477,16 @@ public class PaperTradingService {
                 updated.add(open.withClose(now(), q.z(), pnlPct, pnlRub - slip, closeReason));
             } else if (barsHeld >= 1
                     && !open.partialDone()
+                    && book == BookKind.INTRADAY
+                    && pocPartialTpEligible(open, q)) {
+                double halfRub = pnlRub * 0.5;
+                String leg = pocLegLabel(open, q);
+                updated.add(open.withPartialTp(
+                        q.asOf(), q.z(), halfRub,
+                        String.format(Locale.ROOT, "PARTIAL TP @ POC %s (≈%.0f ₽)", leg, halfRub)
+                ).withMark(q.asOf(), q.z(), pnlPct * 0.5, pnlRub * 0.5, bestZ));
+            } else if (barsHeld >= 1
+                    && !open.partialDone()
                     && ExitRules.halfwayToZero(open.entryZ(), q.z(), risk.partialTpFraction())) {
                 double halfRub = pnlRub * 0.5;
                 updated.add(open.withPartialTp(
@@ -544,6 +555,38 @@ public class PaperTradingService {
             return "AUTO CLOSE: SHORT→LONG";
         }
         return null;
+    }
+
+    private boolean pocPartialTpEligible(PaperTradeEntry open, Quote q) {
+        if (microstructureExecutionService == null || q.priceY() == null || q.priceX() == null) {
+            return false;
+        }
+        try {
+            return microstructureExecutionService.priceNearLegPoc(open.tickerY(), q.priceY())
+                    || microstructureExecutionService.priceNearLegPoc(open.tickerX(), q.priceX());
+        } catch (IOException ex) {
+            log.debug("POC partial TP check failed {}/{}: {}", open.tickerY(), open.tickerX(), ex.getMessage());
+            return false;
+        }
+    }
+
+    private String pocLegLabel(PaperTradeEntry open, Quote q) {
+        try {
+            boolean y = microstructureExecutionService.priceNearLegPoc(open.tickerY(), q.priceY());
+            boolean x = microstructureExecutionService.priceNearLegPoc(open.tickerX(), q.priceX());
+            if (y && x) {
+                return "Y+X";
+            }
+            if (y) {
+                return "Y=" + open.tickerY();
+            }
+            if (x) {
+                return "X=" + open.tickerX();
+            }
+        } catch (IOException ignored) {
+            // fall through
+        }
+        return "leg";
     }
 
     /**

@@ -58,6 +58,7 @@ imoex:
     cusum-threshold: 5.0
     cusum-drift: 0.5
     cusum-lookback: 40
+    min-coverage-percent: 85.0
   regime:
     enabled: true
     adx-period: 14
@@ -138,6 +139,14 @@ imoex:
     session-close-skip-minutes: 30
     volume-profile-lookback: 20
     block-outside-value-area: true
+    dom-enabled: true
+    min-dom-depth-rub: 300000
+    max-dom-spread-bps: 25
+    min-footprint-alignment: 0.20
+    cluster-volume-mult: 2.0
+    block-iceberg-suspect: true
+    poc-partial-tp-enabled: true
+    poc-proximity-bps: 15
     trend:
       enabled: false
       delta-momentum-threshold: 0.55

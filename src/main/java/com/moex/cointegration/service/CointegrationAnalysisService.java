@@ -11,6 +11,7 @@ import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.EngleGrangerResult;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.PairAnalysisResult;
+import com.moex.cointegration.model.PairCoverage;
 import com.moex.cointegration.model.PriceSeries;
 import com.moex.cointegration.model.TradingMetrics;
 import com.moex.cointegration.model.TradingRecommendation;
@@ -303,6 +304,10 @@ public class CointegrationAnalysisService {
                     params.barsPerYear
             );
 
+            int barsY = processed.get(c.tickerY()).points().size();
+            int barsX = processed.get(c.tickerX()).points().size();
+            PairCoverage coverage = PairCoverage.of(barsY, barsX, c.pairData().begins().length);
+
             cointegratedPairs.add(new PairAnalysisResult(
                     c.tickerY(),
                     c.tickerX(),
@@ -317,7 +322,9 @@ public class CointegrationAnalysisService {
                     metrics.totalReturn(),
                     c.eg().rSquared(),
                     SpreadAnalytics.toSeries(c.pairData().begins(), spread),
-                    SpreadAnalytics.toSeries(c.pairData().begins(), zScores)
+                    SpreadAnalytics.toSeries(c.pairData().begins(), zScores),
+                    coverage.coveragePercent(),
+                    coverage.warning()
             ));
         }
         return cointegratedPairs;

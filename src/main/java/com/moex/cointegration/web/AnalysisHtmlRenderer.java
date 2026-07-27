@@ -13,6 +13,7 @@ import com.moex.cointegration.model.WalkForwardReport;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Формирует HTML-страницы с таблицами для просмотра в браузере.
@@ -205,7 +206,11 @@ public class AnalysisHtmlRenderer {
                       <li><strong>Relative volume</strong> — бар не «мёртвый», объём сопоставим с медианой.</li>
                       <li><strong>Spread proxy</strong> — ширина H–L относительно цены (bps): отсев illiquid часов.</li>
                       <li><strong>Delta proxy ног</strong> — направление закрытия бара; согласованность с LONG/SHORT spread.</li>
-                      <li><strong>Volume profile (POC / value area)</strong> — цена ноги в зоне справедливого объёма.</li>
+                      <li><strong>Volume profile (POC / value area)</strong> — цена ноги в зоне справедливого объёма; <strong>partial TP у POC</strong> на INTRADAY.</li>
+                      <li><strong>Footprint proxy</strong> — buy/sell imbalance внутри бара (volume-weighted).</li>
+                      <li><strong>Volume clusters</strong> — аномальный объём на краю VA → WATCH, риск ложного входа.</li>
+                      <li><strong>DOM</strong> — snapshot стакана MOEX ISS: глубина bid/ask, spread bps, imbalance ноги.</li>
+                      <li><strong>Iceberg proxy</strong> — скрытая ликвидность: высокий объём при узком диапазоне.</li>
                       <li><strong>Session edges</strong> — блок первых/последних минут сессии (тонкий рынок MOEX).</li>
                       <li><strong>INTRADAY tier-1</strong> — только ~30 ликвиднейших голубых фишек (SBER, LKOH, GAZP…).</li>
                     </ul>
@@ -318,6 +323,12 @@ public class AnalysisHtmlRenderer {
                       кто проходит контроль множественных сравнений.
                     </li>
                     <li>
+                      <strong>Data coverage.</strong> Для каждой пары считаем долю общих баров
+                      (<code>coveragePercent</code> в <code>analysis-report.json</code>).
+                      Ниже порога (<code>imoex.risk.min-coverage-percent</code>, по умолчанию 85%) — пара отсекается:
+                      слишком много пропусков истории (делистинг, дырявые котировки).
+                    </li>
+                    <li>
                       <strong>Качество серии.</strong>
                       Считаем спред, Z, half-life, Sharpe симуляции. Слишком медленный возврат к среднему
                       или слабые метрики не дают входной сигнал.
@@ -388,7 +399,9 @@ public class AnalysisHtmlRenderer {
                       <tr><td><strong>BLOCK</strong></td><td>CONFLICT / жёсткий стоп: halt, делистинг, earnings miss, SPO, санкции…</td></tr>
                     </tbody>
                   </table>
-                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет» после FA.</p>
+                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет» после FA.
+                    В JSON и UI у каждой строки поле <strong><code>rationale</code></strong> — краткое «почему»:
+                    Z, фундамент (или «пропущен INTRADAY»), режим ADX, решение и слоты.</p>
 
                   <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
                   <p>
@@ -413,7 +426,7 @@ public class AnalysisHtmlRenderer {
                   <p>Выход — не только «дождались Z≈0». В paper работают несколько правил:</p>
                   <ul>
                     <li><strong>Mean-reversion</strong> — спред вернулся к цели около нуля;</li>
-                    <li><strong>Partial take-profit</strong> — на полпути к нулю можно зафиксировать часть;</li>
+                    <li><strong>Partial take-profit</strong> — на полпути к нулю по Z <em>или</em> у POC ноги (INTRADAY, ±15 bps);</li>
                     <li><strong>Trailing по Z</strong> — отдали от лучшей точки — закрываем;</li>
                     <li><strong>Stop по |Z|</strong> (в т.ч. адаптивный) — спред ушёл ещё дальше против нас;</li>
                     <li><strong>Time-stop</strong> — слишком долго в позиции без результата;</li>
@@ -428,7 +441,9 @@ public class AnalysisHtmlRenderer {
                     и закрывает по правилам выше. PnL считается по количествам и ценам ног
                     (с учётом slippage и borrow), а не как «1 Z = 1%».
                     Slippage задаётся <strong>отдельно по книгам</strong>: DAILY ~20 bps, INTRADAY ~40 bps (stress).
-                    Это research-метрика, не брокерский отчёт.
+                    На закрытых сделках — колонка <strong>«Комментарий к закрытию»</strong>:
+                    <code>mean-reversion</code>, <code>stop</code>, <code>time-stop</code>, <code>flatten</code>, <code>partial-tp</code>
+                    (полный текст причины остаётся в Notes).
                   </p>
                   <p>
                     <a href="/view/walk-forward">Walk-forward</a> режет историю на train/test окна:
@@ -758,6 +773,7 @@ public class AnalysisHtmlRenderer {
                       <th>Sharpe</th>
                       <th>p-value</th>
                       <th>Half-life</th>
+                      <th>Coverage</th>
                       <th>Max DD</th>
                       <th>Beta</th>
                       <th>График</th>
@@ -775,6 +791,11 @@ public class AnalysisHtmlRenderer {
             table.append("<td class=\"num\">").append(formatNum(p.sharpeRatio())).append("</td>");
             table.append("<td class=\"num\">").append(formatNum(p.pValue())).append("</td>");
             table.append("<td class=\"num\">").append(formatNum(p.halfLifeDays())).append(" д</td>");
+            String cov = p.coveragePercent() == null ? "—"
+                    : String.format(Locale.ROOT, "%.1f%%", p.coveragePercent());
+            table.append("<td class=\"num\" title=\"")
+                    .append(escape(p.coverageWarning() == null ? "" : p.coverageWarning()))
+                    .append("\">").append(cov).append("</td>");
             table.append("<td class=\"num\">").append(formatPct(p.maxDrawdown())).append("</td>");
             table.append("<td class=\"num\">").append(formatNum(p.hedgeRatio())).append("</td>");
             table.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
@@ -967,8 +988,12 @@ public class AnalysisHtmlRenderer {
             body.append("<td>").append(newsBadge(f.news().riskLevel().name())).append("</td>");
             body.append("<td>").append(f.news().asymmetric() ? "да" : "нет").append("</td>");
             body.append("<td class=\"details\"><div class=\"summary\">")
-                    .append(escape(f.decisionSummary())).append("</div>")
-                    .append("<div class=\"explain\">").append(nl2br(escape(f.news().summary())));
+                    .append(escape(f.decisionSummary())).append("</div>");
+            if (f.rationale() != null && !f.rationale().isBlank()) {
+                body.append("<div class=\"rationale meta\"><strong>Почему:</strong> ")
+                        .append(escape(f.rationale())).append("</div>");
+            }
+            body.append("<div class=\"explain\">").append(nl2br(escape(f.news().summary())));
             if (!f.news().hits().isEmpty()) {
                 body.append("<br><br>");
                 int i = 0;
@@ -1103,7 +1128,7 @@ public class AnalysisHtmlRenderer {
             body.append("<th class=\"num\">Entry Z</th><th class=\"num\">Mark/Exit Z</th>");
             body.append("<th class=\"num\">Notional Y</th>");
             body.append("<th class=\"num\">PnL %*</th><th class=\"num\">PnL ₽*</th>");
-            body.append("<th>Opened</th><th>Closed</th><th>Notes</th><th></th>");
+            body.append("<th>Opened</th><th>Closed</th><th>Комментарий к закрытию</th><th>Notes</th><th></th>");
             body.append("</tr></thead><tbody>");
             for (PaperTradeEntry e : entries) {
                 Double markOrExit = e.exitZ() != null ? e.exitZ() : e.markZ();
@@ -1125,6 +1150,7 @@ public class AnalysisHtmlRenderer {
                         .append(rub == null ? "—" : String.format("%.0f", rub)).append("</td>");
                 body.append("<td>").append(e.openedAt() == null ? "—" : escape(e.openedAt().toString())).append("</td>");
                 body.append("<td>").append(e.closedAt() == null ? "—" : escape(e.closedAt().toString())).append("</td>");
+                body.append("<td>").append(escape(e.closeComment() == null ? "" : e.closeComment())).append("</td>");
                 body.append("<td>").append(escape(e.notes() == null ? "" : e.notes())).append("</td>");
                 body.append("<td class=\"links\">").append(chartPageLink(e.tickerY(), e.tickerX())).append("</td>");
                 body.append("</tr>");

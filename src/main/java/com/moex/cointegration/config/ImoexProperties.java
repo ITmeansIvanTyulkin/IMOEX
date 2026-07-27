@@ -193,7 +193,8 @@ public record ImoexProperties(
             Boolean cusumEnabled,
             Double cusumThreshold,
             Double cusumDrift,
-            Integer cusumLookback
+            Integer cusumLookback,
+            Double minCoveragePercent
     ) {
         public RiskProperties {
             if (borrowRateAnnual == null || borrowRateAnnual < 0) {
@@ -253,12 +254,15 @@ public record ImoexProperties(
             if (cusumLookback == null || cusumLookback < 5) {
                 cusumLookback = 40;
             }
+            if (minCoveragePercent == null || minCoveragePercent <= 0) {
+                minCoveragePercent = 85.0;
+            }
         }
 
         public static RiskProperties defaults() {
             return new RiskProperties(3.5, 40, 0.5, 5, 1.0, 0.0, 90.0, 1.0, 0.08,
                     true, 0.02, 0.25, 1.5, 0.5, 0.75, 0.35, 0.20,
-                    15.0, 0.70, 8, true, 2.5, 4.0, true, 5.0, 0.5, 40);
+                    15.0, 0.70, 8, true, 2.5, 4.0, true, 5.0, 0.5, 40, 85.0);
         }
 
         public boolean dynamicSizingEnabled() {
