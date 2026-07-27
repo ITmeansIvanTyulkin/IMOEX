@@ -2,9 +2,9 @@
 
 **Three Strategies. One Mission.**
 
-**TRINITY** в замысле — три стратегии: (1) cointegration / pairs, (2) календарный арбитраж фьючерсов, (3) опционы. Сейчас полностью реализуем **п.1**: pairs в боковике на горизонте **нескольких дней** и **интрадей** (узкая книга 1–2 пары, профиль счёта от ~100 тыс. ₽). Пункты 2–3 — в дорожной карте, кода ещё нет.
+**TRINITY** в замысле — три стратегии: (1) cointegration / pairs, (2) календарный арбитраж фьючерсов, (3) опционы. Сейчас в **live paper** — **DAILY** pairs в боковике (металлы / mining; нефть в pairs отложена). **INTRADAY** — только research (1H EG/Z/метрики), **без торговли**. Пункты 2–3 — в дорожной карте.
 
-Система загружает дневные свечи через MOEX ISS, отсекает тонкий рынок, тестирует пары Engle–Granger, считает спред / rolling Z-score (опционально Kalman-hedge), симулирует mean-reversion с risk-стопами, показывает графики, пропускает сигналы через новостной фильтр и ведёт **автоматический paper journal**.
+Система загружает дневные свечи через MOEX ISS, отсекает тонкий рынок, тестирует пары Engle–Granger, считает спред / rolling Z-score (опционально Kalman-hedge), симулирует mean-reversion с risk-стопами, показывает графики, пропускает сигналы через новостной фильтр и ведёт **автоматический paper journal** (DAILY). Раз в месяц — пересмотр секторных кластеров по rolling cash PnL / PF.
 
 > **Важно.** Это research / decision-support инструмент, а не автоисполняющий бот и не гарантия прибыли. Перед реальной торговлей нужна собственная валидация (walk-forward, paper-trading, учёт издержек шорта и проскальзывания).
 
@@ -18,16 +18,17 @@
 | **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P`; **INTRADAY tier-1** (~30 голубых фишек) |
 | **ATAS внутри TRINITY** | INTRADAY execution-слой: volume/spread/delta, **footprint, clusters, DOM, iceberg**, POC/VA, session edges; partial TP у POC |
 | **Data coverage** | `coveragePercent` + `warning` в `analysis-report.json`; пары с покрытием &lt; 85% отсекаются risk-фильтром |
-| **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) — отдельно по книгам DAILY / INTRADAY |
+| **Коинтеграция** | Engle–Granger + FDR (Benjamini–Hochberg) — DAILY live; INTRADAY research |
+| **Monthly cluster review** | На стыке месяца: EG/FDR/quality + секторный cash PnL / PF (lookback); в слоты только net>0 и PF≥1.1; OIL_GAS вне DAILY pairs |
 | **Хедж** | Статический β или **Kalman** динамический hedge ratio |
 | **Сигналы** | Rolling Z, вход после **разворота** за ±entry, выход ≈ 0, stop / time-stop |
-| **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются в обеих книгах |
+| **Режим рынка** | ADX индекса: боковик / нейтраль / тренд — в TREND новые входы блокируются |
 | **Risk** | stop-z (в т.ч. адаптивный), CUSUM, R² / half-life / min trades; **CapitalAllocator** слоты/gross по equity |
 | **Рекомендации** | Тексты «что купить/продать» + **`rationale`** в `final-recommendations.json` (техника / FA / режим / риск) |
-| **Новости / FA** | После техники, **только DAILY-книга**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
-| **Paper journal** | Два журнала + колонка **«Комментарий к закрытию»** (stop / mean-reversion / time-stop / flatten / partial-tp) |
-| **Sizing / slippage** | Notional **% от equity**; slippage **отдельно** DAILY (20 bps) / INTRADAY (40 bps) |
-| **Event calendar** | INTRADAY: flatten/block перед макро/отчётностью (`data/event-calendar.json`) |
+| **Новости / FA** | После техники, **только DAILY**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
+| **Paper journal** | DAILY journal + колонка **«Комментарий к закрытию»**; INTRADAY paper opens выключены (`intraday-research-only`) |
+| **Sizing / slippage** | Notional **% от equity**; капитал на DAILY (INTRADAY share = 0); slippage DAILY 20 bps |
+| **Event calendar** | INTRADAY research: flatten/block правила остаются в коде для будущего включения |
 | **Historical replay** | Bar-by-bar прогон paper на локальных свечах (`POST /api/analysis/historical-replay`) |
 | **Walk-forward** | OOS окна train/test по топ-парам (daily) |
 | **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
@@ -41,27 +42,28 @@
 ```mermaid
 flowchart TB
   Equity[equityRub] --> Alloc[CapitalAllocator]
-  Alloc --> DailyBook[DAILY book]
-  Alloc --> IntraBook[INTRADAY book]
+  Alloc --> DailyBook[DAILY book live]
+  Alloc -.-> IntraBook[INTRADAY research only]
   DailyBook --> DTech[Daily EG Z]
-  DTech --> FA[FA news]
+  DTech --> Cluster[Monthly cluster review]
+  Cluster --> FA[FA news]
   FA --> DPaper[paper-journal.json]
-  IntraBook --> HTech[1H EG Z]
-  HTech --> ATAS[ATAS microstructure gate]
-  ATAS --> SkipFA[No FA]
-  SkipFA --> IPaper[paper-journal-intraday.json]
+  IntraBook --> HTech[1H EG Z metrics]
+  HTech --> NoPaper[No paper opens]
 ```
 
-Один операторский цикл (`Анализ + paper`) **автоматически** гоняет **обе книги** подряд: сначала DAILY (техника → FA → paper), затем INTRADAY (1H техника → paper, без FA). Ручного переключателя «сегодня daily / сегодня intraday» нет.
+Операторский цикл (`Анализ + paper`) гоняет **DAILY** (техника → monthly cluster gate → FA → paper). **INTRADAY** при `intraday-research-only: true` считает 1H метрики **без** paper-открытий; cron INTRADAY по умолчанию выключен.
 
-Капитал режется **фиксированно** по equity: ~**40% gross** на DAILY и ~**60%** на INTRADAY; при equity &lt; 1M — без плеча. Лимиты **независимы**: если по DAILY нет сигналов, неиспользованная daily-доля **не перетекает** в INTRADAY — intraday работает только в своих слотах и своём gross. `session.mode: DUAL` — метка dual-book, не exclusive switch.
+Капитал по умолчанию **100% DAILY** (`daily-gross-share: 1.0`, `intraday-gross-share: 0.0`); при equity &lt; 1M — без плеча. `session.mode: DUAL` сохраняет dual-book код, но торговый фокус — DAILY metals.
 
 | Equity | max open DAILY | max open INTRADAY | gross DAILY | gross INTRADAY |
 |--------|----------------|-------------------|-------------|----------------|
-| ~100k  | 1              | 2                 | ~40k        | ~60k           |
-| ~200k  | 2              | 3                 | ~80k        | ~120k          |
+| ~100k  | 1              | 0 (research)      | ~100k       | 0              |
+| ~200k  | 2              | 0 (research)      | ~200k       | 0              |
 
-**Идея стратегии:** две акции обычно движутся вместе; если спред аномально расширился и Z **развернулся** к нулю — ставка на схождение (long одной ноги + short другой). Модуль рассчитан **только на боковик**: при высоком ADX индекса (режим TREND) новые входы блокируются.
+**Идея стратегии:** две акции обычно движутся вместе; если спред аномально расширился и Z **развернулся** к нулю — ставка на схождение (long одной ноги + short другой). Модуль рассчитан **только на боковик**: при высоком ADX индекса (режим TREND) новые входы блокируются. Нефтяные equities в DAILY pairs **не** торгуем (roadmap #2/#3).
+
+**Monthly cluster review:** на стыке месяца пересчёт кандидатов (EG/FDR + quality) и секторный rolling cash PnL / profit factor за lookback (`imoex.cluster-review`). В слоты попадают только кластеры с **net &gt; 0** и **PF ≥ 1.1** (при достаточной истории); OIL_GAS всегда вне DAILY.
 
 ---
 
@@ -217,8 +219,8 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 | Книга | Cron (по умолчанию) | Что внутри |
 |---|---|---|
-| **DAILY** | пн–пт **19:05** (`imoex.paper.auto-run-daily: true`) | Дневные свечи → техника → FA → `paper-journal.json` |
-| **INTRADAY** | пн–пт **:05** с 10:00 до 18:00 (`imoex.paper.auto-run-intraday: true`) | 1H ISS → техника → paper без FA → `paper-journal-intraday.json` |
+| **DAILY** | пн–пт **19:05** (`imoex.paper.auto-run-daily: true`) | Дневные свечи → EG/FDR → cluster review → FA → `paper-journal.json` |
+| **INTRADAY** | выключен (`auto-run-intraday: false`) | Research-only: 1H метрики без paper (`intraday-research-only: true`) |
 
 На выходных новых дневных свечей нет — вечерний DAILY почти ничего не меняет. Paper **не закрывает** стопом на той же свече, что и вход (защита от шума пересчёта Z).
 
@@ -262,9 +264,10 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 1. **Запуск** — `mvn spring-boot:run`, секреты в `application-local.yml`, первый раз «Анализ + скачать свечи».
 2. **Пульт** — на любой `/view/*`: кнопки анализа, логин API, алерты и звук.
 3. **Главные экраны** — `/view/final` (разрешено ли после FA), `/view/paper` (что открылось), дашборд (режим ADX).
-4. **Автопрогоны** — DAILY ~19:05, INTRADAY :05 каждый час 10–18 (пн–пт), пока сервер работает.
+4. **Автопрогон** — DAILY ~19:05 (пн–пт), пока сервер работает. INTRADAY cron выключен (research-only).
 5. **Алерты** — баннер справа сверху в браузере + опционально уведомление ОС (на Windows обычно снизу справа).
-6. **Исторический replay** — `POST /api/analysis/historical-replay?tickerY=SBER&tickerX=LKOH&from=2023-01-01&to=2025-12-31` — bar-by-bar прогон paper на локальных свечах (нужен предварительный `refresh`).
+6. **Исторический replay** — `POST /api/analysis/historical-replay?tickerY=CHMF&tickerX=MAGN&from=2024-01-01&to=2025-12-31` — bar-by-bar прогон paper на локальных свечах (нужен предварительный `refresh`).
+7. **Cluster review** — `imoex.cluster-review.*`: lookback, min PF, exclude OIL_GAS.
 
 Теория стратегии — `/view/strategy`. Пустой paper journal нормален, если нет ENTER/LONG/SHORT с разворотом Z.
 
@@ -272,9 +275,14 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 | Параметр | Значение по умолчанию | Смысл |
 |---|---|---|
+| `imoex.paper.intraday-research-only` | `true` | INTRADAY: техника без paper-открытий |
+| `imoex.paper.auto-run-intraday` | `false` | Cron 1H выключен (research) |
+| `imoex.cluster-review.enabled` | `true` | Ежемесячный пересмотр кластеров |
+| `imoex.cluster-review.min-profit-factor` | `1.10` | Мин. rolling PF сектора/пары |
+| `imoex.cluster-review.exclude-oil-gas` | `true` | OIL_GAS вне DAILY pairs |
 | `imoex.paper.notional-per-leg-pct` | `0.30` | Notional на ногу Y = **30% equity** (масштабируется с капиталом) |
 | `imoex.paper.slippage-bps-daily` | `20` | Slippage DAILY (0.2% от gross ног) |
-| `imoex.paper.slippage-bps-intraday` | `40` | Slippage INTRADAY (stress, 0.4%) |
+| `imoex.paper.slippage-bps-intraday` | `40` | Slippage INTRADAY (stress, 0.4%) — для research/replay |
 | `imoex.session.event-calendar-file` | `data/event-calendar.json` | События для INTRADAY: flatten/block за N минут до события |
 | `imoex.session.event-flatten-minutes-before` | `45` | Окно flatten/block перед событием (минуты) |
 | `imoex.universe.intraday-tier-one-only` | `true` | INTRADAY: только whitelist 1-го эшелона (DAILY шире) |

@@ -216,7 +216,12 @@ public class PaperTradingService {
         }
 
         int closed = markAndCloseOpen(quotes, book);
-        List<PaperTradeEntry> opened = openNew(finals == null ? List.of() : finals, book, maxPairs, grossCap);
+        List<PaperTradeEntry> opened = List.of();
+        if (book == BookKind.INTRADAY && properties.paper().intradayResearchOnlyFlag()) {
+            log.info("INTRADAY research-only: paper opens disabled (closes/marks still applied)");
+        } else {
+            opened = openNew(finals == null ? List.of() : finals, book, maxPairs, grossCap);
+        }
         save(book);
         if (alertService != null && !opened.isEmpty()) {
             alertService.recordNewOpens(opened);
@@ -341,12 +346,25 @@ public class PaperTradingService {
             double notionalY = riskPolicyService.suggestedNotional(f.technical(), reduce);
             double beta = Math.abs(f.technical().hedgeRatio());
             double notionalX = notionalY * beta;
-            if (openGross + notionalY + notionalX > maxGross + 1e-6) {
-                log.info("Paper skip {}/{} [{}]: capital gross cap {} (equity={})",
+            double pairGross = notionalY + notionalX;
+            double remaining = maxGross - openGross;
+            if (pairGross > remaining + 1e-6) {
+                if (remaining < maxGross * 0.15) {
+                    log.info("Paper skip {}/{} [{}]: capital gross cap {} (equity={})",
+                            f.technical().tickerY(), f.technical().tickerX(), book,
+                            String.format(Locale.ROOT, "%.0f", maxGross),
+                            String.format(Locale.ROOT, "%.0f", capitalProperties.equityRub()));
+                    continue;
+                }
+                double scale = remaining / pairGross;
+                notionalY *= scale;
+                notionalX *= scale;
+                pairGross = notionalY + notionalX;
+                log.info("Paper size-down {}/{} [{}]: scale={}: pairGross≈{} within remaining≈{}",
                         f.technical().tickerY(), f.technical().tickerX(), book,
-                        String.format(Locale.ROOT, "%.0f", maxGross),
-                        String.format(Locale.ROOT, "%.0f", capitalProperties.equityRub()));
-                continue;
+                        String.format(Locale.ROOT, "%.2f", scale),
+                        String.format(Locale.ROOT, "%.0f", pairGross),
+                        String.format(Locale.ROOT, "%.0f", remaining));
             }
 
             Double priceY = lastPrice(f.technical().tickerY(), book);
@@ -523,7 +541,7 @@ public class PaperTradingService {
     ) {
         boolean longSpread = open.signal() == TradingSignal.LONG_SPREAD;
 
-        if (Math.abs(q.z()) <= zExit + 0.25) {
+        if (Math.abs(q.z()) <= (zExit > 0 ? zExit : 0.25)) {
             return String.format(Locale.ROOT, "AUTO CLOSE: mean-reversion Z=%.2f", q.z());
         }
         if (Math.abs(q.z()) >= stopZ) {

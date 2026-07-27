@@ -96,6 +96,32 @@ public record MicrostructureProperties(
         );
     }
 
+    /**
+     * Research: базовый RVOL/spread/session-edge, без жёсткого ATAS (DOM/VA/iceberg/footprint).
+     * Live-гейт остаётся {@link #defaults()}.
+     */
+    public static MicrostructureProperties researchDefaults() {
+        return new MicrostructureProperties(
+                true, true, 0.40, 45.0, 0.0, 8.0,
+                10, 20, 20, false,
+                false, 300_000.0, 25.0, 0.0, 2.0, false, true, 15.0,
+                TrendMicrostructureProperties.defaults()
+        );
+    }
+
+    /**
+     * Research mid: только session-edge + мягкий RVOL/spread, без ATAS-прокси.
+     * Между researchDefaults (мало сделок) и micro=off (шум).
+     */
+    public static MicrostructureProperties sessionEdgeOnly() {
+        return new MicrostructureProperties(
+                true, true, 0.25, 60.0, 0.0, 12.0,
+                5, 15, 20, false,
+                false, 300_000.0, 25.0, 0.0, 2.0, false, false, 15.0,
+                TrendMicrostructureProperties.defaults()
+        );
+    }
+
     public boolean domEnabledFlag() {
         return Boolean.TRUE.equals(domEnabled);
     }
