@@ -230,14 +230,14 @@ public class AnalysisHtmlRenderer {
                     <span>INTRADAY tech→paper</span>
                   </div>
                   <ol class="pipeline">
-                    <li><strong>Капитал.</strong> Equity → слоты и gross: ~40% DAILY / ~60% INTRADAY (без плеча до 1M).</li>
+                    <li><strong>Капитал.</strong> Equity → слоты и gross: ~40% DAILY / ~60% INTRADAY (без плеча до 1M). Доли <em>фиксированы</em>: пустой DAILY не отдаёт лимит INTRADAY.</li>
                     <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → фундамент (MOEX+RSS) → paper-journal.json.</li>
                     <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/FDR/Z (окна ~48 баров, max-hold ~7ч) → без FA → paper-journal-intraday.json, flatten ~18:30.</li>
                     <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы в обеих книгах при TREND.</li>
                   </ol>
                   <div class="callout">
-                    Нет ручного переключателя «сегодня daily / сегодня intraday» — оба горизонта в одном цикле.
-                    Источник свечей — только MOEX ISS (TradingView не подключаем).
+                    Нет ручного переключателя «сегодня daily / сегодня intraday» — оба горизонта в одном автоматическом цикле
+                    (кнопка «Анализ + paper» или cron). Источник свечей — только MOEX ISS (TradingView не подключаем).
                   </div>
 
                   <h3 id="universe">3. Как отбираются акции в анализ</h3>
@@ -358,7 +358,8 @@ public class AnalysisHtmlRenderer {
                     Плечо в модели не используется, пока equity ниже порога (~1 млн ₽).
                   </p>
                   <ul>
-                    <li>dual-book: слоты от equity (~100k → 1 daily + 2 intraday); gross 40/60;</li>
+                    <li>dual-book: слоты от equity (~100k → 1 daily + 2 intraday); gross 40/60 <strong>независимо</strong> по книгам;</li>
+                    <li>если DAILY без сигналов — его gross остаётся неиспользованным, INTRADAY не «добирает» остаток;</li>
                     <li>без плеча при equity &lt; 1M;</li>
                     <li>не больше 1 открытой пары на сектор внутри книги;</li>
                     <li>DAILY: удержание несколько дней + FA; INTRADAY: flatten к close, без FA;</li>
@@ -804,9 +805,10 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append("""
                 <div class="hint">
-                  <strong>Paper journal — dual-book.</strong> DAILY и INTRADAY в одном цикле; cash PnL по qty×price,
-                  slippage/borrow из конфига. Капитал без плеча при equity &lt; 1M; слоты/gross из CapitalAllocator.
-                  INTRADAY flatten к ~18:30. Отдельные файлы journal; на этой странице — объединённый взгляд.
+                  <strong>Paper journal — dual-book.</strong> DAILY и INTRADAY в одном автоматическом цикле; cash PnL по qty×price,
+                  slippage/borrow из конфига. Капитал без плеча при equity &lt; 1M; слоты/gross из CapitalAllocator
+                  (40/60 фиксированно, без перетока между книгами). INTRADAY flatten к ~18:30.
+                  Отдельные файлы journal; на этой странице — объединённый взгляд.
                 </div>
                 """);
         List<PaperTradeEntry> entries = journal.entries() == null ? List.of() : journal.entries();
