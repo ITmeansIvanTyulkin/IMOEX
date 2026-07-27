@@ -177,7 +177,7 @@ public class CointegrationAnalysisService {
             return;
         }
 
-        Map<String, PriceSeries> filtered = universeFilterService.filter(loaded);
+        Map<String, PriceSeries> filtered = universeFilterService.filter(loaded, BookKind.INTRADAY);
         Map<String, PriceSeries> processed = preprocessingService.preprocess(filtered);
 
         BookParams params = BookParams.intraday(properties, sessionProperties);
@@ -221,7 +221,7 @@ public class CointegrationAnalysisService {
                     pairsSkipped++;
                     continue;
                 }
-                if (!universeFilterService.allowPair(tickerY, tickerX)) {
+                if (!universeFilterService.allowPair(tickerY, tickerX, params.book)) {
                     pairsSkipped++;
                     continue;
                 }
@@ -334,6 +334,7 @@ public class CointegrationAnalysisService {
     }
 
     private static final class BookParams {
+        final BookKind book;
         final int rollingZWindow;
         final int maxHoldBars;
         final double barsPerYear;
@@ -341,7 +342,8 @@ public class CointegrationAnalysisService {
         int lastPairsTested;
         int lastPairsSkipped;
 
-        private BookParams(int rollingZWindow, int maxHoldBars, double barsPerYear, int adaptiveLongWin) {
+        private BookParams(BookKind book, int rollingZWindow, int maxHoldBars, double barsPerYear, int adaptiveLongWin) {
+            this.book = book;
             this.rollingZWindow = rollingZWindow;
             this.maxHoldBars = maxHoldBars;
             this.barsPerYear = barsPerYear;
@@ -350,6 +352,7 @@ public class CointegrationAnalysisService {
 
         static BookParams daily(ImoexProperties properties) {
             return new BookParams(
+                    BookKind.DAILY,
                     properties.cointegration().rollingZWindow(),
                     properties.risk().maxHoldBars(),
                     252.0,
@@ -360,6 +363,7 @@ public class CointegrationAnalysisService {
         static BookParams intraday(ImoexProperties properties, SessionProperties session) {
             int hours = session.hoursPerSession();
             return new BookParams(
+                    BookKind.INTRADAY,
                     session.intradayRollingZWindow(),
                     session.intradayMaxHoldBars(),
                     session.barsPerYearIntraday(),

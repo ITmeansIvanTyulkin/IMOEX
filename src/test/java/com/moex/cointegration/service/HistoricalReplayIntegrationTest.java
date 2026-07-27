@@ -57,7 +57,8 @@ class HistoricalReplayIntegrationTest {
         MarketDataStorage storage = new MarketDataStorage(props);
 
         HistoricalReplayService replay = new HistoricalReplayService(
-                props, capital, session, preprocessing, risk, events, storage);
+                props, capital, session, preprocessing, risk, events,
+                com.moex.cointegration.config.MicrostructureProperties.defaults(), storage);
 
         HistoricalReplayReport report = replay.replaySynthetic(
                 "AAA", "BBB", logY, logX, dates, 120, n - 1, BookKind.DAILY);

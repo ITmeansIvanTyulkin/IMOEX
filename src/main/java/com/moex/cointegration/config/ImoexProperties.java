@@ -417,7 +417,8 @@ public record ImoexProperties(
             Boolean sameSectorOnly,
             Boolean allowRelatedSectors,
             Double minPairTurnoverRub,
-            Double maxTurnoverRatio
+            Double maxTurnoverRatio,
+            Boolean intradayTierOneOnly
     ) {
         public UniverseProperties {
             if (sameSectorOnly == null) {
@@ -432,13 +433,20 @@ public record ImoexProperties(
             if (maxTurnoverRatio == null || maxTurnoverRatio < 1) {
                 maxTurnoverRatio = 20.0;
             }
+            if (intradayTierOneOnly == null) {
+                intradayTierOneOnly = true;
+            }
         }
 
         public static UniverseProperties defaults() {
             return new UniverseProperties(
                     true, 60, 50_000_000.0, 5.0, 0.15, true,
-                    true, true, 50_000_000.0, 20.0
+                    true, true, 50_000_000.0, 20.0, true
             );
+        }
+
+        public boolean intradayTierOneOnlyEnabled() {
+            return Boolean.TRUE.equals(intradayTierOneOnly);
         }
 
         public boolean sameSectorOnlyEnabled() {
