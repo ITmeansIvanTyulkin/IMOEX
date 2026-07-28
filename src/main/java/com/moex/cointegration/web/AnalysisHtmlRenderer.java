@@ -113,31 +113,34 @@ public class AnalysisHtmlRenderer {
             List<TradingRecommendation> recommendations,
             com.moex.cointegration.model.MarketRegimeSnapshot regime
     ) {
-        long actionable = recommendations.stream()
+        List<TradingRecommendation> actionableSignals = recommendations.stream()
                 .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
-                .count();
+                .sorted((a, b) -> Double.compare(
+                        Math.abs(b.currentZScore()),
+                        Math.abs(a.currentZScore())))
+                .toList();
+
+        long actionable = actionableSignals.size();
 
         StringBuilder body = new StringBuilder();
         body.append(regimeBanner(regime));
         body.append(summaryBlock(report, recommendations.size(), actionable));
-        body.append(dashboardBrokerPanel());
-        body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
         body.append("""
                 <div class="hint">
-                  <strong>Как читать сигнал.</strong> Парная торговля — это одновременно купить одну акцию и продать другую.
-                  Зелёная стрелка на графике = момент «купить спред», красная = «продать спред».
-                  Откройте <a href="/view/final">Итог + новости</a>: там техника уже пропущена через новостной фильтр (ENTER / REDUCE / BLOCK).
-                  Также: <a href="/view/paper">Paper journal</a> и <a href="/view/walk-forward">Walk-forward OOS</a>.
+                  <strong>Экран оператора (быстро):</strong>
+                  <div>1) Проверьте режим рынка (TREND блокирует новые входы).</div>
+                  <div>2) Если вы идёте в sandbox/live: сохраните настройки broker → <em>Test broker connection</em>.</div>
+                  <div>3) Если сигналы есть: смотрите /view/final (ENTER/REDUCE/BLOCK после FA) и /view/paper (что реально открыто в paper).</div>
                 </div>
                 """);
-        body.append(recommendationsTable(
-                recommendations.stream()
-                        .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
-                        .toList(),
-                "Нет активных сигналов входа. См. полный список рекомендаций."
+        body.append(dashboardBrokerPanel());
+        body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
+        body.append(dashboardActionableSignalsTable(
+                actionableSignals,
+                "Нет активных сигналов LONG/SHORT сейчас. См. полный список рекомендаций."
         ));
         body.append("<h2>Топ-пары по Sharpe</h2>");
-        body.append(topPairsTable(report.topPairs()));
+        body.append(topPairsTableCompact(report.topPairs()));
 
         return page("TRINITY — дашборд", body.toString(), nav("dashboard"));
     }
@@ -148,7 +151,9 @@ public class AnalysisHtmlRenderer {
                   <h2>Broker console</h2>
                   <p class="meta">
                     Этот блок есть только на дашборде: здесь удобно подключать токены брокеров без правки
-                    <code>application-local.yml</code> и смотреть состояние broker-journal / reconcile.
+                    <code>application-local.yml</code>.
+                    <br><br>
+                    Сейчас исполнение реализовано только для <strong>T-Invest</strong>; другие варианты в селекте — задел UI.
                   </p>
                   <div class="ops-grid">
                     <div class="callout" id="broker-widget">
@@ -219,6 +224,96 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </section>
                 """;
+    }
+
+    private String dashboardActionableSignalsTable(List<TradingRecommendation> rows, String emptyMessage) {
+        if (rows == null || rows.isEmpty()) {
+            return "<p class=\"empty-msg\">" + escape(emptyMessage) + "</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Пара Y / X</th>
+                      <th>Сигнал</th>
+                      <th>Z-score</th>
+                      <th>Дата</th>
+                      <th>Комментарий</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        for (TradingRecommendation r : rows) {
+            table.append("<tr>");
+            table.append("<td><strong>")
+                    .append(escape(r.tickerY()))
+                    .append("</strong> / ")
+                    .append(escape(r.tickerX()))
+                    .append("</td>");
+            table.append("<td>").append(signalBadge(r.signal())).append("</td>");
+            table.append("<td class=\"num\">").append(formatZ(r.currentZScore())).append("</td>");
+            table.append("<td>").append(r.asOfDate()).append("</td>");
+            table.append("<td class=\"details\">")
+                    .append("<div class=\"summary\">").append(escape(r.summary())).append("</div>")
+                    .append("</td>");
+            table.append("<td class=\"links\">").append(chartPageLink(r.tickerY(), r.tickerX())).append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
+    }
+
+    private String topPairsTableCompact(List<PairAnalysisResult> pairs) {
+        if (pairs == null || pairs.isEmpty()) {
+            return "<p class=\"empty-msg\">Топ-пар нет.</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Пара</th>
+                      <th>Sharpe</th>
+                      <th>Half-life</th>
+                      <th>Coverage</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        int rank = 1;
+        for (PairAnalysisResult p : pairs) {
+            table.append("<tr>");
+            table.append("<td>").append(rank++).append("</td>");
+            table.append("<td><strong>").append(escape(p.tickerY())).append("</strong> / ")
+                    .append(escape(p.tickerX())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.sharpeRatio())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.halfLifeDays())).append(" д</td>");
+
+            String cov = p.coveragePercent() == null ? "—"
+                    : String.format(Locale.ROOT, "%.1f%%", p.coveragePercent());
+            table.append("<td class=\"num\" title=\"")
+                    .append(escape(p.coverageWarning() == null ? "" : p.coverageWarning()))
+                    .append("\">")
+                    .append(cov)
+                    .append("</td>");
+
+            table.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
     }
 
     /** Страница всех торговых рекомендаций. */
