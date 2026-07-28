@@ -27,6 +27,7 @@
 | **Рекомендации** | Тексты «что купить/продать» + **`rationale`** в `final-recommendations.json` (техника / FA / режим / риск) |
 | **Новости / FA** | После техники, **только DAILY**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
 | **Paper journal** | DAILY journal + колонка **«Комментарий к закрытию»**; INTRADAY paper opens выключены (`intraday-research-only`) |
+| **Broker console** | T-Invest execution contour: journal, reconcile по positions+active orders, `flatten-all`, dashboard-only UI для токена/счёта |
 | **Sizing / slippage** | Notional **% от equity**; капитал на DAILY (INTRADAY share = 0); slippage DAILY 20 bps |
 | **Event calendar** | INTRADAY research: flatten/block правила остаются в коде для будущего включения |
 | **Historical replay** | Bar-by-bar прогон paper на локальных свечах (`POST /api/analysis/historical-replay`) |
@@ -192,6 +193,8 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 Откройте http://localhost:8080/view — сверху **пульт оператора**: кнопки «Анализ + paper», «Анализ + скачать свечи», «Только новости / paper», «Walk-forward», «Скачать свечи». Логин/пароль API — из `application-local.yml`, сохраняются в браузере. `curl` ниже — запасной путь.
 
+На самом дашборде есть отдельный блок **Broker console**: туда можно ввести `provider`, `mode`, `accountId`, токен, sandbox/kill-switch и execution-настройки. Эти параметры сохраняются локально в `data/broker-ui-settings.json`, поэтому пользователю не нужно править код или `application-local.yml` ради первого sandbox-подключения.
+
 | Шаг | URL | Зачем |
 |---|---|---|
 | 1 | http://localhost:8080/view | Дашборд + пульт |
@@ -268,6 +271,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 5. **Алерты** — баннер справа сверху в браузере + опционально уведомление ОС (на Windows обычно снизу справа).
 6. **Исторический replay** — `POST /api/analysis/historical-replay?tickerY=CHMF&tickerX=MAGN&from=2024-01-01&to=2025-12-31` — bar-by-bar прогон paper на локальных свечах (нужен предварительный `refresh`).
 7. **Cluster review** — `imoex.cluster-review.*`: lookback, min PF, exclude OIL_GAS.
+8. **Broker console** — только на `/view`: сохранить токен/счёт, посмотреть reconcile и при необходимости дать `flatten-all`.
 
 Теория стратегии — `/view/strategy`. Пустой paper journal нормален, если нет ENTER/LONG/SHORT с разворотом Z.
 
@@ -440,6 +444,12 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | `GET` | `/analysis/recommendations` | Все техрекомендации |
 | `GET` | `/analysis/signals` | Только LONG/SHORT |
 | `GET` | `/analysis/final` | Итог техника + новости |
+| `GET` | `/broker/status` | Статус активного broker adapter |
+| `GET` | `/broker/settings` | Текущие dashboard-настройки брокера (token masked) |
+| `POST` | `/broker/settings` | Сохранить broker token/account/mode из UI |
+| `GET` | `/broker/reports` | Последние broker execution reports |
+| `GET` | `/broker/reconcile` | Сверка paper vs broker positions + active orders |
+| `POST` | `/broker/flatten-all` | Аварийно снять активные ордера и позиции |
 | `GET` | `/charts/{Y}/{X}/data` | JSON графика |
 | `GET` | `/charts/{Y}/{X}/spread` | PNG спреда |
 | `GET` | `/charts/{Y}/{X}/zscore` | PNG Z-score |
@@ -522,9 +532,22 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
-    auto-run-intraday: true
+    auto-run-intraday: false
     intraday-cron: "0 5 10-18 * * MON-FRI"
     slippage-bps: 20
+  broker:
+    enabled: false
+    provider: T_INVEST
+    mode: AUTO
+    sandbox: true
+    auto-execute-after-analysis: true
+    prefer-limit-orders: true
+    allow-market-fallback: false
+    emergency-market-exit-enabled: false
+    passive-price-offset-bps: 15
+    second-leg-timeout-seconds: 60
+    max-leg-drift-bps: 35
+    kill-switch: false
   auth:
     enabled: true
     username: imoex
@@ -541,6 +564,7 @@ imoex:
 | Risk | `imoex.risk.*` | `GET /api/risk/policy` |
 | Walk-forward | `imoex.walk-forward.*` | `/view/walk-forward` |
 | Paper | `imoex.paper.*` | `/view/paper` |
+| Broker | `imoex.broker.*` + dashboard broker console | `/view`, `/api/broker/*` |
 | Auth | `imoex.auth.*` | HTTP Basic на POST |
 
 ---
@@ -575,6 +599,8 @@ IMOEX/
 | `trading-recommendations.json` | Техрекомендации |
 | `final-recommendations.json` | Итог после новостей + поле **`rationale`** |
 | `paper-journal.json` | Paper track-record (+ `closeComment` на закрытых сделках) |
+| `broker-execution-journal.json` | История broker preview / submit / flatten |
+| `broker-ui-settings.json` | Локально сохранённые dashboard-настройки брокера |
 | `walk-forward-report.json` | OOS отчёт |
 | `charts/` | PNG (запасной формат) |
 
@@ -618,7 +644,7 @@ walk-forward / FDR / рекомендации / news / clients / controllers / p
 
 ## Ограничения
 
-- Нет брокера и автоисполнения.  
+- Live execution требует валидного брокерского токена и sandbox-проверки; без токена контур остаётся preview-only.  
 - Возможен look-ahead / overfitting при наивном чтении in-sample Sharpe.  
 - Paper PnL — research-метрика по qty×цене (+ упрощённый slippage/borrow), не брокерский отчёт.  
 - Shortability без брокера — приближение (ликвидность + exclude preferred).  

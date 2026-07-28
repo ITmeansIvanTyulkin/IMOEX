@@ -113,32 +113,221 @@ public class AnalysisHtmlRenderer {
             List<TradingRecommendation> recommendations,
             com.moex.cointegration.model.MarketRegimeSnapshot regime
     ) {
-        long actionable = recommendations.stream()
+        List<TradingRecommendation> actionableSignals = recommendations.stream()
                 .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
-                .count();
+                .sorted((a, b) -> Double.compare(
+                        Math.abs(b.currentZScore()),
+                        Math.abs(a.currentZScore())))
+                .toList();
+
+        long actionable = actionableSignals.size();
 
         StringBuilder body = new StringBuilder();
         body.append(regimeBanner(regime));
         body.append(summaryBlock(report, recommendations.size(), actionable));
-        body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
         body.append("""
                 <div class="hint">
-                  <strong>Как читать сигнал.</strong> Парная торговля — это одновременно купить одну акцию и продать другую.
-                  Зелёная стрелка на графике = момент «купить спред», красная = «продать спред».
-                  Откройте <a href="/view/final">Итог + новости</a>: там техника уже пропущена через новостной фильтр (ENTER / REDUCE / BLOCK).
-                  Также: <a href="/view/paper">Paper journal</a> и <a href="/view/walk-forward">Walk-forward OOS</a>.
+                  <strong>Экран оператора (быстро):</strong>
+                  <div>1) Проверьте режим рынка (TREND блокирует новые входы).</div>
+                  <div>2) Если вы идёте в sandbox/live: сохраните настройки broker → <em>Test broker connection</em>.</div>
+                  <div>3) Если сигналы есть: смотрите /view/final (ENTER/REDUCE/BLOCK после FA) и /view/paper (что реально открыто в paper).</div>
                 </div>
                 """);
-        body.append(recommendationsTable(
-                recommendations.stream()
-                        .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
-                        .toList(),
-                "Нет активных сигналов входа. См. полный список рекомендаций."
+        body.append(dashboardConsolidatedSummary());
+        body.append(dashboardBrokerPanel());
+        body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
+        body.append(dashboardActionableSignalsTable(
+                actionableSignals,
+                "Нет активных сигналов LONG/SHORT сейчас. См. полный список рекомендаций."
         ));
         body.append("<h2>Топ-пары по Sharpe</h2>");
-        body.append(topPairsTable(report.topPairs()));
+        body.append(topPairsTableCompact(report.topPairs()));
 
         return page("TRINITY — дашборд", body.toString(), nav("dashboard"));
+    }
+
+    private String dashboardConsolidatedSummary() {
+        return """
+                <section class="cards">
+                  <div class="card"><span class="label">Paper open</span><span class="value accent" id="dash-paper-open">—</span></div>
+                  <div class="card"><span class="label">Paper PnL ₽</span><span class="value" id="dash-paper-pnl">—</span></div>
+                  <div class="card"><span class="label">Broker</span><span class="value" id="dash-broker-status">—</span></div>
+                  <div class="card"><span class="label">Final ENTER/REDUCE</span><span class="value accent" id="dash-final-actionable">—</span></div>
+                  <div class="card"><span class="label">Final WATCH</span><span class="value" id="dash-final-watch">—</span></div>
+                  <div class="card"><span class="label">Final BLOCK</span><span class="value bad" id="dash-final-block">—</span></div>
+                </section>
+                """;
+    }
+
+    private String dashboardBrokerPanel() {
+        return """
+                <section class="strategy-doc">
+                  <h2>Broker console</h2>
+                  <p class="meta">
+                    Этот блок есть только на дашборде: здесь удобно подключать токены брокеров без правки
+                    <code>application-local.yml</code>.
+                    <br><br>
+                    Сейчас исполнение реализовано только для <strong>T-Invest</strong>; другие варианты в селекте — задел UI.
+                  </p>
+                  <div class="ops-grid">
+                    <div class="callout" id="broker-widget">
+                      <strong>Broker status</strong>
+                      <div id="broker-status-line">Статус брокера загружается…</div>
+                      <div id="broker-test-line">Подключение ещё не проверялось.</div>
+                      <div id="broker-reconcile-line">Reconcile ещё не запрашивался.</div>
+                      <div id="broker-journal-line">Broker journal загружается…</div>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" data-ops-action="broker-test">Test broker connection</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="broker-reconcile">Broker reconcile</button>
+                        <button type="button" class="btn btn-warn" data-ops-action="broker-flatten">Flatten all broker positions</button>
+                      </div>
+                    </div>
+                    <div class="callout">
+                      <strong>Подключение брокера</strong>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-provider">Broker</label>
+                          <select id="broker-provider">
+                            <option value="T_INVEST">T-Invest</option>
+                            <option value="ALOR">Alor</option>
+                            <option value="FINAM">Finam</option>
+                            <option value="BKS">BKS</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label for="broker-mode">Mode</label>
+                          <select id="broker-mode">
+                            <option value="AUTO">AUTO</option>
+                            <option value="MANUAL_CONFIRM">MANUAL_CONFIRM</option>
+                            <option value="PAPER">PAPER</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label for="broker-account-id">Account ID</label>
+                          <input id="broker-account-id" type="text" autocomplete="off" spellcheck="false">
+                        </div>
+                      </div>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-token">Token</label>
+                          <input id="broker-token" type="password" autocomplete="off" placeholder="Вставьте новый токен только при обновлении">
+                        </div>
+                        <div class="field">
+                          <label for="broker-passive-bps">Passive offset, bps</label>
+                          <input id="broker-passive-bps" type="number" step="0.1" min="0">
+                        </div>
+                        <div class="field">
+                          <label for="broker-timeout-seconds">Second leg timeout, sec</label>
+                          <input id="broker-timeout-seconds" type="number" step="1" min="1">
+                        </div>
+                      </div>
+                      <div class="alert-prefs">
+                        <label class="check-label"><input type="checkbox" id="broker-enabled"> Broker enabled</label>
+                        <label class="check-label"><input type="checkbox" id="broker-sandbox"> Sandbox</label>
+                        <label class="check-label"><input type="checkbox" id="broker-auto-execute"> Auto-execute after analysis</label>
+                        <label class="check-label"><input type="checkbox" id="broker-prefer-limit"> Prefer limit orders</label>
+                        <label class="check-label"><input type="checkbox" id="broker-allow-market"> Allow market fallback</label>
+                        <label class="check-label"><input type="checkbox" id="broker-emergency-exit"> Emergency market exit on asymmetric fill</label>
+                        <label class="check-label"><input type="checkbox" id="broker-kill-switch"> Kill-switch</label>
+                      </div>
+                      <p class="meta" id="broker-token-hint">Token пока не сохранён.</p>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" id="broker-save-settings">Сохранить broker settings</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String dashboardActionableSignalsTable(List<TradingRecommendation> rows, String emptyMessage) {
+        if (rows == null || rows.isEmpty()) {
+            return "<p class=\"empty-msg\">" + escape(emptyMessage) + "</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Пара Y / X</th>
+                      <th>Сигнал</th>
+                      <th>Z-score</th>
+                      <th>Дата</th>
+                      <th>Комментарий</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        for (TradingRecommendation r : rows) {
+            table.append("<tr>");
+            table.append("<td><strong>")
+                    .append(escape(r.tickerY()))
+                    .append("</strong> / ")
+                    .append(escape(r.tickerX()))
+                    .append("</td>");
+            table.append("<td>").append(signalBadge(r.signal())).append("</td>");
+            table.append("<td class=\"num\">").append(formatZ(r.currentZScore())).append("</td>");
+            table.append("<td>").append(r.asOfDate()).append("</td>");
+            table.append("<td class=\"details\">")
+                    .append("<div class=\"summary\">").append(escape(r.summary())).append("</div>")
+                    .append("</td>");
+            table.append("<td class=\"links\">").append(chartPageLink(r.tickerY(), r.tickerX())).append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
+    }
+
+    private String topPairsTableCompact(List<PairAnalysisResult> pairs) {
+        if (pairs == null || pairs.isEmpty()) {
+            return "<p class=\"empty-msg\">Топ-пар нет.</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Пара</th>
+                      <th>Sharpe</th>
+                      <th>Half-life</th>
+                      <th>Coverage</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        int rank = 1;
+        for (PairAnalysisResult p : pairs) {
+            table.append("<tr>");
+            table.append("<td>").append(rank++).append("</td>");
+            table.append("<td><strong>").append(escape(p.tickerY())).append("</strong> / ")
+                    .append(escape(p.tickerX())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.sharpeRatio())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.halfLifeDays())).append(" д</td>");
+
+            String cov = p.coveragePercent() == null ? "—"
+                    : String.format(Locale.ROOT, "%.1f%%", p.coveragePercent());
+            table.append("<td class=\"num\" title=\"")
+                    .append(escape(p.coverageWarning() == null ? "" : p.coverageWarning()))
+                    .append("\">")
+                    .append(cov)
+                    .append("</td>");
+
+            table.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
     }
 
     /** Страница всех торговых рекомендаций. */
@@ -557,6 +746,10 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="ops">2. Пульт оператора</h3>
                   <p>На каждой странице <code>/view/*</code> сверху — блок «Пульт оператора»:</p>
+                  <p class="meta">
+                    Отдельно на <a href="/view">дашборде</a> есть блок <strong>Broker console</strong>:
+                    подключение токена/счёта, reconcile и аварийный <code>flatten-all</code> без правки кода.
+                  </p>
                   <table class="params">
                     <thead><tr><th>Кнопка</th><th>Что делает</th></tr></thead>
                     <tbody>
@@ -575,7 +768,7 @@ public class AnalysisHtmlRenderer {
                   <table class="params">
                     <thead><tr><th>Раздел</th><th>Зачем открывать</th></tr></thead>
                     <tbody>
-                      <tr><td><a href="/view">Дашборд</a></td><td>Сводка: режим рынка (ADX), топ-пары, последний прогон.</td></tr>
+                      <tr><td><a href="/view">Дашборд</a></td><td>Сводка: режим рынка (ADX), топ-пары, последний прогон и единственный UI-блок подключения брокера.</td></tr>
                       <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY).</td></tr>
                       <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
                       <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>

@@ -42,6 +42,7 @@ public class CointegrationAnalysisService {
     private final PairUniverseScanService pairUniverseScanService;
     private final MarketRegimeService marketRegimeService;
     private final MonthlyClusterReviewService monthlyClusterReviewService;
+    private final PairExecutionService pairExecutionService;
     private final ImoexProperties properties;
     private final SessionProperties sessionProperties;
     private final CapitalProperties capitalProperties;
@@ -58,6 +59,7 @@ public class CointegrationAnalysisService {
             PairUniverseScanService pairUniverseScanService,
             MarketRegimeService marketRegimeService,
             MonthlyClusterReviewService monthlyClusterReviewService,
+            PairExecutionService pairExecutionService,
             ImoexProperties properties,
             SessionProperties sessionProperties,
             CapitalProperties capitalProperties
@@ -73,6 +75,7 @@ public class CointegrationAnalysisService {
         this.pairUniverseScanService = pairUniverseScanService;
         this.marketRegimeService = marketRegimeService;
         this.monthlyClusterReviewService = monthlyClusterReviewService;
+        this.pairExecutionService = pairExecutionService;
         this.properties = properties;
         this.sessionProperties = sessionProperties;
         this.capitalProperties = capitalProperties;
@@ -161,6 +164,7 @@ public class CointegrationAnalysisService {
                 recommendations, BookKind.DAILY);
         paperTradingService.sync(finals, recommendations, BookKind.DAILY,
                 alloc.dailyMaxPairs(), alloc.dailyGrossCap());
+        autoExecuteDaily(finals);
 
         log.info("DAILY book: {} tickers, {} tested, {} cluster-pass, top {}, {} tech, {} final",
                 processed.size(), params.lastPairsTested(), cointegratedPairs.size(), topPairs.size(),
@@ -215,5 +219,18 @@ public class CointegrationAnalysisService {
         Map<String, List<com.moex.cointegration.model.Candle>> candlesByTicker =
                 universeFilterService.loadCandlesForTickers(processed.keySet(), params.book());
         return pairUniverseScanService.scan(processed, candlesByTicker, params);
+    }
+
+    private void autoExecuteDaily(List<FinalTradeRecommendation> finals) {
+        if (finals == null || finals.isEmpty()) {
+            return;
+        }
+        try {
+            if (pairExecutionService.status().enabled() && pairExecutionService.status().autoExecuteAfterAnalysis()) {
+                pairExecutionService.executeActionableDaily(finals);
+            }
+        } catch (Exception ex) {
+            log.warn("Broker auto-execution skipped: {}", ex.getMessage());
+        }
     }
 }

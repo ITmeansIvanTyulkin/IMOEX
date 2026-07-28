@@ -18,6 +18,7 @@ import com.moex.cointegration.service.FinalRecommendationService;
 import com.moex.cointegration.service.HistoricalReplayService;
 import com.moex.cointegration.service.MarketDataService;
 import com.moex.cointegration.service.PaperTradingService;
+import com.moex.cointegration.service.PairExecutionService;
 import com.moex.cointegration.service.RiskPolicyService;
 import com.moex.cointegration.service.TradingRecommendationService;
 import com.moex.cointegration.service.WalkForwardService;
@@ -56,6 +57,7 @@ public class AnalysisController {
     private final FinalRecommendationService finalRecommendationService;
     private final WalkForwardService walkForwardService;
     private final PaperTradingService paperTradingService;
+    private final PairExecutionService pairExecutionService;
     private final RiskPolicyService riskPolicyService;
     private final HistoricalReplayService historicalReplayService;
 
@@ -69,6 +71,7 @@ public class AnalysisController {
             FinalRecommendationService finalRecommendationService,
             WalkForwardService walkForwardService,
             PaperTradingService paperTradingService,
+            PairExecutionService pairExecutionService,
             RiskPolicyService riskPolicyService,
             HistoricalReplayService historicalReplayService
     ) {
@@ -81,6 +84,7 @@ public class AnalysisController {
         this.finalRecommendationService = finalRecommendationService;
         this.walkForwardService = walkForwardService;
         this.paperTradingService = paperTradingService;
+        this.pairExecutionService = pairExecutionService;
         this.riskPolicyService = riskPolicyService;
         this.historicalReplayService = historicalReplayService;
     }
@@ -226,6 +230,9 @@ public class AnalysisController {
         }
         List<FinalTradeRecommendation> finals = finalRecommendationService.reanalyzeExisting(technical);
         paperTradingService.sync(finals, technical);
+        if (pairExecutionService.status().enabled() && pairExecutionService.status().autoExecuteAfterAnalysis()) {
+            pairExecutionService.executeActionableDaily(finals);
+        }
         return finals;
     }
 

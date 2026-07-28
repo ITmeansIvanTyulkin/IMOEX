@@ -67,8 +67,8 @@ imoex:
     reduce-factor: 0.5
     index-board: SNDX
   capital:
-    # операторский профиль: от ~100 тыс. ₽, без плеча до 1M
-    equity-rub: 100000
+    # операторский профиль: 200 тыс. ₽, без плеча до 1M
+    equity-rub: 200000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
     # DAILY paper live; INTRADAY — research-only (доля 0)
@@ -114,6 +114,21 @@ imoex:
     slippage-bps-daily: 20
     slippage-bps-intraday: 40
     apply-borrow: true
+  broker:
+    enabled: false
+    provider: T_INVEST
+    mode: AUTO
+    sandbox: true
+    token: ${T_INVEST_TOKEN:}
+    account-id: ${T_INVEST_ACCOUNT_ID:}
+    auto-execute-after-analysis: true
+    prefer-limit-orders: true
+    allow-market-fallback: false
+    emergency-market-exit-enabled: false
+    passive-price-offset-bps: 15
+    second-leg-timeout-seconds: 60
+    max-leg-drift-bps: 35
+    kill-switch: false
   # Ежемесячный пересмотр кластеров (секторный cash PnL / PF)
   cluster-review:
     enabled: true

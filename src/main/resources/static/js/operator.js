@@ -65,6 +65,11 @@
     if (lines.length > 40) lines[lines.length - 1].remove();
   }
 
+  function setText(id, text) {
+    const el = $(id);
+    if (el) el.textContent = text;
+  }
+
   function setBusy(on) {
     const bar = $("ops-busy");
     if (bar) bar.classList.toggle("on", !!on);
@@ -234,6 +239,191 @@
     }
   }
 
+  async function loadBrokerWidget() {
+    if (!$("broker-widget")) return;
+    try {
+      const [statusRes, reconcileRes, reportsRes] = await Promise.all([
+        fetch("/api/broker/status", { headers: { Accept: "application/json" } }),
+        fetch("/api/broker/reconcile", { headers: { Accept: "application/json" } }),
+        fetch("/api/broker/reports", { headers: { Accept: "application/json" } })
+      ]);
+      if (statusRes.ok) {
+        const status = await statusRes.json();
+        setText("broker-status-line",
+          "Статус: " + (status.summary || status.provider || "broker") +
+          " · mode=" + (status.mode || "?") +
+          " · sandbox=" + (!!status.sandbox));
+        if ($("dash-broker-status")) {
+          const token = status.tokenPresent ? "token/account: OK" : "token/account: missing";
+          setText("dash-broker-status",
+            token + (status.summary ? " · " + status.summary : "")
+          );
+        }
+      }
+      if (reconcileRes.ok) {
+        const rec = await reconcileRes.json();
+        setText("broker-reconcile-line",
+          "Reconcile: " + (rec.summary || "—"));
+      }
+      if (reportsRes.ok) {
+        const reports = await reportsRes.json();
+        const last = Array.isArray(reports) && reports.length ? reports[0] : null;
+        setText("broker-journal-line",
+          last
+            ? "Последний broker report: " + last.status + " · " + last.summary
+            : "Broker journal пока пуст.");
+      }
+    } catch (_) {
+      setText("broker-status-line", "Статус брокера временно недоступен.");
+    }
+  }
+
+  function fmtMoneyRub(v) {
+    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
+    return (v >= 0 ? "+" : "") + v.toFixed(0) + " ₽";
+  }
+
+  async function loadDashboardConsolidatedSummary() {
+    if (!$("dash-paper-open")) return;
+    try {
+      const [paperRes, finalRes] = await Promise.all([
+        fetch("/api/paper/journal", { headers: { Accept: "application/json" } }),
+        fetch("/api/analysis/final", { headers: { Accept: "application/json" } })
+      ]);
+
+      if (paperRes.ok) {
+        const paper = await paperRes.json();
+        setText("dash-paper-open", paper.openCount != null ? String(paper.openCount) : "—");
+        const realized = paper.realizedPnlRub;
+        const unrealized = paper.unrealizedPnlRub;
+        const hasAny = (typeof realized === "number" && isFinite(realized)) || (typeof unrealized === "number" && isFinite(unrealized));
+        const pnlSum = hasAny ? (realized || 0) + (unrealized || 0) : null;
+        setText("dash-paper-pnl", pnlSum == null ? "—" : fmtMoneyRub(pnlSum));
+      }
+
+      if (finalRes.ok) {
+        const finals = await finalRes.json();
+        const cnt = (decision) => finals.filter(f => f && f.decision === decision).length;
+        const actionable = cnt("ENTER") + cnt("REDUCE_SIZE");
+        setText("dash-final-actionable", String(actionable));
+        setText("dash-final-watch", String(cnt("WATCH")));
+        setText("dash-final-block", String(cnt("BLOCK")));
+      }
+    } catch (_) {
+      // ignore intermittent network errors
+    }
+  }
+
+  async function testBrokerConnection() {
+    saveCreds();
+    setBusy(true);
+    appendLog("Проверяю broker connection…", "info");
+    try {
+      const res = await fetch("/api/broker/test-connection", {
+        method: "POST",
+        headers: {
+          Authorization: authHeader(),
+          Accept: "application/json"
+        }
+      });
+      const text = await res.text();
+      const body = text ? JSON.parse(text) : null;
+      if (!res.ok || !body) {
+        appendLog("Не удалось проверить broker connection.", "err");
+        return;
+      }
+      setText("broker-test-line", body.summary || "Broker connection checked.");
+      appendLog(body.summary || "Broker connection checked.", body.snapshotAvailable ? "ok" : "info");
+      await loadBrokerWidget();
+    } catch (e) {
+      appendLog(String(e && e.message ? e.message : e), "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function brokerSettingsPayload() {
+    return {
+      enabled: $("broker-enabled") ? $("broker-enabled").checked : false,
+      provider: $("broker-provider") ? $("broker-provider").value : "T_INVEST",
+      mode: $("broker-mode") ? $("broker-mode").value : "AUTO",
+      sandbox: $("broker-sandbox") ? $("broker-sandbox").checked : true,
+      token: $("broker-token") ? $("broker-token").value : "",
+      accountId: $("broker-account-id") ? $("broker-account-id").value : "",
+      autoExecuteAfterAnalysis: $("broker-auto-execute") ? $("broker-auto-execute").checked : true,
+      preferLimitOrders: $("broker-prefer-limit") ? $("broker-prefer-limit").checked : true,
+      allowMarketFallback: $("broker-allow-market") ? $("broker-allow-market").checked : false,
+      emergencyMarketExitEnabled: $("broker-emergency-exit") ? $("broker-emergency-exit").checked : false,
+      passivePriceOffsetBps: $("broker-passive-bps") ? Number($("broker-passive-bps").value || 0) : 15,
+      secondLegTimeoutSeconds: $("broker-timeout-seconds") ? Number($("broker-timeout-seconds").value || 60) : 60,
+      maxLegDriftBps: 35,
+      killSwitch: $("broker-kill-switch") ? $("broker-kill-switch").checked : false
+    };
+  }
+
+  function fillBrokerSettings(view) {
+    if (!view || !$("broker-provider")) return;
+    $("broker-enabled").checked = !!view.enabled;
+    $("broker-provider").value = view.provider || "T_INVEST";
+    $("broker-mode").value = view.mode || "AUTO";
+    $("broker-sandbox").checked = !!view.sandbox;
+    $("broker-account-id").value = view.accountId || "";
+    $("broker-token").value = "";
+    $("broker-auto-execute").checked = !!view.autoExecuteAfterAnalysis;
+    $("broker-prefer-limit").checked = !!view.preferLimitOrders;
+    $("broker-allow-market").checked = !!view.allowMarketFallback;
+    $("broker-emergency-exit").checked = !!view.emergencyMarketExitEnabled;
+    $("broker-passive-bps").value = view.passivePriceOffsetBps != null ? view.passivePriceOffsetBps : 15;
+    $("broker-timeout-seconds").value = view.secondLegTimeoutSeconds != null ? view.secondLegTimeoutSeconds : 60;
+    $("broker-kill-switch").checked = !!view.killSwitch;
+    setText("broker-token-hint",
+      view.tokenConfigured
+        ? "Token сохранён: " + (view.maskedToken || "скрыт") + ". Оставьте поле пустым, если не меняете его."
+        : "Token пока не сохранён.");
+  }
+
+  async function loadBrokerSettings() {
+    if (!$("broker-save-settings")) return;
+    try {
+      const res = await fetch("/api/broker/settings", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      fillBrokerSettings(await res.json());
+    } catch (_) {
+      setText("broker-token-hint", "Настройки брокера временно недоступны.");
+    }
+  }
+
+  async function saveBrokerSettings() {
+    if (!$("broker-save-settings")) return;
+    saveCreds();
+    setBusy(true);
+    appendLog("Сохраняю broker settings…", "info");
+    try {
+      const res = await fetch("/api/broker/settings", {
+        method: "POST",
+        headers: {
+          Authorization: authHeader(),
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(brokerSettingsPayload())
+      });
+      const text = await res.text();
+      const body = text ? JSON.parse(text) : null;
+      if (!res.ok) {
+        appendLog("Не удалось сохранить broker settings.", "err");
+        return;
+      }
+      fillBrokerSettings(body);
+      await loadBrokerWidget();
+      appendLog("Broker settings сохранены.", "ok");
+    } catch (e) {
+      appendLog(String(e && e.message ? e.message : e), "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function bindAlertPrefs() {
     const en = $("ops-alerts-enabled");
     const snd = $("ops-alerts-sound");
@@ -270,9 +460,14 @@
     seedSeenFromJournal().then(function () {
       pollPaperAlerts();
       pollAutoRunStatus();
+      loadBrokerWidget();
+      loadBrokerSettings();
+      loadDashboardConsolidatedSummary();
     });
     setInterval(pollPaperAlerts, POLL_MS);
     setInterval(pollAutoRunStatus, POLL_MS * 5);
+    setInterval(loadBrokerWidget, POLL_MS * 2);
+    setInterval(loadDashboardConsolidatedSummary, POLL_MS * 2);
   }
 
   async function apiPost(path, startMessage, okMessage) {
@@ -368,6 +563,23 @@
           ACTION_START["walk-forward"],
           "Walk-forward пересчитан."
         );
+      },
+      "broker-test": function () {
+        return testBrokerConnection();
+      },
+      "broker-reconcile": async function () {
+        saveCreds();
+        appendLog("Запрашиваю broker reconcile…", "info");
+        await loadBrokerWidget();
+        appendLog("Broker reconcile обновлён.", "ok");
+      },
+      "broker-flatten": function () {
+        if (!confirm("Аварийно снять все активные ордера и позиции у брокера?")) return;
+        return apiPost(
+          "/api/broker/flatten-all",
+          "Запускаю broker flatten-all…",
+          "Broker flatten-all отправлен."
+        );
       }
     };
 
@@ -384,6 +596,10 @@
         saveCreds();
         appendLog("Логин сохранён в этом браузере.", "ok");
       });
+    }
+
+    if ($("broker-save-settings")) {
+      $("broker-save-settings").addEventListener("click", saveBrokerSettings);
     }
 
     appendLog("Операторская панель готова.", "info");
