@@ -154,9 +154,11 @@ public class AnalysisHtmlRenderer {
                     <div class="callout" id="broker-widget">
                       <strong>Broker status</strong>
                       <div id="broker-status-line">Статус брокера загружается…</div>
+                      <div id="broker-test-line">Подключение ещё не проверялось.</div>
                       <div id="broker-reconcile-line">Reconcile ещё не запрашивался.</div>
                       <div id="broker-journal-line">Broker journal загружается…</div>
                       <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" data-ops-action="broker-test">Test broker connection</button>
                         <button type="button" class="btn btn-ghost" data-ops-action="broker-reconcile">Broker reconcile</button>
                         <button type="button" class="btn btn-warn" data-ops-action="broker-flatten">Flatten all broker positions</button>
                       </div>

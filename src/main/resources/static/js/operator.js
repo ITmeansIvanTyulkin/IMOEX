@@ -272,6 +272,34 @@
     }
   }
 
+  async function testBrokerConnection() {
+    saveCreds();
+    setBusy(true);
+    appendLog("Проверяю broker connection…", "info");
+    try {
+      const res = await fetch("/api/broker/test-connection", {
+        method: "POST",
+        headers: {
+          Authorization: authHeader(),
+          Accept: "application/json"
+        }
+      });
+      const text = await res.text();
+      const body = text ? JSON.parse(text) : null;
+      if (!res.ok || !body) {
+        appendLog("Не удалось проверить broker connection.", "err");
+        return;
+      }
+      setText("broker-test-line", body.summary || "Broker connection checked.");
+      appendLog(body.summary || "Broker connection checked.", body.snapshotAvailable ? "ok" : "info");
+      await loadBrokerWidget();
+    } catch (e) {
+      appendLog(String(e && e.message ? e.message : e), "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function brokerSettingsPayload() {
     return {
       enabled: $("broker-enabled") ? $("broker-enabled").checked : false,
@@ -491,6 +519,9 @@
           ACTION_START["walk-forward"],
           "Walk-forward пересчитан."
         );
+      },
+      "broker-test": function () {
+        return testBrokerConnection();
       },
       "broker-reconcile": async function () {
         saveCreds();

@@ -1,6 +1,8 @@
 package com.moex.cointegration.controller;
 
 import com.moex.cointegration.model.BookKind;
+import com.moex.cointegration.model.BrokerAccountSnapshot;
+import com.moex.cointegration.model.BrokerConnectionTestResult;
 import com.moex.cointegration.model.BrokerExecutionReport;
 import com.moex.cointegration.model.BrokerReconcileReport;
 import com.moex.cointegration.model.BrokerSettingsUpdateRequest;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 /**
  * Broker / execution API: preview и submit парных ордеров поверх итоговых DAILY recommendations.
@@ -72,6 +75,29 @@ public class BrokerController {
     @PostMapping("/flatten-all")
     public BrokerExecutionReport flattenAll() {
         return pairExecutionService.flattenAll();
+    }
+
+    @PostMapping("/test-connection")
+    public BrokerConnectionTestResult testConnection() {
+        BrokerStatus status = pairExecutionService.status();
+        BrokerAccountSnapshot snapshot = pairExecutionService.snapshot();
+        String summary = snapshot.available()
+                ? String.format("Broker connection OK: positions=%d, activeOrders=%d, %s",
+                snapshot.positions().size(), snapshot.activeOrders().size(), status.summary())
+                : "Broker connection not ready: " + snapshot.summary();
+        return new BrokerConnectionTestResult(
+                LocalDateTime.now(),
+                status.provider(),
+                status.mode(),
+                status.sandbox(),
+                status.enabled(),
+                status.tokenPresent(),
+                status.accountConfigured(),
+                snapshot.available(),
+                snapshot.positions().size(),
+                snapshot.activeOrders().size(),
+                summary
+        );
     }
 
     @PostMapping("/preview")

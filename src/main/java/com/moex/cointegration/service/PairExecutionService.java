@@ -7,6 +7,7 @@ import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.BrokerExecutionReport;
 import com.moex.cointegration.model.BrokerExecutionStatus;
 import com.moex.cointegration.model.BrokerMode;
+import com.moex.cointegration.model.BrokerAccountSnapshot;
 import com.moex.cointegration.model.BrokerOrderIntent;
 import com.moex.cointegration.model.BrokerOrderSide;
 import com.moex.cointegration.model.BrokerOrderType;
@@ -77,6 +78,10 @@ public class PairExecutionService {
 
     public BrokerStatus status() {
         return brokerClient.status();
+    }
+
+    public BrokerAccountSnapshot snapshot() {
+        return brokerClient.snapshot();
     }
 
     public List<BrokerExecutionReport> recentReports() {
