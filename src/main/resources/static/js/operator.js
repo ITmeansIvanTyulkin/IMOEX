@@ -253,6 +253,12 @@
           "Статус: " + (status.summary || status.provider || "broker") +
           " · mode=" + (status.mode || "?") +
           " · sandbox=" + (!!status.sandbox));
+        if ($("dash-broker-status")) {
+          const token = status.tokenPresent ? "token/account: OK" : "token/account: missing";
+          setText("dash-broker-status",
+            token + (status.summary ? " · " + status.summary : "")
+          );
+        }
       }
       if (reconcileRes.ok) {
         const rec = await reconcileRes.json();
@@ -269,6 +275,42 @@
       }
     } catch (_) {
       setText("broker-status-line", "Статус брокера временно недоступен.");
+    }
+  }
+
+  function fmtMoneyRub(v) {
+    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
+    return (v >= 0 ? "+" : "") + v.toFixed(0) + " ₽";
+  }
+
+  async function loadDashboardConsolidatedSummary() {
+    if (!$("dash-paper-open")) return;
+    try {
+      const [paperRes, finalRes] = await Promise.all([
+        fetch("/api/paper/journal", { headers: { Accept: "application/json" } }),
+        fetch("/api/analysis/final", { headers: { Accept: "application/json" } })
+      ]);
+
+      if (paperRes.ok) {
+        const paper = await paperRes.json();
+        setText("dash-paper-open", paper.openCount != null ? String(paper.openCount) : "—");
+        const realized = paper.realizedPnlRub;
+        const unrealized = paper.unrealizedPnlRub;
+        const hasAny = (typeof realized === "number" && isFinite(realized)) || (typeof unrealized === "number" && isFinite(unrealized));
+        const pnlSum = hasAny ? (realized || 0) + (unrealized || 0) : null;
+        setText("dash-paper-pnl", pnlSum == null ? "—" : fmtMoneyRub(pnlSum));
+      }
+
+      if (finalRes.ok) {
+        const finals = await finalRes.json();
+        const cnt = (decision) => finals.filter(f => f && f.decision === decision).length;
+        const actionable = cnt("ENTER") + cnt("REDUCE_SIZE");
+        setText("dash-final-actionable", String(actionable));
+        setText("dash-final-watch", String(cnt("WATCH")));
+        setText("dash-final-block", String(cnt("BLOCK")));
+      }
+    } catch (_) {
+      // ignore intermittent network errors
     }
   }
 
@@ -420,10 +462,12 @@
       pollAutoRunStatus();
       loadBrokerWidget();
       loadBrokerSettings();
+      loadDashboardConsolidatedSummary();
     });
     setInterval(pollPaperAlerts, POLL_MS);
     setInterval(pollAutoRunStatus, POLL_MS * 5);
     setInterval(loadBrokerWidget, POLL_MS * 2);
+    setInterval(loadDashboardConsolidatedSummary, POLL_MS * 2);
   }
 
   async function apiPost(path, startMessage, okMessage) {

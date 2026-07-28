@@ -133,6 +133,7 @@ public class AnalysisHtmlRenderer {
                   <div>3) Если сигналы есть: смотрите /view/final (ENTER/REDUCE/BLOCK после FA) и /view/paper (что реально открыто в paper).</div>
                 </div>
                 """);
+        body.append(dashboardConsolidatedSummary());
         body.append(dashboardBrokerPanel());
         body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
         body.append(dashboardActionableSignalsTable(
@@ -143,6 +144,19 @@ public class AnalysisHtmlRenderer {
         body.append(topPairsTableCompact(report.topPairs()));
 
         return page("TRINITY — дашборд", body.toString(), nav("dashboard"));
+    }
+
+    private String dashboardConsolidatedSummary() {
+        return """
+                <section class="cards">
+                  <div class="card"><span class="label">Paper open</span><span class="value accent" id="dash-paper-open">—</span></div>
+                  <div class="card"><span class="label">Paper PnL ₽</span><span class="value" id="dash-paper-pnl">—</span></div>
+                  <div class="card"><span class="label">Broker</span><span class="value" id="dash-broker-status">—</span></div>
+                  <div class="card"><span class="label">Final ENTER/REDUCE</span><span class="value accent" id="dash-final-actionable">—</span></div>
+                  <div class="card"><span class="label">Final WATCH</span><span class="value" id="dash-final-watch">—</span></div>
+                  <div class="card"><span class="label">Final BLOCK</span><span class="value bad" id="dash-final-block">—</span></div>
+                </section>
+                """;
     }
 
     private String dashboardBrokerPanel() {
