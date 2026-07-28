@@ -120,6 +120,7 @@ public class AnalysisHtmlRenderer {
         StringBuilder body = new StringBuilder();
         body.append(regimeBanner(regime));
         body.append(summaryBlock(report, recommendations.size(), actionable));
+        body.append(dashboardBrokerPanel());
         body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
         body.append("""
                 <div class="hint">
@@ -139,6 +140,83 @@ public class AnalysisHtmlRenderer {
         body.append(topPairsTable(report.topPairs()));
 
         return page("TRINITY — дашборд", body.toString(), nav("dashboard"));
+    }
+
+    private String dashboardBrokerPanel() {
+        return """
+                <section class="strategy-doc">
+                  <h2>Broker console</h2>
+                  <p class="meta">
+                    Этот блок есть только на дашборде: здесь удобно подключать токены брокеров без правки
+                    <code>application-local.yml</code> и смотреть состояние broker-journal / reconcile.
+                  </p>
+                  <div class="ops-grid">
+                    <div class="callout" id="broker-widget">
+                      <strong>Broker status</strong>
+                      <div id="broker-status-line">Статус брокера загружается…</div>
+                      <div id="broker-reconcile-line">Reconcile ещё не запрашивался.</div>
+                      <div id="broker-journal-line">Broker journal загружается…</div>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-ghost" data-ops-action="broker-reconcile">Broker reconcile</button>
+                        <button type="button" class="btn btn-warn" data-ops-action="broker-flatten">Flatten all broker positions</button>
+                      </div>
+                    </div>
+                    <div class="callout">
+                      <strong>Подключение брокера</strong>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-provider">Broker</label>
+                          <select id="broker-provider">
+                            <option value="T_INVEST">T-Invest</option>
+                            <option value="ALOR">Alor</option>
+                            <option value="FINAM">Finam</option>
+                            <option value="BKS">BKS</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label for="broker-mode">Mode</label>
+                          <select id="broker-mode">
+                            <option value="AUTO">AUTO</option>
+                            <option value="MANUAL_CONFIRM">MANUAL_CONFIRM</option>
+                            <option value="PAPER">PAPER</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label for="broker-account-id">Account ID</label>
+                          <input id="broker-account-id" type="text" autocomplete="off" spellcheck="false">
+                        </div>
+                      </div>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-token">Token</label>
+                          <input id="broker-token" type="password" autocomplete="off" placeholder="Вставьте новый токен только при обновлении">
+                        </div>
+                        <div class="field">
+                          <label for="broker-passive-bps">Passive offset, bps</label>
+                          <input id="broker-passive-bps" type="number" step="0.1" min="0">
+                        </div>
+                        <div class="field">
+                          <label for="broker-timeout-seconds">Second leg timeout, sec</label>
+                          <input id="broker-timeout-seconds" type="number" step="1" min="1">
+                        </div>
+                      </div>
+                      <div class="alert-prefs">
+                        <label class="check-label"><input type="checkbox" id="broker-enabled"> Broker enabled</label>
+                        <label class="check-label"><input type="checkbox" id="broker-sandbox"> Sandbox</label>
+                        <label class="check-label"><input type="checkbox" id="broker-auto-execute"> Auto-execute after analysis</label>
+                        <label class="check-label"><input type="checkbox" id="broker-prefer-limit"> Prefer limit orders</label>
+                        <label class="check-label"><input type="checkbox" id="broker-allow-market"> Allow market fallback</label>
+                        <label class="check-label"><input type="checkbox" id="broker-emergency-exit"> Emergency market exit on asymmetric fill</label>
+                        <label class="check-label"><input type="checkbox" id="broker-kill-switch"> Kill-switch</label>
+                      </div>
+                      <p class="meta" id="broker-token-hint">Token пока не сохранён.</p>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" id="broker-save-settings">Сохранить broker settings</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                """;
     }
 
     /** Страница всех торговых рекомендаций. */
@@ -557,6 +635,10 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="ops">2. Пульт оператора</h3>
                   <p>На каждой странице <code>/view/*</code> сверху — блок «Пульт оператора»:</p>
+                  <p class="meta">
+                    Отдельно на <a href="/view">дашборде</a> есть блок <strong>Broker console</strong>:
+                    подключение токена/счёта, reconcile и аварийный <code>flatten-all</code> без правки кода.
+                  </p>
                   <table class="params">
                     <thead><tr><th>Кнопка</th><th>Что делает</th></tr></thead>
                     <tbody>
@@ -575,7 +657,7 @@ public class AnalysisHtmlRenderer {
                   <table class="params">
                     <thead><tr><th>Раздел</th><th>Зачем открывать</th></tr></thead>
                     <tbody>
-                      <tr><td><a href="/view">Дашборд</a></td><td>Сводка: режим рынка (ADX), топ-пары, последний прогон.</td></tr>
+                      <tr><td><a href="/view">Дашборд</a></td><td>Сводка: режим рынка (ADX), топ-пары, последний прогон и единственный UI-блок подключения брокера.</td></tr>
                       <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY).</td></tr>
                       <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
                       <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>

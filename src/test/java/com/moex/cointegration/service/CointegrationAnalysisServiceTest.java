@@ -1,5 +1,6 @@
 package com.moex.cointegration.service;
 
+import com.moex.cointegration.config.BrokerProperties;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.AnalysisReport;
 import com.moex.cointegration.model.Candle;
@@ -66,6 +67,9 @@ class CointegrationAnalysisServiceTest {
         MarketRegimeService regimeService = mock(MarketRegimeService.class);
         when(regimeService.refresh()).thenReturn(com.moex.cointegration.model.MarketRegimeSnapshot.unknown());
 
+        BrokerSettingsService brokerSettingsService = new BrokerSettingsService(BrokerProperties.defaults(), props);
+        brokerSettingsService.load();
+
         CointegrationAnalysisService service = new CointegrationAnalysisService(
                 marketDataService,
                 preprocessingService,
@@ -78,6 +82,13 @@ class CointegrationAnalysisServiceTest {
                 pairUniverseScanService,
                 regimeService,
                 new MonthlyClusterReviewService(),
+                new PairExecutionService(
+                        brokerSettingsService,
+                        new NoopBrokerClient(brokerSettingsService),
+                        riskPolicyService,
+                        storage,
+                        props
+                ),
                 props,
                 com.moex.cointegration.config.SessionProperties.defaults(),
                 com.moex.cointegration.config.CapitalProperties.defaults()
