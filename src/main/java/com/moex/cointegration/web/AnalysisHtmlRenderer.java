@@ -1,25 +1,40 @@
 package com.moex.cointegration.web;
 
+import com.moex.cointegration.upsell.UpsellAccess;
+import com.moex.cointegration.upsell.UpsellService;
 import com.moex.cointegration.model.AnalysisReport;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
+import com.moex.cointegration.model.MarketRegimeSnapshot;
 import com.moex.cointegration.model.NewsTriggerHit;
 import com.moex.cointegration.model.PairAnalysisResult;
 import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.PaperTradeEntry;
+import com.moex.cointegration.model.RssHeadline;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
 import com.moex.cointegration.model.WalkForwardReport;
+import com.moex.cointegration.service.RssHeadlineService;
 import org.springframework.stereotype.Component;
 
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Формирует HTML-страницы с таблицами для просмотра в браузере.
  */
 @Component
 public class AnalysisHtmlRenderer {
+
+    private final UpsellService upsellService;
+
+    public AnalysisHtmlRenderer(UpsellService upsellService) {
+        this.upsellService = upsellService;
+    }
 
     private static final String PAGE_TEMPLATE = """
             <!DOCTYPE html>
@@ -33,7 +48,7 @@ public class AnalysisHtmlRenderer {
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
               <link rel="stylesheet" href="/css/operator.css">
             </head>
-            <body>
+            <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}">
               <header class="site-header">
                 <div class="brand-row">
                   <div class="trinity-logo" aria-hidden="true">
@@ -188,6 +203,8 @@ public class AnalysisHtmlRenderer {
                   </ol>
                 </aside>
                 """);
+        body.append(trialBanner());
+        body.append(dashboardFullCoreTeasers());
         body.append(dashboardQuietCta());
         body.append(summaryBlock(report, recommendations.size(), actionable));
         body.append("<section class=\"dash-section\"><h2>Сигналы входа (LONG / SHORT)</h2>");
@@ -220,8 +237,13 @@ public class AnalysisHtmlRenderer {
                   </header>
                   %s
                   %s
+                  %s
                 </div>
-                """.formatted(opsPanel(), brokerConsolePanel());
+                """.formatted(
+                trialBanner(),
+                opsPanel(),
+                brokerConsolePanel()
+        );
         return page("TRINITY — настройки", body, nav("settings"), OpsMode.NONE);
     }
 
@@ -539,6 +561,10 @@ public class AnalysisHtmlRenderer {
      * Описание торговой стратегии простым языком.
      */
     public String renderStrategy() {
+        String arbBadge = fullCoreBadge("calendar-arb");
+        String trendBadge = fullCoreBadge("trend");
+        String researchBadge = ""; // working local replay — no fake lock
+        String roadmapBlock = coreRoadmapBlock();
         String body = """
                 <article class="strategy-doc">
                   <h2>Описание торговой стратегии</h2>
@@ -547,8 +573,10 @@ public class AnalysisHtmlRenderer {
                     (фокус — металлы / mining; нефть в equities-парах отложена на фьючерсы/опционы).
                     <strong>INTRADAY</strong> — только research (1H EG/Z/метрики), без paper-торговли.
                     Мы не угадываем направление рынка: ищем временный разрыв связанной пары и ставим на сжатие.
-                    Календарный арбитраж и опционы — следующие стратегии бренда, пока в дорожной карте.
+                    Календарный арбитраж %s и опционы — следующие стратегии бренда, пока в дорожной карте.
                   </p>
+
+                  %s
 
                   <aside class="atas-plaque" id="atas" aria-labelledby="atas-title">
                     <span class="atas-badge">Встроено в TRINITY</span>
@@ -577,13 +605,14 @@ public class AnalysisHtmlRenderer {
                       и асимметрии ног. TRINITY отсекает сигналы, где Z «есть», а исполнение на MOEX — сомнительное.
                       Для оператора — меньше ложных входов; для продукта — честнее paper и ближе к live.
                       Задел под трендовую стратегию (breakout VA, delta momentum, absorption) уже в коде
-                      (<code>quant/trend</code>, <code>imoex.microstructure.trend</code>), включается на roadmap #2.
+                      (<code>quant/trend</code>, <code>imoex.microstructure.trend</code>), включается на roadmap #2 %s.
                     </p>
                   </aside>
 
                   <nav class="strategy-toc" aria-label="Содержание">
                     <strong>Содержание</strong>
                     <ol>
+                      <li><a href="#core-roadmap">Roadmap TRINITY / Full Core</a></li>
                       <li><a href="#atas">Функционал ATAS внутри TRINITY</a></li>
                       <li><a href="#idea">Идея простыми словами</a></li>
                       <li><a href="#pipeline">Что за чем происходит</a></li>
@@ -641,7 +670,17 @@ public class AnalysisHtmlRenderer {
                     (`imoex.paper.intraday-research-only`), не как вторая торговая книга.
                     Источник свечей — только MOEX ISS.
                   </div>
+                """.formatted(arbBadge, roadmapBlock, trendBadge);
+        // Continue with rest of strategy page — read original and splice carefully.
+        // The original method had one big string; we split: first part formatted above,
+        // then append the remainder that starts at universe section.
+        body = body + strategyDocRemainder(researchBadge);
+        return page("TRINITY — описание стратегии", body, nav("strategy"));
+    }
 
+    /** Remainder of strategy doc after the pipeline callout. */
+    private String strategyDocRemainder(String researchBadge) {
+        return """
                   <h3 id="universe">3. Как отбираются акции в анализ</h3>
                   <p>До любых статистических тестов тикер должен пройти простой «рыночный» фильтр:</p>
                   <ul>
@@ -758,10 +797,11 @@ public class AnalysisHtmlRenderer {
                     В <strong>INTRADAY</strong> фундамент намеренно пропускается — новости запаздывают.
                   </p>
                   <p>
-                    Источники: MOEX sitenews и опционально RSS Interfax / RBC.
+                    Источники: MOEX sitenews и RSS (<code>imoex.news.rss-feeds</code> — Interfax / RBC / Vedomosti и др.).
                     Те же правила-триггеры (earnings miss, guidance down, SPO, M&amp;A, санкции…).
                     При расхождении с LONG/SHORT в «Итоге» будет явный
                     <strong>CONFLICT: техника vs фундамент</strong>.
+                    На <a href="/view/final">Итог + новости</a> лента RSS показана как <em>контекст FA</em>, не как сигнал.
                   </p>
                   <table class="params">
                     <thead><tr><th>Итог</th><th>Что это значит</th></tr></thead>
@@ -772,7 +812,9 @@ public class AnalysisHtmlRenderer {
                       <tr><td><strong>BLOCK</strong></td><td>CONFLICT / жёсткий стоп: halt, делистинг, earnings miss, SPO, санкции…</td></tr>
                     </tbody>
                   </table>
-                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет» после FA.
+                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет» после FA:
+                    развёрнутый explain (пайплайн, причины пустой таблицы, словарь ENTER/REDUCE/WATCH/BLOCK),
+                    сводка «почему такие», expandable-разбор по строкам и RSS-контекст.
                     В JSON и UI у каждой строки поле <strong><code>rationale</code></strong> — краткое «почему»:
                     Z, фундамент (или «пропущен INTRADAY»), режим ADX, решение и слоты.</p>
 
@@ -829,12 +871,14 @@ public class AnalysisHtmlRenderer {
                     Дополнительно к walk-forward есть <strong>bar-by-bar replay</strong> всего paper-пайплайна
                     на сохранённых свечах: на каждом баре система «видит» только историю ≤ as-of,
                     строит Z/сигнал и синхронизирует paper — как если бы вы торговали день за днём.
+                    {{RESEARCH_BADGE}}
                   </p>
                   <p>Запуск через API (нужны локальные свечи в <code>data/candles/</code>):</p>
                   <pre class="code-block">POST /api/analysis/historical-replay?tickerY=SBER&amp;tickerX=LKOH&amp;from=2023-01-01&amp;to=2025-12-31&amp;book=DAILY</pre>
                   <p>
                     Ответ: сделки, net/realized PnL ₽, win rate, max drawdown.
                     Подробнее в <a href="/view/guide">Как пользоваться системой</a>.
+                    Долгий локальный candle-архив и deep research replay — профиль Full Core (roadmap).
                   </p>
 
                   <h3 id="intraday-events">12. INTRADAY: календарь событий</h3>
@@ -866,8 +910,7 @@ public class AnalysisHtmlRenderer {
                     <code>universe</code>, <code>microstructure</code>, <code>risk</code>, <code>regime</code>, <code>news</code>, <code>paper</code>).
                   </div>
                 </article>
-                """;
-        return page("TRINITY — описание стратегии", body, nav("strategy"));
+                """.replace("{{RESEARCH_BADGE}}", researchBadge);
     }
 
     /**
@@ -940,7 +983,7 @@ public class AnalysisHtmlRenderer {
                     <tbody>
                       <tr><td><a href="/view">Дашборд</a></td><td>Спокойный обзор: KPI (Paper / Брокер / Final / Режим), сигналы и топ-пары.</td></tr>
                       <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера (токен, песочница, сверка).</td></tr>
-                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY).</td></tr>
+                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY), развёрнутый explain-panel (почему 0 или N строк), словарь действий и RSS-контекст для FA (не сигнал). INTRADAY FA/RSS пропускает.</td></tr>
                       <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
                       <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>
                       <tr><td><a href="/view/paper">Paper</a></td><td>Журнал бумажных сделок: OPEN / CLOSED, PnL ₽, колонка «Книга» (DAILY / INTRADAY).</td></tr>
@@ -1038,7 +1081,7 @@ public class AnalysisHtmlRenderer {
                     <li>В логе терминала: <code>Started CointegrationApplication</code></li>
                     <li>Кнопка «Анализ + paper» завершается без 401 (логин/пароль верные)</li>
                     <li>В <code>data/candles/</code> есть JSON тикеров (после первого refresh)</li>
-                    <li><a href="/view/final">Итог + новости</a> показывает таблицу (может быть пустой — нет ENTER)</li>
+                    <li><a href="/view/final">Итог + новости</a> — таблица и explain-panel (пустая таблица нормальна: нет LONG/SHORT/WATCH после техники или всё отфильтровано до FA; читайте блоки «почему 0 строк»)</li>
                     <li>На дашборде видны виджеты режима рынка (SIDEWAYS / NEUTRAL / TREND)</li>
                     <li>При тестовом OPEN — баннер и звук в браузере (алерты включены)</li>
                   </ul>
@@ -1324,75 +1367,492 @@ public class AnalysisHtmlRenderer {
      * Итоговая таблица: техника + новости + решение ENTER/REDUCE/WATCH/BLOCK.
      */
     public String renderFinalTable(List<FinalTradeRecommendation> rows) {
+        return renderFinalTable(
+                rows,
+                List.of(),
+                MarketRegimeSnapshot.unknown(),
+                null,
+                RssHeadlineService.Snapshot.disabled()
+        );
+    }
+
+    public String renderFinalTable(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            RssHeadlineService.Snapshot rss
+    ) {
+        if (rows == null) {
+            rows = List.of();
+        }
+        if (technical == null) {
+            technical = List.of();
+        }
+        if (regime == null) {
+            regime = MarketRegimeSnapshot.unknown();
+        }
+        if (rss == null) {
+            rss = RssHeadlineService.Snapshot.disabled();
+        }
+
         StringBuilder body = new StringBuilder();
         body.append("""
                 <div class="hint">
                   <strong>Итог после фундамента (multi-day / DAILY).</strong>
-                  Порядок: техника → фундамент (MOEX + опционально RSS) → рекомендация → paper.
-                  В INTRADAY фундамент пропускается. Смотрите колонку <em>Итог</em>:
-                  ENTER / REDUCE / WATCH / BLOCK. При расхождении — текст
-                  <em>CONFLICT: техника vs фундамент</em>.
+                  Порядок: техника → cluster gate → фундамент (MOEX + RSS) → рекомендация → paper.
+                  В INTRADAY фундамент и RSS-контекст намеренно пропускаются — новости запаздывают.
+                  Это research / decision-support, не инвестиционная рекомендация и не обещание прибыли.
                 </div>
                 """);
-        body.append("<p class=\"meta\">Строк: ").append(rows.size()).append("</p>");
-        if (rows.isEmpty()) {
-            body.append("<p class=\"empty-msg\">Итоговых рекомендаций нет.</p>");
-            return page("TRINITY — итог", body.toString(), nav("final"));
+
+        body.append(renderFinalExplainPanel(rows, technical, regime, report));
+
+        if (!rows.isEmpty()) {
+            body.append(renderFinalSummaryStrip(rows));
+            body.append("""
+                    <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Итог</th>
+                          <th>Пара</th>
+                          <th>Техсигнал</th>
+                          <th>Z</th>
+                          <th>Нов. риск</th>
+                          <th>Асимм.</th>
+                          <th>Почему</th>
+                          <th>График</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                    """);
+
+            for (FinalTradeRecommendation f : rows) {
+                body.append("<tr>");
+                body.append("<td>").append(decisionBadge(f.decision())).append("</td>");
+                body.append("<td><strong>").append(escape(f.tickerY())).append("</strong> / ")
+                        .append(escape(f.tickerX())).append("</td>");
+                body.append("<td>").append(signalBadge(f.technical().signal())).append("</td>");
+                body.append("<td class=\"num\">").append(formatZ(f.technical().currentZScore())).append("</td>");
+                body.append("<td>").append(newsBadge(f.news().riskLevel().name())).append("</td>");
+                body.append("<td>").append(f.news().asymmetric() ? "да" : "нет").append("</td>");
+                body.append("<td class=\"details\">");
+                body.append("<div class=\"summary\">").append(escape(f.decisionSummary())).append("</div>");
+                body.append(renderFinalRowProse(f));
+                body.append("</td>");
+                body.append("<td class=\"links\">").append(chartPageLink(f.tickerY(), f.tickerX())).append("</td>");
+                body.append("</tr>");
+            }
+
+            body.append("</tbody></table></div>");
         }
 
-        body.append("""
-                <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Итог</th>
-                      <th>Пара</th>
-                      <th>Техсигнал</th>
-                      <th>Z</th>
-                      <th>Нов. риск</th>
-                      <th>Асимм.</th>
-                      <th>Почему</th>
-                      <th>График</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                """);
+        body.append(renderFinalNewsSection(rss));
+        return page("TRINITY — итог", body.toString(), nav("final"));
+    }
 
-        for (FinalTradeRecommendation f : rows) {
-            body.append("<tr>");
-            body.append("<td>").append(decisionBadge(f.decision())).append("</td>");
-            body.append("<td><strong>").append(escape(f.tickerY())).append("</strong> / ")
-                    .append(escape(f.tickerX())).append("</td>");
-            body.append("<td>").append(signalBadge(f.technical().signal())).append("</td>");
-            body.append("<td class=\"num\">").append(formatZ(f.technical().currentZScore())).append("</td>");
-            body.append("<td>").append(newsBadge(f.news().riskLevel().name())).append("</td>");
-            body.append("<td>").append(f.news().asymmetric() ? "да" : "нет").append("</td>");
-            body.append("<td class=\"details\"><div class=\"summary\">")
-                    .append(escape(f.decisionSummary())).append("</div>");
-            if (f.rationale() != null && !f.rationale().isBlank()) {
-                body.append("<div class=\"rationale meta\"><strong>Почему:</strong> ")
-                        .append(escape(f.rationale())).append("</div>");
+    private String renderFinalExplainPanel(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report
+    ) {
+        boolean empty = rows.isEmpty();
+        StringBuilder sb = new StringBuilder();
+        sb.append("<section class=\"final-explain\" id=\"final-explain\">");
+        sb.append("<p class=\"final-explain-lead\">");
+        if (empty) {
+            sb.append("Сейчас в таблице <strong>нет строк</strong> — это не «поломка», а честный итог пайплайна: ")
+                    .append("до paper доходят только пары, прошедшие технику и (для DAILY) фундаментальный слой.");
+        } else {
+            long actionable = rows.stream()
+                    .filter(f -> f.decision() == FinalTradeDecision.ENTER
+                            || f.decision() == FinalTradeDecision.REDUCE_SIZE)
+                    .count();
+            sb.append("Ниже — <strong>").append(rows.size()).append("</strong> итоговых строк после FA. ")
+                    .append("Actionable (ENTER/REDUCE): <strong>").append(actionable).append("</strong>. ")
+                    .append("Читайте «почему именно такие», затем детали по строкам.");
+        }
+        sb.append("</p>");
+
+        sb.append("<div class=\"final-explain-grid\">");
+
+        sb.append("<article class=\"final-explain-block\">");
+        sb.append("<h3>Что значит «Итог» в пайплайне</h3>");
+        sb.append("<p>TRINITY — mean-reversion по коинтегрированным парам IMOEX <em>только в боковике</em>. ")
+                .append("Страница «Итог» — операторский вердикт после цепочки, а не сырой LONG/SHORT.</p>");
+        sb.append("<ol class=\"final-pipeline\">");
+        sb.append("<li><strong>Техника</strong> — EG/FDR, Z-score, качество пары, разворот входа.</li>");
+        sb.append("<li><strong>Cluster gate</strong> — месячная eligibility секторов (net&gt;0, PF≥1.1); OIL_GAS вне pairs.</li>");
+        sb.append("<li><strong>FA (только DAILY)</strong> — новости MOEX + RSS; CONFLICT с техникой снижает или блокирует вход. ")
+                .append("INTRADAY FA пропускает.</li>");
+        sb.append("<li><strong>Рекомендация</strong> — ENTER / REDUCE / WATCH / BLOCK.</li>");
+        sb.append("<li><strong>Paper</strong> — журнал открывает только ENTER/REDUCE при свободном слоте и не-TREND.</li>");
+        sb.append("</ol>");
+        sb.append("<p class=\"meta\">Research / decision-support: система помогает думать, не исполняет у брокера и не гарантирует результат.</p>");
+        sb.append("</article>");
+
+        sb.append("<article class=\"final-explain-block\">");
+        if (empty) {
+            sb.append("<h3>Почему сейчас 0 строк</h3>");
+            sb.append("<p>Ниже — реальные причины по текущим данным (если что-то не сработало в этом прогоне, пункт отмечен).</p>");
+            sb.append("<ul class=\"final-reasons\">");
+            for (String reason : diagnoseEmptyFinalReasons(rows, technical, regime, report)) {
+                sb.append("<li>").append(reason).append("</li>");
             }
-            body.append("<div class=\"explain\">").append(nl2br(escape(f.news().summary())));
-            if (!f.news().hits().isEmpty()) {
-                body.append("<br><br>");
-                int i = 0;
-                for (NewsTriggerHit hit : f.news().hits()) {
-                    if (i++ >= 3) {
-                        body.append("…<br>");
+            sb.append("</ul>");
+            sb.append("<div class=\"final-conflict-note\">");
+            sb.append("<h4>Что такое CONFLICT (техника vs фундамент)</h4>");
+            sb.append("<p><strong>Коротко:</strong> техника говорит «спред перетянут, mean-reversion», ")
+                    .append("а новости/фундамент по одной ноге пары — «здесь шок или структурный риск».</p>");
+            sb.append("<p>Для новичка: представьте, что стрелки на графике красивые, но по одной акции вышла ")
+                    .append("плохая отчётность, SPO или санкционный заголовок. Спред может «уехать» не к среднему, ")
+                    .append("а ещё дальше. Поэтому CONFLICT → REDUCE (осторожный размер) или BLOCK (не открывать).</p>");
+            sb.append("<p class=\"meta\">Когда CONFLICT уже есть в таблице — в колонке «Почему» будет явная фраза ")
+                    .append("«CONFLICT: техника vs фундамент» плюс тип триггера. Сейчас строк нет, поэтому живых CONFLICT-примеров в таблице нет.</p>");
+            sb.append("</div>");
+        } else {
+            sb.append("<h3>Почему именно такие решения</h3>");
+            sb.append(renderFinalWhyProse(rows, regime));
+            List<FinalTradeRecommendation> conflicts = rows.stream()
+                    .filter(f -> f.decisionSummary() != null && f.decisionSummary().contains("CONFLICT"))
+                    .toList();
+            if (!conflicts.isEmpty()) {
+                sb.append("<div class=\"final-conflict-note\">");
+                sb.append("<h4>CONFLICT в текущей таблице (").append(conflicts.size()).append(")</h4>");
+                sb.append("<p><strong>Педагогика:</strong> техника и фундамент расходятся. ")
+                        .append("Это не «ошибка модели», а честный стоп/снижение размера, пока шок не переварится.</p>");
+                sb.append("<ul>");
+                int shown = 0;
+                for (FinalTradeRecommendation c : conflicts) {
+                    if (shown++ >= 5) {
+                        sb.append("<li>… и ещё ").append(conflicts.size() - 5).append("</li>");
                         break;
                     }
-                    body.append("• ").append(escape(hit.ticker())).append(": ")
-                            .append(escape(hit.title())).append("<br>");
+                    sb.append("<li><strong>").append(escape(c.tickerY())).append("/")
+                            .append(escape(c.tickerX())).append("</strong> — ")
+                            .append(escape(c.decisionSummary()));
+                    if (c.news() != null && !c.news().hits().isEmpty()) {
+                        NewsTriggerHit top = c.news().hits().get(0);
+                        sb.append("<br><span class=\"meta\">")
+                                .append(escape(top.type().name())).append(": ")
+                                .append(escape(top.explanation())).append("</span>");
+                    }
+                    sb.append("</li>");
                 }
+                sb.append("</ul></div>");
             }
-            body.append("</div></td>");
-            body.append("<td class=\"links\">").append(chartPageLink(f.tickerY(), f.tickerX())).append("</td>");
-            body.append("</tr>");
+        }
+        sb.append("</article>");
+
+        sb.append("<article class=\"final-explain-block\">");
+        sb.append("<h3>Что делать оператору дальше</h3>");
+        sb.append("<ol>");
+        if (empty) {
+            sb.append("<li>Если анализ давно не гоняли — на <a href=\"/view/settings\">Настройках</a> «Анализ + paper».</li>");
+            sb.append("<li>Проверить виджет <strong>режима рынка</strong> на <a href=\"/view\">дашборде</a>: TREND (высокий ADX) блокирует новые входы.</li>");
+            sb.append("<li>Открыть <a href=\"/view/signals\">Сигналы</a> и <a href=\"/view/recommendations\">Все рекомендации</a> — есть ли сырой LONG/SHORT до FA.</li>");
+            sb.append("<li>Если техника есть, а итог пуст — пересчитать «Только новости / paper» или полный цикл (FA мог не сохраниться).</li>");
+            sb.append("<li>Смотреть <a href=\"/view/paper\">Paper</a>: пустой journal при пустом итоге — нормальная дисциплина, не «баг».</li>");
+        } else {
+            sb.append("<li>Сверить ENTER/REDUCE с графиком пары и размером слота (капитал без плеча до 1M).</li>");
+            sb.append("<li>При CONFLICT / BLOCK — прочитать новости по ноге; не «продавливать» вход ради активности.</li>");
+            sb.append("<li>Проверить режим ADX на дашборде — даже ENTER не откроется в paper при TREND.</li>");
+            sb.append("<li>Сверить, что реально легло в <a href=\"/view/paper\">Paper</a>.</li>");
+            sb.append("<li>RSS ниже — только контекст FA, не отдельный сигнал на вход.</li>");
+        }
+        sb.append("</ol>");
+        sb.append("</article>");
+
+        sb.append("<article class=\"final-explain-block final-glossary\">");
+        sb.append("<h3>Словарь: ENTER / REDUCE / WATCH / BLOCK</h3>");
+        sb.append("<dl>");
+        sb.append("<dt>ENTER</dt><dd><strong>Новичку:</strong> техника и фундамент согласны — пару можно разбирать к открытию. ")
+                .append("<em>Профи:</em> полный слот книги в рамках CapitalAllocator; всё равно считайте borrow, slippage и стоп по Z — ")
+                .append("это не гарантия mean-reversion.</dd>");
+        sb.append("<dt>REDUCE</dt><dd><strong>Новичку:</strong> вход возможен, но уменьшенным размером (часто CONFLICT средней силы или caution). ")
+                .append("<em>Профи:</em> типично × reduce-factor / risk policy; сохраняйте асимметрию ног и room-to-stop.</dd>");
+        sb.append("<dt>WATCH</dt><dd><strong>Новичку:</strong> наблюдать, не открывать новую сделку (ждём разворот Z, режим, или мягкий FA). ")
+                .append("<em>Профи:</em> не путать с HOLD у нуля — WATCH часто = «порог есть, подтверждения нет» или TREND-gate.</dd>");
+        sb.append("<dt>BLOCK</dt><dd><strong>Новичку:</strong> вход запрещён — структурный/новостной блокер или жёсткий CONFLICT. ")
+                .append("<em>Профи:</em> halt, delisting, earnings miss, SPO, санкции и т.п.; paper не откроет.</dd>");
+        sb.append("</dl>");
+        sb.append("<p class=\"meta\">Ни один статус не обещает доходность. TRINITY — desk research для оператора pairs.</p>");
+        sb.append("</article>");
+
+        sb.append("</div></section>");
+        return sb.toString();
+    }
+
+    private List<String> diagnoseEmptyFinalReasons(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report
+    ) {
+        List<String> reasons = new ArrayList<>();
+        long techActionable = technical.stream()
+                .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
+                .count();
+        long techWatch = technical.stream().filter(r -> r.signal() == TradingSignal.WATCH).count();
+        long regimeWatch = technical.stream()
+                .filter(r -> r.signal() == TradingSignal.WATCH)
+                .filter(r -> r.summary() != null && (r.summary().contains("тренд") || r.summary().toUpperCase(Locale.ROOT).contains("TREND")))
+                .count();
+
+        if (technical.isEmpty()) {
+            reasons.add("<strong>Нет технических рекомендаций</strong> — анализ не прогонялся, не загрузился с диска, "
+                    + "или после FDR/качества не осталось пар. "
+                    + (report == null
+                    ? "Отчёт анализа в памяти пуст."
+                    : "В отчёте: тикеров " + report.tickersAnalyzed()
+                    + ", протестировано пар " + report.pairsTested()
+                    + ", коинтегрировано " + report.cointegratedPairs() + "."));
+        } else if (techActionable == 0 && techWatch == 0) {
+            reasons.add("<strong>Нет LONG/SHORT/WATCH</strong> — все пары в HOLD/NO_SIGNAL "
+                    + "(|Z| ниже порога, half-life/R²/coverage, нет разворота). Итоговая таблица строится только по LONG/SHORT/WATCH.");
+        } else if (techActionable == 0) {
+            reasons.add("<strong>Есть WATCH, нет LONG/SHORT</strong> — техника видит напряжение спреда, но подтверждённого входа нет. "
+                    + "Итог мог бы содержать WATCH-строки после FA; если таблица пуста, перезапустите цикл «Анализ + paper» / «Только новости».");
         }
 
-        body.append("</tbody></table></div>");
-        return page("TRINITY — итог", body.toString(), nav("final"));
+        if (regime.blockEntries() || "TREND".equalsIgnoreCase(regime.label()) || regimeWatch > 0) {
+            reasons.add("<strong>Режим TREND / ADX</strong> — сейчас "
+                    + escape(regime.label()) + " (ADX="
+                    + (Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.1f", regime.adx()))
+                    + "). " + escape(regime.detail())
+                    + (regimeWatch > 0 ? " Техника пометила WATCH по тренду у " + regimeWatch + " пар(ы)." : ""));
+        } else {
+            reasons.add("<strong>Режим рынка:</strong> " + escape(regime.label())
+                    + " — блокера TREND сейчас нет (ADX="
+                    + (Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.1f", regime.adx()))
+                    + ").");
+        }
+
+        reasons.add("<strong>Cluster gate</strong> — ежемесячный пересмотр секторов (net&gt;0, PF≥1.1) и hard-ban OIL_GAS "
+                + "режут пары <em>до</em> техники. Если в отчёте мало коинтегрированных пар при живом индексе — смотрите cluster-review / сектора.");
+
+        reasons.add("<strong>FA CONFLICT</strong> — при расхождении техники и новостей строка обычно <em>остаётся</em> "
+                + "как REDUCE/BLOCK с текстом «CONFLICT: техника vs фундамент», а не исчезает. "
+                + "Пустая таблица чаще значит «нечего было прогонять через FA», а не «всё CONFLICT-нули».");
+
+        reasons.add("<strong>WATCH/BLOCK vs actionable view</strong> — paper и виджет дашборда смотрят на ENTER/REDUCE. "
+                + "Даже при непустой таблице actionable может быть 0, если все строки WATCH/BLOCK.");
+
+        reasons.add("<strong>FA blocked entries</strong> — news risk BLOCK/HIGH по ноге пары запрещает новый вход (halt, delisting, miss, SPO…). "
+                + "Такие пары видны как BLOCK в непустой таблице; при пустой — сначала нужна техника LONG/SHORT/WATCH.");
+
+        if (!reasons.isEmpty() && technical.isEmpty() && report != null && report.cointegratedPairs() == 0) {
+            reasons.add(0, "<strong>Нет коинтегрированных пар в последнем отчёте</strong> — FDR/p-value/качество не дали universe для сигналов.");
+        }
+
+        return reasons;
+    }
+
+    private String renderFinalWhyProse(List<FinalTradeRecommendation> rows, MarketRegimeSnapshot regime) {
+        Map<FinalTradeDecision, Long> counts = new EnumMap<>(FinalTradeDecision.class);
+        for (FinalTradeDecision d : FinalTradeDecision.values()) {
+            counts.put(d, 0L);
+        }
+        for (FinalTradeRecommendation f : rows) {
+            counts.merge(f.decision(), 1L, Long::sum);
+        }
+        long conflicts = rows.stream()
+                .filter(f -> f.decisionSummary() != null && f.decisionSummary().contains("CONFLICT"))
+                .count();
+        long faBlocked = rows.stream()
+                .filter(f -> f.decision() == FinalTradeDecision.BLOCK)
+                .count();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<p>Сводка по действиям: ");
+        sb.append("ENTER ").append(counts.get(FinalTradeDecision.ENTER));
+        sb.append(", REDUCE ").append(counts.get(FinalTradeDecision.REDUCE_SIZE));
+        sb.append(", WATCH ").append(counts.get(FinalTradeDecision.WATCH));
+        sb.append(", BLOCK ").append(counts.get(FinalTradeDecision.BLOCK));
+        sb.append(". Режим рынка: <strong>").append(escape(regime.label())).append("</strong>");
+        if (regime.blockEntries()) {
+            sb.append(" — новые paper-входы режет ADX даже при ENTER в таблице");
+        }
+        sb.append(".</p>");
+
+        sb.append("<ul>");
+        if (counts.get(FinalTradeDecision.ENTER) > 0) {
+            sb.append("<li><strong>ENTER</strong> — техника подтверждена, FA без жёстких блокеров; размер по слотам книги.</li>");
+        }
+        if (counts.get(FinalTradeDecision.REDUCE_SIZE) > 0) {
+            sb.append("<li><strong>REDUCE</strong> — caution / CONFLICT средней силы: вход только урезанным размером.</li>");
+        }
+        if (counts.get(FinalTradeDecision.WATCH) > 0) {
+            sb.append("<li><strong>WATCH</strong> — наблюдение: нет подтверждённого входа, режим, или мягкий FA.</li>");
+        }
+        if (faBlocked > 0) {
+            sb.append("<li><strong>BLOCK (").append(faBlocked).append(")</strong> — FA или структурный стоп; не открывать.</li>");
+        }
+        if (conflicts > 0) {
+            sb.append("<li><strong>CONFLICT-маркеры:</strong> ").append(conflicts)
+                    .append(" строк(и) с явным расхождением техники и фундамента — см. блок ниже.</li>");
+        } else {
+            sb.append("<li>Явных CONFLICT-строк в decisionSummary сейчас нет.</li>");
+        }
+        sb.append("</ul>");
+
+        // top blockers from news summaries / rationale
+        List<String> blockers = rows.stream()
+                .filter(f -> f.decision() == FinalTradeDecision.BLOCK
+                        || f.decision() == FinalTradeDecision.WATCH
+                        || f.decision() == FinalTradeDecision.REDUCE_SIZE)
+                .map(f -> {
+                    String tip = f.rationale() != null && !f.rationale().isBlank()
+                            ? f.rationale()
+                            : f.decisionSummary();
+                    return escape(f.tickerY() + "/" + f.tickerX() + " — " + tip);
+                })
+                .limit(5)
+                .toList();
+        if (!blockers.isEmpty()) {
+            sb.append("<p><strong>Топ пояснений (не ENTER):</strong></p><ul>");
+            for (String b : blockers) {
+                sb.append("<li>").append(b).append("</li>");
+            }
+            sb.append("</ul>");
+        }
+        return sb.toString();
+    }
+
+    private String renderFinalSummaryStrip(List<FinalTradeRecommendation> rows) {
+        long enter = rows.stream().filter(f -> f.decision() == FinalTradeDecision.ENTER).count();
+        long reduce = rows.stream().filter(f -> f.decision() == FinalTradeDecision.REDUCE_SIZE).count();
+        long watch = rows.stream().filter(f -> f.decision() == FinalTradeDecision.WATCH).count();
+        long block = rows.stream().filter(f -> f.decision() == FinalTradeDecision.BLOCK).count();
+        long conflicts = rows.stream()
+                .filter(f -> f.decisionSummary() != null && f.decisionSummary().contains("CONFLICT"))
+                .count();
+        return """
+                <div class="final-summary-strip meta">
+                  Строк: <strong>%d</strong>
+                  · ENTER <strong>%d</strong>
+                  · REDUCE <strong>%d</strong>
+                  · WATCH <strong>%d</strong>
+                  · BLOCK <strong>%d</strong>
+                  · CONFLICT-маркеров: <strong>%d</strong>
+                </div>
+                """.formatted(rows.size(), enter, reduce, watch, block, conflicts);
+    }
+
+    private String renderFinalRowProse(FinalTradeRecommendation f) {
+        StringBuilder sb = new StringBuilder();
+        if (f.rationale() != null && !f.rationale().isBlank()) {
+            sb.append("<div class=\"rationale meta\"><strong>Почему (кратко):</strong> ")
+                    .append(escape(f.rationale())).append("</div>");
+        }
+        if (f.beginnerGuide() != null && !f.beginnerGuide().isBlank()) {
+            sb.append("<details class=\"final-row-detail\">");
+            sb.append("<summary>Разбор для оператора</summary>");
+            sb.append("<div class=\"final-row-prose\">");
+            sb.append(nl2br(escape(enrichBeginnerGuideProse(f))));
+            sb.append("</div></details>");
+        } else {
+            sb.append("<div class=\"explain\">").append(nl2br(escape(f.news().summary())));
+            appendNewsHits(sb, f);
+            sb.append("</div>");
+        }
+        // always surface news hits if beginner guide path
+        if (f.beginnerGuide() != null && !f.beginnerGuide().isBlank()
+                && f.news() != null && !f.news().hits().isEmpty()) {
+            sb.append("<div class=\"explain final-news-hits\">");
+            appendNewsHits(sb, f);
+            sb.append("</div>");
+        }
+        return sb.toString();
+    }
+
+    private void appendNewsHits(StringBuilder sb, FinalTradeRecommendation f) {
+        if (f.news() == null || f.news().hits().isEmpty()) {
+            return;
+        }
+        sb.append("<br><br>");
+        int i = 0;
+        for (NewsTriggerHit hit : f.news().hits()) {
+            if (i++ >= 3) {
+                sb.append("…<br>");
+                break;
+            }
+            sb.append("• ").append(escape(hit.ticker())).append(": ")
+                    .append(escape(hit.title())).append("<br>");
+        }
+    }
+
+    /**
+     * Обогащает beginnerGuide спокойной прозой: lead + уже сохранённый разбор.
+     */
+    private String enrichBeginnerGuideProse(FinalTradeRecommendation f) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(switch (f.decision()) {
+            case ENTER -> "Ведущая мысль: вход разрешён после техники и FA — можно разбирать размер слота, не «покупать на эмоциях».";
+            case REDUCE_SIZE -> "Ведущая мысль: вход только уменьшенным размером — часто CONFLICT или caution по новостям.";
+            case WATCH -> "Ведущая мысль: пока наблюдаем — новой сделки нет, даже если Z выглядит «интересным».";
+            case BLOCK -> "Ведущая мысль: вход запрещён. Красивая техника не отменяет новостной/структурный стоп.";
+        });
+        sb.append("\n\n");
+        sb.append(f.beginnerGuide());
+        return sb.toString();
+    }
+
+    private String renderFinalNewsSection(RssHeadlineService.Snapshot rss) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<section class=\"final-news\" id=\"final-news\">");
+        sb.append("<h2>Новости (RSS) — контекст FA</h2>");
+        sb.append("<p class=\"final-news-lead\">Лента для слоя фундамента на <strong>DAILY</strong>: помогает понять фон, ")
+                .append("в котором FA мог выставить CONFLICT / BLOCK. ")
+                .append("<em>Это не торговый сигнал и не замена разбору пары.</em> ")
+                .append("Для книги INTRADAY FA и RSS-контекст намеренно пропускаются (новости запаздывают к 1H-ритму).</p>");
+
+        if (!rss.enabled()) {
+            sb.append("<div class=\"final-news-placeholder\">");
+            sb.append("<p><strong>Новости (RSS) — подключается</strong></p>");
+            sb.append("<p class=\"meta\">").append(escape(rss.status())).append("</p>");
+            sb.append("<p class=\"meta\">Хук конфига: <code>imoex.news.rss-enabled</code>, ")
+                    .append("<code>rss-max-items</code>, <code>rss-feeds</code>.</p>");
+            sb.append("</div>");
+        } else if (rss.items().isEmpty()) {
+            sb.append("<div class=\"final-news-placeholder\">");
+            sb.append("<p>").append(escape(rss.status())).append("</p>");
+            sb.append("<p class=\"meta\">Кэш 15 мин · HTTP-таймаут ~5 с — страница не блокируется надолго.</p>");
+            sb.append("</div>");
+        } else {
+            sb.append("<p class=\"meta\">").append(escape(rss.status()));
+            if (rss.fetchedAt() != null) {
+                sb.append(" · обновлено ").append(escape(rss.fetchedAt().toString()));
+            }
+            sb.append("</p>");
+            sb.append("<div class=\"final-news-grid\">");
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM HH:mm");
+            for (RssHeadline h : rss.items()) {
+                sb.append("<article class=\"final-news-card\">");
+                sb.append("<div class=\"final-news-meta\">");
+                sb.append("<span class=\"final-news-source\">").append(escape(h.source())).append("</span>");
+                if (h.publishedAt() != null) {
+                    sb.append("<time>").append(escape(fmt.format(h.publishedAt()))).append("</time>");
+                }
+                sb.append("</div>");
+                if (h.url() != null && !h.url().isBlank()) {
+                    sb.append("<a class=\"final-news-title\" href=\"").append(escape(h.url()))
+                            .append("\" target=\"_blank\" rel=\"noopener noreferrer\">")
+                            .append(escape(h.title())).append("</a>");
+                } else {
+                    sb.append("<div class=\"final-news-title\">").append(escape(h.title())).append("</div>");
+                }
+                if (h.tickerHint() != null && !h.tickerHint().isBlank()) {
+                    sb.append("<div class=\"final-news-tickers\">").append(escape(h.tickerHint())).append("</div>");
+                }
+                sb.append("</article>");
+            }
+            sb.append("</div>");
+        }
+        sb.append("</section>");
+        return sb.toString();
     }
 
     private String decisionBadge(FinalTradeDecision decision) {
@@ -1604,6 +2064,7 @@ public class AnalysisHtmlRenderer {
                   <a href="/view/paper" class="%s">Paper</a>
                   <a href="/view/walk-forward" class="%s">Walk-forward</a>
                   <a href="/view/strategy" class="%s">Описание торговой стратегии</a>
+                  <a href="/view/full-core" class="%s">Full Core</a>
                 </nav>
                 """.formatted(
                 active.equals("dashboard") ? "active" : "",
@@ -1614,7 +2075,8 @@ public class AnalysisHtmlRenderer {
                 active.equals("recommendations") ? "active" : "",
                 active.equals("paper") ? "active" : "",
                 active.equals("walkforward") ? "active" : "",
-                active.equals("strategy") ? "active" : ""
+                active.equals("strategy") ? "active" : "",
+                active.equals("fullcore") ? "active" : ""
         );
     }
 
@@ -1623,8 +2085,13 @@ public class AnalysisHtmlRenderer {
     }
 
     private String page(String title, String body, String nav, OpsMode opsMode) {
+        UpsellAccess access = upsellService != null ? upsellService.access() : null;
+        String upsellAttr = (access != null && access.enabled()) ? "on" : "off";
+        String phase = access != null ? access.phase() : "OFF";
         return PAGE_TEMPLATE
                 .replace("{{TITLE}}", escape(title))
+                .replace("{{UPSELL}}", upsellAttr)
+                .replace("{{UPSELL_PHASE}}", escape(phase))
                 .replace("{{NAV}}", nav)
                 .replace("{{OPS}}", opsHtml(opsMode))
                 .replace("{{BODY}}", body);
@@ -1659,6 +2126,276 @@ public class AnalysisHtmlRenderer {
                 "<strong>%s</strong>: пар %d, LONG/SHORT %d, WATCH %d, max |Z|=%.2f; лидер: %s",
                 book, recs.size(), actionable, watch, maxZ, top
         );
+    }
+
+    /**
+     * Gated Full Core preview page — value copy + soft CTA; no fabricated PnL.
+     * feature: options | calendar-arb | trend | (blank = overview)
+     */
+    public String renderFullCore(String feature) {
+        UpsellAccess access = upsellService.access();
+        String key = feature == null ? "" : feature.trim().toLowerCase(Locale.ROOT);
+        String title;
+        String previewTitle;
+        String previewBody;
+        String earlyNote;
+        switch (key) {
+            case "options" -> {
+                title = "Отчёт по опционам";
+                previewTitle = "Опционный research-слой";
+                previewBody = "Сводка по опционам на акции/фьючерсы: структура экспозиции, события и risk notes. "
+                        + "Модуль в дорожной карте — это preview макета, не live-расчёт и не обещание доходности.";
+                earlyNote = "Опционы — дальше трёх столпов TRINITY; early access для клиентов полного Core.";
+            }
+            case "calendar-arb", "arb" -> {
+                title = "Календарный арбитраж";
+                previewTitle = "Доска calendar spread (фьючерсы)";
+                previewBody = "Контуры near/far, базис и roll — strategy 3. Сейчас макет locked-preview: "
+                        + "research / decision-support без fake PnL и без auto-execution.";
+                earlyNote = "Strategy 3 в разработке — early access / preorder для клиентов полного Core.";
+            }
+            case "trend" -> {
+                title = "Trend desk";
+                previewTitle = "Трендовый стол (strategy 2)";
+                previewBody = "Breakout / regime desk поверх microstructure-задела. Не включён в live paper pairs — "
+                        + "roadmap #2. Preview без fabricated метрик.";
+                earlyNote = "Strategy 2 в разработке — early access / preorder для клиентов полного Core.";
+            }
+            default -> {
+                title = "Full Core";
+                previewTitle = "Полный Core — research-контур";
+                previewBody = "Локальный candle-архив, deep replay, calendar arbitrage и trend desk. "
+                        + "Ниже — честные locked-preview модулей: видно ценность, действие заблокировано "
+                        + "вне trial / подписки. Research / decision-support.";
+                earlyNote = "Инвестиция в следующие стратегии бренда, не в «уже готовый» live-модуль.";
+            }
+        }
+
+        boolean locked = access.locksVisible();
+        String statusLine;
+        if (!access.enabled()) {
+            statusLine = "Upsell выключен в конфиге.";
+        } else if (access.hasFullCoreAccess()) {
+            statusLine = "Full Core trial · осталось "
+                    + (access.daysRemaining() == null ? "—" : access.daysRemaining()) + " дн. "
+                    + "Модули ниже — early access / в разработке.";
+        } else if ("EXPIRED".equals(access.phase())) {
+            statusLine = "Trial закончился. Модули заблокированы — доступны в полном Core.";
+        } else {
+            statusLine = "Доступно в полном Core.";
+        }
+
+        String lockClass = locked ? "full-core-preview is-locked" : "full-core-preview is-trial";
+        String badge = locked
+                ? "<span class=\"full-core-badge\">Доступно в полном Core</span>"
+                : "<span class=\"full-core-badge full-core-badge--trial\">Full Core trial</span>";
+
+        String body = """
+                <article class="strategy-doc full-core-page" id="full-core">
+                  <p class="settings-eyebrow">TRINITY · коммерческий контур</p>
+                  <h2>%s</h2>
+                  <p class="lead">%s</p>
+                  %s
+                  <section class="%s" aria-label="Превью модуля">
+                    %s
+                    <h3>%s</h3>
+                    <p>%s</p>
+                    <div class="full-core-mock" aria-hidden="true">
+                      <div class="full-core-mock-row"><span>Сводка</span><span class="muted">preview</span></div>
+                      <div class="full-core-mock-row"><span>Сигналы / board</span><span class="muted">заблокировано</span></div>
+                      <div class="full-core-mock-row"><span>Действие</span><span class="muted">нет live-исполнения</span></div>
+                    </div>
+                    <p class="meta">%s</p>
+                  </section>
+                  %s
+                  <p class="meta"><a href="/view">← К дашборду</a> · <a href="/view/strategy#core-roadmap">Roadmap</a></p>
+                </article>
+                """.formatted(
+                escape(title),
+                escape(statusLine),
+                tierLadderHtml(access),
+                lockClass,
+                badge,
+                escape(previewTitle),
+                escape(previewBody),
+                escape(earlyNote),
+                softCtaBlock(access)
+        );
+        return page("TRINITY — " + title, body, nav("fullcore"), OpsMode.NONE);
+    }
+
+    private UpsellAccess accessOrOff() {
+        return upsellService != null ? upsellService.access()
+                : new UpsellAccess(false, false, "OFF", null, null, null, 5000, 7500, 15000);
+    }
+
+    private String formatPrice(int rub) {
+        return UpsellService.formatRub(rub);
+    }
+
+    private String trialBanner() {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled()) {
+            return "";
+        }
+        if (access.hasFullCoreAccess()) {
+            int days = access.daysRemaining() == null ? 0 : access.daysRemaining();
+            return """
+                    <aside class="trial-banner" role="status">
+                      <span class="full-core-badge full-core-badge--trial">Full Core trial</span>
+                      <p>Осталось <strong>%d</strong> дн. Locked-preview модули открыты как early access (в разработке).</p>
+                      <a href="/view/full-core">Обзор Full Core</a>
+                    </aside>
+                    """.formatted(days);
+        }
+        if ("EXPIRED".equals(access.phase())) {
+            return """
+                    <aside class="trial-banner trial-banner--expired" role="status">
+                      <span class="full-core-badge">Доступно в полном Core</span>
+                      <p>Trial закончился. Ниже — честные превью модулей без fake PnL.</p>
+                      <a href="/view/full-core">Открыть превью</a>
+                    </aside>
+                    """;
+        }
+        return "";
+    }
+
+    private String dashboardFullCoreTeasers() {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled()) {
+            return "";
+        }
+        boolean locked = access.locksVisible();
+        String badge = locked
+                ? "<span class=\"full-core-badge\">Доступно в полном Core</span>"
+                : "<span class=\"full-core-badge full-core-badge--trial\">trial</span>";
+        return """
+                <section class="dash-section full-core-teasers" id="full-core-teasers" aria-label="Full Core превью">
+                  <div class="full-core-teasers-head">
+                    <h2>Full Core</h2>
+                    %s
+                  </div>
+                  <p class="meta">
+                    Locked-preview: видно ценность модуля, действие заблокировано вне trial.
+                    Research / decision-support — без обещания доходности.
+                  </p>
+                  <div class="locked-teaser-grid">
+                    %s
+                    %s
+                    %s
+                  </div>
+                </section>
+                """.formatted(
+                badge,
+                lockedTeaserLink(
+                        "Посмотреть отчёт по опционам",
+                        "Макет опционного research-слоя",
+                        "/view/full-core?feature=options",
+                        locked
+                ),
+                lockedTeaserLink(
+                        "Доска календарного арбитража",
+                        "Strategy 3 · futures calendar",
+                        "/view/full-core?feature=calendar-arb",
+                        locked
+                ),
+                lockedTeaserLink(
+                        "Trend desk",
+                        "Strategy 2 · roadmap",
+                        "/view/full-core?feature=trend",
+                        locked
+                )
+        );
+    }
+
+    private String lockedTeaserLink(String label, String hint, String href, boolean locked) {
+        String cls = locked ? "locked-teaser is-locked" : "locked-teaser is-trial";
+        String lock = locked ? "<span class=\"locked-teaser-lock\" aria-hidden=\"true\"></span>" : "";
+        return """
+                <a class="%s" href="%s" data-core-upsell="teaser">
+                  %s
+                  <strong>%s</strong>
+                  <span class="locked-teaser-hint">%s</span>
+                </a>
+                """.formatted(cls, escape(href), lock, escape(label), escape(hint));
+    }
+
+    private String fullCoreBadge(String featureKey) {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled() || access.hasFullCoreAccess()) {
+            return "";
+        }
+        String tip = "Full Core · " + formatPrice(access.fullPriceRub())
+                + " ₽/мес. Календарный арбитраж / deep research. Research / decision-support.";
+        return "<a class=\"full-core-badge\" href=\"/view/full-core?feature="
+                + escape(featureKey == null ? "" : featureKey)
+                + "\" title=\"" + escape(tip) + "\" data-core-upsell=\""
+                + escape(featureKey == null ? "full-core" : featureKey)
+                + "\">Доступно в полном Core</a>";
+    }
+
+    private String coreRoadmapBlock() {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled()) {
+            return "";
+        }
+        return """
+                <aside class="core-teaser" id="core-roadmap" data-core-upsell="full-core">
+                  <span class="full-core-badge">Доступно в полном Core</span>
+                  <div class="core-teaser-copy">
+                    <strong>Roadmap #2 Trend · #3 Calendar arb</strong>
+                    <p>
+                      Стратегии в разработке — <em>early access / preorder</em> для клиентов полного Core.
+                      Инвестиция в следующий контур бренда, не live-модуль сегодня.
+                      Research / decision-support, без обещания доходности.
+                    </p>
+                  </div>
+                  %s
+                  <p class="meta"><a href="/view/full-core">Открыть превью Full Core</a></p>
+                </aside>
+                """.formatted(tierLadderHtml(access));
+    }
+
+    private String tierLadderHtml(UpsellAccess access) {
+        if (access == null || !access.enabled()) {
+            return "";
+        }
+        return """
+                <ul class="tier-ladder" aria-label="Тарифная лестница">
+                  <li><span class="tier-name">Обзор</span><span class="tier-price">%s ₽</span></li>
+                  <li><span class="tier-name">Оператор</span><span class="tier-price">%s ₽</span></li>
+                  <li class="is-anchor"><span class="tier-name">Full Core</span><span class="tier-price">%s ₽</span></li>
+                </ul>
+                """.formatted(
+                formatPrice(access.overviewPriceRub()),
+                formatPrice(access.operatorPriceRub()),
+                formatPrice(access.fullPriceRub())
+        );
+    }
+
+    private String softCtaBlock(UpsellAccess access) {
+        if (access == null || !access.enabled()) {
+            return "";
+        }
+        if (access.hasFullCoreAccess()) {
+            return """
+                    <div class="full-core-cta">
+                      <p>Сейчас у вас reverse trial полного Core. Модули #2/#3 — early access, код live pairs не подменяется.</p>
+                    </div>
+                    """;
+        }
+        return """
+                <div class="full-core-cta">
+                  <p>
+                    Полный Core — <strong>%s ₽/мес</strong>
+                    (якорь относительно Оператора %s ₽). Мягкий CTA, без биллинга в этом scaffold.
+                  </p>
+                  <div class="ops-actions">
+                    <a class="btn btn-primary" href="/view/strategy#core-roadmap">Early access / roadmap</a>
+                    <button type="button" class="btn btn-ghost" data-core-upsell="cta" id="full-core-soft-cta">Подробнее</button>
+                  </div>
+                </div>
+                """.formatted(formatPrice(access.fullPriceRub()), formatPrice(access.operatorPriceRub()));
     }
 
     private String escape(String text) {

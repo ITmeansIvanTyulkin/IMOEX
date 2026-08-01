@@ -8,6 +8,7 @@ import com.moex.cointegration.model.WalkForwardReport;
 import com.moex.cointegration.service.FinalRecommendationService;
 import com.moex.cointegration.service.MarketRegimeService;
 import com.moex.cointegration.service.PaperTradingService;
+import com.moex.cointegration.service.RssHeadlineService;
 import com.moex.cointegration.service.TradingRecommendationService;
 import com.moex.cointegration.service.WalkForwardService;
 import com.moex.cointegration.storage.MarketDataStorage;
@@ -35,6 +36,7 @@ public class AnalysisViewController {
     private final PaperTradingService paperTradingService;
     private final WalkForwardService walkForwardService;
     private final MarketRegimeService marketRegimeService;
+    private final RssHeadlineService rssHeadlineService;
     private final AnalysisHtmlRenderer htmlRenderer;
 
     public AnalysisViewController(
@@ -44,6 +46,7 @@ public class AnalysisViewController {
             PaperTradingService paperTradingService,
             WalkForwardService walkForwardService,
             MarketRegimeService marketRegimeService,
+            RssHeadlineService rssHeadlineService,
             AnalysisHtmlRenderer htmlRenderer
     ) {
         this.storage = storage;
@@ -52,6 +55,7 @@ public class AnalysisViewController {
         this.paperTradingService = paperTradingService;
         this.walkForwardService = walkForwardService;
         this.marketRegimeService = marketRegimeService;
+        this.rssHeadlineService = rssHeadlineService;
         this.htmlRenderer = htmlRenderer;
     }
 
@@ -83,11 +87,18 @@ public class AnalysisViewController {
 
     @GetMapping(value = "/final", produces = MediaType.TEXT_HTML_VALUE)
     public String finalTable() throws IOException {
-        if (storage.loadReport().isEmpty()) {
+        Optional<AnalysisReport> report = storage.loadReport();
+        if (report.isEmpty()) {
             return htmlRenderer.renderEmpty();
         }
         List<FinalTradeRecommendation> rows = finalRecommendationService.getLastFinal();
-        return htmlRenderer.renderFinalTable(rows);
+        return htmlRenderer.renderFinalTable(
+                rows,
+                recommendationService.getLastRecommendations(),
+                marketRegimeService.current(),
+                report.get(),
+                rssHeadlineService.current()
+        );
     }
 
     @GetMapping(value = "/paper", produces = MediaType.TEXT_HTML_VALUE)
@@ -121,6 +132,13 @@ public class AnalysisViewController {
     @GetMapping(value = "/strategy", produces = MediaType.TEXT_HTML_VALUE)
     public String strategy() {
         return htmlRenderer.renderStrategy();
+    }
+
+    @GetMapping(value = "/full-core", produces = MediaType.TEXT_HTML_VALUE)
+    public String fullCore(
+            @org.springframework.web.bind.annotation.RequestParam(value = "feature", required = false) String feature
+    ) {
+        return htmlRenderer.renderFullCore(feature);
     }
 
     @GetMapping(value = "/guide", produces = MediaType.TEXT_HTML_VALUE)

@@ -68,7 +68,7 @@ class HistoricalReplayCampaignRunnerTest {
                 5,
                 0.0005,
                 ImoexProperties.CointegrationProperties.whitelistResearchDefaults(),
-                new ImoexProperties.NewsProperties(false, 10, 10, 3),
+                ImoexProperties.NewsProperties.withoutRss(false, 10, 10, 3),
                 dataDir.toString(),
                 dataDir.resolve("charts").toString(),
                 ImoexProperties.RiskProperties.whitelistResearchDefaults(),

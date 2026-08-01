@@ -24,8 +24,18 @@ imoex:
     lookback-days: 10
     stale-candle-days: 10
     max-news-pages: 8
-    # FA только после техники и только в DAILY; RSS опционально (Interfax + RBC)
+    # FA только после техники и только в DAILY; RSS — контекст UI + триггер-матчер
     rss-enabled: true
+    rss-max-items: 12
+    # curated feeds (MOEX-relevant + внешний фон, который может двигать индекс)
+    rss-feeds:
+      - name: Interfax
+        url: https://www.interfax.ru/rss.asp
+      - name: RBC
+        url: https://rssexport.rbc.ru/rbcnews/news/30/full.rss
+      - name: Vedomosti
+        url: https://www.vedomosti.ru/rss/news
+    # legacy fallbacks, если rss-feeds пуст
     rss-interfax-url: https://www.interfax.ru/rss.asp
     rss-rbc-url: https://rssexport.rbc.ru/rbcnews/news/30/full.rss
   risk:
@@ -139,10 +149,17 @@ imoex:
   # Soft upsell Full Core / calendar arbitrage (scaffolding, no billing)
   upsell:
     enabled: true
+    overview-price-rub: 5000
+    operator-price-rub: 7500
     full-price-rub: 15000
     cooldown-hours: 168
     min-events-before-prompt: 3
     min-dashboard-views: 2
+    reverse-trial-days: 14
+    auto-start-reverse-trial: true
+    # Local/dev simulation (no billing): force trial active or expired
+    simulate-trial-active: false
+    simulate-trial-expired: false
   # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
   universe:
     enabled: true

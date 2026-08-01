@@ -25,7 +25,7 @@ public record ImoexProperties(
 ) {
     public ImoexProperties {
         if (news == null) {
-            news = new NewsProperties(true, 10, 10, 8);
+            news = NewsProperties.withoutRss(true, 10, 10, 8);
         }
         if (cointegration == null) {
             cointegration = new CointegrationProperties(0.05, 2.0, 0.0, 10, true, 60, 0.10, true, 1e-5, 1e-3, true, true);
@@ -155,6 +155,9 @@ public record ImoexProperties(
         }
     }
 
+    /**
+     * Новостной / FA слой. RSS: {@code imoex.news.rss-*} (enabled, max-items, feeds, legacy URL keys).
+     */
     public record NewsProperties(
             boolean enabled,
             int lookbackDays,
@@ -162,8 +165,13 @@ public record ImoexProperties(
             int maxNewsPages,
             Boolean rssEnabled,
             String rssInterfaxUrl,
-            String rssRbcUrl
+            String rssRbcUrl,
+            Integer rssMaxItems,
+            java.util.List<RssFeed> rssFeeds
     ) {
+        public record RssFeed(String name, String url) {
+        }
+
         public NewsProperties {
             if (rssEnabled == null) {
                 rssEnabled = false;
@@ -174,15 +182,38 @@ public record ImoexProperties(
             if (rssRbcUrl == null || rssRbcUrl.isBlank()) {
                 rssRbcUrl = "https://rssexport.rbc.ru/rbcnews/news/30/full.rss";
             }
+            if (rssMaxItems == null || rssMaxItems < 1) {
+                rssMaxItems = 12;
+            }
+            if (rssFeeds == null) {
+                rssFeeds = java.util.List.of();
+            }
         }
 
-        /** Короткий конструктор для тестов / defaults без RSS. */
-        public NewsProperties(boolean enabled, int lookbackDays, int staleCandleDays, int maxNewsPages) {
-            this(enabled, lookbackDays, staleCandleDays, maxNewsPages, false, null, null);
+        /** Фабрика для тестов / defaults без RSS (не конструктор — иначе Spring bind игнорирует rss-*). */
+        public static NewsProperties withoutRss(boolean enabled, int lookbackDays, int staleCandleDays, int maxNewsPages) {
+            return new NewsProperties(enabled, lookbackDays, staleCandleDays, maxNewsPages, false, null, null, null, null);
         }
 
         public boolean rssEnabledFlag() {
             return Boolean.TRUE.equals(rssEnabled);
+        }
+
+        public int rssMaxItemsOrDefault() {
+            return rssMaxItems == null || rssMaxItems < 1 ? 12 : rssMaxItems;
+        }
+
+        /** Явный список feeds или legacy Interfax + RBC. */
+        public java.util.List<RssFeed> resolvedRssFeeds() {
+            if (rssFeeds != null && !rssFeeds.isEmpty()) {
+                return rssFeeds.stream()
+                        .filter(f -> f != null && f.url() != null && !f.url().isBlank())
+                        .toList();
+            }
+            return java.util.List.of(
+                    new RssFeed("Interfax", rssInterfaxUrl),
+                    new RssFeed("RBC", rssRbcUrl)
+            );
         }
     }
 

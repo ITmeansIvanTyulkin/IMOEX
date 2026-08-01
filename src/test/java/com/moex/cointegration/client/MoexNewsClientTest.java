@@ -29,7 +29,7 @@ class MoexNewsClientTest {
         ImoexProperties props = ImoexProperties.forTests(
                 "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
                 ImoexProperties.CointegrationProperties.of(0.05, 2.0, 0.0, 10),
-                new ImoexProperties.NewsProperties(true, 10, 10, 2),
+                ImoexProperties.NewsProperties.withoutRss(true, 10, 10, 2),
                 "data", "data/charts"
         );
         client = new MoexNewsClient(restTemplate, props);

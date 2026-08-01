@@ -21,7 +21,7 @@ import java.util.Optional;
 
 /**
  * Tracks operator actions and suggests a soft Full Core / calendar-arbitrage upsell.
- * Research/decision-support copy only — no billing, no return promises.
+ * Reverse trial + locked previews. Research/decision-support copy only — no billing.
  */
 @Service
 public class UpsellService {
@@ -29,6 +29,11 @@ public class UpsellService {
     public static final String FEATURE_CALENDAR_ARB = "CALENDAR_ARB";
     public static final String PROMPT_ID_CALENDAR_ARB = "upsell-calendar-arb-v1";
     public static final String TARGET_TIER_FULL_CORE = "FULL_CORE";
+
+    public static final String PHASE_OFF = "OFF";
+    public static final String PHASE_TRIAL = "TRIAL";
+    public static final String PHASE_LOCKED = "LOCKED";
+    public static final String PHASE_EXPIRED = "EXPIRED";
 
     private static final Logger log = LoggerFactory.getLogger(UpsellService.class);
     private static final int MAX_EVENTS = 500;
@@ -63,10 +68,16 @@ public class UpsellService {
             if (loaded != null) {
                 store.setEvents(loaded.getEvents());
                 store.setDismissals(loaded.getDismissals());
+                store.setTrialStartedAt(loaded.getTrialStartedAt());
+                store.setTrialEndsAt(loaded.getTrialEndsAt());
             }
         } catch (Exception ex) {
             log.warn("Could not load upsell store {}: {}", storeFile, ex.getMessage());
         }
+    }
+
+    public UpsellProperties properties() {
+        return properties;
     }
 
     public synchronized UpsellEvent recordEvent(UpsellEventRequest request) {
@@ -94,6 +105,10 @@ public class UpsellService {
         if (!properties.enabledFlag()) {
             return Optional.empty();
         }
+        UpsellAccess access = accessAt(now);
+        if (access.hasFullCoreAccess()) {
+            return Optional.empty();
+        }
         if (isOnCooldown(FEATURE_CALENDAR_ARB, now)) {
             return Optional.empty();
         }
@@ -118,15 +133,119 @@ public class UpsellService {
         persist();
     }
 
+    /**
+     * Static tip for teaser clicks — always available when upsell is enabled
+     * (no cooldown / heuristic). Does not start a dismiss cycle by itself.
+     */
+    public Optional<UpsellPrompt> infoTip() {
+        if (!properties.enabledFlag()) {
+            return Optional.empty();
+        }
+        return Optional.of(calendarArbPrompt());
+    }
+
+    public boolean enabled() {
+        return properties.enabledFlag();
+    }
+
+    public synchronized UpsellAccess access() {
+        return accessAt(Instant.now());
+    }
+
+    synchronized UpsellAccess accessAt(Instant now) {
+        if (!properties.enabledFlag()) {
+            return new UpsellAccess(
+                    false, false, PHASE_OFF, null, null, null,
+                    properties.overviewPriceRub(), properties.operatorPriceRub(), properties.fullPriceRub()
+            );
+        }
+        if (properties.simulateTrialActiveFlag()) {
+            Instant end = now.plus(Duration.ofDays(properties.reverseTrialDays()));
+            return new UpsellAccess(
+                    true, true, PHASE_TRIAL, now, end, properties.reverseTrialDays(),
+                    properties.overviewPriceRub(), properties.operatorPriceRub(), properties.fullPriceRub()
+            );
+        }
+        if (properties.simulateTrialExpiredFlag()) {
+            Instant started = now.minus(Duration.ofDays(properties.reverseTrialDays() + 1));
+            Instant ended = now.minus(Duration.ofDays(1));
+            return new UpsellAccess(
+                    true, false, PHASE_EXPIRED, started, ended, 0,
+                    properties.overviewPriceRub(), properties.operatorPriceRub(), properties.fullPriceRub()
+            );
+        }
+
+        if (store.getTrialStartedAt() == null || store.getTrialEndsAt() == null) {
+            if (properties.autoStartReverseTrialFlag()) {
+                startTrialAt(now);
+            } else {
+                return new UpsellAccess(
+                        true, false, PHASE_LOCKED, null, null, null,
+                        properties.overviewPriceRub(), properties.operatorPriceRub(), properties.fullPriceRub()
+                );
+            }
+        }
+
+        Instant started = store.getTrialStartedAt();
+        Instant ends = store.getTrialEndsAt();
+        if (ends != null && ends.isAfter(now)) {
+            long hoursLeft = Math.max(1, Duration.between(now, ends).toHours());
+            int days = (int) Math.max(1, Math.ceil(hoursLeft / 24.0));
+            return new UpsellAccess(
+                    true, true, PHASE_TRIAL, started, ends, days,
+                    properties.overviewPriceRub(), properties.operatorPriceRub(), properties.fullPriceRub()
+            );
+        }
+        return new UpsellAccess(
+                true, false, PHASE_EXPIRED, started, ends, 0,
+                properties.overviewPriceRub(), properties.operatorPriceRub(), properties.fullPriceRub()
+        );
+    }
+
+    /** Start (or restart) reverse trial from now. */
+    public synchronized UpsellAccess startTrial() {
+        return startTrialAt(Instant.now());
+    }
+
+    synchronized UpsellAccess startTrialAt(Instant now) {
+        Instant end = now.plus(Duration.ofDays(properties.reverseTrialDays()));
+        store.setTrialStartedAt(now);
+        store.setTrialEndsAt(end);
+        persist();
+        return accessAt(now);
+    }
+
+    /** Dev helper: expire trial immediately. */
+    public synchronized UpsellAccess expireTrial() {
+        Instant now = Instant.now();
+        if (store.getTrialStartedAt() == null) {
+            store.setTrialStartedAt(now.minus(Duration.ofDays(properties.reverseTrialDays())));
+        }
+        store.setTrialEndsAt(now.minusSeconds(1));
+        persist();
+        return accessAt(now);
+    }
+
+    /** Dev helper: clear trial timestamps (back to LOCKED until auto-start). */
+    public synchronized UpsellAccess resetTrial() {
+        store.setTrialStartedAt(null);
+        store.setTrialEndsAt(null);
+        persist();
+        return accessAt(Instant.now());
+    }
+
     UpsellPrompt calendarArbPrompt() {
-        String price = formatRub(properties.fullPriceRub());
+        String full = formatRub(properties.fullPriceRub());
+        String operator = formatRub(properties.operatorPriceRub());
+        String overview = formatRub(properties.overviewPriceRub());
         return new UpsellPrompt(
                 PROMPT_ID_CALENDAR_ARB,
-                "Full Core · календарный арбитраж",
-                "На Full Core доступны calendar arbitrage (strategy 3) и более глубокий research-контур — "
-                        + price + " ₽/мес. Research / decision-support, без обещания доходности.",
-                "Подробнее о стратегии",
-                "/view/strategy",
+                "Доступно в полном Core",
+                "Тарифы: Обзор " + overview + " · Оператор " + operator + " · Full Core " + full
+                        + " ₽/мес. На полном Core — calendar arbitrage, trend desk (early access) и глубокий research. "
+                        + "Research / decision-support, без обещания доходности.",
+                "Открыть Full Core",
+                "/view/full-core",
                 TARGET_TIER_FULL_CORE,
                 FEATURE_CALENDAR_ARB
         );
@@ -185,6 +304,11 @@ public class UpsellService {
         store.getDismissals().put(featureKey, at);
     }
 
+    synchronized void seedTrial(Instant started, Instant ends) {
+        store.setTrialStartedAt(started);
+        store.setTrialEndsAt(ends);
+    }
+
     private void trimEvents() {
         var events = store.getEvents();
         if (events.size() > MAX_EVENTS) {
@@ -225,7 +349,7 @@ public class UpsellService {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
 
-    private static String formatRub(int amount) {
+    public static String formatRub(int amount) {
         NumberFormat nf = NumberFormat.getInstance(new Locale("ru", "RU"));
         nf.setGroupingUsed(true);
         nf.setMaximumFractionDigits(0);

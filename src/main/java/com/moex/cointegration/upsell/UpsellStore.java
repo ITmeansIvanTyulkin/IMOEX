@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Lightweight JSON persistence for upsell events and dismissals.
+ * Lightweight JSON persistence for upsell events, dismissals, and reverse trial.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class UpsellStore {
@@ -17,6 +17,8 @@ public class UpsellStore {
     private List<UpsellEvent> events = new ArrayList<>();
     /** featureKey → last dismiss instant */
     private Map<String, Instant> dismissals = new HashMap<>();
+    private Instant trialStartedAt;
+    private Instant trialEndsAt;
 
     public List<UpsellEvent> getEvents() {
         return events;
@@ -32,5 +34,21 @@ public class UpsellStore {
 
     public void setDismissals(Map<String, Instant> dismissals) {
         this.dismissals = dismissals != null ? dismissals : new HashMap<>();
+    }
+
+    public Instant getTrialStartedAt() {
+        return trialStartedAt;
+    }
+
+    public void setTrialStartedAt(Instant trialStartedAt) {
+        this.trialStartedAt = trialStartedAt;
+    }
+
+    public Instant getTrialEndsAt() {
+        return trialEndsAt;
+    }
+
+    public void setTrialEndsAt(Instant trialEndsAt) {
+        this.trialEndsAt = trialEndsAt;
     }
 }

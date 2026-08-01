@@ -17,6 +17,7 @@
     "/view/paper": "Paper journal",
     "/view/walk-forward": "Walk-forward",
     "/view/strategy": "Описание стратегии",
+    "/view/full-core": "Full Core",
     "/view/guide": "Как пользоваться системой"
   };
 
@@ -257,13 +258,13 @@
     }
   }
 
-  function showUpsellPrompt(prompt) {
+  function showUpsellPrompt(prompt, force) {
     const host = $("trinity-upsell-host");
     if (!host || !prompt || !prompt.id) return;
-    if (sessionStorage.getItem(UPSELL_SHOWN_KEY) === prompt.id) return;
-    sessionStorage.setItem(UPSELL_SHOWN_KEY, prompt.id);
+    if (!force && sessionStorage.getItem(UPSELL_SHOWN_KEY) === prompt.id) return;
+    if (!force) sessionStorage.setItem(UPSELL_SHOWN_KEY, prompt.id);
 
-    const href = prompt.ctaHref || "/view/strategy";
+    const href = prompt.ctaHref || "/view/full-core";
     const cta = prompt.ctaLabel || "Подробнее";
     const card = document.createElement("aside");
     card.className = "upsell-card";
@@ -293,7 +294,18 @@
       const res = await fetch("/api/upsell/prompt", { headers: { Accept: "application/json" } });
       if (res.status === 204 || !res.ok) return;
       const prompt = await res.json();
-      if (prompt && prompt.id) showUpsellPrompt(prompt);
+      if (prompt && prompt.id) showUpsellPrompt(prompt, false);
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  async function showFullCoreTip() {
+    try {
+      const res = await fetch("/api/upsell/tip", { headers: { Accept: "application/json" } });
+      if (res.status === 204 || !res.ok) return;
+      const prompt = await res.json();
+      if (prompt && prompt.id) showUpsellPrompt(prompt, true);
     } catch (_) {
       // ignore
     }
@@ -302,6 +314,21 @@
   async function beaconUpsell(action, page) {
     await recordUpsellEvent(action, page);
     await maybeShowUpsell();
+  }
+
+  function bindFullCoreTeasers() {
+    document.addEventListener("click", function (ev) {
+      const el = ev.target && ev.target.closest
+        ? ev.target.closest("[data-core-upsell]")
+        : null;
+      if (!el) return;
+      const kind = el.getAttribute("data-core-upsell") || "teaser";
+      recordUpsellEvent("full_core_" + kind, currentPagePath());
+      if (el.tagName === "BUTTON" || kind === "cta") {
+        ev.preventDefault();
+        showFullCoreTip();
+      }
+    });
   }
 
   async function seedSeenFromJournal() {
@@ -860,6 +887,7 @@
 
     appendLog("Операторская панель готова.", "info");
     appendLog("Раздел: " + currentSectionTitle() + ".", "info");
+    bindFullCoreTeasers();
     startAlertPolling();
     beaconUpsell("page_view", currentPagePath());
   }

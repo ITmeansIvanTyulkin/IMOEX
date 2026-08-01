@@ -199,7 +199,7 @@ class NewsRiskAnalysisServiceTest {
                 5,
                 0.0005,
                 ImoexProperties.CointegrationProperties.of(0.05, 2.0, 0.0, 10),
-                new ImoexProperties.NewsProperties(enabled, 10, 10, 3),
+                ImoexProperties.NewsProperties.withoutRss(enabled, 10, 10, 3),
                 "data",
                 "data/charts"
         );

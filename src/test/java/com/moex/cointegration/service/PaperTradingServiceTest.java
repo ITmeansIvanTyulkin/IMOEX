@@ -190,7 +190,7 @@ class PaperTradingServiceTest {
         return new ImoexProperties(
                 "https://iss.moex.com/iss", "TQBR", "IMOEX", 5, 0.0005,
                 ImoexProperties.CointegrationProperties.of(0.05, 2.0, 0.0, 10),
-                new ImoexProperties.NewsProperties(false, 10, 10, 1),
+                ImoexProperties.NewsProperties.withoutRss(false, 10, 10, 1),
                 tempDir.toString(),
                 tempDir.resolve("charts").toString(),
                 new ImoexProperties.RiskProperties(3.5, 40, 0.5, maxOpen, 1.0, 0.0, 90.0, 1.0, 0.08,

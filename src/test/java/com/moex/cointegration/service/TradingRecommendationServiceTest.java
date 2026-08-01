@@ -79,7 +79,7 @@ class TradingRecommendationServiceTest {
                 5,
                 0.0005,
                 ImoexProperties.CointegrationProperties.of(0.05, 2.0, 0.0, 10),
-                new ImoexProperties.NewsProperties(false, 10, 10, 3),
+                ImoexProperties.NewsProperties.withoutRss(false, 10, 10, 3),
                 dataDir,
                 dataDir + "/charts"
         );
