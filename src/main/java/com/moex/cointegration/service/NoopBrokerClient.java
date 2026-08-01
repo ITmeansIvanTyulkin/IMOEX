@@ -4,9 +4,12 @@ import com.moex.cointegration.model.BrokerExecutionReport;
 import com.moex.cointegration.model.BrokerExecutionStatus;
 import com.moex.cointegration.model.BrokerMode;
 import com.moex.cointegration.model.BrokerAccountSnapshot;
+import com.moex.cointegration.model.BrokerSandboxAccountResult;
+import com.moex.cointegration.model.BrokerSandboxPayInResult;
 import com.moex.cointegration.model.BrokerStatus;
 import com.moex.cointegration.model.PairExecutionPlan;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -128,6 +131,30 @@ public class NoopBrokerClient implements BrokerClient {
                 List.of("No token/account or broker disabled, so no broker-side flatten was attempted."),
                 List.of(),
                 null
+        );
+    }
+
+    @Override
+    public BrokerSandboxAccountResult ensureSandboxAccount() {
+        return new BrokerSandboxAccountResult(
+                LocalDateTime.now(),
+                false,
+                false,
+                null,
+                List.of(),
+                "Sandbox account unavailable: stub/no T-Invest adapter"
+        );
+    }
+
+    @Override
+    public BrokerSandboxPayInResult payInSandbox(double amountRub) {
+        return new BrokerSandboxPayInResult(
+                LocalDateTime.now(),
+                false,
+                null,
+                BigDecimal.valueOf(amountRub),
+                null,
+                "Sandbox pay-in unavailable: stub/no T-Invest adapter"
         );
     }
 }

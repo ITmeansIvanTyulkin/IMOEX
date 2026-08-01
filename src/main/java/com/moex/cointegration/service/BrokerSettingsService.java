@@ -93,6 +93,32 @@ public class BrokerSettingsService {
         return view();
     }
 
+    public synchronized BrokerSettingsView updateAccountId(String accountId) {
+        if (accountId == null || accountId.isBlank()) {
+            throw new IllegalArgumentException("accountId is blank");
+        }
+        BrokerProperties current = effective();
+        BrokerProperties next = new BrokerProperties(
+                current.enabled(),
+                current.provider(),
+                current.mode(),
+                current.sandbox(),
+                current.token(),
+                accountId.trim(),
+                current.autoExecuteAfterAnalysis(),
+                current.preferLimitOrders(),
+                current.allowMarketFallback(),
+                current.emergencyMarketExitEnabled(),
+                current.passivePriceOffsetBps(),
+                current.secondLegTimeoutSeconds(),
+                current.maxLegDriftBps(),
+                current.killSwitch()
+        );
+        overrides = next;
+        persist(next);
+        return view();
+    }
+
     private void persist(BrokerProperties properties) {
         try {
             Files.createDirectories(settingsFile.getParent());

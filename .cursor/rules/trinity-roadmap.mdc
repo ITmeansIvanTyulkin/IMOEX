@@ -35,3 +35,12 @@ Do not start calendar/options until DAILY pairs is validated on paper/OOS; do no
 ## Product truth
 
 - Research / decision-support, not auto-execution.
+
+## Deferred: Instance vs Core (autumn–winter 2026)
+
+Inspired by TestOps-style split. **Do not implement now** — current focus remains DAILY pairs paper validation. One codebase / one repo, two delivery profiles (config flags), **not two repositories**, not forever-separate products.
+
+- **Instance** — light/cheaper browser profile: ephemeral candles (re-download, no long archive), lighter features, cheaper subscription; paper/sandbox oriented; trust/demo for clients.
+- **Core** — downloadable/local fuller profile: persistent candle archive, research/replay/walk-forward friendly; operator journals stay local.
+- Useful diffs later: secrets locality; cron/alerts depth; cluster-review export/history; INTRADAY depth; live broker only in Core.
+- Gate: defer to **autumn–winter 2026**.

@@ -27,14 +27,14 @@
 | **Рекомендации** | Тексты «что купить/продать» + **`rationale`** в `final-recommendations.json` (техника / FA / режим / риск) |
 | **Новости / FA** | После техники, **только DAILY**: MOEX + опционально RSS → CONFLICT / ENTER / REDUCE / BLOCK |
 | **Paper journal** | DAILY journal + колонка **«Комментарий к закрытию»**; INTRADAY paper opens выключены (`intraday-research-only`) |
-| **Broker console** | T-Invest execution contour: journal, reconcile по positions+active orders, `flatten-all`, dashboard-only UI для токена/счёта |
+| **Broker console** | T-Invest execution contour: journal, reconcile по positions+active orders, `flatten-all`, UI токена/счёта в `/view/settings` |
 | **Sizing / slippage** | Notional **% от equity**; капитал на DAILY (INTRADAY share = 0); slippage DAILY 20 bps |
 | **Event calendar** | INTRADAY research: flatten/block правила остаются в коде для будущего включения |
 | **Historical replay** | Bar-by-bar прогон paper на локальных свечах (`POST /api/analysis/historical-replay`) |
 | **Walk-forward** | OOS окна train/test по топ-парам (daily) |
 | **Графики** | Свечи, дивергенция, спред + KAMA, Z со стрелками |
 | **Auth** | HTTP Basic на mutating API (`POST /api/**`) |
-| **UI** | HTML-дашборд TRINITY (операторский пульт) + инструкция `/view/guide` |
+| **UI** | Дашборд `/view` + настройки `/view/settings` (пульт/брокер) + инструкция `/view/guide` |
 
 ---
 
@@ -191,19 +191,20 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 ### 6. Смотреть результаты в браузере
 
-Откройте http://localhost:8080/view — сверху **пульт оператора**: кнопки «Анализ + paper», «Анализ + скачать свечи», «Только новости / paper», «Walk-forward», «Скачать свечи». Логин/пароль API — из `application-local.yml`, сохраняются в браузере. `curl` ниже — запасной путь.
+Откройте http://localhost:8080/view — спокойный дашборд (KPI, сигналы, топ-пары). Полный **пульт оператора** и **консоль брокера** — в http://localhost:8080/view/settings: логин API, алерты, токен, sandbox, сверка. Логин/пароль API — из `application-local.yml`, сохраняются в браузере. `curl` ниже — запасной путь.
 
-На самом дашборде есть отдельный блок **Broker console**: туда можно ввести `provider`, `mode`, `accountId`, токен, sandbox/kill-switch и execution-настройки. Эти параметры сохраняются локально в `data/broker-ui-settings.json`, поэтому пользователю не нужно править код или `application-local.yml` ради первого sandbox-подключения.
+В **Настройках** блок Broker console принимает `provider`, `mode`, `accountId`, токен, sandbox/kill-switch и execution-настройки. Кнопка **«Подтянуть / создать sandbox account»** сама получает `accountId` через T-Invest Sandbox API (или создаёт новый счёт). Эти параметры сохраняются локально в `data/broker-ui-settings.json`, поэтому пользователю не нужно править код или `application-local.yml` ради первого sandbox-подключения.
 
 | Шаг | URL | Зачем |
 |---|---|---|
-| 1 | http://localhost:8080/view | Дашборд + пульт |
-| 2 | http://localhost:8080/view/guide | **Как пользоваться** — запуск, cron, алерты |
-| 3 | http://localhost:8080/view/final | Итог ENTER / REDUCE / BLOCK |
-| 4 | http://localhost:8080/view/paper | Paper: открытые / закрытые, Net ₽ |
-| 5 | http://localhost:8080/view/walk-forward | OOS Sharpe по окнам |
-| 6 | http://localhost:8080/view/signals | Сырые LONG / SHORT |
-| 7 | http://localhost:8080/view/charts/SBER/LKOH | График конкретной пары (подставьте тикеры) |
+| 1 | http://localhost:8080/view | Дашборд (обзор) |
+| 2 | http://localhost:8080/view/settings | Пульт + консоль брокера |
+| 3 | http://localhost:8080/view/guide | **Как пользоваться** — запуск, cron, алерты |
+| 4 | http://localhost:8080/view/final | Итог ENTER / REDUCE / BLOCK |
+| 5 | http://localhost:8080/view/paper | Paper: открытые / закрытые, Net ₽ |
+| 6 | http://localhost:8080/view/walk-forward | OOS Sharpe по окнам |
+| 7 | http://localhost:8080/view/signals | Сырые LONG / SHORT |
+| 8 | http://localhost:8080/view/charts/SBER/LKOH | График конкретной пары (подставьте тикеры) |
 
 Корень `/` → редирект на `/view`.
 
@@ -239,7 +240,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | macOS | правый верхний угол страницы | Notification Center — справа сверху |
 | Windows | правый верхний угол страницы | Центр уведомлений — обычно **правый нижний** угол (позицию задаёт Windows) |
 
-Чекбоксы «Алерты» и «Звук» — в пульте оператора. После ручного «Анализ + paper» опрос срабатывает сразу. Подробнее: **http://localhost:8080/view/guide**.
+Чекбоксы «Алерты» и «Звук» — в пульте на `/view/settings`. После ручного «Анализ + paper» опрос срабатывает сразу. Подробнее: **http://localhost:8080/view/guide**.
 
 ### 8. Сброс paper journal (чистый track-record)
 
@@ -264,14 +265,14 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 Кратко:
 
-1. **Запуск** — `mvn spring-boot:run`, секреты в `application-local.yml`, первый раз «Анализ + скачать свечи».
-2. **Пульт** — на любой `/view/*`: кнопки анализа, логин API, алерты и звук.
+1. **Запуск** — `mvn spring-boot:run`, секреты в `application-local.yml`, первый раз «Анализ + скачать свечи» в Настройках.
+2. **Пульт** — полный в `/view/settings`; на остальных `/view/*` — компактная полоска; на дашборде — одна CTA.
 3. **Главные экраны** — `/view/final` (разрешено ли после FA), `/view/paper` (что открылось), дашборд (режим ADX).
 4. **Автопрогон** — DAILY ~19:05 (пн–пт), пока сервер работает. INTRADAY cron выключен (research-only).
 5. **Алерты** — баннер справа сверху в браузере + опционально уведомление ОС (на Windows обычно снизу справа).
 6. **Исторический replay** — `POST /api/analysis/historical-replay?tickerY=CHMF&tickerX=MAGN&from=2024-01-01&to=2025-12-31` — bar-by-bar прогон paper на локальных свечах (нужен предварительный `refresh`).
 7. **Cluster review** — `imoex.cluster-review.*`: lookback, min PF, exclude OIL_GAS.
-8. **Broker console** — только на `/view`: сохранить токен/счёт, посмотреть reconcile и при необходимости дать `flatten-all`.
+8. **Broker console** — в `/view/settings`: сохранить токен/счёт, посмотреть reconcile и при необходимости дать `flatten-all`.
 
 Теория стратегии — `/view/strategy`. Пустой paper journal нормален, если нет ENTER/LONG/SHORT с разворотом Z.
 
@@ -447,6 +448,8 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 | `GET` | `/broker/status` | Статус активного broker adapter |
 | `GET` | `/broker/settings` | Текущие dashboard-настройки брокера (token masked) |
 | `POST` | `/broker/settings` | Сохранить broker token/account/mode из UI |
+| `POST` | `/broker/sandbox-account` | Подтянуть существующий sandbox account или создать новый и сохранить `accountId` |
+| `POST` | `/broker/sandbox-pay-in` | Пополнить sandbox-счёт (`amountRub`, по умолчанию 200000) |
 | `GET` | `/broker/reports` | Последние broker execution reports |
 | `GET` | `/broker/reconcile` | Сверка paper vs broker positions + active orders |
 | `POST` | `/broker/flatten-all` | Аварийно снять активные ордера и позиции |
@@ -564,7 +567,7 @@ imoex:
 | Risk | `imoex.risk.*` | `GET /api/risk/policy` |
 | Walk-forward | `imoex.walk-forward.*` | `/view/walk-forward` |
 | Paper | `imoex.paper.*` | `/view/paper` |
-| Broker | `imoex.broker.*` + dashboard broker console | `/view`, `/api/broker/*` |
+| Broker | `imoex.broker.*` + settings broker console | `/view/settings`, `/api/broker/*` |
 | Auth | `imoex.auth.*` | HTTP Basic на POST |
 
 ---

@@ -5,6 +5,8 @@ import com.moex.cointegration.model.BrokerAccountSnapshot;
 import com.moex.cointegration.model.BrokerConnectionTestResult;
 import com.moex.cointegration.model.BrokerExecutionReport;
 import com.moex.cointegration.model.BrokerReconcileReport;
+import com.moex.cointegration.model.BrokerSandboxAccountResult;
+import com.moex.cointegration.model.BrokerSandboxPayInResult;
 import com.moex.cointegration.model.BrokerSettingsUpdateRequest;
 import com.moex.cointegration.model.BrokerSettingsView;
 import com.moex.cointegration.model.BrokerStatus;
@@ -98,6 +100,23 @@ public class BrokerController {
                 snapshot.activeOrders().size(),
                 summary
         );
+    }
+
+    @PostMapping("/sandbox-account")
+    public BrokerSandboxAccountResult ensureSandboxAccount(
+            @RequestBody(required = false) BrokerSettingsUpdateRequest request
+    ) {
+        if (request != null) {
+            brokerSettingsService.save(request);
+        }
+        return pairExecutionService.ensureSandboxAccount();
+    }
+
+    @PostMapping("/sandbox-pay-in")
+    public BrokerSandboxPayInResult sandboxPayIn(
+            @RequestParam(defaultValue = "200000") double amountRub
+    ) {
+        return pairExecutionService.payInSandbox(amountRub);
     }
 
     @PostMapping("/preview")

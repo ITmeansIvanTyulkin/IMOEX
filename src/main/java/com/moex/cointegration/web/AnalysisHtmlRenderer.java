@@ -30,7 +30,7 @@ public class AnalysisHtmlRenderer {
               <title>{{TITLE}}</title>
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-              <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
               <link rel="stylesheet" href="/css/operator.css">
             </head>
             <body>
@@ -60,21 +60,27 @@ public class AnalysisHtmlRenderer {
             </html>
             """;
 
+    private enum OpsMode {
+        /** Полный пульт — только на /view/settings. */
+        SETTINGS,
+        COMPACT,
+        NONE
+    }
+
     private String opsPanel() {
         return """
                 <section class="ops-panel" id="ops-panel">
                   <h2>Пульт оператора</h2>
                   <p class="ops-lead">
-                    Запускайте анализ и обновляйте paper прямо отсюда.
-                    <strong>INTRADAY</strong> обновляется автоматически в :05 каждого часа 10–18 (пн–пт), пока приложение запущено.
-                    Логин и пароль оператора — в полях ниже (сохраняются только в этом браузере).
+                    Настройте один раз: логин API, алерты и запуск анализа.
+                    Учётные данные сохраняются только в этом браузере.
                   </p>
                   <div class="alert-prefs">
                     <label class="check-label"><input type="checkbox" id="ops-alerts-enabled" checked> Алерты при новой paper-сделке</label>
                     <label class="check-label"><input type="checkbox" id="ops-alerts-sound" checked> Звук</label>
                     <button type="button" class="btn btn-ghost" id="ops-notify-permission">Уведомления macOS / Windows</button>
                   </div>
-                  <p class="meta alert-hint">Баннер справа сверху в браузере + системное уведомление (если разрешено). На Windows позиция задаётся ОС (обычно правый нижний угол).</p>
+                  <p class="meta alert-hint">Баннер справа сверху в браузере + системное уведомление (если разрешено).</p>
                   <div class="busy-bar" id="ops-busy"></div>
                   <div class="ops-grid">
                     <div>
@@ -105,6 +111,51 @@ public class AnalysisHtmlRenderer {
                 """;
     }
 
+    private String compactOpsPanel() {
+        return """
+                <section class="ops-compact" id="ops-panel">
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <p class="ops-compact-lead">
+                    Быстрый запуск. Полный пульт и консоль брокера — в
+                    <a href="/view/settings">Настройках</a>.
+                  </p>
+                  <div class="ops-compact-actions">
+                    <input id="ops-user" type="hidden">
+                    <input id="ops-pass" type="hidden">
+                    <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                    <a class="btn btn-ghost" href="/view/settings">Настройки</a>
+                  </div>
+                </section>
+                """;
+    }
+
+    /** Дискретная CTA на дашборде: без пульта и без консоли брокера. */
+    private String dashboardQuietCta() {
+        return """
+                <section class="dash-cta" id="dash-cta">
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <input id="ops-user" type="hidden">
+                  <input id="ops-pass" type="hidden">
+                  <div class="dash-cta-copy">
+                    <p class="dash-cta-label">Действие</p>
+                    <p class="dash-cta-text">Обновить сигналы и paper-журнал. Учётные данные и брокер — в настройках.</p>
+                  </div>
+                  <div class="dash-cta-actions">
+                    <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                    <a class="btn btn-ghost" href="/view/settings">Настройки</a>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String opsHtml(OpsMode mode) {
+        return switch (mode) {
+            case SETTINGS -> opsPanel();
+            case COMPACT -> compactOpsPanel();
+            case NONE -> "";
+        };
+    }
+
     /**
      * Главная страница: сводка, сигналы входа, топ-пары.
      */
@@ -123,70 +174,174 @@ public class AnalysisHtmlRenderer {
         long actionable = actionableSignals.size();
 
         StringBuilder body = new StringBuilder();
-        body.append(regimeBanner(regime));
-        body.append(summaryBlock(report, recommendations.size(), actionable));
+        body.append("<div class=\"dash-shell\">");
+        body.append(dashboardWidgetGrid(regime));
         body.append("""
-                <div class="hint">
-                  <strong>Экран оператора (быстро):</strong>
-                  <div>1) Проверьте режим рынка (TREND блокирует новые входы).</div>
-                  <div>2) Если вы идёте в sandbox/live: сохраните настройки broker → <em>Test broker connection</em>.</div>
-                  <div>3) Если сигналы есть: смотрите /view/final (ENTER/REDUCE/BLOCK после FA) и /view/paper (что реально открыто в paper).</div>
-                </div>
+                <aside class="next-steps" id="dash-next-steps">
+                  <p class="next-steps-label">Что сделать сейчас</p>
+                  <ol>
+                    <li>Смотрите виджет «Режим рынка» — TREND блокирует новые входы.</li>
+                    <li>Нажмите <em>Анализ + paper</em> ниже — обновит сигналы и журнал.</li>
+                    <li>Разбор сделок: <a href="/view/final">Итог</a> / <a href="/view/paper">Paper</a>.
+                      Токен и песочница — в <a href="/view/settings">Настройках</a>.</li>
+                  </ol>
+                </aside>
                 """);
-        body.append(dashboardConsolidatedSummary());
-        body.append(dashboardBrokerPanel());
-        body.append("<h2>Сигналы входа (LONG / SHORT)</h2>");
+        body.append(dashboardQuietCta());
+        body.append(summaryBlock(report, recommendations.size(), actionable));
+        body.append("<section class=\"dash-section\"><h2>Сигналы входа (LONG / SHORT)</h2>");
         body.append(dashboardActionableSignalsTable(
                 actionableSignals,
                 "Нет активных сигналов LONG/SHORT сейчас. См. полный список рекомендаций."
         ));
-        body.append("<h2>Топ-пары по Sharpe</h2>");
+        body.append("</section>");
+        body.append("<section class=\"dash-section\"><h2>Топ-пары по Sharpe</h2>");
         body.append(topPairsTableCompact(report.topPairs()));
+        body.append("</section>");
+        body.append("</div>");
 
-        return page("TRINITY — дашборд", body.toString(), nav("dashboard"));
+        return page("TRINITY — дашборд", body.toString(), nav("dashboard"), OpsMode.NONE);
     }
 
-    private String dashboardConsolidatedSummary() {
+    /**
+     * Настройки: полный пульт оператора + консоль брокера (один раз настроить, не жить здесь).
+     */
+    public String renderSettings() {
+        String body = """
+                <div class="settings-shell">
+                  <header class="settings-intro">
+                    <p class="settings-eyebrow">Конфигурация</p>
+                    <h2>Настройки оператора</h2>
+                    <p class="meta">
+                      Пульт и консоль брокера собраны здесь. Дашборд остаётся обзором портфеля и сигналов —
+                      без форм токенов и логов.
+                    </p>
+                  </header>
+                  %s
+                  %s
+                </div>
+                """.formatted(opsPanel(), brokerConsolePanel());
+        return page("TRINITY — настройки", body, nav("settings"), OpsMode.NONE);
+    }
+
+    private String dashboardWidgetGrid(com.moex.cointegration.model.MarketRegimeSnapshot regime) {
+        if (regime == null) {
+            regime = com.moex.cointegration.model.MarketRegimeSnapshot.unknown();
+        }
+        String label = regime.label() == null ? "—" : regime.label();
+        String shortLabel = label.length() > 8 ? label.substring(0, 7) + "…" : label;
+        String color = switch (label) {
+            case "SIDEWAYS" -> "var(--ok)";
+            case "NEUTRAL" -> "var(--warn)";
+            case "TREND" -> "var(--danger)";
+            default -> "var(--slate)";
+        };
+        String swatch = switch (label) {
+            case "SIDEWAYS" -> "ok";
+            case "NEUTRAL" -> "warn";
+            case "TREND" -> "danger";
+            default -> "";
+        };
+        String hint = switch (label) {
+            case "SIDEWAYS" -> "входы ок";
+            case "NEUTRAL" -> "осторожно";
+            case "TREND" -> "блок входов";
+            default -> "нет данных";
+        };
+        String adx = Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.0f", regime.adx());
         return """
-                <section class="cards">
-                  <div class="card"><span class="label">Paper open</span><span class="value accent" id="dash-paper-open">—</span></div>
-                  <div class="card"><span class="label">Paper PnL ₽</span><span class="value" id="dash-paper-pnl">—</span></div>
-                  <div class="card"><span class="label">Broker</span><span class="value" id="dash-broker-status">—</span></div>
-                  <div class="card"><span class="label">Final ENTER/REDUCE</span><span class="value accent" id="dash-final-actionable">—</span></div>
-                  <div class="card"><span class="label">Final WATCH</span><span class="value" id="dash-final-watch">—</span></div>
-                  <div class="card"><span class="label">Final BLOCK</span><span class="value bad" id="dash-final-block">—</span></div>
+                <section class="widget-grid" aria-label="Сводка дашборда">
+                  <article class="widget-card" id="widget-paper">
+                    <div class="widget-title">Paper</div>
+                    <div class="widget-body">
+                      <div class="donut" id="widget-paper-donut" style="--p:0;--c:var(--accent)">
+                        <div class="donut-center">
+                          <strong id="dash-paper-open">—</strong>
+                          <span>open</span>
+                        </div>
+                      </div>
+                      <div class="widget-meta">
+                        <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Открыто</span><span class="v" id="widget-paper-open-label">—</span></div>
+                        <div class="widget-stat"><span class="k"><i class="swatch ok"></i>PnL ₽</span><span class="v" id="dash-paper-pnl">—</span></div>
+                      </div>
+                    </div>
+                  </article>
+                  <article class="widget-card" id="widget-broker">
+                    <div class="widget-title">Брокер</div>
+                    <div class="widget-body">
+                      <div class="donut" id="widget-broker-donut" style="--p:0;--c:var(--info)">
+                        <div class="donut-center">
+                          <strong id="widget-broker-center">—</strong>
+                          <span>статус</span>
+                        </div>
+                      </div>
+                      <div class="widget-meta">
+                        <div class="widget-stat"><span class="k"><i class="swatch info"></i>Сводка</span><span class="v" id="dash-broker-status">—</span></div>
+                        <div class="widget-stat"><span class="k"><i class="swatch gold"></i>Контур</span><span class="v" id="widget-broker-mode">—</span></div>
+                      </div>
+                    </div>
+                  </article>
+                  <article class="widget-card" id="widget-final">
+                    <div class="widget-title">Final</div>
+                    <div class="widget-body">
+                      <div class="donut" id="widget-final-donut" style="--p:0;--c:var(--ok)">
+                        <div class="donut-center">
+                          <strong id="dash-final-actionable">—</strong>
+                          <span>вход</span>
+                        </div>
+                      </div>
+                      <div class="widget-meta">
+                        <div class="widget-stat"><span class="k"><i class="swatch ok"></i>ENTER/REDUCE</span><span class="v" id="widget-final-enter">—</span></div>
+                        <div class="widget-stat"><span class="k"><i class="swatch warn"></i>WATCH</span><span class="v" id="dash-final-watch">—</span></div>
+                        <div class="widget-stat"><span class="k"><i class="swatch danger"></i>BLOCK</span><span class="v" id="dash-final-block">—</span></div>
+                      </div>
+                    </div>
+                  </article>
+                  <article class="widget-card" id="widget-regime">
+                    <div class="widget-title">Режим рынка</div>
+                    <div class="widget-body">
+                      <div class="donut" id="widget-regime-donut" style="--p:100;--c:%s">
+                        <div class="donut-center">
+                          <strong id="widget-regime-center">%s</strong>
+                          <span>ADX %s</span>
+                        </div>
+                      </div>
+                      <div class="widget-meta">
+                        <div class="widget-stat"><span class="k"><i class="swatch %s" id="widget-regime-swatch"></i>Режим</span><span class="v" id="widget-regime-label">%s</span></div>
+                        <div class="widget-stat"><span class="k">Подсказка</span><span class="v" id="widget-regime-hint">%s</span></div>
+                      </div>
+                    </div>
+                  </article>
                 </section>
-                """;
+                """.formatted(color, escape(shortLabel), escape(adx), swatch, escape(label), escape(hint));
     }
 
-    private String dashboardBrokerPanel() {
+    private String brokerConsolePanel() {
         return """
-                <section class="strategy-doc">
-                  <h2>Broker console</h2>
+                <section class="dash-section strategy-doc" id="broker-console">
+                  <h2>Консоль брокера</h2>
                   <p class="meta">
-                    Этот блок есть только на дашборде: здесь удобно подключать токены брокеров без правки
-                    <code>application-local.yml</code>.
-                    <br><br>
-                    Сейчас исполнение реализовано только для <strong>T-Invest</strong>; другие варианты в селекте — задел UI.
+                    Токены и параметры исполнения без правки
+                    <code>application-local.yml</code>. Сейчас — <strong>T-Invest</strong>.
                   </p>
                   <div class="ops-grid">
                     <div class="callout" id="broker-widget">
-                      <strong>Broker status</strong>
+                      <strong>Статус брокера</strong>
                       <div id="broker-status-line">Статус брокера загружается…</div>
                       <div id="broker-test-line">Подключение ещё не проверялось.</div>
-                      <div id="broker-reconcile-line">Reconcile ещё не запрашивался.</div>
-                      <div id="broker-journal-line">Broker journal загружается…</div>
+                      <div id="broker-reconcile-line">Сверка ещё не запрашивалась.</div>
+                      <div id="broker-journal-line">Журнал брокера загружается…</div>
                       <div class="ops-actions">
-                        <button type="button" class="btn btn-primary" data-ops-action="broker-test">Test broker connection</button>
-                        <button type="button" class="btn btn-ghost" data-ops-action="broker-reconcile">Broker reconcile</button>
-                        <button type="button" class="btn btn-warn" data-ops-action="broker-flatten">Flatten all broker positions</button>
+                        <button type="button" class="btn btn-primary" data-ops-action="broker-test">Проверить подключение</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="broker-reconcile">Сверить с брокером</button>
+                        <button type="button" class="btn btn-warn" data-ops-action="broker-flatten">Закрыть все позиции брокера</button>
                       </div>
                     </div>
                     <div class="callout">
                       <strong>Подключение брокера</strong>
                       <div class="auth-row">
                         <div class="field">
-                          <label for="broker-provider">Broker</label>
+                          <label for="broker-provider">Брокер</label>
                           <select id="broker-provider">
                             <option value="T_INVEST">T-Invest</option>
                             <option value="ALOR">Alor</option>
@@ -195,44 +350,55 @@ public class AnalysisHtmlRenderer {
                           </select>
                         </div>
                         <div class="field">
-                          <label for="broker-mode">Mode</label>
+                          <label for="broker-mode">Режим</label>
                           <select id="broker-mode">
-                            <option value="AUTO">AUTO</option>
-                            <option value="MANUAL_CONFIRM">MANUAL_CONFIRM</option>
-                            <option value="PAPER">PAPER</option>
+                            <option value="AUTO">AUTO — автоматически</option>
+                            <option value="MANUAL_CONFIRM">MANUAL — с подтверждением</option>
+                            <option value="PAPER">PAPER — только paper</option>
                           </select>
                         </div>
                         <div class="field">
-                          <label for="broker-account-id">Account ID</label>
+                          <label for="broker-account-id">ID счёта</label>
                           <input id="broker-account-id" type="text" autocomplete="off" spellcheck="false">
+                        </div>
+                      </div>
+                      <p class="meta" id="broker-sandbox-account-line">
+                        Для песочницы: токен → «Подтянуть / создать счёт» → «Пополнить песочницу».
+                      </p>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-token">Токен</label>
+                          <input id="broker-token" type="password" autocomplete="off" placeholder="Вставьте новый токен только при обновлении">
+                        </div>
+                        <div class="field">
+                          <label for="broker-sandbox-payin-amount">Пополнение песочницы, ₽</label>
+                          <input id="broker-sandbox-payin-amount" type="number" step="1000" min="1000" value="200000">
+                        </div>
+                        <div class="field">
+                          <label for="broker-passive-bps">Смещение лимита, bps</label>
+                          <input id="broker-passive-bps" type="number" step="0.1" min="0">
                         </div>
                       </div>
                       <div class="auth-row">
                         <div class="field">
-                          <label for="broker-token">Token</label>
-                          <input id="broker-token" type="password" autocomplete="off" placeholder="Вставьте новый токен только при обновлении">
-                        </div>
-                        <div class="field">
-                          <label for="broker-passive-bps">Passive offset, bps</label>
-                          <input id="broker-passive-bps" type="number" step="0.1" min="0">
-                        </div>
-                        <div class="field">
-                          <label for="broker-timeout-seconds">Second leg timeout, sec</label>
+                          <label for="broker-timeout-seconds">Таймаут второй ноги, сек</label>
                           <input id="broker-timeout-seconds" type="number" step="1" min="1">
                         </div>
                       </div>
                       <div class="alert-prefs">
-                        <label class="check-label"><input type="checkbox" id="broker-enabled"> Broker enabled</label>
-                        <label class="check-label"><input type="checkbox" id="broker-sandbox"> Sandbox</label>
-                        <label class="check-label"><input type="checkbox" id="broker-auto-execute"> Auto-execute after analysis</label>
-                        <label class="check-label"><input type="checkbox" id="broker-prefer-limit"> Prefer limit orders</label>
-                        <label class="check-label"><input type="checkbox" id="broker-allow-market"> Allow market fallback</label>
-                        <label class="check-label"><input type="checkbox" id="broker-emergency-exit"> Emergency market exit on asymmetric fill</label>
-                        <label class="check-label"><input type="checkbox" id="broker-kill-switch"> Kill-switch</label>
+                        <label class="check-label"><input type="checkbox" id="broker-enabled"> Брокер включён</label>
+                        <label class="check-label"><input type="checkbox" id="broker-sandbox"> Песочница</label>
+                        <label class="check-label"><input type="checkbox" id="broker-auto-execute"> Автоисполнение после анализа</label>
+                        <label class="check-label"><input type="checkbox" id="broker-prefer-limit"> Предпочитать лимитные заявки</label>
+                        <label class="check-label"><input type="checkbox" id="broker-allow-market"> Разрешить рыночный fallback</label>
+                        <label class="check-label"><input type="checkbox" id="broker-emergency-exit"> Аварийный market-exit при асимметрии</label>
+                        <label class="check-label"><input type="checkbox" id="broker-kill-switch"> Аварийный стоп (kill-switch)</label>
                       </div>
-                      <p class="meta" id="broker-token-hint">Token пока не сохранён.</p>
+                      <p class="meta" id="broker-token-hint">Токен пока не сохранён.</p>
                       <div class="ops-actions">
-                        <button type="button" class="btn btn-primary" id="broker-save-settings">Сохранить broker settings</button>
+                        <button type="button" class="btn btn-primary" id="broker-save-settings">Сохранить настройки брокера</button>
+                        <button type="button" class="btn btn-ghost" id="broker-sandbox-account">Подтянуть / создать счёт песочницы</button>
+                        <button type="button" class="btn btn-ghost" id="broker-sandbox-payin">Пополнить песочницу</button>
                       </div>
                     </div>
                   </div>
@@ -341,7 +507,7 @@ public class AnalysisHtmlRenderer {
                 </div>
                 """);
         body.append("<p class=\"meta\">Всего рекомендаций: ").append(recommendations.size()).append("</p>");
-        body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Нажмите «Анализ + paper» в пульте выше."));
+        body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Нажмите «Анализ + paper» на дашборде, в полоске сверху или в Настройках."));
         return page("TRINITY — рекомендации", body.toString(), nav("recommendations"));
     }
 
@@ -358,10 +524,11 @@ public class AnalysisHtmlRenderer {
         String body = """
                 <div class="empty">
                   <h2>Анализ ещё не выполнен</h2>
-                  <p>Нажмите <strong>«Анализ + paper»</strong> в пульте выше.
+                  <p>Нажмите <strong>«Анализ + paper»</strong> на дашборде, в полоске сверху или в
+                    <a href="/view/settings">Настройках</a>.
                   Логин/пароль API — из вашего локального <code>application-local.yml</code>
                   (в репозитории секретов нет). После завершения страница обновится сама.</p>
-                  <p class="meta">Если свечей ещё нет — сначала «Скачать свечи», либо «Анализ + скачать свечи».</p>
+                  <p class="meta">Если свечей ещё нет — сначала «Скачать свечи» в Настройках, либо «Анализ + скачать свечи».</p>
                 </div>
                 """;
         return page("TRINITY — нет данных", body, nav("none"));
@@ -548,7 +715,7 @@ public class AnalysisHtmlRenderer {
                   <p>
                     Mean-reversion плохо работает в сильном тренде: спред может «уехать» вместе с рынком
                     и не вернуться к среднему. Поэтому перед входами смотрим <strong>ADX индекса IMOEX</strong>
-                    (баннер «Режим рынка» на дашборде):
+                    (виджет «Режим рынка» на дашборде):
                   </p>
                   <ul>
                     <li><strong>SIDEWAYS</strong> (ADX низкий) — боковик, mean-reversion активна;</li>
@@ -735,20 +902,22 @@ public class AnalysisHtmlRenderer {
                     <li><strong>Java 17+</strong> и <strong>Maven 3.9+</strong> установлены; вы в корне репозитория (там, где <code>pom.xml</code>).</li>
                     <li>Создайте <code>src/main/resources/application-local.yml</code> с паролем API и ключом <code>imoex.run.unlock</code> (без них приложение не стартует).</li>
                     <li>Запустите: <code>mvn spring-boot:run</code> и дождитесь <code>Started CointegrationApplication</code>.</li>
-                    <li>Откройте <a href="/view">http://localhost:8080/view</a> — дашборд и пульт оператора.</li>
-                    <li>Первый раз нажмите <strong>«Анализ + скачать свечи»</strong> — скачает историю с MOEX ISS (может занять много минут).</li>
-                    <li>Дальше обычно достаточно <strong>«Анализ + paper»</strong> — пересчёт без полного скачивания.</li>
+                    <li>Откройте <a href="/view">http://localhost:8080/view</a> — спокойный дашборд (KPI и сигналы).</li>
+                    <li>В <a href="/view/settings">Настройках</a> сохраните логин API; первый раз нажмите
+                      <strong>«Анализ + скачать свечи»</strong> — скачает историю с MOEX ISS (может занять много минут).</li>
+                    <li>Дальше обычно достаточно <strong>«Анализ + paper»</strong> — с дашборда или из настроек.</li>
                   </ol>
                   <div class="callout">
                     GET-страницы <code>/view/*</code> открываются без пароля. Кнопки пульта шлют POST на API —
                     нужны логин и пароль из <code>application-local.yml</code> (по умолчанию user <code>imoex</code>).
                   </div>
 
-                  <h3 id="ops">2. Пульт оператора</h3>
-                  <p>На каждой странице <code>/view/*</code> сверху — блок «Пульт оператора»:</p>
-                  <p class="meta">
-                    Отдельно на <a href="/view">дашборде</a> есть блок <strong>Broker console</strong>:
-                    подключение токена/счёта, reconcile и аварийный <code>flatten-all</code> без правки кода.
+                  <h3 id="ops">2. Пульт и брокер (Настройки)</h3>
+                  <p>
+                    Полный <strong>пульт оператора</strong> и <strong>консоль брокера</strong> — только в
+                    <a href="/view/settings">Настройках</a>. Дашборд — обзор: виджеты, «что сделать сейчас», сигналы.
+                    На остальных страницах сверху компактная полоска: быстрый <strong>Анализ + paper</strong>
+                    и ссылка в настройки.
                   </p>
                   <table class="params">
                     <thead><tr><th>Кнопка</th><th>Что делает</th></tr></thead>
@@ -761,14 +930,15 @@ public class AnalysisHtmlRenderer {
                     </tbody>
                   </table>
                   <p>
-                    Логин и пароль сохраняются в <em>этом браузере</em> (localStorage). Журнал действий пульта — в блоке «Лог» под кнопками.
+                    Логин и пароль сохраняются в <em>этом браузере</em> (localStorage). Журнал действий пульта — в блоке «Лог» в Настройках.
                   </p>
 
                   <h3 id="pages">3. Разделы верхнего меню</h3>
                   <table class="params">
                     <thead><tr><th>Раздел</th><th>Зачем открывать</th></tr></thead>
                     <tbody>
-                      <tr><td><a href="/view">Дашборд</a></td><td>Сводка: режим рынка (ADX), топ-пары, последний прогон и единственный UI-блок подключения брокера.</td></tr>
+                      <tr><td><a href="/view">Дашборд</a></td><td>Спокойный обзор: KPI (Paper / Брокер / Final / Режим), сигналы и топ-пары.</td></tr>
+                      <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера (токен, песочница, сверка).</td></tr>
                       <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY).</td></tr>
                       <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
                       <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>
@@ -788,7 +958,7 @@ public class AnalysisHtmlRenderer {
                     <li>Нажать «Анализ + paper» (или дождаться вечернего cron — см. ниже).</li>
                     <li>Открыть <a href="/view/final">Итог + новости</a> — что разрешено по DAILY после FA.</li>
                     <li>Открыть <a href="/view/paper">Paper</a> — что реально открылось в обеих книгах.</li>
-                    <li>При сомнениях — график пары и баннер «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
+                    <li>При сомнениях — график пары и виджет «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
                   </ol>
 
                   <h3 id="auto">5. Автопрогоны (cron)</h3>
@@ -830,7 +1000,7 @@ public class AnalysisHtmlRenderer {
                     </tbody>
                   </table>
                   <p>
-                    В пульте: чекбоксы «Алерты при новой paper-сделке» и «Звук».
+                    В <a href="/view/settings">Настройках</a>: чекбоксы «Алерты при новой paper-сделке» и «Звук».
                     После ручного «Анализ + paper» опрос срабатывает сразу.
                     Вкладка может быть в фоне, но <strong>браузер должен быть запущен</strong> — это не push с сервера без открытой страницы.
                   </p>
@@ -868,7 +1038,7 @@ public class AnalysisHtmlRenderer {
                     <li>Кнопка «Анализ + paper» завершается без 401 (логин/пароль верные)</li>
                     <li>В <code>data/candles/</code> есть JSON тикеров (после первого refresh)</li>
                     <li><a href="/view/final">Итог + новости</a> показывает таблицу (может быть пустой — нет ENTER)</li>
-                    <li>На дашборде виден баннер режима рынка (SIDEWAYS / NEUTRAL / TREND)</li>
+                    <li>На дашборде видны виджеты режима рынка (SIDEWAYS / NEUTRAL / TREND)</li>
                     <li>При тестовом OPEN — баннер и звук в браузере (алерты включены)</li>
                   </ul>
                   <div class="callout">
@@ -1382,7 +1552,7 @@ public class AnalysisHtmlRenderer {
                 </div>
                 """);
         if (report == null || report.pairs() == null || report.pairs().isEmpty()) {
-            body.append("<p class=\"empty\">Нет walk-forward отчёта. Нажмите «Walk-forward» в пульте или запустите полный анализ.</p>");
+            body.append("<p class=\"empty\">Нет walk-forward отчёта. Нажмите «Walk-forward» в <a href=\"/view/settings\">Настройках</a> или запустите полный анализ.</p>");
             return page("Walk-forward", body.toString(), nav("walkforward"));
         }
 
@@ -1425,6 +1595,7 @@ public class AnalysisHtmlRenderer {
         return """
                 <nav class="topnav">
                   <a href="/view" class="%s">Дашборд</a>
+                  <a href="/view/settings" class="%s">Настройки</a>
                   <a href="/view/guide" class="%s">Как пользоваться системой</a>
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
@@ -1435,6 +1606,7 @@ public class AnalysisHtmlRenderer {
                 </nav>
                 """.formatted(
                 active.equals("dashboard") ? "active" : "",
+                active.equals("settings") ? "active" : "",
                 active.equals("guide") ? "active" : "",
                 active.equals("final") ? "active" : "",
                 active.equals("signals") ? "active" : "",
@@ -1446,10 +1618,14 @@ public class AnalysisHtmlRenderer {
     }
 
     private String page(String title, String body, String nav) {
+        return page(title, body, nav, OpsMode.COMPACT);
+    }
+
+    private String page(String title, String body, String nav, OpsMode opsMode) {
         return PAGE_TEMPLATE
                 .replace("{{TITLE}}", escape(title))
                 .replace("{{NAV}}", nav)
-                .replace("{{OPS}}", opsPanel())
+                .replace("{{OPS}}", opsHtml(opsMode))
                 .replace("{{BODY}}", body);
     }
 
