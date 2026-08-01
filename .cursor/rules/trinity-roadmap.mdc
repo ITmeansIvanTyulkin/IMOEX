@@ -10,8 +10,10 @@ Three strategies under one brand. Do not jump ahead without completing the curre
 ## Product shape
 
 1. **Cointegration / pairs** — active now (DAILY live; INTRADAY research-only).
-2. **Futures calendar** arbitrage — roadmap only, no code yet (oil/energy equities deferred here).
-3. **Options** — roadmap only, no code yet.
+2. **Trend** — roadmap only, no code yet.
+3. **Arbitrage** — futures calendar arbitrage; roadmap only, no code yet (oil/energy equities deferred here).
+
+Options — further deferred beyond the three pillars; not in scope of this roadmap stage.
 
 ## Strategy 1 — current scope
 
@@ -24,7 +26,7 @@ Target operator profile: equity **from ~100 000 ₽**, capital on **DAILY** (n
 
 Pipeline DAILY: **tech → cluster gate → FA → final recommendations → paper**. Never open DAILY paper before FA.
 
-Do not start calendar/options until DAILY pairs is validated on paper/OOS; do not treat INTRADAY as a second live book while research-only.
+Do not start strategy 2 (trend) or strategy 3 (calendar arbitrage) until DAILY pairs is validated on paper/OOS; do not treat INTRADAY as a second live book while research-only.
 
 ## Config intent (pairs)
 
@@ -44,3 +46,24 @@ Inspired by TestOps-style split. **Do not implement now** — current focus rema
 - **Core** — downloadable/local fuller profile: persistent candle archive, research/replay/walk-forward friendly; operator journals stay local.
 - Useful diffs later: secrets locality; cron/alerts depth; cluster-review export/history; INTRADAY depth; live broker only in Core.
 - Gate: defer to **autumn–winter 2026**.
+
+### Pricing draft (autumn–winter 2026)
+
+**Do not implement now.** Draft only; delivery (Instance vs Core) ≠ price tier. Full Core tier → Core delivery + strategy 3 (arbitrage) module.
+
+Monthly RUB draft:
+
+- **5 000 — Обзор**: Instance; dashboard / signals / paper summary; без глубокого candle-архива; paper/sandbox; без walk-forward; без trend / arbitrage.
+- **7 500 — Оператор**: полный DAILY pairs pipeline + paper / alerts / sandbox; ограниченная история / export; **только pairs** (strategy 1).
+- **10 000 — Research / Full Core**: локальный candle-архив, replay / WF, INTRADAY research depth, Core desktop; **открывает strategy 3 — arbitrage** (futures calendar). Strategy 2 (trend) — tier TBD (likely Full Core or later). Options — позже / вне этого драфта.
+
+Pairs in lower tiers; trend + arb gated (trend tier TBD; arb = Full Core). Trend/arbitrage coding still gated on DAILY pairs paper/OOS validation (see above).
+
+### Core updates (desktop installs)
+
+Still deferred to **autumn–winter 2026** — do not implement now. Prefer one codebase; updater is a delivery concern for the Core profile only.
+
+- **Instance** — updates server-side; users always on latest.
+- **Core** (e.g. Windows exe) — data/journals/candles live outside the app dir (e.g. AppData) and must survive upgrades.
+- **Phase 1 (MVP)** — version check + manual download/reinstall.
+- **Phase 2 (later)** — in-app banner / optional auto-updater (WiX/Squirrel/MSIX/jpackage+updater), code signing, stable/beta channels, semver in About.
