@@ -55,7 +55,7 @@ Monthly RUB draft:
 
 - **5 000 — Обзор**: Instance; dashboard / signals / paper summary; без глубокого candle-архива; paper/sandbox; без walk-forward; без trend / arbitrage.
 - **7 500 — Оператор**: полный DAILY pairs pipeline + paper / alerts / sandbox; ограниченная история / export; **только pairs** (strategy 1).
-- **10 000 — Research / Full Core**: локальный candle-архив, replay / WF, INTRADAY research depth, Core desktop; **открывает strategy 3 — arbitrage** (futures calendar). Strategy 2 (trend) — tier TBD (likely Full Core or later). Options — позже / вне этого драфта.
+- **15 000 — Research / Full Core** (commercial target): локальный candle-архив, replay / WF, INTRADAY research depth, Core desktop; **открывает strategy 3 — arbitrage** (futures calendar). Soft upsell scaffold in `imoex.upsell.*`. Strategy 2 (trend) — tier TBD (likely Full Core or later). Options — позже / вне этого драфта.
 
 Pairs in lower tiers; trend + arb gated (trend tier TBD; arb = Full Core). Trend/arbitrage coding still gated on DAILY pairs paper/OOS validation (see above).
 

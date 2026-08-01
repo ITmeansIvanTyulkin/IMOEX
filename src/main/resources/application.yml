@@ -136,6 +136,13 @@ imoex:
     min-profit-factor: 1.10
     min-closed-trades: 4
     exclude-oil-gas: true
+  # Soft upsell Full Core / calendar arbitrage (scaffolding, no billing)
+  upsell:
+    enabled: true
+    full-price-rub: 15000
+    cooldown-hours: 168
+    min-events-before-prompt: 3
+    min-dashboard-views: 2
   # Pre-filter до Engle–Granger: оборот / цена / preferred / сектора
   universe:
     enabled: true

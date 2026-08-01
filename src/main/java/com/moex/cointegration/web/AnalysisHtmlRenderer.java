@@ -53,6 +53,7 @@ public class AnalysisHtmlRenderer {
                 {{OPS}}
                 {{BODY}}
                 <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
+                <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
               </main>
               <script src="/js/operator.js"></script>

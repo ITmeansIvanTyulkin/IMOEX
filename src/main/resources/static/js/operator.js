@@ -4,6 +4,7 @@
   const ALERTS_ENABLED_KEY = "imoex.alerts.enabled";
   const ALERTS_SOUND_KEY = "imoex.alerts.sound";
   const SEEN_IDS_KEY = "imoex.alerts.seenIds";
+  const UPSELL_SHOWN_KEY = "imoex.upsell.shownId";
   const POLL_MS = 60000;
 
   const SECTION_TITLES = {
@@ -194,6 +195,113 @@
     showToast(alert);
     showNativeNotification(alert);
     appendLog("Новая paper: " + (alert.summary || alert.tickerY + "/" + alert.tickerX), "ok");
+  }
+
+  function currentPagePath() {
+    return (location.pathname || "/view").replace(/\/+$/, "") || "/view";
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function recordUpsellEvent(action, page) {
+    try {
+      await fetch("/api/upsell/events", {
+        method: "POST",
+        headers: {
+          Authorization: authHeader(),
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: action || "unknown",
+          page: page || currentPagePath(),
+          tierHint: null
+        })
+      });
+    } catch (_) {
+      // soft beacon — never break ops
+    }
+  }
+
+  function hideUpsellCard() {
+    const host = $("trinity-upsell-host");
+    if (host) host.innerHTML = "";
+  }
+
+  async function dismissUpsell(prompt) {
+    hideUpsellCard();
+    try {
+      sessionStorage.removeItem(UPSELL_SHOWN_KEY);
+    } catch (_) {}
+    try {
+      await fetch("/api/upsell/dismiss", {
+        method: "POST",
+        headers: {
+          Authorization: authHeader(),
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          promptId: prompt && prompt.id,
+          featureKey: (prompt && prompt.featureKey) || "CALENDAR_ARB"
+        })
+      });
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  function showUpsellPrompt(prompt) {
+    const host = $("trinity-upsell-host");
+    if (!host || !prompt || !prompt.id) return;
+    if (sessionStorage.getItem(UPSELL_SHOWN_KEY) === prompt.id) return;
+    sessionStorage.setItem(UPSELL_SHOWN_KEY, prompt.id);
+
+    const href = prompt.ctaHref || "/view/strategy";
+    const cta = prompt.ctaLabel || "Подробнее";
+    const card = document.createElement("aside");
+    card.className = "upsell-card";
+    card.setAttribute("role", "complementary");
+    card.innerHTML =
+      '<button type="button" class="upsell-close" aria-label="Закрыть">&times;</button>' +
+      "<strong>" + escapeHtml(prompt.title) + "</strong>" +
+      "<p>" + escapeHtml(prompt.body) + "</p>" +
+      '<div class="upsell-actions">' +
+      '<a href="' + escapeHtml(href) + '">' + escapeHtml(cta) + "</a>" +
+      '<button type="button" class="upsell-dismiss">Скрыть</button>' +
+      "</div>";
+
+    card.querySelector(".upsell-close").addEventListener("click", function () {
+      dismissUpsell(prompt);
+    });
+    card.querySelector(".upsell-dismiss").addEventListener("click", function () {
+      dismissUpsell(prompt);
+    });
+
+    host.innerHTML = "";
+    host.appendChild(card);
+  }
+
+  async function maybeShowUpsell() {
+    try {
+      const res = await fetch("/api/upsell/prompt", { headers: { Accept: "application/json" } });
+      if (res.status === 204 || !res.ok) return;
+      const prompt = await res.json();
+      if (prompt && prompt.id) showUpsellPrompt(prompt);
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  async function beaconUpsell(action, page) {
+    await recordUpsellEvent(action, page);
+    await maybeShowUpsell();
   }
 
   async function seedSeenFromJournal() {
@@ -665,6 +773,7 @@
     loadCreds();
     const map = {
       "run-fast": function () {
+        beaconUpsell("run-fast", currentPagePath());
         return apiPost(
           "/api/analysis/run?refresh=false",
           ACTION_START["run-fast"],
@@ -673,6 +782,7 @@
       },
       "run-full": function () {
         if (!confirm("Полный refresh скачает свечи с MOEX — может занять много минут. Продолжить?")) return;
+        beaconUpsell("run-full", currentPagePath());
         return apiPost(
           "/api/analysis/run?refresh=true",
           ACTION_START["run-full"],
@@ -680,6 +790,7 @@
         );
       },
       "news-refresh": function () {
+        beaconUpsell("news-refresh", currentPagePath());
         return apiPost(
           "/api/analysis/news-refresh",
           ACTION_START["news-refresh"],
@@ -688,6 +799,7 @@
       },
       "data-refresh": function () {
         if (!confirm("Скачать свечи IMOEX с биржи?")) return;
+        beaconUpsell("data-refresh", currentPagePath());
         return apiPost(
           "/api/data/refresh",
           ACTION_START["data-refresh"],
@@ -695,6 +807,7 @@
         );
       },
       "walk-forward": function () {
+        beaconUpsell("walk-forward", currentPagePath());
         return apiPost(
           "/api/analysis/walk-forward?maxPairs=10",
           ACTION_START["walk-forward"],
@@ -748,6 +861,7 @@
     appendLog("Операторская панель готова.", "info");
     appendLog("Раздел: " + currentSectionTitle() + ".", "info");
     startAlertPolling();
+    beaconUpsell("page_view", currentPagePath());
   }
 
   if (document.readyState === "loading") {
