@@ -3,6 +3,8 @@ package com.moex.cointegration.service;
 import com.moex.cointegration.model.BrokerExecutionReport;
 import com.moex.cointegration.model.BrokerStatus;
 import com.moex.cointegration.model.BrokerAccountSnapshot;
+import com.moex.cointegration.model.BrokerSandboxAccountResult;
+import com.moex.cointegration.model.BrokerSandboxPayInResult;
 import com.moex.cointegration.model.PairExecutionPlan;
 
 /**
@@ -19,4 +21,14 @@ public interface BrokerClient {
     BrokerExecutionReport execute(PairExecutionPlan plan);
 
     BrokerExecutionReport flattenAll();
+
+    /**
+     * Подтянуть существующий sandbox account или создать новый и сохранить accountId.
+     */
+    BrokerSandboxAccountResult ensureSandboxAccount();
+
+    /**
+     * Пополнить sandbox-счёт в рублях (SandboxPayIn).
+     */
+    BrokerSandboxPayInResult payInSandbox(double amountRub);
 }

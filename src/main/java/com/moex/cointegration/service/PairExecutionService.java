@@ -11,6 +11,8 @@ import com.moex.cointegration.model.BrokerAccountSnapshot;
 import com.moex.cointegration.model.BrokerOrderIntent;
 import com.moex.cointegration.model.BrokerOrderSide;
 import com.moex.cointegration.model.BrokerOrderType;
+import com.moex.cointegration.model.BrokerSandboxAccountResult;
+import com.moex.cointegration.model.BrokerSandboxPayInResult;
 import com.moex.cointegration.model.BrokerStatus;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
@@ -143,6 +145,14 @@ public class PairExecutionService {
         BrokerExecutionReport report = brokerClient.flattenAll();
         remember(report);
         return report;
+    }
+
+    public BrokerSandboxAccountResult ensureSandboxAccount() {
+        return brokerClient.ensureSandboxAccount();
+    }
+
+    public BrokerSandboxPayInResult payInSandbox(double amountRub) {
+        return brokerClient.payInSandbox(amountRub);
     }
 
     public PairExecutionPlan buildPlan(FinalTradeRecommendation finalRec, BookKind book) {

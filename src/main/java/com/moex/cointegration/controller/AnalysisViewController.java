@@ -113,6 +113,11 @@ public class AnalysisViewController {
         return htmlRenderer.renderWalkForward(report.orElse(null));
     }
 
+    @GetMapping(value = "/settings", produces = MediaType.TEXT_HTML_VALUE)
+    public String settings() {
+        return htmlRenderer.renderSettings();
+    }
+
     @GetMapping(value = "/strategy", produces = MediaType.TEXT_HTML_VALUE)
     public String strategy() {
         return htmlRenderer.renderStrategy();

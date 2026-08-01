@@ -9,6 +9,8 @@ import com.moex.cointegration.model.BrokerOrderSide;
 import com.moex.cointegration.model.BrokerOrderType;
 import com.moex.cointegration.model.BrokerAccountSnapshot;
 import com.moex.cointegration.model.BrokerPositionSnapshot;
+import com.moex.cointegration.model.BrokerSandboxAccountResult;
+import com.moex.cointegration.model.BrokerSandboxPayInResult;
 import com.moex.cointegration.model.BrokerStatus;
 import com.moex.cointegration.model.PairExecutionPlan;
 import jakarta.annotation.PreDestroy;
@@ -16,17 +18,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
+import ru.tinkoff.piapi.contract.v1.MoneyValue;
 import ru.tinkoff.piapi.contract.v1.OrderDirection;
 import ru.tinkoff.piapi.contract.v1.OrderExecutionReportStatus;
 import ru.tinkoff.piapi.contract.v1.OrderState;
 import ru.tinkoff.piapi.contract.v1.OrderType;
 import ru.tinkoff.piapi.contract.v1.PriceType;
 import ru.tinkoff.piapi.contract.v1.Quotation;
+import ru.tinkoff.piapi.contract.v1.SecurityTradingStatus;
 import ru.tinkoff.piapi.contract.v1.Share;
 import ru.tinkoff.piapi.core.InvestApi;
 import ru.tinkoff.piapi.core.models.SecurityPosition;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,17 +69,17 @@ public class TInvestBrokerClient implements BrokerClient {
         boolean accountPresent = properties.accountId() != null && !properties.accountId().isBlank();
         String summary;
         if (!properties.enabledFlag()) {
-            summary = "broker disabled";
+            summary = "брокер выключен";
         } else if (properties.killSwitchEnabled()) {
-            summary = "kill-switch enabled";
+            summary = "аварийный стоп включён";
         } else if (!tokenPresent) {
-            summary = "token missing: preview only";
+            summary = "нет токена: только preview";
         } else if (!accountPresent) {
-            summary = "accountId missing: preview only";
+            summary = "нет ID счёта: только preview";
         } else {
             summary = properties.sandboxFlag()
-                    ? "T-Invest sandbox armed"
-                    : "T-Invest live armed";
+                    ? "T-Invest песочница готова"
+                    : "T-Invest live готов";
         }
         return new BrokerStatus(
                 properties.enabledFlag(),
@@ -149,6 +154,11 @@ public class TInvestBrokerClient implements BrokerClient {
         try {
             Share shareY = shareByTicker(plan.legY().ticker());
             Share shareX = shareByTicker(plan.legX().ticker());
+
+            List<String> statusBlocks = new ArrayList<>();
+            if (!assertTradable(shareY, statusBlocks) || !assertTradable(shareX, statusBlocks)) {
+                return failed(plan, "Инструмент недоступен для торговли", statusBlocks);
+            }
 
             long lotsY = lots(plan.legY(), shareY);
             long lotsX = lots(plan.legX(), shareX);
@@ -253,8 +263,147 @@ public class TInvestBrokerClient implements BrokerClient {
         }
     }
 
+    @Override
+    public BrokerSandboxAccountResult ensureSandboxAccount() {
+        var properties = brokerSettingsService.effective();
+        String token = properties.token();
+        if (token == null || token.isBlank()) {
+            return new BrokerSandboxAccountResult(
+                    LocalDateTime.now(),
+                    false,
+                    false,
+                    null,
+                    List.of(),
+                    "Сначала сохраните токен песочницы"
+            );
+        }
+        if (!properties.sandboxFlag()) {
+            return new BrokerSandboxAccountResult(
+                    LocalDateTime.now(),
+                    false,
+                    false,
+                    properties.accountId(),
+                    List.of(),
+                    "Включите «Песочница»: создание/подтягивание счёта доступно только там"
+            );
+        }
+        try {
+            resetApi();
+            List<String> available = api().getSandboxService().getAccountsSync().stream()
+                    .map(account -> account.getId())
+                    .filter(id -> id != null && !id.isBlank())
+                    .toList();
+            String current = properties.accountId();
+            if (current != null && !current.isBlank() && available.contains(current)) {
+                return new BrokerSandboxAccountResult(
+                        LocalDateTime.now(),
+                        true,
+                        false,
+                        current,
+                        available,
+                        "Счёт песочницы уже настроен: " + current
+                );
+            }
+            boolean created = false;
+            String accountId;
+            if (!available.isEmpty()) {
+                accountId = available.get(0);
+            } else {
+                accountId = api().getSandboxService().openAccountSync();
+                if (accountId == null || accountId.isBlank()) {
+                    throw new IllegalStateException("T-Invest вернул пустой accountId при OpenSandboxAccount");
+                }
+                created = true;
+                available = List.of(accountId);
+            }
+            brokerSettingsService.updateAccountId(accountId);
+            return new BrokerSandboxAccountResult(
+                    LocalDateTime.now(),
+                    true,
+                    created,
+                    accountId,
+                    available,
+                    created
+                            ? "Создан новый счёт песочницы: " + accountId
+                            : "Подтянут существующий счёт песочницы: " + accountId
+            );
+        } catch (Exception ex) {
+            log.warn("T-Invest sandbox account ensure failed: {}", ex.getMessage(), ex);
+            return new BrokerSandboxAccountResult(
+                    LocalDateTime.now(),
+                    false,
+                    false,
+                    properties.accountId(),
+                    List.of(),
+                    "Не удалось получить счёт песочницы: " + rootMessage(ex)
+            );
+        }
+    }
+
+    @Override
+    public BrokerSandboxPayInResult payInSandbox(double amountRub) {
+        var properties = brokerSettingsService.effective();
+        String token = properties.token();
+        String accountId = properties.accountId();
+        if (token == null || token.isBlank()) {
+            return new BrokerSandboxPayInResult(
+                    LocalDateTime.now(), false, accountId, BigDecimal.valueOf(amountRub), null,
+                    "Сначала сохраните токен песочницы"
+            );
+        }
+        if (!properties.sandboxFlag()) {
+            return new BrokerSandboxPayInResult(
+                    LocalDateTime.now(), false, accountId, BigDecimal.valueOf(amountRub), null,
+                    "Пополнение доступно только в песочнице"
+            );
+        }
+        if (accountId == null || accountId.isBlank()) {
+            return new BrokerSandboxPayInResult(
+                    LocalDateTime.now(), false, null, BigDecimal.valueOf(amountRub), null,
+                    "Сначала подтяните / создайте счёт песочницы"
+            );
+        }
+        if (amountRub <= 0) {
+            return new BrokerSandboxPayInResult(
+                    LocalDateTime.now(), false, accountId, BigDecimal.valueOf(amountRub), null,
+                    "Сумма пополнения должна быть > 0"
+            );
+        }
+        try {
+            resetApi();
+            long units = Math.round(amountRub);
+            MoneyValue paid = api().getSandboxService().payInSync(
+                    accountId,
+                    MoneyValue.newBuilder().setUnits(units).setNano(0).setCurrency("RUB").build()
+            );
+            String balance = moneyToString(paid);
+            return new BrokerSandboxPayInResult(
+                    LocalDateTime.now(),
+                    true,
+                    accountId,
+                    BigDecimal.valueOf(units),
+                    balance,
+                    "Песочница пополнена на " + units + " RUB. Баланс: " + balance
+            );
+        } catch (Exception ex) {
+            log.warn("T-Invest sandbox pay-in failed: {}", ex.getMessage(), ex);
+            return new BrokerSandboxPayInResult(
+                    LocalDateTime.now(),
+                    false,
+                    accountId,
+                    BigDecimal.valueOf(amountRub),
+                    null,
+                    "Не удалось пополнить песочницу: " + rootMessage(ex)
+            );
+        }
+    }
+
     @PreDestroy
     void destroy() {
+        resetApi();
+    }
+
+    private synchronized void resetApi() {
         if (api != null) {
             try {
                 api.destroy(3);
@@ -262,6 +411,10 @@ public class TInvestBrokerClient implements BrokerClient {
                 // best effort
             }
         }
+        api = null;
+        apiToken = null;
+        apiSandbox = null;
+        sharesByTicker.clear();
     }
 
     private synchronized InvestApi api() {
@@ -311,11 +464,15 @@ public class TInvestBrokerClient implements BrokerClient {
         OrderType orderType = leg.orderType() == BrokerOrderType.MARKET
                 ? OrderType.ORDER_TYPE_MARKET
                 : OrderType.ORDER_TYPE_LIMIT;
-        Quotation price = leg.limitPrice() == null ? null : quotation(BigDecimal.valueOf(leg.limitPrice()));
+        Quotation price = null;
+        if (leg.limitPrice() != null) {
+            BigDecimal aligned = alignToMinIncrement(BigDecimal.valueOf(leg.limitPrice()), share.getMinPriceIncrement());
+            price = quotation(aligned);
+        }
 
         log.info("T-Invest submit {} {} lots {} as {} @{} [{}]",
                 leg.side(), leg.ticker(), lots, orderType,
-                leg.limitPrice(), properties.sandboxFlag() ? "sandbox" : "live");
+                price == null ? null : decimal(price), properties.sandboxFlag() ? "sandbox" : "live");
 
         return api().getOrdersService().postOrderSync(
                 share.getFigi(),
@@ -330,6 +487,7 @@ public class TInvestBrokerClient implements BrokerClient {
 
     private String replaceOrder(String orderId, long lots, double desiredPrice) {
         var properties = brokerSettingsService.effective();
+        // desiredPrice already aligned in desiredPassiveLimit
         Quotation price = quotation(BigDecimal.valueOf(desiredPrice));
         return api().getOrdersService().replaceOrderSync(
                 orderId,
@@ -491,8 +649,9 @@ public class TInvestBrokerClient implements BrokerClient {
             return null;
         }
         double bps = properties.passivePriceOffsetBps() / 10_000.0;
-        double raw = last.doubleValue() * (side == BrokerOrderSide.BUY ? (1.0 - bps) : (1.0 + bps));
-        return round(raw);
+        BigDecimal raw = last.multiply(BigDecimal.valueOf(side == BrokerOrderSide.BUY ? (1.0 - bps) : (1.0 + bps)));
+        BigDecimal aligned = alignToMinIncrement(raw, share.getMinPriceIncrement());
+        return aligned.doubleValue();
     }
 
     private BrokerExecutionReport failed(PairExecutionPlan plan, String summary, List<String> messages) {
@@ -558,6 +717,52 @@ public class TInvestBrokerClient implements BrokerClient {
 
     private static double round(double value) {
         return Math.round(value * 100.0) / 100.0;
+    }
+
+    /**
+     * Округление цены к minPriceIncrement инструмента (как в официальном Example.java).
+     */
+    static BigDecimal alignToMinIncrement(BigDecimal price, Quotation minIncrement) {
+        if (price == null) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal step = decimal(minIncrement);
+        if (step == null || step.compareTo(BigDecimal.ZERO) <= 0) {
+            return price.setScale(2, RoundingMode.HALF_UP);
+        }
+        BigDecimal steps = price.divide(step, 0, RoundingMode.HALF_UP);
+        return steps.multiply(step).stripTrailingZeros();
+    }
+
+    private boolean assertTradable(Share share, List<String> messages) {
+        try {
+            SecurityTradingStatus status = api().getMarketDataService()
+                    .getTradingStatusSync(share.getFigi())
+                    .getTradingStatus();
+            if (isTradable(status)) {
+                return true;
+            }
+            messages.add(String.format(Locale.ROOT, "%s tradingStatus=%s", share.getTicker(), status.name()));
+            return false;
+        } catch (Exception ex) {
+            messages.add(String.format(Locale.ROOT, "%s tradingStatus check failed: %s",
+                    share.getTicker(), rootMessage(ex)));
+            return false;
+        }
+    }
+
+    static boolean isTradable(SecurityTradingStatus status) {
+        return status == SecurityTradingStatus.SECURITY_TRADING_STATUS_NORMAL_TRADING
+                || status == SecurityTradingStatus.SECURITY_TRADING_STATUS_DEALER_NORMAL_TRADING
+                || status == SecurityTradingStatus.SECURITY_TRADING_STATUS_SESSION_OPEN;
+    }
+
+    private static String moneyToString(MoneyValue value) {
+        if (value == null) {
+            return "—";
+        }
+        BigDecimal amount = BigDecimal.valueOf(value.getUnits()).add(BigDecimal.valueOf(value.getNano(), 9));
+        return amount.stripTrailingZeros().toPlainString() + " " + value.getCurrency();
     }
 
     private static Quotation quotation(BigDecimal value) {
@@ -637,6 +842,15 @@ public class TInvestBrokerClient implements BrokerClient {
 
     private static boolean safeEquals(Object a, Object b) {
         return a == null ? b == null : a.equals(b);
+    }
+
+    private static String rootMessage(Throwable ex) {
+        Throwable cur = ex;
+        while (cur.getCause() != null && cur.getCause() != cur) {
+            cur = cur.getCause();
+        }
+        String message = cur.getMessage();
+        return message == null || message.isBlank() ? cur.getClass().getSimpleName() : message;
     }
 
     private record SafetyResult(boolean ok, String summary, List<String> messages) {

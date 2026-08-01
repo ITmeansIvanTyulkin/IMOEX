@@ -10,6 +10,7 @@ import com.moex.cointegration.service.CointegrationAnalysisService;
 import com.moex.cointegration.service.FinalRecommendationService;
 import com.moex.cointegration.service.HistoricalReplayService;
 import com.moex.cointegration.service.MarketDataService;
+import com.moex.cointegration.service.PairExecutionService;
 import com.moex.cointegration.service.PaperTradingService;
 import com.moex.cointegration.service.RiskPolicyService;
 import com.moex.cointegration.service.TradingRecommendationService;
@@ -59,6 +60,8 @@ class AnalysisControllerTest {
     WalkForwardService walkForwardService;
     @MockBean
     PaperTradingService paperTradingService;
+    @MockBean
+    PairExecutionService pairExecutionService;
     @MockBean
     RiskPolicyService riskPolicyService;
     @MockBean
