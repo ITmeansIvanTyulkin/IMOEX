@@ -21,7 +21,13 @@ public record BrokerProperties(
         Double passivePriceOffsetBps,
         Integer secondLegTimeoutSeconds,
         Double maxLegDriftBps,
-        Boolean killSwitch
+        Boolean killSwitch,
+        /**
+         * When true, T-Invest gRPC uses a channel-scoped SSL context that trusts the
+         * embedded Russian Trusted CA bundle (not JVM {@code cacerts}). Default true
+         * for sandbox; false for live unless explicitly enabled.
+         */
+        Boolean trustAllSsl
 ) {
     public BrokerProperties {
         if (enabled == null) {
@@ -60,11 +66,15 @@ public record BrokerProperties(
         if (killSwitch == null) {
             killSwitch = false;
         }
+        if (trustAllSsl == null) {
+            // Corretto/OpenJDK without Russian Trusted CA: sandbox needs this to talk to T-Invest.
+            trustAllSsl = Boolean.TRUE.equals(sandbox);
+        }
     }
 
     public static BrokerProperties defaults() {
         return new BrokerProperties(false, "T_INVEST", "AUTO", true, "", "",
-                true, true, false, false, 15.0, 60, 35.0, false);
+                true, true, false, false, 15.0, 60, 35.0, false, true);
     }
 
     public boolean enabledFlag() {
@@ -93,5 +103,9 @@ public record BrokerProperties(
 
     public boolean killSwitchEnabled() {
         return Boolean.TRUE.equals(killSwitch);
+    }
+
+    public boolean trustAllSslFlag() {
+        return Boolean.TRUE.equals(trustAllSsl);
     }
 }

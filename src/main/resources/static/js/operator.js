@@ -58,12 +58,50 @@
     if ($("ops-pass")) $("ops-pass").value = pass;
   }
 
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  /** Ignition-style gauge: sweep --p from empty to target on load/update. */
   function setDonut(id, pct, colorVar) {
     const el = $(id);
     if (!el) return;
     const p = Math.max(0, Math.min(100, Number(pct) || 0));
-    el.style.setProperty("--p", String(p));
+    const prev = el.dataset.p != null ? Number(el.dataset.p) : NaN;
     if (colorVar) el.style.setProperty("--c", colorVar);
+
+    const same = Number.isFinite(prev) && Math.abs(prev - p) < 0.5;
+    if (same) {
+      el.style.setProperty("--p", String(p));
+      return;
+    }
+
+    el.dataset.p = String(p);
+
+    if (prefersReducedMotion()) {
+      el.style.setProperty("--p", String(p));
+      return;
+    }
+
+    const started = el.dataset.ignited === "1";
+    if (!started || (Number.isFinite(prev) && Math.abs(prev - p) >= 0.5)) {
+      el.style.transition = "none";
+      el.style.setProperty("--p", "0");
+      void el.offsetWidth;
+      el.style.transition = "";
+      el.dataset.ignited = "1";
+    }
+    requestAnimationFrame(function () {
+      el.style.setProperty("--p", String(p));
+    });
+  }
+
+  function igniteRegimeDonut() {
+    const el = $("widget-regime-donut");
+    if (!el) return;
+    const target = el.getAttribute("data-target-p");
+    const p = target != null && target !== "" ? Number(target) : 100;
+    setDonut("widget-regime-donut", Number.isFinite(p) ? p : 100);
   }
 
   function appendLog(msg, cls) {
@@ -729,14 +767,20 @@
       pollPaperAlerts();
       pollAutoRunStatus();
       if ($("broker-save-settings")) {
-        loadBrokerWidget();
         loadBrokerSettings();
       }
+      if ($("broker-save-settings") || $("widget-broker") || $("dash-broker-status")) {
+        loadBrokerWidget();
+      }
       loadDashboardConsolidatedSummary();
+      // Double-rAF: paint empty rings, then ignition sweep (incl. regime ADX).
+      requestAnimationFrame(function () {
+        requestAnimationFrame(igniteRegimeDonut);
+      });
     });
     setInterval(pollPaperAlerts, POLL_MS);
     setInterval(pollAutoRunStatus, POLL_MS * 5);
-    if ($("broker-save-settings")) {
+    if ($("broker-save-settings") || $("widget-broker") || $("dash-broker-status")) {
       setInterval(loadBrokerWidget, POLL_MS * 2);
     }
     setInterval(loadDashboardConsolidatedSummary, POLL_MS * 2);

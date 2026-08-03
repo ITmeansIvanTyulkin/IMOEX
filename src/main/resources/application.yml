@@ -139,6 +139,9 @@ imoex:
     second-leg-timeout-seconds: 60
     max-leg-drift-bps: 35
     kill-switch: false
+    # Channel-scoped SSL for T-Invest only (embedded Russian Trusted CA; not JVM cacerts).
+    # Defaults to true when sandbox=true. Set true for live if Corretto lacks Russian Trusted CA.
+    trust-all-ssl: true
   # Ежемесячный пересмотр кластеров (секторный cash PnL / PF)
   cluster-review:
     enabled: true

@@ -86,7 +86,8 @@ public class BrokerSettingsService {
                 doubleOr(current.passivePriceOffsetBps(), request.passivePriceOffsetBps()),
                 intOr(current.secondLegTimeoutSeconds(), request.secondLegTimeoutSeconds()),
                 doubleOr(current.maxLegDriftBps(), request.maxLegDriftBps()),
-                boolOr(current.killSwitch(), request.killSwitch())
+                boolOr(current.killSwitch(), request.killSwitch()),
+                current.trustAllSsl()
         );
         overrides = next;
         persist(next);
@@ -112,7 +113,8 @@ public class BrokerSettingsService {
                 current.passivePriceOffsetBps(),
                 current.secondLegTimeoutSeconds(),
                 current.maxLegDriftBps(),
-                current.killSwitch()
+                current.killSwitch(),
+                current.trustAllSsl()
         );
         overrides = next;
         persist(next);

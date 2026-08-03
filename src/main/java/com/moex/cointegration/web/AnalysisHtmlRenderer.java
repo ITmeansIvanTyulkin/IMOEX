@@ -323,7 +323,7 @@ public class AnalysisHtmlRenderer {
                   <article class="widget-card" id="widget-regime">
                     <div class="widget-title">Режим рынка</div>
                     <div class="widget-body">
-                      <div class="donut" id="widget-regime-donut" style="--p:100;--c:%s">
+                      <div class="donut" id="widget-regime-donut" data-target-p="100" style="--p:0;--c:%s">
                         <div class="donut-center">
                           <strong id="widget-regime-center">%s</strong>
                           <span>ADX %s</span>

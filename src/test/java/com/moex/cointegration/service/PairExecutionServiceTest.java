@@ -43,7 +43,7 @@ class PairExecutionServiceTest {
 
         BrokerProperties broker = new BrokerProperties(
                 true, "T_INVEST", "AUTO", true, "", "",
-                true, true, false, false, 15.0, 60, 35.0, false
+                true, true, false, false, 15.0, 60, 35.0, false, true
         );
         BrokerSettingsService settings = new BrokerSettingsService(broker, props);
         settings.load();
@@ -66,7 +66,7 @@ class PairExecutionServiceTest {
         MarketDataStorage storage = new MarketDataStorage(props);
         BrokerProperties broker = new BrokerProperties(
                 true, "T_INVEST", "MANUAL_CONFIRM", true, "", "",
-                true, true, false, false, 15.0, 60, 35.0, false
+                true, true, false, false, 15.0, 60, 35.0, false, true
         );
         BrokerSettingsService settings = new BrokerSettingsService(broker, props);
         settings.load();

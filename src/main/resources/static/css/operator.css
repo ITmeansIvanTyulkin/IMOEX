@@ -75,6 +75,19 @@ a:hover { color: var(--navy); }
   border-radius: 50%;
   border: 2.5px solid transparent;
   box-sizing: border-box;
+  transition: transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.3s ease;
+}
+
+.brand-row:hover .trinity-logo .ring-a {
+  transform: translate(-1px, 1px) scale(1.06);
+}
+
+.brand-row:hover .trinity-logo .ring-b {
+  transform: translate(1px, 1px) scale(1.06);
+}
+
+.brand-row:hover .trinity-logo .ring-c {
+  transform: translate(0, -1px) scale(1.08);
 }
 
 .trinity-logo .ring-a {
@@ -1462,6 +1475,13 @@ body[data-upsell="off"] .full-core-badge {
   margin-bottom: 0.5rem;
 }
 
+/* Animatable donut fill (--p) for ignition-style sweep */
+@property --p {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 /* Wealth-desk KPI widgets — airy cards, soft hierarchy */
 .widget-grid {
   display: grid;
@@ -1482,18 +1502,23 @@ body[data-upsell="off"] .full-core-badge {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 1.35rem 1.4rem 1.3rem;
+  padding: 1.4rem 1.4rem 1.5rem;
   box-shadow: var(--shadow);
-  min-height: 198px;
+  min-height: 248px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    border-color 0.28s ease,
+    box-shadow 0.32s ease,
+    transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .widget-card:hover {
-  border-color: #d5dde5;
-  box-shadow: var(--shadow-hover);
-  transform: translateY(-2px);
+  border-color: rgba(11, 122, 102, 0.22);
+  box-shadow:
+    var(--shadow-hover),
+    0 0 0 1px rgba(196, 163, 90, 0.1);
+  transform: translateY(-3px);
 }
 
 .widget-card .widget-title {
@@ -1501,19 +1526,24 @@ body[data-upsell="off"] .full-core-badge {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin: 0 0 1.15rem;
+  margin: 0 0 1.05rem;
   font-size: 0.7rem;
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
+  transition: color 0.25s ease;
+}
+
+.widget-card:hover .widget-title {
+  color: var(--navy);
 }
 
 .widget-body {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 1.2rem;
+  gap: 1.75rem;
   flex: 1;
 }
 
@@ -1524,24 +1554,41 @@ body[data-upsell="off"] .full-core-badge {
 .donut {
   --p: 0;
   --c: var(--accent);
-  width: 88px;
-  height: 88px;
+  width: 104px;
+  height: 104px;
   border-radius: 50%;
   background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--bg-deep) 0);
   display: grid;
   place-items: center;
   flex-shrink: 0;
   position: relative;
+  transition:
+    --p 1.05s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1),
+    filter 0.35s ease;
+  will-change: --p;
+}
+
+.widget-card:hover .donut {
+  transform: scale(1.045);
+  filter: drop-shadow(0 6px 14px rgba(30, 42, 50, 0.1));
 }
 
 .donut::before {
   content: "";
-  width: 64px;
-  height: 64px;
+  width: 76px;
+  height: 76px;
   border-radius: 50%;
   background: var(--panel);
   position: absolute;
   box-shadow: inset 0 0 0 1px rgba(30, 42, 50, 0.03);
+  transition: box-shadow 0.3s ease;
+}
+
+.widget-card:hover .donut::before {
+  box-shadow:
+    inset 0 0 0 1px rgba(11, 122, 102, 0.08),
+    0 0 0 1px rgba(196, 163, 90, 0.06);
 }
 
 .donut-center {
@@ -1549,11 +1596,16 @@ body[data-upsell="off"] .full-core-badge {
   z-index: 1;
   text-align: center;
   line-height: 1.15;
+  transition: transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.widget-card:hover .donut-center {
+  transform: translateY(-1px);
 }
 
 .donut-center strong {
   display: block;
-  font-size: 1.2rem;
+  font-size: 1.28rem;
   font-weight: 650;
   letter-spacing: -0.03em;
   color: var(--ink);
@@ -1561,7 +1613,7 @@ body[data-upsell="off"] .full-core-badge {
 
 .donut-center span {
   display: block;
-  margin-top: 0.12rem;
+  margin-top: 0.14rem;
   font-size: 0.62rem;
   color: var(--muted);
   font-weight: 600;
@@ -1576,7 +1628,8 @@ body[data-upsell="off"] .full-core-badge {
   min-width: 0;
   flex: 1;
   border-top: 1px solid var(--line);
-  padding-top: 0.85rem;
+  padding-top: 1.15rem;
+  margin-top: 0.1rem;
 }
 
 .widget-stat {
@@ -1585,7 +1638,8 @@ body[data-upsell="off"] .full-core-badge {
   justify-content: space-between;
   gap: 0.75rem;
   font-size: 0.88rem;
-  padding: 0.42rem 0;
+  padding: 0.48rem 0;
+  transition: background 0.2s ease;
 }
 
 .widget-stat + .widget-stat {
@@ -1613,6 +1667,12 @@ body[data-upsell="off"] .full-core-badge {
   border-radius: 50%;
   display: inline-block;
   background: var(--slate);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.widget-card:hover .swatch {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 3px rgba(126, 182, 212, 0.18);
 }
 
 .swatch.ok { background: var(--ok); }
@@ -1621,6 +1681,32 @@ body[data-upsell="off"] .full-core-badge {
 .swatch.info { background: var(--info); }
 .swatch.accent { background: var(--accent); }
 .swatch.gold { background: var(--gold); }
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-card,
+  .widget-card .widget-title,
+  .donut,
+  .donut::before,
+  .donut-center,
+  .swatch,
+  .trinity-logo .ring {
+    transition: none !important;
+  }
+
+  .widget-card:hover {
+    transform: none;
+  }
+
+  .widget-card:hover .donut,
+  .widget-card:hover .donut-center,
+  .widget-card:hover .swatch,
+  .brand-row:hover .trinity-logo .ring-a,
+  .brand-row:hover .trinity-logo .ring-b,
+  .brand-row:hover .trinity-logo .ring-c {
+    transform: none;
+    filter: none;
+  }
+}
 
 .dash-section {
   background: var(--panel);

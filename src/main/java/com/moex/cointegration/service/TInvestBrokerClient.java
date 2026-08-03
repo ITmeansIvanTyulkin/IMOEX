@@ -56,6 +56,7 @@ public class TInvestBrokerClient implements BrokerClient {
     private volatile InvestApi api;
     private volatile String apiToken;
     private volatile Boolean apiSandbox;
+    private volatile Boolean apiTrustAllSsl;
 
     public TInvestBrokerClient(BrokerSettingsService brokerSettingsService) {
         this.brokerSettingsService = brokerSettingsService;
@@ -414,12 +415,16 @@ public class TInvestBrokerClient implements BrokerClient {
         api = null;
         apiToken = null;
         apiSandbox = null;
+        apiTrustAllSsl = null;
         sharesByTicker.clear();
     }
 
     private synchronized InvestApi api() {
         var properties = brokerSettingsService.effective();
-        if (api == null || !safeEquals(apiToken, properties.token()) || !safeEquals(apiSandbox, properties.sandbox())) {
+        if (api == null
+                || !safeEquals(apiToken, properties.token())
+                || !safeEquals(apiSandbox, properties.sandbox())
+                || !safeEquals(apiTrustAllSsl, properties.trustAllSsl())) {
             if (api != null) {
                 try {
                     api.destroy(3);
@@ -430,9 +435,18 @@ public class TInvestBrokerClient implements BrokerClient {
             sharesByTicker.clear();
             apiToken = properties.token();
             apiSandbox = properties.sandbox();
-            api = properties.sandboxFlag()
-                    ? InvestApi.createSandbox(properties.token())
-                    : InvestApi.create(properties.token());
+            apiTrustAllSsl = properties.trustAllSsl();
+            if (properties.trustAllSslFlag()) {
+                var channel = TInvestGrpcChannelFactory.create(
+                        properties.token(), properties.sandboxFlag(), true);
+                api = properties.sandboxFlag()
+                        ? InvestApi.createSandbox(channel)
+                        : InvestApi.create(channel);
+            } else {
+                api = properties.sandboxFlag()
+                        ? InvestApi.createSandbox(properties.token())
+                        : InvestApi.create(properties.token());
+            }
         }
         return api;
     }
