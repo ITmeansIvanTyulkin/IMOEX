@@ -102,7 +102,7 @@ public class AnalysisHtmlRenderer {
                     <div>
                       <div class="auth-row">
                         <div class="field">
-                          <label for="ops-user">API user</label>
+                          <label for="ops-user">API user / email</label>
                           <input id="ops-user" type="text" autocomplete="username" spellcheck="false">
                         </div>
                         <div class="field">

@@ -1,11 +1,19 @@
 (function () {
   const USER_KEY = "imoex.ops.user";
   const PASS_KEY = "imoex.ops.pass";
+  const SB_TOKEN_KEY = "trinity.supabase.access_token";
+  const SB_EMAIL_KEY = "trinity.supabase.user_email";
   const ALERTS_ENABLED_KEY = "imoex.alerts.enabled";
   const ALERTS_SOUND_KEY = "imoex.alerts.sound";
   const SEEN_IDS_KEY = "imoex.alerts.seenIds";
   const UPSELL_SHOWN_KEY = "imoex.upsell.shownId";
   const POLL_MS = 60000;
+
+  /** Filled from GET /api/auth/mode — Supabase shares IdP with trinity-landing cabinet. */
+  let authMode = {
+    basicEnabled: true,
+    supabase: { enabled: false, configured: false, url: "", anonKey: "" }
+  };
 
   const SECTION_TITLES = {
     "/view": "Дашборд",
@@ -41,6 +49,10 @@
   }
 
   function authHeader() {
+    const token = localStorage.getItem(SB_TOKEN_KEY);
+    if (token) {
+      return "Bearer " + token;
+    }
     const user = ($("ops-user") && $("ops-user").value) || localStorage.getItem(USER_KEY) || "imoex";
     const pass = ($("ops-pass") && $("ops-pass").value) || localStorage.getItem(PASS_KEY) || "";
     return "Basic " + btoa(unescape(encodeURIComponent(user + ":" + pass)));
@@ -52,10 +64,94 @@
   }
 
   function loadCreds() {
-    const user = localStorage.getItem(USER_KEY) || "imoex";
+    const user =
+      localStorage.getItem(SB_EMAIL_KEY) ||
+      localStorage.getItem(USER_KEY) ||
+      "imoex";
     const pass = localStorage.getItem(PASS_KEY) || "";
     if ($("ops-user")) $("ops-user").value = user;
     if ($("ops-pass")) $("ops-pass").value = pass;
+  }
+
+  async function loadAuthMode() {
+    try {
+      const res = await fetch("/api/auth/mode", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const body = await res.json();
+      if (body && typeof body === "object") {
+        authMode = body;
+      }
+      applyAuthModeUi();
+    } catch (_) {
+      /* ignore — fall back to Basic */
+    }
+  }
+
+  function applyAuthModeUi() {
+    const sb = authMode.supabase || {};
+    const userLabel = document.querySelector('label[for="ops-user"]');
+    const passLabel = document.querySelector('label[for="ops-pass"]');
+    if (sb.enabled) {
+      if (userLabel) userLabel.textContent = "Email (Supabase / кабинет)";
+      if (passLabel) passLabel.textContent = "Пароль";
+      if ($("ops-user")) {
+        $("ops-user").placeholder = "you@example.com";
+        $("ops-user").type = "email";
+      }
+      if ($("ops-save-creds")) {
+        $("ops-save-creds").textContent = "Войти / сохранить";
+      }
+    }
+  }
+
+  async function ensureSupabaseSession() {
+    const sb = authMode.supabase || {};
+    if (!sb.enabled || !sb.url || !sb.anonKey) return;
+    if (localStorage.getItem(SB_TOKEN_KEY)) return;
+
+    const email = (($("ops-user") && $("ops-user").value) || "").trim();
+    const password = ($("ops-pass") && $("ops-pass").value) || "";
+    if (!email || !password) return;
+
+    const base = String(sb.url).replace(/\/$/, "");
+    const res = await fetch(base + "/auth/v1/token?grant_type=password", {
+      method: "POST",
+      headers: {
+        apikey: sb.anonKey,
+        Authorization: "Bearer " + sb.anonKey,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({ email: email, password: password })
+    });
+    const text = await res.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (_) {
+      data = null;
+    }
+    if (!res.ok || !data || !data.access_token) {
+      const msg =
+        (data && (data.error_description || data.msg || data.error)) ||
+        ("Supabase login HTTP " + res.status);
+      throw new Error(msg);
+    }
+    localStorage.setItem(SB_TOKEN_KEY, data.access_token);
+    localStorage.setItem(SB_EMAIL_KEY, email);
+    appendLog("Supabase-сессия: вход выполнен (общий логин с кабинетом).", "ok");
+  }
+
+  async function prepareAuth() {
+    saveCreds();
+    try {
+      await ensureSupabaseSession();
+    } catch (e) {
+      appendLog(
+        "Supabase: " + (e && e.message ? e.message : e) + " — пробую Basic fallback.",
+        "info"
+      );
+    }
   }
 
   function prefersReducedMotion() {
@@ -526,7 +622,7 @@
   }
 
   async function testBrokerConnection() {
-    saveCreds();
+    await prepareAuth();
     setBusy(true);
     appendLog("Проверяю подключение брокера…", "info");
     try {
@@ -606,7 +702,7 @@
 
   async function saveBrokerSettings() {
     if (!$("broker-save-settings")) return false;
-    saveCreds();
+    await prepareAuth();
     setBusy(true);
     appendLog("Сохраняю настройки брокера…", "info");
     try {
@@ -639,7 +735,7 @@
 
   async function ensureSandboxAccount() {
     if (!$("broker-sandbox-account")) return;
-    saveCreds();
+    await prepareAuth();
     setBusy(true);
     appendLog("Подтягиваю счёт песочницы…", "info");
     try {
@@ -688,7 +784,7 @@
 
   async function sandboxPayIn() {
     if (!$("broker-sandbox-payin")) return;
-    saveCreds();
+    await prepareAuth();
     setBusy(true);
     const amount = $("broker-sandbox-payin-amount")
       ? Number($("broker-sandbox-payin-amount").value || 200000)
@@ -787,7 +883,7 @@
   }
 
   async function apiPost(path, startMessage, okMessage) {
-    saveCreds();
+    await prepareAuth();
     setBusy(true);
     appendLog(startMessage || "Выполняю запрос…", "info");
     try {
@@ -803,7 +899,13 @@
       try { body = JSON.parse(text); } catch (_) { body = text; }
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
-          appendLog("Нет доступа — проверьте логин и пароль оператора.", "err");
+          appendLog(
+            "Нет доступа — войдите email/паролем кабинета (Supabase) или Basic operator.",
+            "err"
+          );
+          try {
+            localStorage.removeItem(SB_TOKEN_KEY);
+          } catch (_) { /* ignore */ }
         } else {
           appendLog(
             "Не удалось выполнить действие (" + res.status + ").",
@@ -842,6 +944,11 @@
 
   function bind() {
     loadCreds();
+    loadAuthMode().then(function () {
+      if (authMode.supabase && authMode.supabase.enabled && localStorage.getItem(SB_TOKEN_KEY)) {
+        appendLog("Найдена Supabase-сессия кабинета — Bearer для API.", "ok");
+      }
+    });
     const map = {
       "run-fast": function () {
         beaconUpsell("run-fast", currentPagePath());
@@ -889,7 +996,7 @@
         return testBrokerConnection();
       },
       "broker-reconcile": async function () {
-        saveCreds();
+        await prepareAuth();
         appendLog("Запрашиваю сверку с брокером…", "info");
         await loadBrokerWidget();
         appendLog("Сверка с брокером обновлена.", "ok");
@@ -913,9 +1020,18 @@
     });
 
     if ($("ops-save-creds")) {
-      $("ops-save-creds").addEventListener("click", function () {
+      $("ops-save-creds").addEventListener("click", async function () {
         saveCreds();
-        appendLog("Логин сохранён в этом браузере.", "ok");
+        try {
+          await ensureSupabaseSession();
+          if (localStorage.getItem(SB_TOKEN_KEY)) {
+            appendLog("Вход сохранён (Supabase token + localStorage).", "ok");
+          } else {
+            appendLog("Логин сохранён в этом браузере (Basic).", "ok");
+          }
+        } catch (e) {
+          appendLog("Логин сохранён; Supabase: " + (e && e.message ? e.message : e), "info");
+        }
       });
     }
 

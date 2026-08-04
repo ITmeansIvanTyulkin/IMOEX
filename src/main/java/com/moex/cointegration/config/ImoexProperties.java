@@ -603,15 +603,46 @@ public record ImoexProperties(
 
     /**
      * HTTP auth для mutating endpoints. При {@code enabled=false} API открыт (dev).
+     * При {@code supabase.enabled=true} POST /api/** также принимает Bearer JWT (тот же IdP, что кабинет).
      */
     public record AuthProperties(
             boolean enabled,
             String username,
             String password,
-            String apiKey
+            String apiKey,
+            SupabaseProperties supabase
     ) {
+        public AuthProperties {
+            if (supabase == null) {
+                supabase = SupabaseProperties.defaults();
+            }
+        }
+
         public static AuthProperties defaults() {
-            return new AuthProperties(false, "imoex", "change-me", "");
+            return new AuthProperties(false, "imoex", "change-me", "", SupabaseProperties.defaults());
+        }
+
+        /**
+         * Shared IdP with trinity-landing cabinet (Supabase Auth).
+         * JWT secret — только server-side; anon key можно отдать UI для login.
+         */
+        public record SupabaseProperties(
+                boolean enabled,
+                String url,
+                String jwtSecret,
+                String anonKey
+        ) {
+            public static SupabaseProperties defaults() {
+                return new SupabaseProperties(false, "", "", "");
+            }
+
+            public boolean jwtConfigured() {
+                return enabled
+                        && jwtSecret != null
+                        && !jwtSecret.isBlank()
+                        && url != null
+                        && !url.isBlank();
+            }
         }
     }
 }

@@ -217,6 +217,12 @@ imoex:
     username: imoex
     password: ${IMOEX_AUTH_PASSWORD:}
     api-key: ""
+    # Shared IdP with trinity-landing cabinet (optional). See docs/AUTH_SUPABASE.md
+    supabase:
+      enabled: false
+      url: ${SUPABASE_URL:}
+      jwt-secret: ${SUPABASE_JWT_SECRET:}
+      anon-key: ${SUPABASE_ANON_KEY:}
 
 # Продуктовый бренд (стратегии 2–3 появятся позже; сейчас cointegration)
 trinity:
