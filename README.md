@@ -89,30 +89,31 @@ cd /path/to/IMOEX          # macOS / Linux
 cd C:\path\to\IMOEX        # Windows
 ```
 
-> Если Maven пишет `No plugin found for prefix 'spring-boot'` — вы не в корне: там лежит `pom.xml` с артефактом `trinity-arbitrage`. Подпапка `moex/` — старый пустой модуль IDEA, из неё `spring-boot:run` не работает.
+> Multi-module Maven: parent artifact `trinity`. Runnable module — `trinity-app`. Подпапка `moex/` — старый пустой модуль IDEA, из неё `spring-boot:run` не работает.
+
 ### 1. (Опционально) Прогнать тесты
 
 ```bash
-mvn test
+mvn -pl trinity-app -am test -Djacoco.skip=true
 ```
 
 Все зелёные — можно запускать приложение.
 
 ### 2. Запустить сервер
 
-**Терминал A** (оставьте открытым):
+**Терминал A** (оставьте открытым), из корня репо:
 
 ```bash
-mvn spring-boot:run
+mvn -pl trinity-app -am spring-boot:run
 ```
 
 Дождитесь строки:
 
 ```text
-Started CointegrationApplication
+Started TrinityApplication
 ```
 
-Приложение слушает **http://localhost:8080**.
+Приложение слушает **http://localhost:8080**. Секреты — `application-local.yml` в **корне** репо (подхватывается и из `trinity-app/`).
 
 **Если порт занят**
 
@@ -219,7 +220,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 Затем откройте `/view/paper` и `/view/final`.
 
-**Вариант B — автомат:** пока `mvn spring-boot:run` запущен, планировщики сами гоняют анализ:
+**Вариант B — автомат:** пока `mvn -pl trinity-app -am spring-boot:run` запущен, планировщики сами гоняют анализ:
 
 | Книга | Cron (по умолчанию) | Что внутри |
 |---|---|---|
@@ -250,7 +251,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 ### 9. Чеклист «всё ок»
 
-- [ ] `Started CointegrationApplication` в логе  
+- [ ] `Started TrinityApplication` в логе  
 - [ ] `POST /api/analysis/run` вернул JSON / не 401 (логин верный)  
 - [ ] В `data/candles/` появились JSON-файлы тикеров  
 - [ ] `/view/final` показывает пары и решения  
@@ -265,7 +266,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -X POST \
 
 Кратко:
 
-1. **Запуск** — `mvn spring-boot:run`, секреты в `application-local.yml`, первый раз «Анализ + скачать свечи» в Настройках.
+1. **Запуск** — `mvn -pl trinity-app -am spring-boot:run`, секреты в `application-local.yml`, первый раз «Анализ + скачать свечи» в Настройках.
 2. **Пульт** — полный в `/view/settings`; на остальных `/view/*` — компактная полоска; на дашборде — одна CTA.
 3. **Главные экраны** — `/view/final` (разрешено ли после FA), `/view/paper` (что открылось), дашборд (режим ADX).
 4. **Автопрогон** — DAILY ~19:05 (пн–пт), пока сервер работает. INTRADAY cron выключен (research-only).
@@ -469,7 +470,7 @@ curl -u "imoex:${IMOEX_AUTH_PASSWORD}" -sS "http://localhost:8080/api/paper/jour
 
 ## Конфигурация
 
-Файл: `src/main/resources/application.yml` (ключевые блоки):
+Файл: `trinity-app/src/main/resources/application.yml` (ключевые блоки):
 
 ```yaml
 server:
@@ -574,24 +575,22 @@ imoex:
 
 ## Структура проекта
 
+Maven multi-module (один репо, три стратегии):
+
 ```text
 IMOEX/
-├── src/main/java/com/moex/cointegration/
-│   ├── client/          # MOEX ISS: свечи, новости, статус
-│   ├── config/          # properties + Security
-│   ├── controller/      # REST + HTML
-│   ├── model/           # DTO / records
-│   ├── news/            # триггеры заголовков
-│   ├── quant/           # ADF, EG, OLS, Spread, KAMA, Kalman, SignalRules, WF, microstructure/, trend/
-│   ├── scheduler/       # daily + intraday paper cron
-│   ├── service/         # анализ, paper, universe filter, MicrostructureExecutionService, …
-│   ├── storage/         # JSON-кэш
-│   └── web/             # HTML-рендер
-├── src/main/resources/application.yml
-├── src/test/java/
-├── pom.xml
-└── data/                # свечи, отчёты, paper (в .gitignore)
+├── pom.xml                      # parent: trinity
+├── trinity-shared/              # StrategyId и общие примитивы
+├── trinity-pairs/               # strategy 1 — cointegration (com.moex.cointegration.*)
+├── trinity-trend/               # strategy 2 — playbook SPI (com.moex.trinity.trend)
+├── trinity-calendar-arb/        # strategy 3 — skeleton (com.moex.trinity.calendararb)
+├── trinity-app/                 # Boot shell, /view, security, upsell
+│   └── src/main/resources/application.yml
+├── application-local.yml        # секреты (gitignore), корень репо
+└── data/                        # свечи, отчёты, paper (gitignore)
 ```
+
+Флаги модулей: `imoex.strategies.pairs|trend|calendar-arb.enabled` (trend/arb по умолчанию `false`).
 
 ### Локальные артефакты (`data/`)
 
