@@ -21,11 +21,14 @@ imoex:
     supabase:
       enabled: true
       url: https://YOUR_PROJECT.supabase.co
-      jwt-secret: "YOUR_JWT_SECRET"   # Settings → API → JWT Secret
       anon-key: "YOUR_ANON_KEY"       # public; for operator UI login
+      # optional: legacy HS256 secret (новые проекты подписывают ES256 через JWKS)
+      jwt-secret: "YOUR_JWT_SECRET"
 ```
 
 Или env: `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_ANON_KEY`.
+
+Бэкенд проверяет Bearer через JWKS (`{url}/auth/v1/.well-known/jwks.json`, ES256) и опционально legacy HS256.
 
 Проверка: `GET http://localhost:8080/api/auth/mode`
 
