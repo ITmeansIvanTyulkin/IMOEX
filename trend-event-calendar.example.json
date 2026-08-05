@@ -1,0 +1,16 @@
+[
+  {
+    "date": "2026-08-05",
+    "time": "17:30",
+    "type": "OIL_INVENTORY",
+    "title": "EIA Weekly Petroleum Status Report (example)",
+    "tickers": ["BR", "*"]
+  },
+  {
+    "date": "2026-09-01",
+    "time": "15:00",
+    "type": "OPEC",
+    "title": "OPEC+ meeting / decision window (example)",
+    "tickers": ["BR", "*"]
+  }
+]

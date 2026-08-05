@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Picks at most one playbook for the current regime context. Stub: first registered or empty.
+ * Picks at most one trend playbook for the bar / session context.
  */
 public interface TrendRegimeSelector {
 

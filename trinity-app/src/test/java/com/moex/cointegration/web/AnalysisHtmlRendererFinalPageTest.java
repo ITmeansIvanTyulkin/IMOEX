@@ -30,7 +30,9 @@ class AnalysisHtmlRendererFinalPageTest {
         when(upsell.access()).thenReturn(new UpsellAccess(
                 false, false, "OFF", null, null, null, 5000, 7500, 15000
         ));
-        AnalysisHtmlRenderer renderer = new AnalysisHtmlRenderer(upsell);
+        AnalysisHtmlRenderer renderer = new AnalysisHtmlRenderer(
+                upsell, com.moex.cointegration.config.CapitalProperties.defaults(), true, false, false
+        );
 
         String html = renderer.renderFinalTable(
                 List.of(),
@@ -58,7 +60,9 @@ class AnalysisHtmlRendererFinalPageTest {
         when(upsell.access()).thenReturn(new UpsellAccess(
                 false, false, "OFF", null, null, null, 5000, 7500, 15000
         ));
-        AnalysisHtmlRenderer renderer = new AnalysisHtmlRenderer(upsell);
+        AnalysisHtmlRenderer renderer = new AnalysisHtmlRenderer(
+                upsell, com.moex.cointegration.config.CapitalProperties.defaults(), true, false, false
+        );
 
         TradingRecommendation tech = new TradingRecommendation(
                 "SBER", "VTBR", TradingSignal.LONG_SPREAD, -2.4,

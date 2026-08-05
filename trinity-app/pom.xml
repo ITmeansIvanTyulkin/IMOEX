@@ -32,6 +32,10 @@
             <artifactId>trinity-calendar-arb</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.moex</groupId>
+            <artifactId>trinity-marketdata</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>

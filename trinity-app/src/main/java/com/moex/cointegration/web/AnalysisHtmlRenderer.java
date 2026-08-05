@@ -1,5 +1,6 @@
 package com.moex.cointegration.web;
 
+import com.moex.cointegration.config.CapitalProperties;
 import com.moex.cointegration.upsell.UpsellAccess;
 import com.moex.cointegration.upsell.UpsellService;
 import com.moex.cointegration.model.AnalysisReport;
@@ -15,6 +16,7 @@ import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
 import com.moex.cointegration.model.WalkForwardReport;
 import com.moex.cointegration.service.RssHeadlineService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.format.DateTimeFormatter;
@@ -31,9 +33,23 @@ import java.util.Map;
 public class AnalysisHtmlRenderer {
 
     private final UpsellService upsellService;
+    private final CapitalProperties capitalProperties;
+    private final boolean strategyPairsEnabled;
+    private final boolean strategyTrendEnabled;
+    private final boolean strategyCalendarArbEnabled;
 
-    public AnalysisHtmlRenderer(UpsellService upsellService) {
+    public AnalysisHtmlRenderer(
+            UpsellService upsellService,
+            CapitalProperties capitalProperties,
+            @Value("${imoex.strategies.pairs.enabled:true}") boolean strategyPairsEnabled,
+            @Value("${imoex.strategies.trend.enabled:false}") boolean strategyTrendEnabled,
+            @Value("${imoex.strategies.calendar-arb.enabled:false}") boolean strategyCalendarArbEnabled
+    ) {
         this.upsellService = upsellService;
+        this.capitalProperties = capitalProperties;
+        this.strategyPairsEnabled = strategyPairsEnabled;
+        this.strategyTrendEnabled = strategyTrendEnabled;
+        this.strategyCalendarArbEnabled = strategyCalendarArbEnabled;
     }
 
     private static final String PAGE_TEMPLATE = """
@@ -46,7 +62,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css">
+              <link rel="stylesheet" href="/css/operator.css?v=20260805-trend-switch">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}">
               <header class="site-header">
@@ -64,6 +80,7 @@ public class AnalysisHtmlRenderer {
                 <p class="tagline">Three Strategies. One Mission.</p>
               </header>
               {{NAV}}
+              <div id="auth-session-bar" class="auth-session-bar" hidden></div>
               <main>
                 {{OPS}}
                 {{BODY}}
@@ -71,7 +88,51 @@ public class AnalysisHtmlRenderer {
                 <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
               </main>
-              <script src="/js/operator.js?v=20260804-auth-settings"></script>
+              <div id="trinity-auth-gate" class="trinity-auth-gate" hidden aria-hidden="true">
+                <canvas id="trinity-auth-canvas" class="trinity-auth-canvas" aria-hidden="true"></canvas>
+                <div class="trinity-auth-veil"></div>
+                <div class="trinity-auth-stage">
+                  <div class="trinity-auth-modal" id="trinity-auth-modal" role="dialog" aria-modal="true" aria-labelledby="trinity-auth-title">
+                    <div class="trinity-auth-brand">
+                      <div class="trinity-logo trinity-logo-lg" aria-hidden="true">
+                        <span class="ring ring-a"></span>
+                        <span class="ring ring-b"></span>
+                        <span class="ring ring-c"></span>
+                      </div>
+                      <p class="trinity-auth-eyebrow">Operator desk</p>
+                      <h2 id="trinity-auth-title" class="trinity-auth-title">TRINITY</h2>
+                      <p class="trinity-auth-lead">Три стратегии. Один пульт. Войдите аккаунтом кабинета.</p>
+                    </div>
+                    <form id="trinity-auth-form" class="trinity-auth-form" autocomplete="on">
+                      <div class="field">
+                        <label for="gate-user">Email</label>
+                        <input id="gate-user" name="email" type="email" autocomplete="username" spellcheck="false" placeholder="you@example.com" required>
+                      </div>
+                      <div class="field">
+                        <label for="gate-pass">Пароль</label>
+                        <input id="gate-pass" name="password" type="password" autocomplete="current-password" required>
+                      </div>
+                      <p id="trinity-auth-error" class="trinity-auth-error" hidden></p>
+                      <button type="submit" class="btn btn-primary trinity-auth-submit" id="gate-login-btn">Войти в платформу</button>
+                    </form>
+                    <p class="trinity-auth-foot">Тот же email и пароль, что в кабинете TRINITY.</p>
+                  </div>
+                  <div class="trinity-welcome" id="trinity-welcome" hidden aria-live="polite">
+                    <div class="trinity-logo trinity-logo-xl" aria-hidden="true">
+                      <span class="ring ring-a"></span>
+                      <span class="ring ring-b"></span>
+                      <span class="ring ring-c"></span>
+                    </div>
+                    <p class="trinity-welcome-kicker">Сессия открыта</p>
+                    <h2 class="trinity-welcome-title">Добро пожаловать в TRINITY!</h2>
+                    <p class="trinity-welcome-copy">
+                      Три стратегии + самообучаемый искусственный интеллект в одной платформе —
+                      ваш билет в мир автоматической торговли
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <script src="/js/operator.js?v=20260805-trend-switch"></script>
             </body>
             </html>
             """;
@@ -150,7 +211,7 @@ public class AnalysisHtmlRenderer {
                   <div class="busy-bar" id="ops-busy"></div>
                   <div class="dash-cta-copy">
                     <p class="dash-cta-label">Действие</p>
-                    <p class="dash-cta-text">Обновить сигналы и paper-журнал. Вход и брокер — только в Настройках.</p>
+                    <p class="dash-cta-text">Обновить сигналы и paper-журнал. Брокер и алерты — в Настройках.</p>
                   </div>
                   <div class="dash-cta-actions">
                     <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
@@ -187,15 +248,15 @@ public class AnalysisHtmlRenderer {
 
         StringBuilder body = new StringBuilder();
         body.append("<div class=\"dash-shell\">");
-        body.append(dashboardWidgetGrid(regime));
+        body.append(dashboardWidgetGrid(regime, report, actionable));
         body.append("""
                 <aside class="next-steps" id="dash-next-steps">
                   <p class="next-steps-label">Что сделать сейчас</p>
                   <ol>
-                    <li>Смотрите виджет «Режим рынка» — TREND блокирует новые входы.</li>
-                    <li>Нажмите <em>Анализ + paper</em> ниже — обновит сигналы и журнал.</li>
-                    <li>Разбор сделок: <a href="/view/final">Итог</a> / <a href="/view/paper">Paper</a>.
-                      Токен и песочница — в <a href="/view/settings">Настройках</a>.</li>
+                    <li>Три карточки стратегий: боковик / тренд / арбитраж.</li>
+                    <li>Смотрите «Режим рынка» — TREND блокирует новые pairs-входы.</li>
+                    <li>Нажмите <em>Анализ + paper</em> — обновит сигналы и журнал.
+                      Trend и брокер — в <a href="/view/settings">Настройках</a>.</li>
                   </ol>
                 </aside>
                 """);
@@ -234,18 +295,56 @@ public class AnalysisHtmlRenderer {
                   %s
                   %s
                   %s
+                  %s
                 </div>
                 """.formatted(
                 trialBanner(),
                 opsPanel(),
+                trendPlaybookPanel(),
                 brokerConsolePanel()
         );
         return page("TRINITY — настройки", body, nav("settings"), OpsMode.NONE);
     }
 
-    private String dashboardWidgetGrid(com.moex.cointegration.model.MarketRegimeSnapshot regime) {
+    private String trendPlaybookPanel() {
+        if (!strategyTrendEnabled) {
+            return "";
+        }
+        return """
+                <section class="dash-section strategy-doc" id="trend-playbook-settings">
+                  <h2>Trend playbook · исполнение</h2>
+                  <p class="meta">
+                    Робот «Уровни + профиль» (BR M5) — один из playbook’ов: сигнал или авто
+                    (sandbox journal / live по флагам). Выбор режима — переключателем ниже.
+                  </p>
+                  <div class="callout trend-delivery-card">
+                    <div class="trend-delivery-row">
+                      <div class="trend-delivery-copy">
+                        <strong id="trend-delivery-title">Только сигнал</strong>
+                        <p class="meta" id="trend-delivery-hint">
+                          Тикер + BUY/SELL без заявок. Переключите для автоторговли.
+                        </p>
+                      </div>
+                      <label class="mode-switch" title="Сигнал ↔ Автоторговля">
+                        <span class="mode-switch-label" id="trend-mode-left">Сигнал</span>
+                        <input type="checkbox" id="trend-auto-execution" role="switch" aria-checked="false">
+                        <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+                        <span class="mode-switch-label" id="trend-mode-right">Авто</span>
+                      </label>
+                    </div>
+                    <p class="meta" id="trend-delivery-status">Загрузка режима…</p>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String dashboardWidgetGrid(
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            long actionableSignals
+    ) {
         if (regime == null) {
-            regime = com.moex.cointegration.model.MarketRegimeSnapshot.unknown();
+            regime = MarketRegimeSnapshot.unknown();
         }
         String label = regime.label() == null ? "—" : regime.label();
         String shortLabel = label.length() > 8 ? label.substring(0, 7) + "…" : label;
@@ -268,71 +367,442 @@ public class AnalysisHtmlRenderer {
             default -> "нет данных";
         };
         String adx = Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.0f", regime.adx());
-        return """
+        String regimeBack = regimeBackCopy(label);
+
+        var capital = capitalProperties;
+        double equity = capital.equityRub() != null ? capital.equityRub() : 100_000.0;
+        int dailyPct = (int) Math.round((capital.dailyGrossShare() != null ? capital.dailyGrossShare() : 1.0) * 100);
+        int intraPct = (int) Math.round((capital.intradayGrossShare() != null ? capital.intradayGrossShare() : 0.0) * 100);
+        String equityLabel = String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' ');
+        String leverage = capital.leverageAllowed() ? "доступно" : "выкл <1M";
+
+        boolean pairsOn = strategyPairsEnabled;
+        boolean trendOn = strategyTrendEnabled;
+        boolean arbOn = strategyCalendarArbEnabled;
+
+        String strategiesFrontHint = strategyActiveHint(label, pairsOn, trendOn, arbOn);
+        String strategiesBack = strategyBackCopy(label, pairsOn, trendOn, arbOn);
+
+        int tickers = report != null ? report.tickersAnalyzed() : 0;
+        int pairs = report != null ? report.pairsTested() : 0;
+        int coint = report != null ? report.cointegratedPairs() : 0;
+        int topN = report != null && report.topPairs() != null ? report.topPairs().size() : 0;
+        String analysisDate = report != null && report.analysisDate() != null
+                ? report.analysisDate().toString()
+                : "—";
+
+        String row1 = """
                 <section class="widget-grid" aria-label="Сводка дашборда">
-                  <article class="widget-card" id="widget-paper">
-                    <div class="widget-title">Paper</div>
-                    <div class="widget-body">
-                      <div class="donut" id="widget-paper-donut" style="--p:0;--c:var(--accent)">
-                        <div class="donut-center">
-                          <strong id="dash-paper-open">—</strong>
-                          <span>open</span>
-                        </div>
-                      </div>
-                      <div class="widget-meta">
-                        <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Открыто</span><span class="v" id="widget-paper-open-label">—</span></div>
-                        <div class="widget-stat"><span class="k"><i class="swatch ok"></i>PnL ₽</span><span class="v" id="dash-paper-pnl">—</span></div>
-                      </div>
-                    </div>
-                  </article>
-                  <article class="widget-card" id="widget-broker">
-                    <div class="widget-title">Брокер</div>
-                    <div class="widget-body">
-                      <div class="donut" id="widget-broker-donut" style="--p:0;--c:var(--info)">
-                        <div class="donut-center">
-                          <strong id="widget-broker-center">—</strong>
-                          <span>статус</span>
-                        </div>
-                      </div>
-                      <div class="widget-meta">
-                        <div class="widget-stat"><span class="k"><i class="swatch info"></i>Сводка</span><span class="v" id="dash-broker-status">—</span></div>
-                        <div class="widget-stat"><span class="k"><i class="swatch gold"></i>Контур</span><span class="v" id="widget-broker-mode">—</span></div>
-                      </div>
-                    </div>
-                  </article>
-                  <article class="widget-card" id="widget-final">
-                    <div class="widget-title">Final</div>
-                    <div class="widget-body">
-                      <div class="donut" id="widget-final-donut" style="--p:0;--c:var(--ok)">
-                        <div class="donut-center">
-                          <strong id="dash-final-actionable">—</strong>
-                          <span>вход</span>
-                        </div>
-                      </div>
-                      <div class="widget-meta">
-                        <div class="widget-stat"><span class="k"><i class="swatch ok"></i>ENTER/REDUCE</span><span class="v" id="widget-final-enter">—</span></div>
-                        <div class="widget-stat"><span class="k"><i class="swatch warn"></i>WATCH</span><span class="v" id="dash-final-watch">—</span></div>
-                        <div class="widget-stat"><span class="k"><i class="swatch danger"></i>BLOCK</span><span class="v" id="dash-final-block">—</span></div>
-                      </div>
-                    </div>
-                  </article>
-                  <article class="widget-card" id="widget-regime">
-                    <div class="widget-title">Режим рынка</div>
-                    <div class="widget-body">
-                      <div class="donut" id="widget-regime-donut" data-target-p="100" style="--p:0;--c:%s">
-                        <div class="donut-center">
-                          <strong id="widget-regime-center">%s</strong>
-                          <span>ADX %s</span>
-                        </div>
-                      </div>
-                      <div class="widget-meta">
-                        <div class="widget-stat"><span class="k"><i class="swatch %s" id="widget-regime-swatch"></i>Режим</span><span class="v" id="widget-regime-label">%s</span></div>
-                        <div class="widget-stat"><span class="k">Подсказка</span><span class="v" id="widget-regime-hint">%s</span></div>
-                      </div>
-                    </div>
-                  </article>
+                  %s
+                  %s
+                  %s
+                  %s
                 </section>
-                """.formatted(color, escape(shortLabel), escape(adx), swatch, escape(label), escape(hint));
+                """.formatted(
+                flipCard(
+                        "widget-paper",
+                        "Paper",
+                        """
+                        <div class="donut" id="widget-paper-donut" style="--p:0;--c:var(--accent)">
+                          <div class="donut-center">
+                            <strong id="dash-paper-open">—</strong>
+                            <span>open</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Открыто</span><span class="v" id="widget-paper-open-label">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch ok"></i>PnL ₽</span><span class="v" id="dash-paper-pnl">—</span></div>
+                        </div>
+                        """,
+                        """
+                        <p class="widget-back-lead" id="widget-paper-back-lead">Загрузка journal…</p>
+                        <div class="widget-back-stats" id="widget-paper-back-stats"></div>
+                        <a class="widget-back-link" href="/view/paper">Открыть paper journal →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-broker",
+                        "Брокер",
+                        """
+                        <div class="donut" id="widget-broker-donut" style="--p:0;--c:var(--info)">
+                          <div class="donut-center">
+                            <strong id="widget-broker-center">—</strong>
+                            <span>статус</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch info"></i>Сводка</span><span class="v" id="dash-broker-status">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch gold"></i>Контур</span><span class="v" id="widget-broker-mode">—</span></div>
+                        </div>
+                        """,
+                        """
+                        <p class="widget-back-lead" id="widget-broker-back-lead">Загрузка статуса…</p>
+                        <div class="widget-back-stats" id="widget-broker-back-stats"></div>
+                        <a class="widget-back-link" href="/view/settings">Настройки брокера →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-final",
+                        "Final",
+                        """
+                        <div class="donut" id="widget-final-donut" style="--p:0;--c:var(--ok)">
+                          <div class="donut-center">
+                            <strong id="dash-final-actionable">—</strong>
+                            <span>вход</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch ok"></i>ENTER/REDUCE</span><span class="v" id="widget-final-enter">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch warn"></i>WATCH</span><span class="v" id="dash-final-watch">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch danger"></i>BLOCK</span><span class="v" id="dash-final-block">—</span></div>
+                        </div>
+                        """,
+                        """
+                        <p class="widget-back-lead" id="widget-final-back-lead">Загрузка итога…</p>
+                        <div class="widget-back-stats" id="widget-final-back-stats"></div>
+                        <a class="widget-back-link" href="/view/final">Итог + новости →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-regime",
+                        "Режим рынка",
+                        """
+                        <div class="donut" id="widget-regime-donut" data-target-p="100" style="--p:0;--c:%s">
+                          <div class="donut-center">
+                            <strong id="widget-regime-center">%s</strong>
+                            <span>ADX %s</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s" id="widget-regime-swatch"></i>Режим</span><span class="v" id="widget-regime-label">%s</span></div>
+                          <div class="widget-stat"><span class="k">Подсказка</span><span class="v" id="widget-regime-hint">%s</span></div>
+                        </div>
+                        """.formatted(color, escape(shortLabel), escape(adx), swatch, escape(label), escape(hint)),
+                        """
+                        <p class="widget-back-lead" id="widget-regime-back-lead">%s</p>
+                        <div class="widget-back-stats" id="widget-regime-back-stats"></div>
+                        <a class="widget-back-link" href="/view/strategy">О стратегии →</a>
+                        """.formatted(escape(regimeBack))
+                )
+        );
+
+        String row2 = """
+                <section class="widget-grid widget-grid-secondary" aria-label="Сводка счёта и стратегий">
+                  %s
+                  %s
+                  %s
+                  %s
+                </section>
+                """.formatted(
+                flipCard(
+                        "widget-capital",
+                        "Капитал",
+                        """
+                        <div class="donut" id="widget-capital-donut" style="--p:%d;--c:var(--gold)">
+                          <div class="donut-center">
+                            <strong id="widget-capital-center">%s</strong>
+                            <span>equity</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch gold"></i>DAILY</span><span class="v">%d%%</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch info"></i>INTRADAY</span><span class="v">%d%%</span></div>
+                          <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
+                        </div>
+                        """.formatted(dailyPct, escape(equityLabel), dailyPct, intraPct, escape(leverage)),
+                        """
+                        <p class="widget-back-lead">Операторский профиль капитала для paper / research.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Equity</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Книга DAILY</span><span class="v">%d%% капитала</span></div>
+                          <div class="widget-stat"><span class="k">INTRADAY</span><span class="v">%d%% · research-only</span></div>
+                          <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/settings">Конфиг в Настройках →</a>
+                        """.formatted(escape(equityLabel), dailyPct, intraPct, escape(leverage))
+                ),
+                flipCard(
+                        "widget-signals",
+                        "Сигналы",
+                        """
+                        <div class="donut" id="widget-signals-donut" style="--p:0;--c:var(--accent)">
+                          <div class="donut-center">
+                            <strong id="widget-signals-center">%d</strong>
+                            <span>active</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch ok"></i>LONG</span><span class="v" id="widget-signals-long">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch danger"></i>SHORT</span><span class="v" id="widget-signals-short">—</span></div>
+                        </div>
+                        """.formatted(actionableSignals),
+                        """
+                        <p class="widget-back-lead" id="widget-signals-back-lead">Технические LONG/SHORT до FA-гейта.</p>
+                        <div class="widget-back-stats" id="widget-signals-back-stats"></div>
+                        <a class="widget-back-link" href="/view/signals">Все сигналы →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-strategies",
+                        "Стратегии",
+                        """
+                        <div class="donut" id="widget-strategies-donut" style="--p:%d;--c:var(--navy)">
+                          <div class="donut-center">
+                            <strong id="widget-strategies-center">3</strong>
+                            <span>модуля</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Сейчас</span><span class="v" id="widget-strategies-hint">%s</span></div>
+                          <div class="widget-stat"><span class="k">Pairs</span><span class="v">%s</span></div>
+                        </div>
+                        """.formatted(
+                                pairsOn ? 100 : 35,
+                                escape(strategiesFrontHint),
+                                pairsOn ? "live paper" : "off"
+                        ),
+                        """
+                        <p class="widget-back-lead" id="widget-strategies-back-lead">%s</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">#1 Pairs</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">#2 Trend</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">#3 Calendar arb</span><span class="v">%s</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/full-core">Full Core roadmap →</a>
+                        """.formatted(
+                                escape(strategiesBack),
+                                pairsOn ? "активна (paper)" : "выкл",
+                                trendOn ? "вкл" : "research / off",
+                                arbOn ? "вкл" : "roadmap / off"
+                        )
+                ),
+                flipCard(
+                        "widget-universe",
+                        "Вселенная",
+                        """
+                        <div class="donut" id="widget-universe-donut" style="--p:%d;--c:var(--info)">
+                          <div class="donut-center">
+                            <strong id="widget-universe-center">%d</strong>
+                            <span>coint</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch info"></i>Тикеры</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch gold"></i>Пары</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">Топ</span><span class="v">%d</span></div>
+                        </div>
+                        """.formatted(
+                                pairs > 0 ? Math.min(100, (int) Math.round(100.0 * coint / Math.max(1, pairs))) : 0,
+                                coint,
+                                tickers,
+                                pairs,
+                                topN
+                        ),
+                        """
+                        <p class="widget-back-lead">Последний прогон анализа: <strong>%s</strong>.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Тикеров</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">Пар протестировано</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">Коинтегрированы</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">В топе UI</span><span class="v">%d</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/recommendations">Рекомендации →</a>
+                        """.formatted(escape(analysisDate), tickers, pairs, coint, topN)
+                )
+        );
+
+        String pillars = dashboardStrategyPillars(label, pairsOn, trendOn, arbOn);
+        return row1 + row2 + pillars;
+    }
+
+    /**
+     * Три столпа TRINITY на дашборде: боковик (pairs), тренд (все playbooks), календарный арбитраж.
+     */
+    private String dashboardStrategyPillars(
+            String regime,
+            boolean pairsOn,
+            boolean trendOn,
+            boolean arbOn
+    ) {
+        boolean sideways = "SIDEWAYS".equals(regime);
+        boolean trending = "TREND".equals(regime);
+
+        String pairsStatus = !pairsOn ? "выкл"
+                : trending ? "пауза · ADX"
+                : sideways ? "paper live" : "осторожно";
+        String pairsSwatch = !pairsOn ? "slate" : trending ? "warn" : "ok";
+        String pairsCenter = !pairsOn ? "OFF" : trending ? "HOLD" : "ON";
+        int pairsPct = !pairsOn ? 0 : trending ? 35 : 100;
+
+        String trendStatus = !trendOn ? "выкл" : "1 playbook";
+        String trendSwatch = trendOn ? "accent" : "slate";
+        String trendCenter = trendOn ? "BR" : "—";
+        int trendPct = trendOn ? 70 : 20;
+
+        String arbStatus = arbOn ? "early" : "заглушка";
+        String arbSwatch = arbOn ? "gold" : "slate";
+        String arbCenter = arbOn ? "EA" : "···";
+        int arbPct = arbOn ? 40 : 15;
+
+        return """
+                <section class="widget-grid widget-grid-pillars" aria-label="Три стратегии TRINITY">
+                  %s
+                  %s
+                  %s
+                </section>
+                """.formatted(
+                flipCard(
+                        "pillar-pairs",
+                        "① Боковик · Pairs",
+                        """
+                        <div class="donut" style="--p:%d;--c:var(--ok)">
+                          <div class="donut-center">
+                            <strong>%s</strong>
+                            <span>pairs</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Книга</span><span class="v">DAILY paper</span></div>
+                          <div class="widget-stat"><span class="k">Gate</span><span class="v">ADX · FA</span></div>
+                        </div>
+                        """.formatted(pairsPct, escape(pairsCenter), pairsSwatch, escape(pairsStatus)),
+                        """
+                        <p class="widget-back-lead">Стратегия #1 — mean-reversion на коинтегрированных парах IMOEX.
+                          Новые входы в SIDEWAYS; при TREND (ADX) — блок.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Модуль</span><span class="v">trinity-pairs</span></div>
+                          <div class="widget-stat"><span class="k">Флаг</span><span class="v">imoex.strategies.pairs</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/strategy">О pairs →</a>
+                        """
+                ),
+                flipCard(
+                        "pillar-trend",
+                        "② Тренд · Playbooks",
+                        """
+                        <div class="donut" style="--p:%d;--c:var(--accent)">
+                          <div class="donut-center">
+                            <strong>%s</strong>
+                            <span>trend</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Активный</span><span class="v">Уровни+профиль</span></div>
+                          <div class="widget-stat"><span class="k">Инстр.</span><span class="v">BR M5</span></div>
+                        </div>
+                        """.formatted(trendPct, escape(trendCenter), trendSwatch, escape(trendStatus)),
+                        """
+                        <p class="widget-back-lead">Стратегия #2 — робот по playbook’ам. Сейчас один:
+                          «Уровни + профиль рынка» (BR). Одновременно на инструменте — не больше одного
+                          playbook’а; переключение — через селектор режима (см. ниже / настройки).</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Playbook</span><span class="v">levels-profile-br-m5</span></div>
+                          <div class="widget-stat"><span class="k">Режим</span><span class="v">сигнал / авто</span></div>
+                          <div class="widget-stat"><span class="k">Данные</span><span class="v">T-Invest tape+DOM</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/settings#trend-playbook-settings">Настройки trend →</a>
+                        """
+                ),
+                flipCard(
+                        "pillar-arb",
+                        "③ Арбитраж · Calendar",
+                        """
+                        <div class="donut" style="--p:%d;--c:var(--gold)">
+                          <div class="donut-center">
+                            <strong>%s</strong>
+                            <span>arb</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Тип</span><span class="v">futures calendar</span></div>
+                          <div class="widget-stat"><span class="k">Доступ</span><span class="v">Full Core</span></div>
+                        </div>
+                        """.formatted(arbPct, escape(arbCenter), arbSwatch, escape(arbStatus)),
+                        """
+                        <p class="widget-back-lead">Стратегия #3 — календарный арбитраж фьючерсов.
+                          Код и live пока не стартуем: roadmap / early access Full Core после валидации pairs paper.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Модуль</span><span class="v">trinity-calendar-arb</span></div>
+                          <div class="widget-stat"><span class="k">Сейчас</span><span class="v">заглушка UI</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/full-core?feature=calendar-arb">Full Core · arbitrage →</a>
+                        """
+                )
+        );
+    }
+
+    private String flipCard(String id, String title, String frontInner, String backInner) {
+        return """
+                <article class="widget-card is-flippable" id="%s" data-flip="1" tabindex="0" role="button" aria-pressed="false" aria-label="%s — нажмите, чтобы перевернуть">
+                  <div class="widget-flip">
+                    <div class="widget-face widget-front">
+                      <div class="widget-title">%s <span class="widget-flip-cue" aria-hidden="true">⇄</span></div>
+                      <div class="widget-body">%s</div>
+                    </div>
+                    <div class="widget-face widget-back">
+                      <div class="widget-title">%s · детали <span class="widget-flip-cue" aria-hidden="true">↩</span></div>
+                      <div class="widget-back-body">%s</div>
+                    </div>
+                  </div>
+                </article>
+                """.formatted(id, escape(title), escape(title), frontInner, escape(title), backInner);
+    }
+
+    private static String regimeBackCopy(String label) {
+        return switch (label) {
+            case "TREND" -> "Сейчас выявлен трендовый рынок: mean-reversion (коинтеграция) на таком рынке неэффективна. "
+                    + "Новые входы pairs заблокированы. В фокусе — research TREND и calendar-arbitrage (поиск идей, не live paper).";
+            case "NEUTRAL" -> "Переходный режим: pairs ещё допустимы, но размер снижен. "
+                    + "Параллельно идёт мониторинг — при усилении тренда активируется контур TREND / ARBITRAGE research.";
+            case "SIDEWAYS" -> "Боковик: стратегия коинтеграции (pairs) в приоритете — paper-входы разрешены при прохождении FA. "
+                    + "TREND и ARBITRAGE остаются на research-контуре.";
+            default -> "Режим рынка не определён (нет ADX). Pairs работают осторожно; TREND/ARBITRAGE — research.";
+        };
+    }
+
+    private static String strategyActiveHint(String regime, boolean pairsOn, boolean trendOn, boolean arbOn) {
+        if ("TREND".equals(regime)) {
+            if (trendOn) {
+                return "Trend playbook";
+            }
+            if (arbOn) {
+                return "ARB research";
+            }
+            return "pairs блок · research";
+        }
+        if (pairsOn) {
+            return "Pairs paper";
+        }
+        if (trendOn) {
+            return "Pairs + Trend";
+        }
+        return "модули off";
+    }
+
+    private static String strategyBackCopy(String regime, boolean pairsOn, boolean trendOn, boolean arbOn) {
+        StringBuilder sb = new StringBuilder();
+        if ("TREND".equals(regime)) {
+            sb.append("Тренд: коинтеграция неэффективна для новых входов. ");
+            if (trendOn && arbOn) {
+                sb.append("Активны research-контуры TREND и ARBITRAGE — идёт анализ и поиск бумаг/срочных.");
+            } else if (trendOn) {
+                sb.append("Активен research TREND — поиск идей по плейбукам режима.");
+            } else if (arbOn) {
+                sb.append("Активен research calendar-arbitrage.");
+            } else {
+                sb.append("TREND/ARBITRAGE пока выключены флагами — на Full Core roadmap; pairs paper на паузе по режиму.");
+            }
+        } else if ("SIDEWAYS".equals(regime)) {
+            sb.append(pairsOn
+                    ? "Боковик: активна стратегия #1 Pairs (paper). TREND и ARBITRAGE — research/roadmap."
+                    : "Боковик, но pairs выключены конфигом.");
+        } else {
+            sb.append("Сводка модулей TRINITY под текущий режим рынка.");
+        }
+        return sb.toString();
     }
 
     private String brokerConsolePanel() {
@@ -605,11 +1075,70 @@ public class AnalysisHtmlRenderer {
                     </p>
                   </aside>
 
+                  <aside class="atas-plaque" id="tiger" aria-labelledby="tiger-title">
+                    <span class="atas-badge">Встроено в TRINITY</span>
+                    <h3 id="tiger-title">Функционал Tiger.trade внутри TRINITY</h3>
+                    <p>
+                      Отдельный терминал Tiger.trade не нужен: live DOM, лента сделок и depth-профиль
+                      входят в продукт как <strong>market-data контур</strong> маркетплейса —
+                      рядом с ATAS-слоем, но отдельно от исполнения ордеров у брокера.
+                      Это не «ещё один график», а поток рынка: что реально стоит в стакане
+                      и как идут сделки в момент сигнала.
+                    </p>
+                    <ul>
+                      <li><strong>Live DOM</strong> — глубина bid/ask с провайдера (не только snapshot ISS).</li>
+                      <li><strong>Trades tape</strong> — поток сделок для delta / footprint на desk.</li>
+                      <li><strong>Depth / candle profile</strong> — профиль объёма внутри бара для ручного входа.</li>
+                      <li><strong>Session liquidity map</strong> — где рынок тонкий, где набор ног реалистичен.</li>
+                      <li><strong>Модуль <code>trinity-marketdata</code></strong> — SPI feed (<code>MarketDataFeed</code>,
+                        провайдер <code>T_INVEST</code> → MarketDataStream).</li>
+                      <li><strong>Флаг <code>imoex.marketdata.*</code></strong> — контур включается отдельно от pairs/paper.</li>
+                    </ul>
+                    <p class="atas-why">
+                      <strong>Зачем это добавлено.</strong>
+                      ATAS-слой отвечает на вопрос «можно ли входить по объёму/профилю»;
+                      Tiger-слой — «что видит рынок прямо сейчас» (стакан + лента).
+                      Вместе это замена внешней связки ATAS + Tiger.trade в одной подписке TRINITY:
+                      сигнал → объяснение → ручной ордер у брокера.
+                      Сейчас контур в коде как foundation (SPI + stub); live-stream подключается по мере валидации paper/OOS.
+                      Roadmap #4 — volume desk поверх этого feed.
+                    </p>
+                  </aside>
+
+                  <aside class="atas-plaque" id="trend-robot" aria-labelledby="trend-robot-title">
+                    <span class="atas-badge">Робот · sandbox</span>
+                    <h3 id="trend-robot-title">Playbook #1 — Уровни + профиль (BR M5)</h3>
+                    <p>
+                      Торговый робот стратегии #2: чек-лист «Уровни + Объемы» + усиления риска.
+                      На М5 нефтяного фьючерса строит <strong>market profile</strong> на отбоях,
+                      сливает HVN в диапазон <strong>15–20 пунктов</strong>, выбирает bounce или break+retest,
+                      ставит сетку из 3 лимиток (2-2-2 / 3-1-1), SL от средней позиции, TP1 → Б/У → runner.
+                    </p>
+                    <ul>
+                      <li><strong>Модуль</strong> <code>trinity-trend</code> · id <code>levels-profile-br-m5</code></li>
+                      <li><strong>Профиль обязателен</strong> — VAP-прокси по H–L бара; tick VAP — через marketdata позже</li>
+                      <li><strong>Риск</strong> — <code>min(ГО, maxRiskPct equity)</code>, не «весь депозит / ГО»</li>
+                      <li><strong>Одна зона / один сетап</strong> — после ARMED не прыгаем на новый уровень,
+                        пока цена не уйдёт ≥ <code>unlock-distance-points</code> (default 40) от mid зоны или новый день</li>
+                      <li><strong>Исполнение</strong> — сигнал (<code>auto-execution=false</code>)
+                        или авто/journal (<code>auto-execution=true</code>); live FORTS — ещё
+                        <code>live-execution=true</code> когда single-leg брокер готов</li>
+                      <li><strong>API</strong> — <code>GET/POST /api/trend/*</code> (status, signal, evaluate, submit, journal)</li>
+                    </ul>
+                    <p class="atas-why">
+                      <strong>Зачем.</strong>
+                      Нефть уходит из equities-пар в фьючерсный trend-контур. Sandbox-first —
+                      тот же мозг робота, без обещания live до OOS.
+                    </p>
+                  </aside>
+
                   <nav class="strategy-toc" aria-label="Содержание">
                     <strong>Содержание</strong>
                     <ol>
                       <li><a href="#core-roadmap">Roadmap TRINITY / Full Core</a></li>
                       <li><a href="#atas">Функционал ATAS внутри TRINITY</a></li>
+                      <li><a href="#tiger">Функционал Tiger.trade внутри TRINITY</a></li>
+                      <li><a href="#trend-robot">Playbook #1 — Уровни + профиль (BR M5)</a></li>
                       <li><a href="#idea">Идея простыми словами</a></li>
                       <li><a href="#pipeline">Что за чем происходит</a></li>
                       <li><a href="#universe">Как отбираются акции</a></li>
@@ -2341,9 +2870,9 @@ public class AnalysisHtmlRenderer {
                   <div class="core-teaser-copy">
                     <strong>Roadmap #2 Trend · #3 Calendar arb</strong>
                     <p>
-                      Стратегии в разработке — <em>early access / preorder</em> для клиентов полного Core.
-                      Инвестиция в следующий контур бренда, не live-модуль сегодня.
-                      Research / decision-support, без обещания доходности.
+                      #2 — робот «Уровни + профиль» (BR M5) в sandbox/journal; live FORTS за флагом.
+                      #3 calendar arb — early access / preorder Full Core.
+                      Research / decision-support до OOS; без обещания доходности.
                     </p>
                   </div>
                   %s

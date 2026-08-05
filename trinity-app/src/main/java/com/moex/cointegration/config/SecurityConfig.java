@@ -63,6 +63,8 @@ public class SecurityConfig {
                         .requestMatchers(EndpointRequest.to("health", "info")).permitAll()
                         .requestMatchers("/", "/view", "/view/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/**").permitAll()
+                        /* same-origin cabinet login proxy (before authenticated POST /api/**) */
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/**").permitAll()
                         /* soft commercial beacons — не должны триггерить login prompt */
                         .requestMatchers(HttpMethod.POST, "/api/upsell/events").permitAll()

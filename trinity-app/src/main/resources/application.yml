@@ -223,16 +223,69 @@ imoex:
       url: ${SUPABASE_URL:}
       jwt-secret: ${SUPABASE_JWT_SECRET:}
       anon-key: ${SUPABASE_ANON_KEY:}
-  # Module feature flags (Maven modules trinity-pairs / trinity-trend / trinity-calendar-arb)
+  # Module feature flags (Maven modules trinity-pairs / trinity-trend / trinity-calendar-arb / trinity-marketdata)
   strategies:
     pairs:
       enabled: true
     trend:
-      enabled: false
+      enabled: true
+      auto-execution: false   # false = signal-only UI; true = sandbox journal / auto path for playbooks
+      live-execution: false
+      playbook: levels-profile-br-m5
+      grid: MODERATE
+      max-risk-pct-equity: 1.0
+      one-setup-per-zone: true
+      unlock-distance-points: 40
+      allow-zone-pad: false
+      min-touch-count: 3              # A-setup: ≥3 real bounce clusters
+      min-hvn-bands: 2
+      session-bias-bars: 36
+      session-bias-min-points: 40
+      require-bounce-confirm: true
+      min-reward-risk: 1.5
+      max-setups-per-day: 2          # fills only; A-setup scarcity
+      cooldown-bars-after-sl: 12
+      retest-arm-max-distance-points: 10
+      a-setup-bounce-only: true      # no RETEST chase — bounce confirm only
+      initial-size-fraction: 0.4     # ~⅓–½ size until BE
+      prefer-marketdata-zones: true  # tape VAP when broker feed streaming
+      trade-session-open: "09:00"
+      trade-session-close: "23:50"
+      no-trade-after-open-minutes: 40
+      no-trade-before-close-minutes: 40
+      htf-min-move-points: 50
+      htf-slope-bars: 24
+      htf-require-agreement: true
+      counter-trend-size-fraction: 0.6
+      counter-trend-min-reward-risk: 2.0
+      counter-trend-bounce-only: true
+      counter-trend-max-distance-points: 5
+      counter-trend-require-confirm: true
+      event-calendar-enabled: true
+      event-calendar-file: data/trend-event-calendar.json
+      event-block-minutes-before: 45
+      event-block-minutes-after: 30
+      br:
+        zone-min-points: 15
+        zone-max-points: 20
+        stop-points: 15
+        tp1-points: 25
+        rub-per-point: 7.0
     calendar-arb:
       enabled: false
+  # Marketplace live DOM/trades — T-Invest only (no ISS tape).
+  marketdata:
+    enabled: true
+    provider: T_INVEST
+    # token falls back to imoex.broker.token / data/broker-ui-settings.json
+    sandbox: false   # market data from prod API (trading may stay sandbox)
+    tape-capacity: 200000
+    orderbook-depth: 50   # T-Invest max (allowed: 10/20/30/40/50)
+    # hist DOM = our archive data/broker-tape/dom-*.jsonl (broker has no hist DOM API)
+    auto-resolve-instrument: BRU6
+    # instruments: BRU6=FIGI…   # optional override; else auto-resolve future ticker
 
-# Продуктовый бренд (стратегии 2–3 — модули; live пока pairs)
+# Продуктовый бренд (стратегии 2–3 + marketdata — модули; live пока pairs)
 trinity:
   name: TRINITY Multi-Strategy Arbitrage
   version: 1.0.0

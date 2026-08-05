@@ -10,17 +10,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TrendResearchServiceTest {
 
     @Test
-    void selectsPlaceholderInTrend() {
-        TrendPlaybook pb = new PlaceholderTrendPlaybook();
+    void selectsLevelsPlaybookInTrend() {
+        TrendPlaybook pb = new LevelsProfileBrPlaybook();
         TrendResearchService svc = new TrendResearchService(List.of(pb), new DefaultTrendRegimeSelector());
         assertTrue(svc.activePlaybook(new TrendRegimeContext("TREND", 34, true)).isPresent());
-        assertEquals("trend-placeholder", svc.activePlaybook(new TrendRegimeContext("TREND", 34, true)).orElseThrow().id());
+        assertEquals(LevelsProfileBrPlaybook.ID, svc.activePlaybook(new TrendRegimeContext("TREND", 34, true)).orElseThrow().id());
     }
 
     @Test
     void emptyInSidewaysLowAdx() {
         TrendResearchService svc = new TrendResearchService(
-                List.of(new PlaceholderTrendPlaybook()), new DefaultTrendRegimeSelector());
+                List.of(new LevelsProfileBrPlaybook()), new DefaultTrendRegimeSelector());
         assertTrue(svc.activePlaybook(new TrendRegimeContext("SIDEWAYS", 12, false)).isEmpty());
+    }
+
+    @Test
+    void engineHoldsLastPlan() {
+        TrendRobotEngine engine = new TrendRobotEngine(new LevelsProfileBrPlaybook());
+        assertEquals(TrendRobotState.SCAN, engine.state());
     }
 }

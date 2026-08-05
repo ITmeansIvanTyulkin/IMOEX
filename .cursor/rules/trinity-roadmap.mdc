@@ -10,10 +10,20 @@ Three strategies under one brand. Do not jump ahead without completing the curre
 ## Product shape
 
 1. **Cointegration / pairs** — active now (DAILY live; INTRADAY research-only).
-2. **Trend** — roadmap only, no code yet; Full Core early access / preorder framing in UI.
+2. **Trend** — playbook #1 robot «Уровни + профиль» (BR M5) in `trinity-trend`; sandbox/journal first (`live-execution=false`). Full Core early access framing in UI until OOS.
 3. **Arbitrage** — futures calendar arbitrage; roadmap only, no code yet (oil/energy equities deferred here); Full Core early access / preorder.
+4. **Volume intelligence / ATAS-class desk** — roadmap / ideas (not a 4th live strategy): embedded volume profile + candle profile + journal/OOS analogs + entry-probability layer so the operator can **manually** place broker orders without buying ATAS / TensorCharts-class terminals. Decision-support only. Module scaffold: `trinity-marketdata` (live DOM/trades feed contour; default off).
 
-Options — further deferred beyond the three pillars; locked preview only in commercial UI.
+Options — further deferred beyond the pillars; locked preview only in commercial UI.
+
+## Ideas backlog (deferred product bets)
+
+Keep here so we do not lose commercial/research bets. **Do not implement until the gate for that item says so.**
+
+- **#4 Volume desk (ATAS→probability)** — see section below; substitute for buying external volume terminals when user refuses autotrade and wants filtered entries → manual broker. Code: `trinity-marketdata` (feed SPI; stream later).
+- Instance vs Core delivery split + Core updater — autumn–winter 2026.
+- Soft commercial upsell / reverse trial — scaffolding OK; no real billing yet.
+- Options module — after pillars; locked preview only.
 
 ## Strategy 1 — current scope
 
@@ -74,13 +84,23 @@ Still deferred to **autumn–winter 2026** — do not implement now. Prefer one 
 - **Phase 1 (MVP)** — version check + manual download/reinstall.
 - **Phase 2 (later)** — in-app banner / optional auto-updater (WiX/Squirrel/MSIX/jpackage+updater), code signing, stable/beta channels, semver in About.
 
-## Deferred: Volume intelligence / ATAS→ML (autumn 2026+)
+## Deferred: #4 Volume intelligence / ATAS-class desk (autumn 2026+)
+
+**Commercial why:** if the user does **not** want auto-execution, they still should not need to buy ATAS / «профиль свечи» competitors. TRINITY already filters pairs → regime → FA; add volume/profile + historical analogs + an honest probability layer so they open the broker and place orders themselves. Research / decision-support — not a black-box bot.
 
 Beyond mechanical volume filters (ATAS-like) toward TensorCharts-style pattern finding — combinations of volume, delta, and price that precede successful spread mean-reversion.
 
+### Scope to ship later (in order)
+
+1. **Candle / volume profile on each bar** — scan POC/VA/clusters (and related ATAS-class cues) on the active leg/spread context; surface on dashboard cards / final explain.
+2. **Patterns vs journal / OOS** — compare the current setup to labeled historical analogs from paper journal and OOS replays (tabular features first).
+3. **Entry probability layer** — extra score **on top of** pairs stats (Z, quality, FA, regime), with plain-language why; never silent override of risk gates.
+4. Only later: heavier sequence / pattern ML if (1)–(3) prove OOS lift.
+
 Sequencing: (1) labeled journal / features from paper / OOS → (2) simple tabular models → (3) only later heavy sequence / pattern ML.
 
-Honest constraints: needs data + OOS; Cursor IDE ≠ training compute; research / decision-support — not black-box autotrade claims.
+Honest constraints: needs data + OOS; Cursor IDE ≠ training compute; research / decision-support — not black-box autotrade claims. Mechanical microstructure already in pairs INTRADAY research; this item is the **deeper** desk + probability product.
 
 - Gate: after DAILY pairs paper validation; **do not start now**.
 - Fits strategy 1 first; later can filter trend (#2) / arb (#3).
+- Full Core / Оператор framing: «отфильтрованный вход в TRINITY → заявки у брокера вручную».

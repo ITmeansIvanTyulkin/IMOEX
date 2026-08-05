@@ -3,6 +3,7 @@
   const PASS_KEY = "imoex.ops.pass";
   const SB_TOKEN_KEY = "trinity.supabase.access_token";
   const SB_EMAIL_KEY = "trinity.supabase.user_email";
+  const WELCOME_SESSION_KEY = "trinity.welcome.played";
   const ALERTS_ENABLED_KEY = "imoex.alerts.enabled";
   const ALERTS_SOUND_KEY = "imoex.alerts.sound";
   const SEEN_IDS_KEY = "imoex.alerts.seenIds";
@@ -53,15 +54,18 @@
   }
 
   function hasLoginForm() {
-    return !!( $("ops-save-creds") && $("ops-user") && $("ops-pass") );
+    return !!( ($("ops-save-creds") && $("ops-user") && $("ops-pass"))
+      || ($("trinity-auth-form") && $("gate-user") && $("gate-pass")) );
   }
 
   function readLoginEmail() {
+    if ($("gate-user") && $("gate-user").value) return String($("gate-user").value).trim();
     if ($("ops-user") && $("ops-user").value) return String($("ops-user").value).trim();
     return (localStorage.getItem(SB_EMAIL_KEY) || localStorage.getItem(USER_KEY) || "").trim();
   }
 
   function readLoginPassword() {
+    if ($("gate-pass") && $("gate-pass").value) return String($("gate-pass").value);
     if ($("ops-pass") && $("ops-pass").value) return String($("ops-pass").value);
     return localStorage.getItem(PASS_KEY) || "";
   }
@@ -122,6 +126,7 @@
   }
 
   function applyAuthModeUi() {
+    updateSessionBar();
     /* Login form lives only on /view/settings — do not mutate hidden fields elsewhere. */
     if (!hasLoginForm()) {
       const sb = authMode.supabase || {};
@@ -162,7 +167,7 @@
 
   async function ensureSupabaseSession(force) {
     const sb = authMode.supabase || {};
-    if (!sb.enabled || !sb.url || !sb.anonKey) return;
+    if (!sb.enabled) return;
     if (!force && localStorage.getItem(SB_TOKEN_KEY)) return;
 
     const email = readLoginEmail();
@@ -175,17 +180,25 @@
       );
     }
 
-    const base = String(sb.url).replace(/\/$/, "");
-    const res = await fetch(base + "/auth/v1/token?grant_type=password", {
-      method: "POST",
-      headers: {
-        apikey: sb.anonKey,
-        Authorization: "Bearer " + sb.anonKey,
-        "Content-Type": "application/json",
-        Accept: "application/json"
-      },
-      body: JSON.stringify({ email: email, password: password })
-    });
+    /* Same-origin proxy — avoids Safari/WebKit «Load failed» on direct supabase.co fetch. */
+    let res;
+    try {
+      res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({ email: email, password: password })
+      });
+    } catch (e) {
+      const raw = e && e.message ? e.message : String(e);
+      throw new Error(
+        raw === "Load failed" || raw === "Failed to fetch"
+          ? "Сеть: не достучались до /api/auth/login (сервер не запущен или блокировка)."
+          : ("Сеть: " + raw)
+      );
+    }
     const text = await res.text();
     let data = null;
     try {
@@ -195,22 +208,25 @@
     }
     if (!res.ok || !data || !data.access_token) {
       const msg =
-        (data && (data.error_description || data.msg || data.error)) ||
-        ("Supabase login HTTP " + res.status);
+        (data && (data.message || data.error_description || data.msg || data.error)) ||
+        ("Login HTTP " + res.status);
       throw new Error(msg);
     }
     localStorage.setItem(SB_TOKEN_KEY, data.access_token);
-    localStorage.setItem(SB_EMAIL_KEY, email);
+    localStorage.setItem(SB_EMAIL_KEY, (data.email || email));
     /* Don't reuse cabinet password as HTTP Basic operator password. */
     try {
       localStorage.removeItem(PASS_KEY);
     } catch (_) { /* ignore */ }
+    if ($("ops-pass")) $("ops-pass").value = "";
+    if ($("gate-pass")) $("gate-pass").value = "";
     let alg = "";
     try {
       const part = String(data.access_token).split(".")[0] || "";
       const padded = part + "=".repeat((4 - (part.length % 4)) % 4);
       alg = JSON.parse(atob(padded.replace(/-/g, "+").replace(/_/g, "/"))).alg || "";
     } catch (_) { /* ignore */ }
+    updateSessionBar();
     appendLog(
       "Вход выполнен — тот же email/пароль, что в кабинете TRINITY"
         + (alg ? " (JWT " + alg + ")" : "")
@@ -241,37 +257,65 @@
     return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 
-  /** Ignition-style gauge: sweep --p from empty to target on load/update. */
+  /** Медленный приятный sweep кольца (--p). Первый раз — с нуля; дальше — к новому значению. */
   function setDonut(id, pct, colorVar) {
     const el = $(id);
     if (!el) return;
     const p = Math.max(0, Math.min(100, Number(pct) || 0));
-    const prev = el.dataset.p != null ? Number(el.dataset.p) : NaN;
+    const prev = el.dataset.p != null && el.dataset.p !== "" ? Number(el.dataset.p) : NaN;
     if (colorVar) el.style.setProperty("--c", colorVar);
 
-    const same = Number.isFinite(prev) && Math.abs(prev - p) < 0.5;
+    const same = el.dataset.ignited === "1" && Number.isFinite(prev) && Math.abs(prev - p) < 0.35;
     if (same) {
       el.style.setProperty("--p", String(p));
       return;
     }
 
-    el.dataset.p = String(p);
-
     if (prefersReducedMotion()) {
+      el.dataset.p = String(p);
+      el.dataset.ignited = "1";
       el.style.setProperty("--p", String(p));
       return;
     }
 
-    const started = el.dataset.ignited === "1";
-    if (!started || (Number.isFinite(prev) && Math.abs(prev - p) >= 0.5)) {
+    const first = el.dataset.ignited !== "1";
+    el.dataset.p = String(p);
+    el.style.transition = "--p 2.1s cubic-bezier(0.22, 0.8, 0.24, 1)";
+
+    if (first) {
       el.style.transition = "none";
       el.style.setProperty("--p", "0");
       void el.offsetWidth;
-      el.style.transition = "";
+      el.style.transition = "--p 2.1s cubic-bezier(0.22, 0.8, 0.24, 1)";
       el.dataset.ignited = "1";
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          el.style.setProperty("--p", String(p));
+        });
+      });
+      return;
     }
-    requestAnimationFrame(function () {
-      el.style.setProperty("--p", String(p));
+
+    el.style.setProperty("--p", String(p));
+  }
+
+  function igniteAllDonuts() {
+    document.querySelectorAll(".widget-card .donut[id]").forEach(function (el) {
+      let target = NaN;
+      const attr = el.getAttribute("data-target-p");
+      if (attr != null && attr !== "") target = Number(attr);
+      if (!Number.isFinite(target) && el.dataset.p != null && el.dataset.p !== "") {
+        target = Number(el.dataset.p);
+      }
+      if (!Number.isFinite(target)) {
+        const inline = el.style.getPropertyValue("--p").trim();
+        target = inline !== "" ? Number(inline) : 0;
+      }
+      if (!Number.isFinite(target)) target = 0;
+      el.dataset.ignited = "0";
+      el.dataset.p = "";
+      const color = el.style.getPropertyValue("--c").trim();
+      setDonut(el.id, target, color || undefined);
     });
   }
 
@@ -285,14 +329,509 @@
 
   function appendLog(msg, cls) {
     const box = $("ops-log");
-    if (!box) return;
-    const line = document.createElement("div");
-    line.className = cls || "info";
-    const ts = new Date().toLocaleTimeString();
-    line.textContent = "[" + ts + "] " + msg;
-    box.prepend(line);
-    const lines = box.querySelectorAll("div");
-    if (lines.length > 40) lines[lines.length - 1].remove();
+    if (box) {
+      const line = document.createElement("div");
+      line.className = cls || "info";
+      const ts = new Date().toLocaleTimeString();
+      line.textContent = "[" + ts + "] " + msg;
+      box.prepend(line);
+      const lines = box.querySelectorAll("div");
+      if (lines.length > 40) lines[lines.length - 1].remove();
+    }
+  }
+
+  function updateSessionBar() {
+    const bar = $("auth-session-bar");
+    if (!bar) return;
+    const sb = authMode.supabase || {};
+    if (!sb.enabled) {
+      bar.hidden = true;
+      bar.innerHTML = "";
+      return;
+    }
+    bar.hidden = false;
+    const email = (localStorage.getItem(SB_EMAIL_KEY) || "").trim();
+    const token = localStorage.getItem(SB_TOKEN_KEY);
+    if (token) {
+      bar.className = "auth-session-bar ok";
+      bar.innerHTML =
+        '<span class="auth-session-text">Сессия: <strong>' +
+        escapeHtml(email || "кабинет") +
+        "</strong> — API с Bearer JWT</span>" +
+        '<button type="button" class="btn btn-ghost auth-session-btn" id="auth-logout-btn">Выйти</button>';
+      const btn = $("auth-logout-btn");
+      if (btn) {
+        btn.addEventListener("click", function () {
+          try {
+            localStorage.removeItem(SB_TOKEN_KEY);
+            localStorage.removeItem(SB_EMAIL_KEY);
+            sessionStorage.removeItem(WELCOME_SESSION_KEY);
+          } catch (_) { /* ignore */ }
+          updateSessionBar();
+          appendLog("Сессия сброшена — войдите снова.", "info");
+          maybeShowAuthGate();
+        });
+      }
+    } else {
+      bar.className = "auth-session-bar need";
+      bar.innerHTML =
+        '<span class="auth-session-text"><strong>Нужен вход</strong> — email и пароль кабинета TRINITY (кнопки анализа без сессии вернут 401).</span>' +
+        '<a class="btn btn-primary auth-session-btn" href="/view/settings">Войти в Настройках</a>';
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  let authCanvasRaf = 0;
+  let authCanvasStop = null;
+
+  function isDashboardPath() {
+    const path = (location.pathname || "").replace(/\/+$/, "") || "/view";
+    return path === "/view" || path === "";
+  }
+
+  function stopAuthCanvas() {
+    if (authCanvasRaf) {
+      cancelAnimationFrame(authCanvasRaf);
+      authCanvasRaf = 0;
+    }
+    if (typeof authCanvasStop === "function") {
+      authCanvasStop();
+      authCanvasStop = null;
+    }
+  }
+
+  function startAuthCanvas() {
+    const canvas = $("trinity-auth-canvas");
+    if (!canvas || !canvas.getContext) return;
+    stopAuthCanvas();
+    const ctx = canvas.getContext("2d");
+    const green = "#1f9a68";
+    const red = "#c94a4a";
+    const gold = "rgba(196,163,90,0.85)";
+    const cyan = "rgba(126,182,212,0.75)";
+    let w = 0;
+    let h = 0;
+    let dpr = 1;
+    const candles = [];
+    const CANDLE_N = 42;
+
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function seedCandles() {
+      candles.length = 0;
+      let price = 100;
+      for (let i = 0; i < CANDLE_N; i++) {
+        const drift = (Math.sin(i * 0.35) + Math.cos(i * 0.17)) * 1.1;
+        const open = price;
+        const close = open + drift + (Math.random() - 0.48) * 2.4;
+        const high = Math.max(open, close) + Math.random() * 1.8;
+        const low = Math.min(open, close) - Math.random() * 1.8;
+        candles.push({ open: open, close: close, high: high, low: low });
+        price = close;
+      }
+    }
+
+    function pushCandle() {
+      const last = candles[candles.length - 1];
+      const open = last.close;
+      const close = open + (Math.random() - 0.47) * 3.2 + Math.sin(Date.now() / 900) * 0.4;
+      candles.push({
+        open: open,
+        close: close,
+        high: Math.max(open, close) + Math.random() * 1.6,
+        low: Math.min(open, close) - Math.random() * 1.6
+      });
+      if (candles.length > CANDLE_N) candles.shift();
+    }
+
+    function ema(period) {
+      const k = 2 / (period + 1);
+      const out = [];
+      let prev = candles[0].close;
+      for (let i = 0; i < candles.length; i++) {
+        prev = candles[i].close * k + prev * (1 - k);
+        out.push(prev);
+      }
+      return out;
+    }
+
+    let lastPush = 0;
+    let t0 = performance.now();
+
+    function draw(now) {
+      const elapsed = (now - t0) / 1000;
+      if (now - lastPush > 420) {
+        pushCandle();
+        lastPush = now;
+      }
+
+      ctx.clearRect(0, 0, w, h);
+      const g = ctx.createLinearGradient(0, 0, w * 0.2, h);
+      g.addColorStop(0, "#0a1218");
+      g.addColorStop(0.4, "#152028");
+      g.addColorStop(0.75, "#1a2a34");
+      g.addColorStop(1, "#0e171e");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+
+      /* warm vignette + gold rim light */
+      const vig = ctx.createRadialGradient(w * 0.5, h * 0.42, h * 0.1, w * 0.5, h * 0.5, h * 0.85);
+      vig.addColorStop(0, "rgba(0,0,0,0)");
+      vig.addColorStop(0.7, "rgba(8,12,16,0.15)");
+      vig.addColorStop(1, "rgba(4,8,12,0.55)");
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, w, h);
+
+      /* soft grid — more readable */
+      ctx.strokeStyle = "rgba(196,163,90,0.06)";
+      ctx.lineWidth = 1;
+      const grid = 48;
+      const ox = (elapsed * 14) % grid;
+      for (let x = -grid + ox; x < w + grid; x += grid) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(255,255,255,0.045)";
+      for (let y = 0; y < h; y += grid) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+
+      let minP = Infinity;
+      let maxP = -Infinity;
+      for (let i = 0; i < candles.length; i++) {
+        minP = Math.min(minP, candles[i].low);
+        maxP = Math.max(maxP, candles[i].high);
+      }
+      const pad = (maxP - minP) * 0.18 || 1;
+      minP -= pad;
+      maxP += pad;
+      const chartTop = h * 0.14;
+      const chartH = h * 0.56;
+      const chartLeft = w * 0.07;
+      const chartW = w * 0.86;
+      const slot = chartW / CANDLE_N;
+
+      function yOf(p) {
+        return chartTop + ((maxP - p) / (maxP - minP)) * chartH;
+      }
+
+      /* volume bars */
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const vol = Math.abs(c.close - c.open) * 10 + 10;
+        const x = chartLeft + i * slot + slot * 0.18;
+        const bw = Math.max(2, slot * 0.58);
+        ctx.fillStyle = c.close >= c.open ? "rgba(31,154,104,0.22)" : "rgba(201,74,74,0.2)";
+        ctx.fillRect(x, chartTop + chartH + 16, bw, Math.min(56, vol));
+      }
+
+      const emaFast = ema(5);
+      const emaSlow = ema(13);
+
+      /* area fill under slow EMA — depth */
+      ctx.beginPath();
+      for (let i = 0; i < emaSlow.length; i++) {
+        const x = chartLeft + i * slot + slot * 0.5;
+        const y = yOf(emaSlow[i]);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.lineTo(chartLeft + (emaSlow.length - 1) * slot + slot * 0.5, chartTop + chartH);
+      ctx.lineTo(chartLeft + slot * 0.5, chartTop + chartH);
+      ctx.closePath();
+      const area = ctx.createLinearGradient(0, chartTop, 0, chartTop + chartH);
+      area.addColorStop(0, "rgba(196,163,90,0.14)");
+      area.addColorStop(1, "rgba(196,163,90,0)");
+      ctx.fillStyle = area;
+      ctx.fill();
+
+      function strokeSeries(series, color, width) {
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        for (let i = 0; i < series.length; i++) {
+          const x = chartLeft + i * slot + slot * 0.5;
+          const y = yOf(series[i]);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      strokeSeries(emaSlow, gold, 2.1);
+      strokeSeries(emaFast, cyan, 2.2);
+
+      /* Bollinger-ish envelope */
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.setLineDash([5, 7]);
+      for (let i = 0; i < candles.length; i++) {
+        const x = chartLeft + i * slot + slot * 0.5;
+        const mid = emaSlow[i];
+        const y = yOf(mid + (maxP - minP) * 0.08);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.beginPath();
+      for (let i = 0; i < candles.length; i++) {
+        const x = chartLeft + i * slot + slot * 0.5;
+        const mid = emaSlow[i];
+        const y = yOf(mid - (maxP - minP) * 0.08);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const x = chartLeft + i * slot + slot * 0.5;
+        const up = c.close >= c.open;
+        const col = up ? green : red;
+        ctx.strokeStyle = col;
+        ctx.fillStyle = col;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(x, yOf(c.high));
+        ctx.lineTo(x, yOf(c.low));
+        ctx.stroke();
+        const bodyTop = yOf(Math.max(c.open, c.close));
+        const bodyBot = yOf(Math.min(c.open, c.close));
+        const bw = Math.max(3.5, slot * 0.55);
+        ctx.shadowColor = up ? "rgba(31,154,104,0.45)" : "rgba(201,74,74,0.4)";
+        ctx.shadowBlur = 8;
+        ctx.globalAlpha = 0.95;
+        ctx.fillRect(x - bw / 2, bodyTop, bw, Math.max(2.5, bodyBot - bodyTop));
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+      }
+
+      /* floating markers */
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.2);
+      const last = candles[candles.length - 1];
+      const lx = chartLeft + (candles.length - 1) * slot + slot * 0.5;
+      const ly = yOf(last.close);
+      ctx.beginPath();
+      ctx.fillStyle = last.close >= last.open ? green : red;
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 12;
+      ctx.arc(lx, ly, 4 + pulse * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(255,255,255,0.45)";
+      ctx.lineWidth = 1.2;
+      ctx.arc(lx, ly, 12 + pulse * 7, 0, Math.PI * 2);
+      ctx.stroke();
+
+      /* crosshair */
+      ctx.strokeStyle = "rgba(196,163,90,0.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(chartLeft, ly);
+      ctx.lineTo(chartLeft + chartW, ly);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(lx, chartTop);
+      ctx.lineTo(lx, chartTop + chartH);
+      ctx.stroke();
+
+      /* price tag */
+      const tag = (last.close * 10 + 2140).toFixed(1);
+      ctx.font = "600 12px IBM Plex Mono, ui-monospace, monospace";
+      const tw = ctx.measureText(tag).width + 14;
+      ctx.fillStyle = "rgba(196,163,90,0.92)";
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(chartLeft + chartW + 6, ly - 10, tw, 20, 4);
+        ctx.fill();
+      } else {
+        ctx.fillRect(chartLeft + chartW + 6, ly - 10, tw, 20);
+      }
+      ctx.fillStyle = "#12181e";
+      ctx.fillText(tag, chartLeft + chartW + 13, ly + 4);
+
+      /* RSI strip */
+      const rsiY = chartTop + chartH + 88;
+      ctx.fillStyle = "rgba(255,255,255,0.045)";
+      ctx.fillRect(chartLeft, rsiY, chartW, 58);
+      ctx.strokeStyle = "rgba(196,163,90,0.2)";
+      ctx.strokeRect(chartLeft + 0.5, rsiY + 0.5, chartW - 1, 57);
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(126,182,212,0.75)";
+      ctx.lineWidth = 1.8;
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const rsi = 50 + Math.tanh((c.close - c.open) / 2) * 28 + Math.sin(i * 0.4 + elapsed) * 6;
+        const x = chartLeft + i * slot + slot * 0.5;
+        const y = rsiY + 58 - ((rsi - 20) / 60) * 58;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(196,163,90,0.4)";
+      ctx.beginPath();
+      ctx.moveTo(chartLeft, rsiY + 18);
+      ctx.lineTo(chartLeft + chartW, rsiY + 18);
+      ctx.stroke();
+
+      /* corner monogram feel */
+      ctx.fillStyle = "rgba(196,163,90,0.28)";
+      ctx.font = "600 11px IBM Plex Sans, sans-serif";
+      ctx.fillText("TRINITY  ·  LIVE DESK", chartLeft, chartTop - 18);
+
+      if (!prefersReducedMotion()) {
+        authCanvasRaf = requestAnimationFrame(draw);
+      }
+    }
+
+    resize();
+    seedCandles();
+    const onResize = function () {
+      resize();
+    };
+    window.addEventListener("resize", onResize);
+    authCanvasStop = function () {
+      window.removeEventListener("resize", onResize);
+    };
+    lastPush = performance.now();
+    if (prefersReducedMotion()) {
+      draw(performance.now());
+    } else {
+      authCanvasRaf = requestAnimationFrame(draw);
+    }
+  }
+
+  function setGateError(msg) {
+    const el = $("trinity-auth-error");
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+  }
+
+  function openAuthGate() {
+    const gate = $("trinity-auth-gate");
+    if (!gate) return;
+    gate.hidden = false;
+    gate.setAttribute("aria-hidden", "false");
+    gate.classList.remove("is-leaving", "is-welcome", "is-done");
+    gate.classList.add("is-open");
+    document.body.classList.add("trinity-gate-lock");
+    const welcome = $("trinity-welcome");
+    const modal = $("trinity-auth-modal");
+    if (welcome) welcome.hidden = true;
+    if (modal) modal.hidden = false;
+    setGateError("");
+    startAuthCanvas();
+    const email = localStorage.getItem(SB_EMAIL_KEY) || localStorage.getItem(USER_KEY) || "";
+    if ($("gate-user") && !$("gate-user").value) $("gate-user").value = email;
+    setTimeout(function () {
+      if ($("gate-user") && !$("gate-user").value) $("gate-user").focus();
+      else if ($("gate-pass")) $("gate-pass").focus();
+    }, 120);
+  }
+
+  function closeAuthGateHard() {
+    const gate = $("trinity-auth-gate");
+    if (!gate) return;
+    stopAuthCanvas();
+    gate.hidden = true;
+    gate.setAttribute("aria-hidden", "true");
+    gate.classList.remove("is-open", "is-leaving", "is-welcome", "is-done");
+    document.body.classList.remove("trinity-gate-lock");
+  }
+
+  function playWelcomeThenClose() {
+    const gate = $("trinity-auth-gate");
+    const modal = $("trinity-auth-modal");
+    const welcome = $("trinity-welcome");
+    if (!gate) return;
+    try {
+      sessionStorage.setItem(WELCOME_SESSION_KEY, "1");
+    } catch (_) { /* ignore */ }
+
+    gate.classList.add("is-leaving");
+    gate.classList.remove("is-open");
+    setTimeout(function () {
+      if (modal) modal.hidden = true;
+      if (welcome) welcome.hidden = false;
+      gate.classList.add("is-welcome");
+      gate.classList.remove("is-leaving");
+    }, prefersReducedMotion() ? 0 : 520);
+
+    setTimeout(function () {
+      gate.classList.add("is-done");
+    }, prefersReducedMotion() ? 3900 : 6200);
+
+    setTimeout(function () {
+      closeAuthGateHard();
+    }, prefersReducedMotion() ? 4100 : 6900);
+  }
+
+  function maybeShowAuthGate() {
+    const sb = authMode.supabase || {};
+    if (!sb.enabled) {
+      closeAuthGateHard();
+      return;
+    }
+    if (!isDashboardPath()) {
+      /* Gate is a dashboard entrance ritual; other pages keep the session bar. */
+      if (localStorage.getItem(SB_TOKEN_KEY)) closeAuthGateHard();
+      return;
+    }
+    if (localStorage.getItem(SB_TOKEN_KEY)) {
+      closeAuthGateHard();
+      return;
+    }
+    openAuthGate();
+  }
+
+  async function submitAuthGate(ev) {
+    if (ev) ev.preventDefault();
+    const sb = authMode.supabase || {};
+    if (!sb.enabled) return;
+    setGateError("");
+    const btn = $("gate-login-btn");
+    if (btn) btn.disabled = true;
+    try {
+      if ($("gate-user")) localStorage.setItem(USER_KEY, $("gate-user").value || "");
+      await ensureSupabaseSession(true);
+      if (localStorage.getItem(SB_TOKEN_KEY)) {
+        playWelcomeThenClose();
+      }
+    } catch (e) {
+      setGateError(e && e.message ? e.message : String(e));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   function setText(id, text) {
@@ -597,6 +1136,142 @@
     }
   }
 
+  function fmtMoneyRub(v) {
+    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
+    return (v >= 0 ? "+" : "") + v.toFixed(0) + " ₽";
+  }
+
+  function fmtWhen(iso) {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return d.toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    } catch (_) {
+      return String(iso);
+    }
+  }
+
+  function setBackStats(id, rows) {
+    const el = $(id);
+    if (!el) return;
+    el.innerHTML = (rows || []).map(function (r) {
+      return '<div class="widget-stat"><span class="k">' + escapeHtml(r.k) +
+        '</span><span class="v">' + escapeHtml(r.v) + "</span></div>";
+    }).join("");
+  }
+
+  function bindWidgetFlips() {
+    document.querySelectorAll(".widget-card.is-flippable").forEach(function (card) {
+      if (card.dataset.flipBound) return;
+      card.dataset.flipBound = "1";
+      card.classList.add("flip-settled");
+      const flip = card.querySelector(".widget-flip");
+      if (flip) {
+        flip.addEventListener("transitionend", function (ev) {
+          if (ev.propertyName !== "transform") return;
+          card.classList.add("flip-settled");
+        });
+      }
+      function toggle() {
+        card.classList.remove("flip-settled");
+        const on = card.classList.toggle("is-flipped");
+        card.setAttribute("aria-pressed", on ? "true" : "false");
+        if (prefersReducedMotion()) {
+          card.classList.add("flip-settled");
+        }
+      }
+      card.addEventListener("click", function (ev) {
+        if (ev.target && ev.target.closest && ev.target.closest("a,button,input,select,textarea,label")) {
+          return;
+        }
+        toggle();
+      });
+      card.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          toggle();
+        }
+      });
+    });
+    syncWidgetCardHeights();
+    if (!window.__trinityFlipResizeBound) {
+      window.__trinityFlipResizeBound = true;
+      let t = 0;
+      window.addEventListener("resize", function () {
+        clearTimeout(t);
+        t = setTimeout(syncWidgetCardHeights, 120);
+      });
+    }
+  }
+
+  /** Все карточки дашборда — одна высота (= max по всем рядам). */
+  function syncWidgetCardHeights() {
+    const cards = Array.prototype.slice.call(
+      document.querySelectorAll(".widget-grid .widget-card.is-flippable")
+    );
+    if (!cards.length) return;
+
+    let globalMax = 360;
+    const measured = cards.map(function (card) {
+      const flip = card.querySelector(".widget-flip");
+      const front = card.querySelector(".widget-front");
+      const back = card.querySelector(".widget-back");
+      if (!flip || !front || !back) return null;
+
+      function naturalHeight(face) {
+        const probe = face.cloneNode(true);
+        probe.removeAttribute("id");
+        probe.querySelectorAll("[id]").forEach(function (n) { n.removeAttribute("id"); });
+        probe.style.cssText = [
+          "position:static",
+          "transform:none",
+          "-webkit-transform:none",
+          "visibility:hidden",
+          "opacity:1",
+          "pointer-events:none",
+          "height:auto",
+          "min-height:0",
+          "inset:auto",
+          "display:block",
+          "width:" + flip.clientWidth + "px"
+        ].join(";");
+        flip.appendChild(probe);
+        const h = Math.ceil(probe.getBoundingClientRect().height);
+        probe.remove();
+        return h;
+      }
+
+      const h = Math.max(360, naturalHeight(front), naturalHeight(back)) + 4;
+      globalMax = Math.max(globalMax, h);
+      return { card: card, flip: flip, front: front, back: back };
+    });
+
+    measured.forEach(function (m) {
+      if (!m) return;
+      m.flip.style.height = globalMax + "px";
+      m.card.style.height = globalMax + "px";
+      m.card.style.minHeight = globalMax + "px";
+      m.front.style.height = globalMax + "px";
+      m.back.style.height = globalMax + "px";
+      m.front.style.width = "100%";
+      m.back.style.width = "100%";
+    });
+  }
+
+  function bookLabel(book) {
+    if (!book) return "Pairs / DAILY";
+    const b = String(book).toUpperCase();
+    if (b === "INTRADAY") return "Pairs / INTRADAY (research)";
+    return "Pairs / DAILY";
+  }
+
   async function loadBrokerWidget() {
     if (!$("broker-widget") && !$("widget-broker") && !$("dash-broker-status")) return;
     try {
@@ -625,6 +1300,23 @@
         }
         setText("widget-broker-mode",
           (status.mode || "?") + (status.sandbox ? " · sandbox" : " · live"));
+
+        const lead = $("widget-broker-back-lead");
+        if (lead) {
+          lead.textContent = armed
+            ? "Брокер подключён и готов к контуру исполнения."
+            : (status.enabled
+              ? "Брокер включён, но контур ещё не полностью готов."
+              : "Брокер выключен — paper работает без live-исполнения.");
+        }
+        setBackStats("widget-broker-back-stats", [
+          { k: "Провайдер", v: status.provider || "T-Invest" },
+          { k: "Режим", v: (status.mode || "—") + (status.sandbox ? " · sandbox" : " · live") },
+          { k: "Токен", v: status.tokenPresent ? "сохранён" : "нет" },
+          { k: "Счёт", v: status.accountConfigured ? (status.accountId || "OK") : "не задан" },
+          { k: "Kill-switch", v: status.killSwitch ? "ВКЛ" : "выкл" },
+          { k: "Автоисполнение", v: status.autoExecuteAfterAnalysis ? "да" : "нет" }
+        ]);
       }
       if (reconcileRes.ok && $("broker-reconcile-line")) {
         const rec = await reconcileRes.json();
@@ -644,19 +1336,16 @@
         setText("broker-status-line", "Статус брокера временно недоступен.");
       }
     }
-  }
-
-  function fmtMoneyRub(v) {
-    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
-    return (v >= 0 ? "+" : "") + v.toFixed(0) + " ₽";
+    syncWidgetCardHeights();
   }
 
   async function loadDashboardConsolidatedSummary() {
     if (!$("dash-paper-open") && !$("widget-paper")) return;
     try {
-      const [paperRes, finalRes] = await Promise.all([
+      const [paperRes, finalRes, signalsRes] = await Promise.all([
         fetch("/api/paper/journal", { headers: { Accept: "application/json" } }),
-        fetch("/api/analysis/final", { headers: { Accept: "application/json" } })
+        fetch("/api/analysis/final", { headers: { Accept: "application/json" } }),
+        fetch("/api/analysis/signals", { headers: { Accept: "application/json" } })
       ]);
 
       if (paperRes.ok) {
@@ -675,6 +1364,44 @@
           pnlEl.classList.toggle("bad", pnlSum != null && pnlSum < 0);
           pnlEl.classList.toggle("accent", pnlSum != null && pnlSum >= 0);
         }
+
+        const entries = Array.isArray(paper.entries) ? paper.entries.slice() : [];
+        const closed = entries.filter(function (e) { return e && String(e.status || "").toUpperCase() === "CLOSED"; });
+        const last = closed.sort(function (a, b) {
+          return String(b.closedAt || "").localeCompare(String(a.closedAt || ""));
+        })[0] || entries.sort(function (a, b) {
+          return String(b.openedAt || "").localeCompare(String(a.openedAt || ""));
+        })[0];
+        const lead = $("widget-paper-back-lead");
+        if (lead) {
+          if (!last) {
+            lead.textContent = "Пока не было paper-сделок по стратегиям. После «Анализ + paper» здесь появится последняя запись.";
+          } else if (String(last.status || "").toUpperCase() === "CLOSED") {
+            lead.textContent =
+              "Последняя сделка " + bookLabel(last.book) + " · " +
+              (last.tickerY || "?") + "/" + (last.tickerX || "?") +
+              " закрыта " + fmtWhen(last.closedAt) + ".";
+          } else {
+            lead.textContent =
+              "Открыта позиция " + bookLabel(last.book) + " · " +
+              (last.tickerY || "?") + "/" + (last.tickerX || "?") +
+              " с " + fmtWhen(last.openedAt) + ".";
+          }
+        }
+        setBackStats("widget-paper-back-stats", last ? [
+          { k: "Стратегия", v: bookLabel(last.book) },
+          { k: "Пара", v: (last.tickerY || "?") + " / " + (last.tickerX || "?") },
+          { k: "Сигнал", v: last.signal || "—" },
+          { k: "Статус", v: last.status || "—" },
+          { k: "PnL", v: last.pnlRub != null ? fmtMoneyRub(Number(last.pnlRub))
+            : (last.unrealizedPnlRub != null ? fmtMoneyRub(Number(last.unrealizedPnlRub)) + " MTM" : "—") },
+          { k: "Закрытых / открытых", v: String(paper.closedCount != null ? paper.closedCount : closed.length)
+            + " / " + String(openCount) }
+        ] : [
+          { k: "Открытых", v: String(openCount) },
+          { k: "Закрытых", v: String(paper.closedCount != null ? paper.closedCount : 0) },
+          { k: "PnL ₽", v: pnlSum == null ? "—" : fmtMoneyRub(pnlSum) }
+        ]);
       }
 
       if (finalRes.ok) {
@@ -690,7 +1417,58 @@
         setText("dash-final-watch", String(watch));
         setText("dash-final-block", String(block));
         setDonut("widget-final-donut", Math.round((actionable / total) * 100), actionable > 0 ? "var(--ok)" : "var(--slate)");
+
+        const top = list.filter(function (f) {
+          return f && (f.decision === "ENTER" || f.decision === "REDUCE_SIZE");
+        }).slice(0, 3);
+        const fLead = $("widget-final-back-lead");
+        if (fLead) {
+          fLead.textContent = actionable > 0
+            ? "Горячие решения после FA: " + actionable + " на вход/reduce."
+            : (list.length
+              ? "Сейчас нет ENTER — рынок/новости держат пары в WATCH или BLOCK."
+              : "Итог ещё пуст. Запустите анализ с FA.");
+        }
+        setBackStats("widget-final-back-stats", top.length ? top.map(function (f) {
+          const t = f.recommendation || f;
+          const pair = (t.tickerY || "?") + "/" + (t.tickerX || "?");
+          return { k: f.decision, v: pair };
+        }) : [
+          { k: "ENTER/REDUCE", v: String(actionable) },
+          { k: "WATCH", v: String(watch) },
+          { k: "BLOCK", v: String(block) }
+        ]);
       }
+
+      if (signalsRes.ok) {
+        const signals = await signalsRes.json();
+        const list = Array.isArray(signals) ? signals : [];
+        const longs = list.filter(function (s) { return s && s.signal === "LONG_SPREAD"; }).length;
+        const shorts = list.filter(function (s) { return s && s.signal === "SHORT_SPREAD"; }).length;
+        setText("widget-signals-center", String(list.length));
+        setText("widget-signals-long", String(longs));
+        setText("widget-signals-short", String(shorts));
+        setDonut("widget-signals-donut", Math.min(100, list.length * 15), list.length ? "var(--accent)" : "var(--slate)");
+        const sLead = $("widget-signals-back-lead");
+        if (sLead) {
+          sLead.textContent = list.length
+            ? "Технические сигналы до финального FA-гейта."
+            : "Нет LONG/SHORT — режим или качество пар не дали входов.";
+        }
+        setBackStats("widget-signals-back-stats", [
+          { k: "LONG_SPREAD", v: String(longs) },
+          { k: "SHORT_SPREAD", v: String(shorts) },
+          { k: "Всего", v: String(list.length) }
+        ]);
+      }
+
+      const regimeLabel = ($("widget-regime-label") && $("widget-regime-label").textContent) || "";
+      setBackStats("widget-regime-back-stats", [
+        { k: "Режим", v: regimeLabel || "—" },
+        { k: "Pairs paper", v: regimeLabel === "TREND" ? "новые входы блок" : "разрешены (после FA)" },
+        { k: "TREND / ARB", v: regimeLabel === "TREND" ? "research в приоритете" : "research / ожидание" }
+      ]);
+      syncWidgetCardHeights();
     } catch (_) {
       // ignore intermittent network errors
     }
@@ -759,6 +1537,69 @@
       view.tokenConfigured
         ? "Токен сохранён: " + (view.maskedToken || "скрыт") + ". Оставьте поле пустым, если не меняете его."
         : "Токен пока не сохранён.");
+  }
+
+  async function loadTrendDeliverySettings() {
+    const toggle = $("trend-auto-execution");
+    if (!toggle) return;
+    try {
+      const res = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyTrendDeliveryView(await res.json());
+    } catch (err) {
+      const status = $("trend-delivery-status");
+      if (status) status.textContent = "Не удалось загрузить режим trend: " + (err.message || err);
+    }
+  }
+
+  function applyTrendDeliveryView(view) {
+    const toggle = $("trend-auto-execution");
+    if (!toggle || !view) return;
+    const auto = !!view.autoExecution;
+    toggle.checked = auto;
+    toggle.setAttribute("aria-checked", auto ? "true" : "false");
+    const wrap = toggle.closest(".mode-switch");
+    if (wrap) {
+      wrap.classList.toggle("is-auto", auto);
+      wrap.classList.toggle("is-signal", !auto);
+    }
+    const title = $("trend-delivery-title");
+    const hint = $("trend-delivery-hint");
+    const status = $("trend-delivery-status");
+    if (title) title.textContent = auto ? "Автоторговля" : "Только сигнал";
+    if (hint) {
+      hint.textContent = auto
+        ? "Планы уходят в sandbox journal (submit). Live FORTS — только с live-execution."
+        : "Тикер + BUY/SELL без заявок. Включите автоторговлю для journal/ордеров.";
+    }
+    if (status) {
+      status.textContent = "Режим: " + (view.delivery || (auto ? "AUTO" : "SIGNAL_ONLY"))
+        + (view.updatedAt ? " · обновлено " + view.updatedAt : "");
+    }
+  }
+
+  async function setTrendAutoExecution(enabled) {
+    const toggle = $("trend-auto-execution");
+    if (!toggle) return;
+    toggle.disabled = true;
+    try {
+      const res = await fetch("/api/trend/settings/auto-execution", {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      applyTrendDeliveryView(await res.json());
+      appendLog(enabled ? "Trend: автоторговля включена." : "Trend: только сигнал.", "ok");
+    } catch (err) {
+      appendLog("Не удалось переключить trend: " + (err.message || err), "err");
+      await loadTrendDeliverySettings();
+    } finally {
+      toggle.disabled = false;
+    }
   }
 
   async function loadBrokerSettings() {
@@ -929,10 +1770,23 @@
       if ($("broker-save-settings") || $("widget-broker") || $("dash-broker-status")) {
         loadBrokerWidget();
       }
-      loadDashboardConsolidatedSummary();
-      // Double-rAF: paint empty rings, then ignition sweep (incl. regime ADX).
+      loadDashboardConsolidatedSummary().then(function () {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(igniteAllDonuts);
+        });
+      });
+      // Double-rAF fallback if summary skipped
       requestAnimationFrame(function () {
-        requestAnimationFrame(igniteRegimeDonut);
+        requestAnimationFrame(function () {
+          if (!$("widget-paper")) return;
+          /* capital/strategies already in HTML — ignite if summary did not */
+          setTimeout(function () {
+            document.querySelectorAll(".widget-card .donut[id]").forEach(function (el) {
+              if (el.dataset.ignited === "1") return;
+              igniteAllDonuts();
+            });
+          }, 400);
+        });
       });
     });
     setInterval(pollPaperAlerts, POLL_MS);
@@ -1084,6 +1938,7 @@
         if (sb.enabled) {
           try {
             await ensureSupabaseSession(true);
+            updateSessionBar();
           } catch (e) {
             appendLog("Вход не удался: " + (e && e.message ? e.message : e), "err");
           }
@@ -1097,8 +1952,18 @@
       });
     }
 
+    if ($("trinity-auth-form")) {
+      $("trinity-auth-form").addEventListener("submit", submitAuthGate);
+    }
+
     if ($("broker-save-settings")) {
       $("broker-save-settings").addEventListener("click", saveBrokerSettings);
+    }
+    if ($("trend-auto-execution")) {
+      loadTrendDeliverySettings();
+      $("trend-auto-execution").addEventListener("change", function () {
+        setTrendAutoExecution($("trend-auto-execution").checked);
+      });
     }
     if ($("broker-sandbox-account")) {
       $("broker-sandbox-account").addEventListener("click", ensureSandboxAccount);
@@ -1110,8 +1975,11 @@
     appendLog("Операторская панель готова.", "info");
     appendLog("Раздел: " + currentSectionTitle() + ".", "info");
     bindFullCoreTeasers();
+    bindWidgetFlips();
     startAlertPolling();
     loadAuthMode().then(function () {
+      updateSessionBar();
+      maybeShowAuthGate();
       if (authMode.supabase && authMode.supabase.enabled && localStorage.getItem(SB_TOKEN_KEY)) {
         appendLog("Найдена Supabase-сессия — Bearer для API.", "ok");
       }

@@ -1,14 +1,20 @@
 package com.moex.trinity.trend;
 
 /**
- * Minimal regime hint for playbook selection (expand later: ADX, volume regime, range vs breakout).
+ * Regime hint for playbook selection.
+ * {@code preferredPlaybookId} — config hint ({@code imoex.strategies.trend.playbook}); may be null.
  */
 public record TrendRegimeContext(
         String regimeLabel,
         double adx,
-        boolean volumeExpansion
+        boolean volumeExpansion,
+        String preferredPlaybookId
 ) {
+    public TrendRegimeContext(String regimeLabel, double adx, boolean volumeExpansion) {
+        this(regimeLabel, adx, volumeExpansion, null);
+    }
+
     public static TrendRegimeContext unknown() {
-        return new TrendRegimeContext("UNKNOWN", 0, false);
+        return new TrendRegimeContext("UNKNOWN", 0, false, null);
     }
 }

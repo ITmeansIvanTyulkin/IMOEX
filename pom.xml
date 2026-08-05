@@ -16,13 +16,14 @@
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>TRINITY</name>
-    <description>TRINITY Multi-Strategy — pairs / trend / calendar-arb (one repo)</description>
+    <description>TRINITY Multi-Strategy — pairs / trend / calendar-arb / marketdata (one repo)</description>
 
     <modules>
         <module>trinity-shared</module>
         <module>trinity-pairs</module>
         <module>trinity-trend</module>
         <module>trinity-calendar-arb</module>
+        <module>trinity-marketdata</module>
         <module>trinity-app</module>
     </modules>
 
@@ -53,6 +54,11 @@
             <dependency>
                 <groupId>com.moex</groupId>
                 <artifactId>trinity-calendar-arb</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-marketdata</artifactId>
                 <version>${trinity.version}</version>
             </dependency>
             <dependency>
