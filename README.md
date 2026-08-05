@@ -2,7 +2,7 @@
 
 **Three Strategies. One Mission.**
 
-**TRINITY** в замысле — три стратегии: (1) cointegration / pairs, (2) календарный арбитраж фьючерсов, (3) опционы. Сейчас в **live paper** — **DAILY** pairs в боковике (металлы / mining; нефть в pairs отложена). **INTRADAY** — только research (1H EG/Z/метрики), **без торговли**. Пункты 2–3 — в дорожной карте.
+**TRINITY** в замысле — три торговых столпа + четвёртый продуктовый слой: (1) cointegration / pairs, (2) **trend robot** playbook «Уровни + профиль» (BR M5, sandbox-first), (3) календарный арбитраж фьючерсов, (4) **volume / ATAS-class desk**. Сейчас в **live paper** — **DAILY** pairs в боковике (металлы / mining). **INTRADAY** pairs — только research. См. `.cursor/rules/trinity-roadmap.mdc`.
 
 Система загружает дневные свечи через MOEX ISS, отсекает тонкий рынок, тестирует пары Engle–Granger, считает спред / rolling Z-score (опционально Kalman-hedge), симулирует mean-reversion с risk-стопами, показывает графики, пропускает сигналы через новостной фильтр и ведёт **автоматический paper journal** (DAILY). Раз в месяц — пересмотр секторных кластеров по rolling cash PnL / PF.
 
@@ -582,8 +582,9 @@ IMOEX/
 ├── pom.xml                      # parent: trinity
 ├── trinity-shared/              # StrategyId и общие примитивы
 ├── trinity-pairs/               # strategy 1 — cointegration (com.moex.cointegration.*)
-├── trinity-trend/               # strategy 2 — playbook SPI (com.moex.trinity.trend)
+├── trinity-trend/               # strategy 2 — robot playbook levels-profile-br-m5 (sandbox-first)
 ├── trinity-calendar-arb/        # strategy 3 — skeleton (com.moex.trinity.calendararb)
+├── trinity-marketdata/          # marketplace DOM/trades feed SPI (com.moex.trinity.marketdata)
 ├── trinity-app/                 # Boot shell, /view, security, upsell
 │   └── src/main/resources/application.yml
 ├── application-local.yml        # секреты (gitignore), корень репо

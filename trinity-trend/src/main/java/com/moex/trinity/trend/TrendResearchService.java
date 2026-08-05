@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Research facade for strategy 2. No paper / broker wiring.
+ * Facade for strategy 2 playbooks + robot evaluation.
  */
 public class TrendResearchService {
 
@@ -22,5 +22,13 @@ public class TrendResearchService {
 
     public Optional<TrendPlaybook> activePlaybook(TrendRegimeContext context) {
         return selector.select(context, playbooks);
+    }
+
+    public Optional<TrendRobotPlan> evaluate(
+            TrendRegimeContext context,
+            TrendBarSeries series,
+            TrendAccountContext account
+    ) {
+        return activePlaybook(context).flatMap(pb -> pb.evaluate(series, account));
     }
 }

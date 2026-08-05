@@ -159,6 +159,304 @@ nav.topnav a.active {
   color: #fff;
 }
 
+.auth-session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.92rem;
+}
+
+.auth-session-bar[hidden] {
+  display: none !important;
+}
+
+.auth-session-bar.need {
+  background: var(--warn-soft);
+  color: #6b4a12;
+}
+
+.auth-session-bar.ok {
+  background: var(--ok-soft);
+  color: #1a5c34;
+}
+
+.auth-session-text {
+  flex: 1 1 16rem;
+  line-height: 1.4;
+}
+
+.auth-session-btn {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
+/* —— Premium auth gate (dashboard entrance) —— */
+.trinity-auth-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.trinity-auth-gate[hidden] {
+  display: none !important;
+}
+
+.trinity-auth-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  filter: blur(0.35px) saturate(1.25) contrast(1.06);
+  transform: scale(1.02);
+}
+
+.trinity-auth-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(1000px 560px at 16% 18%, rgba(126, 182, 212, 0.16), transparent 58%),
+    radial-gradient(780px 460px at 84% 78%, rgba(196, 163, 90, 0.14), transparent 52%),
+    linear-gradient(165deg, rgba(12, 18, 24, 0.42), rgba(22, 32, 40, 0.48) 48%, rgba(10, 15, 20, 0.55));
+  backdrop-filter: blur(3.5px) saturate(1.15);
+  -webkit-backdrop-filter: blur(3.5px) saturate(1.15);
+}
+
+.trinity-auth-stage {
+  position: relative;
+  z-index: 2;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.trinity-auth-modal {
+  width: min(26.5rem, 100%);
+  padding: 1.85rem 1.7rem 1.4rem;
+  border-radius: 22px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.97), rgba(247, 249, 251, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 28px 70px rgba(8, 14, 18, 0.38),
+    0 8px 24px rgba(8, 14, 18, 0.22);
+  transform: translateY(18px) scale(0.96);
+  opacity: 0;
+  transition:
+    transform 0.55s cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 0.45s ease;
+}
+
+.trinity-auth-gate.is-open .trinity-auth-modal {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.trinity-auth-gate.is-leaving .trinity-auth-modal {
+  transform: translateY(-42px) scale(0.94);
+  opacity: 0;
+  transition:
+    transform 0.65s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.45s ease;
+}
+
+.trinity-auth-brand {
+  text-align: center;
+  margin-bottom: 1.25rem;
+}
+
+.trinity-logo-lg {
+  width: 2.6rem;
+  height: 2.6rem;
+  margin: 0 auto 0.85rem;
+  transform: scale(1.28);
+  transform-origin: center center;
+}
+
+.trinity-logo-xl {
+  width: 2.6rem;
+  height: 2.6rem;
+  margin: 0 auto 1.35rem;
+  transform: scale(1.65);
+  transform-origin: center center;
+  filter: drop-shadow(0 8px 28px rgba(0, 0, 0, 0.35));
+}
+
+.trinity-auth-eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.trinity-auth-title {
+  margin: 0;
+  font-size: 1.85rem;
+  letter-spacing: 0.04em;
+  color: var(--navy);
+  font-weight: 700;
+}
+
+.trinity-auth-lead {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.trinity-auth-form .field {
+  margin-bottom: 0.75rem;
+}
+
+.trinity-auth-form .field label {
+  display: block;
+  margin-bottom: 0.28rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--navy-2);
+}
+
+.trinity-auth-form .field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.72rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: 500 0.95rem var(--sans);
+  color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.trinity-auth-form .field input:focus {
+  outline: none;
+  border-color: rgba(11, 122, 102, 0.55);
+  box-shadow: 0 0 0 3px rgba(11, 122, 102, 0.12);
+}
+
+.trinity-auth-submit {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+
+.trinity-auth-error {
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.86rem;
+}
+
+.trinity-auth-error[hidden] {
+  display: none !important;
+}
+
+.trinity-auth-foot {
+  margin: 0.95rem 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.trinity-welcome {
+  width: min(38rem, 100%);
+  text-align: center;
+  color: #f4f7f9;
+  transform: translateY(28px) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.trinity-welcome[hidden] {
+  display: none !important;
+}
+
+.trinity-auth-gate.is-welcome .trinity-welcome {
+  display: block !important;
+  animation: trinity-welcome-in 0.9s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.trinity-welcome-kicker {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(196, 163, 90, 0.95);
+}
+
+.trinity-welcome-title {
+  margin: 0;
+  font-size: clamp(1.7rem, 4vw, 2.45rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  text-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+
+.trinity-welcome-copy {
+  margin: 1rem auto 0;
+  max-width: 34rem;
+  font-size: clamp(1rem, 2.2vw, 1.18rem);
+  line-height: 1.55;
+  color: rgba(244, 247, 249, 0.88);
+}
+
+@keyframes trinity-welcome-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes trinity-gate-fade {
+  to { opacity: 0; }
+}
+
+.trinity-auth-gate.is-done {
+  animation: trinity-gate-fade 0.7s ease forwards;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trinity-auth-modal,
+  .trinity-auth-gate.is-leaving .trinity-auth-modal,
+  .trinity-auth-gate.is-welcome .trinity-welcome,
+  .trinity-auth-gate.is-done {
+    animation: none !important;
+    transition: none !important;
+  }
+  .trinity-auth-gate.is-open .trinity-auth-modal {
+    opacity: 1;
+    transform: none;
+  }
+  .trinity-auth-canvas {
+    filter: none;
+  }
+}
+
+body.trinity-gate-lock {
+  overflow: hidden;
+}
+
 main {
   padding: 2rem 2rem 3.5rem;
   max-width: 1180px;
@@ -925,7 +1223,7 @@ a.final-news-title:hover { color: var(--accent, var(--info)); text-decoration: u
   line-height: 1.5;
 }
 
-/* Коммерческая плашка: ATAS-inspired microstructure внутри TRINITY */
+/* Коммерческие плашки: ATAS / Tiger.trade внутри TRINITY (один дизайн) */
 .strategy-doc .atas-plaque {
   background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 55%, #1a3d36 100%);
   color: #f4f7f9;
@@ -1475,6 +1773,98 @@ body[data-upsell="off"] .full-core-badge {
   margin-bottom: 0.5rem;
 }
 
+/* Trend playbook: signal ↔ auto toggle */
+.trend-delivery-card {
+  max-width: 42rem;
+}
+
+.trend-delivery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.25rem;
+}
+
+.trend-delivery-copy {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.trend-delivery-copy strong {
+  display: block;
+  font-size: 1.05rem;
+  margin-bottom: 0.25rem;
+}
+
+.mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.mode-switch input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.mode-switch-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: color 0.2s ease;
+}
+
+.mode-switch.is-signal .mode-switch-label:first-of-type,
+.mode-switch.is-auto .mode-switch-label:last-of-type {
+  color: var(--navy);
+}
+
+.mode-switch-track {
+  position: relative;
+  width: 3.1rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: #c5cdd4;
+  border: 1px solid rgba(28, 27, 25, 0.12);
+  transition: background 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.mode-switch-knob {
+  position: absolute;
+  top: 0.18rem;
+  left: 0.18rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.mode-switch.is-auto .mode-switch-track {
+  background: var(--navy);
+  border-color: var(--navy);
+}
+
+.mode-switch.is-auto .mode-switch-knob {
+  transform: translateX(1.35rem);
+}
+
+.mode-switch input:focus-visible + .mode-switch-label + .mode-switch-track,
+.mode-switch:has(input:focus-visible) .mode-switch-track {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
 /* Animatable donut fill (--p) for ignition-style sweep */
 @property --p {
   syntax: "<number>";
@@ -1488,6 +1878,7 @@ body[data-upsell="off"] .full-core-badge {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.15rem;
   margin: 0 0 var(--space);
+  align-items: stretch;
 }
 
 @media (max-width: 1100px) {
@@ -1504,13 +1895,166 @@ body[data-upsell="off"] .full-core-badge {
   border-radius: var(--radius);
   padding: 1.4rem 1.4rem 1.5rem;
   box-shadow: var(--shadow);
-  min-height: 248px;
+  min-height: 360px;
   display: flex;
   flex-direction: column;
   transition:
     border-color 0.28s ease,
     box-shadow 0.32s ease,
     transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.widget-grid-secondary {
+  margin-top: 0.15rem;
+}
+
+.widget-grid-pillars {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.35rem;
+  margin-bottom: calc(var(--space) * 0.85);
+}
+
+@media (max-width: 1100px) {
+  .widget-grid-pillars { grid-template-columns: 1fr; }
+}
+
+.widget-grid-pillars .widget-card.is-flippable {
+  min-height: 340px;
+  height: 340px;
+}
+
+.widget-card.is-flippable {
+  padding: 0;
+  cursor: pointer;
+  perspective: 1600px;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  min-height: 360px;
+  height: 360px; /* JS выровняет весь ряд по max */
+  overflow: hidden;
+  background: #ffffff;
+  isolation: isolate;
+  align-self: stretch;
+}
+
+.widget-card.is-flippable:focus-visible {
+  box-shadow: var(--shadow-hover), 0 0 0 2px rgba(11, 122, 102, 0.35);
+}
+
+.widget-flip {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  height: 100%;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  transition: transform 0.72s cubic-bezier(0.22, 0.61, 0.36, 1);
+  background: #ffffff;
+}
+
+.widget-card.is-flipped .widget-flip {
+  transform: rotateY(180deg);
+}
+
+.widget-face {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 1.45rem 1.45rem 1.55rem;
+  border-radius: 0; /* радиус только у карточки — иначе «остров» */
+  box-sizing: border-box;
+  background: #ffffff;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  transform: rotateY(0deg) translateZ(0.1px);
+  -webkit-transform: rotateY(0deg) translateZ(0.1px);
+  overflow: hidden;
+}
+
+.widget-front {
+  z-index: 2;
+}
+
+.widget-back {
+  z-index: 1;
+  transform: rotateY(180deg) translateZ(0.1px);
+  -webkit-transform: rotateY(180deg) translateZ(0.1px);
+  background: #ffffff;
+}
+
+/* После анимации прячем невидимую грань — страховка от WebKit bleed */
+.widget-card.is-flipped.flip-settled .widget-front {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.widget-card:not(.is-flipped).flip-settled .widget-back {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.widget-back-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.widget-back-lead {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--navy);
+}
+
+.widget-back-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: auto;
+  padding-bottom: 0.15rem;
+}
+
+.widget-back-link {
+  margin-top: 0.45rem;
+  padding-bottom: 0.1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.widget-back-link:hover {
+  color: var(--navy);
+}
+
+.widget-flip-cue {
+  font-size: 0.78rem;
+  color: var(--slate);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.widget-card.is-flippable:hover:not(.is-flipped) {
+  border-color: rgba(11, 122, 102, 0.22);
+  box-shadow:
+    var(--shadow-hover),
+    0 0 0 1px rgba(196, 163, 90, 0.1);
+  transform: translateY(-3px);
+}
+
+.widget-card.is-flippable.is-flipped {
+  border-color: rgba(196, 163, 90, 0.28);
+  box-shadow: var(--shadow-hover);
+  transform: none;
 }
 
 .widget-card:hover {
@@ -1543,12 +2087,15 @@ body[data-upsell="off"] .full-core-badge {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 1.75rem;
-  flex: 1;
+  gap: 1.35rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .widget-body .donut {
   align-self: flex-start;
+  flex: 0 0 auto;
 }
 
 .donut {
@@ -1563,7 +2110,7 @@ body[data-upsell="off"] .full-core-badge {
   flex-shrink: 0;
   position: relative;
   transition:
-    --p 1.05s cubic-bezier(0.16, 1, 0.3, 1),
+    --p 2.1s cubic-bezier(0.22, 0.8, 0.24, 1),
     transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1),
     filter 0.35s ease;
   will-change: --p;
@@ -1626,10 +2173,11 @@ body[data-upsell="off"] .full-core-badge {
   flex-direction: column;
   gap: 0;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
   border-top: 1px solid var(--line);
-  padding-top: 1.15rem;
-  margin-top: 0.1rem;
+  padding-top: 1rem;
+  padding-bottom: 0.15rem;
+  margin-top: auto;
 }
 
 .widget-stat {
@@ -1638,7 +2186,7 @@ body[data-upsell="off"] .full-core-badge {
   justify-content: space-between;
   gap: 0.75rem;
   font-size: 0.88rem;
-  padding: 0.48rem 0;
+  padding: 0.42rem 0;
   transition: background 0.2s ease;
 }
 
@@ -1689,11 +2237,13 @@ body[data-upsell="off"] .full-core-badge {
   .donut::before,
   .donut-center,
   .swatch,
-  .trinity-logo .ring {
+  .trinity-logo .ring,
+  .widget-flip {
     transition: none !important;
   }
 
-  .widget-card:hover {
+  .widget-card:hover,
+  .widget-card.is-flippable:hover:not(.is-flipped) {
     transform: none;
   }
 

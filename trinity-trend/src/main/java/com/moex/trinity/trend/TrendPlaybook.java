@@ -2,8 +2,10 @@ package com.moex.trinity.trend;
 
 import com.moex.trinity.shared.StrategyId;
 
+import java.util.Optional;
+
 /**
- * Strategy-2 playbook contract. Research-only — no live/paper opens yet.
+ * Strategy-2 playbook contract — trading robot brain (sandbox-first execution in app).
  */
 public interface TrendPlaybook {
 
@@ -11,10 +13,15 @@ public interface TrendPlaybook {
 
     String displayName();
 
-    /** Short human hint: when this playbook is eligible (e.g. "TREND + volume expansion"). */
+    /** Short human hint: when this playbook is eligible. */
     String whenApplicable();
 
     default StrategyId strategyId() {
         return StrategyId.TREND;
     }
+
+    /**
+     * Evaluate M5 series + account → optional order plan (limits / SL / staged TP).
+     */
+    Optional<TrendRobotPlan> evaluate(TrendBarSeries series, TrendAccountContext account);
 }

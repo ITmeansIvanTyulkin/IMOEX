@@ -1,7 +1,9 @@
 package com.moex.trinity.trend;
 
+import java.util.Optional;
+
 /**
- * Placeholder playbook until operator-selected strategies are wired.
+ * Placeholder until operator selects a concrete playbook — kept for tests / fallback.
  */
 public class PlaceholderTrendPlaybook implements TrendPlaybook {
 
@@ -18,5 +20,10 @@ public class PlaceholderTrendPlaybook implements TrendPlaybook {
     @Override
     public String whenApplicable() {
         return "TREND regime — replace with selected volume/range/breakout playbooks";
+    }
+
+    @Override
+    public Optional<TrendRobotPlan> evaluate(TrendBarSeries series, TrendAccountContext account) {
+        return Optional.empty();
     }
 }
