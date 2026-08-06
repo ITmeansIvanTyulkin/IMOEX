@@ -41,7 +41,7 @@ public record TrendPlaybookSettings(
         String eventCalendarFile,
         int eventBlockMinutesBefore,
         int eventBlockMinutesAfter,
-        /** A-setup: arm BOUNCE only (no RETEST chase). */
+        /** Full checklist default false: BOUNCE + RETEST after break+hold. true = bounce only. */
         boolean aSetupBounceOnly,
         /** Fraction of full size at entry until BE (e.g. 0.4 ≈ ⅓–½). */
         double initialSizeFraction,
@@ -49,7 +49,7 @@ public record TrendPlaybookSettings(
         boolean preferMarketDataZones
 ) {
     public static TrendPlaybookSettings brDefaults() {
-        TrendInstrumentSpec br = TrendInstrumentSpec.br(15, 20, 15, 25, 7.0);
+        TrendInstrumentSpec br = TrendInstrumentSpec.brDefaults();
         return new TrendPlaybookSettings(
                 "levels-profile-br-m5",
                 LimitGridStyle.MODERATE,
@@ -57,7 +57,7 @@ public record TrendPlaybookSettings(
                 br,
                 1.0 / 3.0,
                 3,
-                3,
+                5,
                 2,
                 576,
                 true,
@@ -69,13 +69,13 @@ public record TrendPlaybookSettings(
                 40,
                 true,
                 1.5,
-                2,
+                0,
                 12,
                 10,
                 "09:00",
                 "23:50",
                 40,
-                40,
+                30,
                 50,
                 24,
                 true,
@@ -88,7 +88,7 @@ public record TrendPlaybookSettings(
                 "data/trend-event-calendar.json",
                 45,
                 30,
-                true,
+                false,
                 0.4,
                 true
         );

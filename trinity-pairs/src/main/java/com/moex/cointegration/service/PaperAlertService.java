@@ -14,13 +14,15 @@ import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Хранит недавние paper OPEN для browser-алертов и статус cron-прогонов.
+ * Хранит недавние paper OPEN/CLOSE для browser-алертов и статус cron-прогонов.
  */
 @Service
 public class PaperAlertService {
 
     private static final int MAX_ALERTS = 100;
     private static final int ALERT_HOURS = 24;
+    /** Same scale as {@code PaperTradingService.Z_TO_PCT}. */
+    private static final double Z_TO_PCT = 0.01;
 
     private final List<PaperTradeAlert> recent = new CopyOnWriteArrayList<>();
 
@@ -37,15 +39,48 @@ public class PaperAlertService {
             if (!"OPEN".equals(e.status())) {
                 continue;
             }
+            Double potential = estimatePotentialToZero(e);
             PaperTradeAlert alert = new PaperTradeAlert(
                     e.id(),
+                    "OPEN",
                     e.book() == null ? "DAILY" : e.book(),
                     e.tickerY(),
                     e.tickerX(),
                     e.signal(),
                     e.entryZ(),
                     e.openedAt() == null ? LocalDateTime.now() : e.openedAt(),
-                    formatSummary(e)
+                    formatOpenSummary(e, potential),
+                    null,
+                    potential
+            );
+            recent.add(alert);
+        }
+        trim();
+    }
+
+    public void recordCloses(List<PaperTradeEntry> closed) {
+        if (closed == null || closed.isEmpty()) {
+            return;
+        }
+        for (PaperTradeEntry e : closed) {
+            if (!"CLOSED".equals(e.status())) {
+                continue;
+            }
+            LocalDateTime closedAt = e.closedAt() == null ? LocalDateTime.now() : e.closedAt();
+            String alertId = e.id() + ":close:" + closedAt;
+            Double pnl = e.pnlRub();
+            PaperTradeAlert alert = new PaperTradeAlert(
+                    alertId,
+                    "CLOSE",
+                    e.book() == null ? "DAILY" : e.book(),
+                    e.tickerY(),
+                    e.tickerX(),
+                    e.signal(),
+                    e.entryZ(),
+                    closedAt,
+                    formatCloseSummary(e, pnl),
+                    pnl,
+                    null
             );
             recent.add(alert);
         }
@@ -55,8 +90,8 @@ public class PaperAlertService {
     public List<PaperTradeAlert> recentAlerts() {
         LocalDateTime cutoff = LocalDateTime.now().minusHours(ALERT_HOURS);
         return recent.stream()
-                .filter(a -> a.openedAt() != null && !a.openedAt().isBefore(cutoff))
-                .sorted(Comparator.comparing(PaperTradeAlert::openedAt).reversed())
+                .filter(a -> a.at() != null && !a.at().isBefore(cutoff))
+                .sorted(Comparator.comparing(PaperTradeAlert::at).reversed())
                 .toList();
     }
 
@@ -96,16 +131,44 @@ public class PaperAlertService {
         );
     }
 
+    /**
+     * Estimate cash PnL if Z reverts to 0 (same Z→% scale as paper MTM).
+     */
+    public static Double estimatePotentialToZero(PaperTradeEntry e) {
+        if (e == null) {
+            return null;
+        }
+        double pct = approximatePnlPct(e.entryZ(), 0.0, e.signal());
+        return e.notionalY() * pct * e.remainingFracOrOne();
+    }
+
+    static double approximatePnlPct(double entryZ, double exitZ, TradingSignal signal) {
+        double delta = exitZ - entryZ;
+        if (signal == TradingSignal.SHORT_SPREAD) {
+            delta = -delta;
+        }
+        return delta * Z_TO_PCT;
+    }
+
     private void trim() {
         while (recent.size() > MAX_ALERTS) {
             recent.remove(0);
         }
     }
 
-    private static String formatSummary(PaperTradeEntry e) {
+    private static String formatOpenSummary(PaperTradeEntry e, Double potential) {
         String book = e.book() == null ? "DAILY" : e.book();
         String sig = e.signal() == null ? "?" : e.signal().name();
-        return String.format(Locale.ROOT, "%s %s %s/%s Z=%.2f",
-                book, sig, e.tickerY(), e.tickerX(), e.entryZ());
+        String pot = potential == null ? "" : String.format(Locale.ROOT, " · потенциал ~%.0f ₽", potential);
+        return String.format(Locale.ROOT, "%s вход %s %s/%s Z=%.2f%s",
+                book, sig, e.tickerY(), e.tickerX(), e.entryZ(), pot);
+    }
+
+    private static String formatCloseSummary(PaperTradeEntry e, Double pnl) {
+        String book = e.book() == null ? "DAILY" : e.book();
+        String sig = e.signal() == null ? "?" : e.signal().name();
+        String pnlPart = pnl == null ? "" : String.format(Locale.ROOT, " · %+.0f ₽", pnl);
+        return String.format(Locale.ROOT, "%s выход %s %s/%s%s",
+                book, sig, e.tickerY(), e.tickerX(), pnlPart);
     }
 }

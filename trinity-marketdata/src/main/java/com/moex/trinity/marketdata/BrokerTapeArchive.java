@@ -46,6 +46,25 @@ public final class BrokerTapeArchive {
         return dir.resolve("dom-" + day + "-" + id + ".jsonl");
     }
 
+    public long lineCount(Path file) {
+        if (file == null || !Files.isRegularFile(file)) {
+            return 0L;
+        }
+        try (var stream = Files.lines(file)) {
+            return stream.count();
+        } catch (Exception ex) {
+            return 0L;
+        }
+    }
+
+    public long tapeLines(String instrumentId, LocalDate day) {
+        return lineCount(pathFor(instrumentId, day));
+    }
+
+    public long domLines(String instrumentId, LocalDate day) {
+        return lineCount(domPathFor(instrumentId, day));
+    }
+
     public void append(TradePrint print) {
         if (print == null || print.time() == null) {
             return;

@@ -875,7 +875,7 @@
     localStorage.setItem(SEEN_IDS_KEY, JSON.stringify(arr));
   }
 
-  function playAlertSound() {
+  function playAlertSound(kind, pnlRub) {
     if (!soundEnabled()) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -886,28 +886,60 @@
         const g = ctx.createGain();
         o.type = "sine";
         o.frequency.value = freq;
-        g.gain.value = 0.12;
+        g.gain.value = 0.11;
         o.connect(g);
         g.connect(ctx.destination);
         o.start(start);
         o.stop(start + dur);
       }
-      beep(880, ctx.currentTime, 0.18);
-      beep(1100, ctx.currentTime + 0.22, 0.22);
+      const k = String(kind || "").toUpperCase();
+      if (k === "CLOSE" && typeof pnlRub === "number" && pnlRub < 0) {
+        beep(520, ctx.currentTime, 0.16);
+        beep(360, ctx.currentTime + 0.18, 0.22);
+      } else if (k === "CLOSE") {
+        beep(660, ctx.currentTime, 0.14);
+        beep(990, ctx.currentTime + 0.16, 0.2);
+        beep(1320, ctx.currentTime + 0.34, 0.16);
+      } else if (k === "SIGNAL") {
+        beep(740, ctx.currentTime, 0.12);
+        beep(980, ctx.currentTime + 0.14, 0.18);
+      } else {
+        beep(880, ctx.currentTime, 0.16);
+        beep(1100, ctx.currentTime + 0.2, 0.2);
+      }
     } catch (_) {
       // ignore
     }
   }
 
-  function showNativeNotification(alert) {
+  function toastToneClass(evt) {
+    const kind = String(evt.kind || "").toUpperCase();
+    if (kind === "SIGNAL") return "toast--signal";
+    if (kind === "CLOSE") {
+      const pnl = evt.pnlRub;
+      if (typeof pnl === "number" && isFinite(pnl) && pnl < 0) return "toast--exit-loss";
+      return "toast--exit-win";
+    }
+    return "toast--enter";
+  }
+
+  function formatToastPnl(v, approx) {
+    if (v == null || typeof v !== "number" || !isFinite(v)) return null;
+    const sign = v > 0 ? "+" : "";
+    const prefix = approx ? "~" : "";
+    return prefix + sign + Math.round(v).toLocaleString("ru-RU") + " ₽";
+  }
+
+  function showNativeNotification(evt) {
     if (!("Notification" in window) || Notification.permission !== "granted") {
       return;
     }
     try {
-      const body = alert.summary || (alert.tickerY + "/" + alert.tickerX);
-      new Notification("TRINITY — новая paper-сделка", {
+      const title = evt.title || "TRINITY";
+      const body = evt.summary || evt.instrument || "";
+      new Notification(title, {
         body: body,
-        tag: alert.id,
+        tag: evt.id,
         requireInteraction: false
       });
     } catch (_) {
@@ -915,26 +947,44 @@
     }
   }
 
-  function showToast(alert) {
+  function showPremiumToast(evt) {
     const stack = $("trinity-toast-stack");
-    if (!stack) return;
+    if (!stack || !evt) return;
 
     const el = document.createElement("div");
-    el.className = "toast";
+    el.className = "toast " + toastToneClass(evt);
     el.setAttribute("role", "alert");
 
-    const y = alert.tickerY || "?";
-    const x = alert.tickerX || "?";
-    const book = alert.book || "DAILY";
-    const sig = alert.signal || "?";
-    const z = typeof alert.entryZ === "number" ? alert.entryZ.toFixed(2) : "?";
+    const kind = String(evt.kind || "").toUpperCase();
+    let pnlLine = "";
+    if (kind === "CLOSE") {
+      const fact = formatToastPnl(evt.pnlRub, false);
+      if (fact) {
+        const cls = (typeof evt.pnlRub === "number" && evt.pnlRub < 0) ? "toast-pnl is-loss" : "toast-pnl is-win";
+        pnlLine = '<div class="' + cls + '">' + fact + "</div>";
+      }
+    } else {
+      const pot = formatToastPnl(evt.potentialPnlRub, true);
+      if (pot) {
+        pnlLine = '<div class="toast-pnl is-potential">потенциал ' + pot + "</div>";
+      }
+    }
+
+    const href = evt.href || (evt.strategy === "TREND" ? "/view" : "/view/paper");
+    const linkLabel = evt.strategy === "TREND" ? "Trend" : "Paper journal";
+    const metaExtra = evt.instrument
+      ? '<span class="toast-instrument">' + escapeHtml(evt.instrument) + "</span>"
+      : "";
 
     el.innerHTML =
       '<button type="button" class="toast-close" aria-label="Закрыть">&times;</button>' +
-      "<strong>Новая paper-сделка · " + book + "</strong>" +
-      "<div>" + sig + " " + y + " / " + x + " · Z=" + z + "</div>" +
-      '<div class="toast-meta"><a href="/view/paper">Paper journal</a> · ' +
-      '<a href="/view/charts/' + encodeURIComponent(y) + "/" + encodeURIComponent(x) + '">График</a></div>';
+      '<div class="toast-kicker">' + escapeHtml(evt.strategy || "TRINITY") + "</div>" +
+      "<strong>" + escapeHtml(evt.title || "Событие") + "</strong>" +
+      '<div class="toast-body">' + escapeHtml(evt.summary || "") + "</div>" +
+      pnlLine +
+      '<div class="toast-meta">' + metaExtra +
+      (evt.side ? " · " + escapeHtml(evt.side) : "") +
+      ' · <a href="' + href + '">' + linkLabel + "</a></div>";
 
     el.querySelector(".toast-close").addEventListener("click", function () {
       el.remove();
@@ -943,15 +993,22 @@
     stack.prepend(el);
     setTimeout(function () {
       if (el.parentNode) el.remove();
-    }, 20000);
+    }, 22000);
   }
 
-  function handleNewAlert(alert) {
+  function handleNewAlert(evt) {
     if (!alertsEnabled()) return;
-    playAlertSound();
-    showToast(alert);
-    showNativeNotification(alert);
-    appendLog("Новая paper: " + (alert.summary || alert.tickerY + "/" + alert.tickerX), "ok");
+    const kind = String(evt.kind || "OPEN").toUpperCase();
+    playAlertSound(kind, evt.pnlRub);
+    showPremiumToast(evt);
+    showNativeNotification(evt);
+    appendLog((evt.title || "Toast") + ": " + (evt.summary || evt.instrument || evt.id), 
+      kind === "CLOSE" && typeof evt.pnlRub === "number" && evt.pnlRub < 0 ? "err" : "ok");
+  }
+
+  /** @deprecated use showPremiumToast */
+  function showToast(alert) {
+    showPremiumToast(alert);
   }
 
   function currentPagePath() {
@@ -1094,10 +1151,10 @@
     }
   }
 
-  async function pollPaperAlerts() {
+  async function pollTradeToasts() {
     if (!alertsEnabled()) return;
     try {
-      const res = await fetch("/api/ops/paper-alerts", { headers: { Accept: "application/json" } });
+      const res = await fetch("/api/ops/trade-toasts", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       const alerts = await res.json();
       if (!Array.isArray(alerts)) return;
@@ -1116,6 +1173,10 @@
     } catch (_) {
       // ignore transient network errors
     }
+  }
+
+  async function pollPaperAlerts() {
+    return pollTradeToasts();
   }
 
   async function pollAutoRunStatus() {
@@ -1318,6 +1379,7 @@
           { k: "Автоисполнение", v: status.autoExecuteAfterAnalysis ? "да" : "нет" }
         ]);
       }
+      await loadMarketDataWidget();
       if (reconcileRes.ok && $("broker-reconcile-line")) {
         const rec = await reconcileRes.json();
         setText("broker-reconcile-line",
@@ -1539,6 +1601,62 @@
         : "Токен пока не сохранён.");
   }
 
+  function formatOperatorTime(value) {
+    if (!value) return "";
+    try {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value);
+      return d.toLocaleString("ru-RU", {
+        timeZone: "Europe/Moscow",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit"
+      }) + " МСК";
+    } catch (_) {
+      return String(value);
+    }
+  }
+
+  async function loadMarketDataWidget() {
+    try {
+      const res = await fetch("/api/marketdata/status", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const md = await res.json();
+      const tapeLabel = md.streaming
+        ? ("live " + (md.liveTapeSize || 0) + " · day " + (md.archivedTapeLines || 0))
+        : "нет стрима";
+      setText("widget-broker-tape", tapeLabel);
+      setText("pillar-trend-tape", md.streaming
+        ? ((md.instrument || "BR") + " · " + (md.archivedTapeLines || md.liveTapeSize || 0) + " prints")
+        : "offline");
+      if (md.summary) {
+        setBackStats("widget-broker-back-stats", [
+          { k: "Исполнение", v: ($("widget-broker-mode") && $("widget-broker-mode").textContent) || "—" },
+          { k: "Marketdata", v: md.streaming ? "STREAM" : "idle" },
+          { k: "Инструмент", v: md.instrument || "—" },
+          { k: "Tape (live)", v: String(md.liveTapeSize != null ? md.liveTapeSize : "—") },
+          { k: "Tape (архив дня)", v: String(md.archivedTapeLines != null ? md.archivedTapeLines : "—") },
+          { k: "DOM snaps", v: String(md.archivedDomSnapshots != null ? md.archivedDomSnapshots : "—") },
+          { k: "Depth", v: String(md.orderbookDepth != null ? md.orderbookDepth : "—") },
+          { k: "Сводка", v: md.summary || "—" }
+        ]);
+      }
+      if ($("pillar-trend-back-stats") && md.summary) {
+        setBackStats("pillar-trend-back-stats", [
+          { k: "Playbook", v: "levels-profile-br-m5" },
+          { k: "Стрим", v: md.streaming ? "live" : "off" },
+          { k: "Tape сегодня", v: String(md.archivedTapeLines || 0) },
+          { k: "DOM snaps", v: String(md.archivedDomSnapshots || 0) },
+          { k: "Depth", v: String(md.orderbookDepth || 50) }
+        ]);
+      }
+    } catch (_) {
+      setText("widget-broker-tape", "n/a");
+      setText("pillar-trend-tape", "n/a");
+    }
+  }
+
   async function loadTrendDeliverySettings() {
     const toggle = $("trend-auto-execution");
     if (!toggle) return;
@@ -1574,7 +1692,9 @@
     }
     if (status) {
       status.textContent = "Режим: " + (view.delivery || (auto ? "AUTO" : "SIGNAL_ONLY"))
-        + (view.updatedAt ? " · обновлено " + view.updatedAt : "");
+        + (view.updatedAt
+          ? " · переключено " + formatOperatorTime(view.updatedAt) + " (не дата торгов)"
+          : "");
     }
   }
 

@@ -4,6 +4,7 @@ import com.moex.trinity.marketdata.DomBook;
 import com.moex.trinity.marketdata.MarketDataFeed;
 import com.moex.trinity.marketdata.TradePrint;
 
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -22,16 +23,24 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
     private final TrendPlaybookSettings settings;
     private final VolumeAtPriceBuilder vap;
     private final MarketDataFeed marketData;
+    /** Checklist: TOP/BOT fixed for the MSK trading day once established. */
+    private final DayZoneLock dayZones;
+    /** Extension: full 2–4 level set locked for the day. */
+    private final ChecklistDayLock checklistDayLock;
 
     public LevelsProfileBrPlaybook() {
-        this(TrendPlaybookSettings.brDefaults(), null);
+        this(TrendPlaybookSettings.brDefaults(), null, null);
     }
 
     public LevelsProfileBrPlaybook(TrendPlaybookSettings settings) {
-        this(settings, null);
+        this(settings, null, null);
     }
 
     public LevelsProfileBrPlaybook(TrendPlaybookSettings settings, MarketDataFeed marketData) {
+        this(settings, marketData, null);
+    }
+
+    public LevelsProfileBrPlaybook(TrendPlaybookSettings settings, MarketDataFeed marketData, Path dayZoneFile) {
         this.settings = settings == null ? TrendPlaybookSettings.brDefaults() : settings;
         this.vap = new VolumeAtPriceBuilder(
                 this.settings.instrument(),
@@ -39,6 +48,45 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 this.settings.minHvnBands()
         );
         this.marketData = marketData;
+        this.dayZones = new DayZoneLock(dayZoneFile);
+        this.checklistDayLock = new ChecklistDayLock();
+    }
+
+    /** Test/reset hook. */
+    public void clearDayZoneLock() {
+        dayZones.clear();
+        checklistDayLock.clear();
+    }
+
+    public record KickResult(
+            boolean cleared,
+            String reason,
+            boolean hadTop,
+            boolean hadBottom,
+            int levelsCleared
+    ) {
+    }
+
+    /**
+     * Kick: wipe day shelves + checklist level lock so robot re-discovers structure at max aggression.
+     * Does not touch paper statement / journal.
+     */
+    public KickResult kickHard(String reason) {
+        DayZoneLock.Snapshot before = dayZones.get();
+        int levelsBefore = checklistDayLock.get() == null ? 0 : checklistDayLock.get().levels().size();
+        dayZones.clear();
+        checklistDayLock.clear();
+        return new KickResult(
+                true,
+                reason == null ? "kickHard" : reason,
+                before != null && before.hasTop(),
+                before != null && before.hasBottom(),
+                levelsBefore
+        );
+    }
+
+    public DayZoneLock.Snapshot dayZoneSnapshot() {
+        return dayZones.get();
     }
 
     @Override
@@ -53,173 +101,567 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
 
     @Override
     public String whenApplicable() {
-        return "INTRADAY BR M5: A-setup bounce + HTF asymmetry; tape zones when marketdata live";
+        return "INTRADAY BR M5: Exclusive checklist (bounce+retest) + day-lock/prior/session/HTF hardenings";
     }
 
+    /**
+     * Desk overlay: checklist §3–8 structure (hist, zero, current HI/LO, dual zones).
+     * Entry gates stay in {@link #evaluate}.
+     */
     @Override
-    public Optional<TrendRobotPlan> evaluate(TrendBarSeries series, TrendAccountContext account) {
-        if (series == null || series.isEmpty() || series.size() < 30) {
-            return Optional.of(noTrade(series, "need ≥30 M5 bars"));
+    public TrendStructureSnapshot structure(TrendBarSeries series) {
+        if (series == null || series.isEmpty() || series.size() < 10) {
+            return TrendStructureSnapshot.empty("need more M5 bars for structure");
         }
         TrendInstrumentSpec spec = settings.instrument();
         List<TrendBar> bars = series.bars();
         int lookback = Math.min(bars.size(), Math.max(60, settings.levelLookbackBars()));
         List<TrendBar> window = bars.subList(bars.size() - lookback, bars.size());
 
+        // §3: historical extremes of all available M5
+        double[] hist = historicalExtremes(bars);
+        double historicalHigh = hist[0];
+        double historicalLow = hist[1];
+
+        // §5 live extremes (candidates); day-lock freezes HI/LO + zones once set
+        double[] extremes = currentTrendExtremes(window);
+        double liveHigh = extremes[0];
+        double liveLow = extremes[1];
+
         HtfTrend htf = HtfTrend.resolve(window, series.last().time(), settings);
-        if (htf.isFlat()) {
-            return Optional.of(noTrade(series, "HTF FLAT — no trade until clear UP/DOWN"));
-        }
-
-        TrendBias bias = detectBias(window);
+        MarketState marketState = ChecklistStructure.detectMarketState(
+                window, settings.sessionBiasMinPoints(), spec.pointSize());
+        TrendBias bias = marketState.toBias();
         if (bias == TrendBias.NONE) {
-            return Optional.of(noTrade(series, "no clear trend line / HH-HL or LH-LL structure"));
+            bias = detectBias(window);
         }
 
-        SessionBias session = SessionBias.fromBars(
-                window, settings.sessionBiasBars(), settings.sessionBiasMinPoints(), spec.pointSize());
-
-        List<Double> levels = findSwingLevels(window);
-        if (levels.isEmpty()) {
-            return Optional.of(noTrade(series, "no swing levels in 1–2 day lookback"));
+        Optional<ZoneCandidate> topLive = Optional.empty();
+        Optional<ZoneCandidate> botLive = Optional.empty();
+        if (Double.isFinite(liveHigh) && Double.isFinite(liveLow) && liveHigh > liveLow) {
+            topLive = buildZoneAtAnchor(series.instrument(), window, liveHigh, true, true);
+            botLive = buildZoneAtAnchor(series.instrument(), window, liveLow, true, false);
         }
-
-        double lastClose = series.last().close();
-        Optional<ZoneCandidate> zone = pickBestZone(series.instrument(), window, levels, lastClose, bias);
-        if (zone.isEmpty()) {
-            return Optional.of(noTrade(series, "no A-quality volume zone (≥"
-                    + settings.minTouchCount() + " bounces / HVN, no pad)"));
-        }
-
-        ZoneCandidate z = zone.get();
-        ModeDecision md = decideMode(window, z.range(), bias, lastClose);
-        if (md.mode() == null) {
-            return Optional.of(plan(
-                    series,
-                    TrendRobotState.ZONE_READY,
-                    null,
-                    bias == TrendBias.UP,
-                    z.range(),
-                    null,
-                    Double.NaN, Double.NaN, Double.NaN,
-                    "Zone ready at " + fmt(z.range()) + " — waiting: " + md.reason(),
-                    List.of(md.reason(), "htf=" + htf, "session=" + session, "zoneSrc=" + z.source())
-            ));
-        }
-
-        if (settings.aSetupBounceOnly() && md.mode() == TrendTradeMode.RETEST) {
-            return Optional.of(plan(
-                    series, TrendRobotState.ZONE_READY, null, md.buy(), z.range(), null,
-                    Double.NaN, Double.NaN, Double.NaN,
-                    "A-setup: RETEST skipped — waiting bounce confirm",
-                    List.of("htf=" + htf, "aSetupBounceOnly")
-            ));
-        }
-
-        boolean buy = md.buy();
-        boolean against = htf.againstTrend(buy);
-
-        if (against && settings.counterTrendBounceOnly() && md.mode() == TrendTradeMode.RETEST) {
-            return Optional.of(noTrade(series,
-                    "HTF " + htf + " counter — RETEST blocked (bounce only)"));
-        }
-        if ((settings.requireBounceConfirm() || (against && settings.counterTrendRequireConfirm()))
-                && md.mode() == TrendTradeMode.BOUNCE
-                && !bounceConfirmed(window, z.range(), buy)) {
-            return Optional.of(plan(
-                    series, TrendRobotState.ZONE_READY, null, buy, z.range(), null,
-                    Double.NaN, Double.NaN, Double.NaN,
-                    "A-setup bounce — waiting rejection confirm",
-                    List.of("htf=" + htf)
-            ));
-        }
-        if (against && md.mode() == TrendTradeMode.RETEST) {
-            double maxDist = settings.counterTrendMaxDistancePoints();
-            if (!retestEntryAllowed(window, z.range(), buy, maxDist, spec.pointSize())) {
-                return Optional.of(plan(
-                        series, TrendRobotState.ZONE_READY, null, buy, z.range(), null,
-                        Double.NaN, Double.NaN, Double.NaN,
-                        "HTF counter retest — need touch / within " + (int) maxDist + " pts",
-                        List.of("htf=" + htf)
-                ));
-            }
-        }
-
-        TrendAccountContext acct = account == null
-                ? TrendAccountContext.of(100_000, 15_000, 16_000, settings.maxRiskPctEquity())
-                : new TrendAccountContext(
-                account.equityRub(),
-                account.goLongRub(),
-                account.goShortRub(),
-                account.maxRiskPctEquity() > 0 ? account.maxRiskPctEquity() : settings.maxRiskPctEquity()
+        ZonePair lockCands = dayLockCandidates(series, liveHigh, liveLow, topLive, botLive);
+        java.time.LocalDate day = series.last().time().toLocalDate();
+        DayZoneLock.Snapshot locked = resolveDayZones(
+                series.last().time(),
+                day,
+                liveHigh,
+                liveLow,
+                lockCands.topRange(),
+                lockCands.topSource(),
+                lockCands.bottomRange(),
+                lockCands.bottomSource()
         );
 
-        int contracts = TrendPositionSizer.sizeContracts(acct, spec, buy, spec.stopPoints());
-        double initFrac = settings.initialSizeFraction() > 0 ? settings.initialSizeFraction() : 0.4;
-        contracts = Math.max(1, (int) Math.round(contracts * initFrac));
-        if (against) {
-            double frac = settings.counterTrendSizeFraction() > 0 ? settings.counterTrendSizeFraction() : 0.6;
-            contracts = Math.max(1, (int) Math.round(contracts * frac));
-        }
-        if (contracts < 1) {
-            return Optional.of(noTrade(series, "size=0 after GO/risk / initial fraction"));
-        }
-
-        LimitGridPlan grid = LimitGridBuilder.build(z.range(), buy, contracts, settings.gridStyle());
-        double avg = grid.averagePrice();
-        double stopPtsPrice = spec.stopPoints() * spec.pointSize();
-        double rrFloor = against
-                ? Math.max(settings.minRewardRisk(), settings.counterTrendMinRewardRisk())
-                : Math.max(1.0, settings.minRewardRisk());
-        double minTp1 = stopPtsPrice * rrFloor;
-        double tp1PtsPrice = Math.max(spec.tp1Points() * spec.pointSize(), minTp1);
-        double stop;
-        double tp1;
-        double tp2;
-        if (buy) {
-            stop = Math.max(avg - stopPtsPrice, z.range().low() - stopPtsPrice);
-            tp1 = avg + tp1PtsPrice;
-            double runnerMult = md.mode() == TrendTradeMode.BOUNCE ? 2.0 : 1.5;
-            tp2 = avg + stopPtsPrice * runnerMult;
-            if (tp2 < tp1) {
-                tp2 = tp1 + stopPtsPrice * 0.5;
-            }
+        // Display / trade anchors = locked day ranges; before 09:40 show live candidates only
+        double trendHigh;
+        double trendLow;
+        TrendStructureSnapshot.Zone zoneTop;
+        TrendStructureSnapshot.Zone zoneBottom;
+        if (locked.hasTop() || locked.hasBottom()) {
+            trendHigh = Double.isFinite(locked.trendHigh()) ? locked.trendHigh() : liveHigh;
+            trendLow = Double.isFinite(locked.trendLow()) ? locked.trendLow() : liveLow;
+            zoneTop = locked.hasTop()
+                    ? toZoneDto(new ZoneCandidate(trendHigh, locked.top(),
+                    locked.topSource() == null ? "DAY" : locked.topSource() + "+DAY"), spec, "TOP")
+                    : null;
+            zoneBottom = locked.hasBottom()
+                    ? toZoneDto(new ZoneCandidate(trendLow, locked.bottom(),
+                    locked.bottomSource() == null ? "DAY" : locked.bottomSource() + "+DAY"), spec, "BOTTOM")
+                    : null;
         } else {
-            stop = Math.min(avg + stopPtsPrice, z.range().high() + stopPtsPrice);
-            tp1 = avg - tp1PtsPrice;
-            double runnerMult = md.mode() == TrendTradeMode.BOUNCE ? 2.0 : 1.5;
-            tp2 = avg - stopPtsPrice * runnerMult;
-            if (tp2 > tp1) {
-                tp2 = tp1 - stopPtsPrice * 0.5;
-            }
+            trendHigh = liveHigh;
+            trendLow = liveLow;
+            zoneTop = topLive.map(c -> toZoneDto(c, spec, "TOP")).orElse(null);
+            zoneBottom = botLive.map(c -> toZoneDto(c, spec, "BOTTOM")).orElse(null);
         }
 
-        TrendRobotState state = md.mode() == TrendTradeMode.BOUNCE
-                ? TrendRobotState.ARMED_BOUNCE
-                : TrendRobotState.ARMED_RETEST;
+        // §4: previous-trend zero point
+        double zero = previousTrendZeroPoint(window, bias, trendHigh, trendLow);
+        boolean zeroBroken = zeroPointBroken(bias, trendHigh, trendLow, zero, spec.pointSize());
 
-        String tilt = against ? "COUNTER×" + settings.counterTrendSizeFraction() : "WITH";
-        String domNote = domSoftNote(series.instrument(), z.range());
-        String rationale = String.format(Locale.ROOT,
-                "%s %s | htf=%s %s | zone=%s [%s] (%.0f pts) | size×%.2f until BE | grid=%s %d | SL=%.2f TP1=%.2f TP2=%.2f R≥%.1f%s",
-                md.mode(), buy ? "BUY" : "SELL", htf, tilt,
-                z.source(), fmt(z.range()), z.range().widthPoints(spec.pointSize()),
-                initFrac, settings.gridStyle(), grid.totalQty(), stop, tp1, tp2, rrFloor,
-                domNote.isEmpty() ? "" : " | " + domNote);
+        List<Swing> swings = swings(window, 3);
+        List<Double> swingHighs = swings.stream()
+                .filter(Swing::high)
+                .sorted(Comparator.comparingDouble((Swing s) -> Math.abs(s.price - series.last().close())))
+                .limit(3)
+                .map(s -> s.price)
+                .sorted()
+                .toList();
+        List<Double> swingLows = swings.stream()
+                .filter(s -> !s.high())
+                .sorted(Comparator.comparingDouble((Swing s) -> Math.abs(s.price - series.last().close())))
+                .limit(3)
+                .map(s -> s.price)
+                .sorted()
+                .toList();
 
-        return Optional.of(plan(
-                series, state, md.mode(), buy, z.range(), grid, stop, tp1, tp2, rationale,
-                List.of(md.reason(), "htf=" + htf, tilt, "zoneSrc=" + z.source(),
-                        "session=" + session, "initialSize=" + initFrac)
-        ));
+        Optional<ZoneCandidate> topCand = locked.hasTop()
+                ? Optional.of(new ZoneCandidate(trendHigh, locked.top(), locked.topSource()))
+                : topLive;
+        Optional<ZoneCandidate> botCand = locked.hasBottom()
+                ? Optional.of(new ZoneCandidate(trendLow, locked.bottom(), locked.bottomSource()))
+                : botLive;
+
+        // §8 status against locked day zones
+        boolean topBrokenHeld = topCand
+                .map(c -> breakHoldSatisfied(window, c.range(), true, Math.max(1, settings.confirmBarsAfterBreak())))
+                .orElse(false);
+        boolean bottomBrokenHeld = botCand
+                .map(c -> breakHoldSatisfied(window, c.range(), false, Math.max(1, settings.confirmBarsAfterBreak())))
+                .orElse(false);
+
+        String note = checklistNote(htf, bias, zoneTop, zoneBottom, zero, zeroBroken, topBrokenHeld, bottomBrokenHeld);
+        List<ChecklistLevel> levelsLive = buildProfiledLevels(
+                series.instrument(), window, marketState, trendHigh, trendLow, zero, series.last().close());
+        List<ChecklistLevel> levels = checklistDayLock.absorb(day, levelsLive);
+        note = ChecklistStructure.majorityNote(levels, marketState) + ". " + note;
+        if (locked.hasTop() || locked.hasBottom()) {
+            String srcHint = "";
+            if (locked.topSource() != null && locked.topSource().contains("PRIOR")) {
+                srcHint = "TOP с вчерашнего объёма. ";
+            }
+            if (locked.bottomSource() != null && locked.bottomSource().contains("PRIOR")) {
+                srcHint += "BOT с вчерашнего объёма. ";
+            }
+            note = "Зоны дня зафиксированы (не двигаем до завтра). " + srcHint + note;
+        } else if (!TrendSessionEdge.isTradable(series.last().time(), settings)) {
+            note = "Day-lock после окна сессии (open+40м). Сейчас live-кандидаты. " + note;
+        }
+        List<TrendStructureSnapshot.LevelDto> levelDtos = new ArrayList<>();
+        for (ChecklistLevel l : levels) {
+            levelDtos.add(new TrendStructureSnapshot.LevelDto(
+                    l.price(), l.role(), l.source(), l.preferBuy(),
+                    l.hasValidRange() ? l.range().low() : null,
+                    l.hasValidRange() ? l.range().high() : null,
+                    l.brokenHeld()));
+        }
+        return new TrendStructureSnapshot(
+                lookback,
+                trendHigh,
+                trendLow,
+                historicalHigh,
+                historicalLow,
+                zero,
+                zeroBroken,
+                topBrokenHeld,
+                bottomBrokenHeld,
+                swingHighs,
+                swingLows,
+                zoneTop,
+                zoneBottom,
+                htf.name(),
+                bias.name(),
+                note,
+                marketState.name(),
+                levelDtos
+        );
     }
 
-    private Optional<ZoneCandidate> pickBestZone(
+    /**
+     * Day-lock only inside the tradable session window (after open+N, before close−M).
+     * Pre-open / first N minutes: do not freeze thin overnight/early shelves.
+     * Broken prior shelves (new HI/LO beyond zone) are cleared so a fresh volume range can lock.
+     */
+    private DayZoneLock.Snapshot resolveDayZones(
+            java.time.LocalDateTime now,
+            java.time.LocalDate day,
+            double trendHigh,
+            double trendLow,
+            MergedVolumeRange topCand,
+            String topSrc,
+            MergedVolumeRange bottomCand,
+            String bottomSrc
+    ) {
+        DayZoneLock.Snapshot cur = dayZones.get();
+        if (cur != null && cur.day() != null && !cur.day().equals(day)) {
+            dayZones.clear();
+            cur = null;
+        }
+        if (TrendSessionEdge.isTradable(now, settings)) {
+            double breakPts = Math.max(settings.instrument().zoneMaxPoints(), 20);
+            DayZoneLock.Snapshot before = dayZones.get();
+            dayZones.clearBrokenShelves(trendHigh, trendLow, breakPts, settings.instrument().pointSize());
+            DayZoneLock.Snapshot afterClear = dayZones.get();
+            // If TOP/BOT shelf was broken, drop locked checklist HI/LO so new extreme re-profiles
+            if (before != null && afterClear != null) {
+                if (before.hasTop() && !afterClear.hasTop()) {
+                    checklistDayLock.dropRoles("TREND_HI");
+                }
+                if (before.hasBottom() && !afterClear.hasBottom()) {
+                    checklistDayLock.dropRoles("TREND_LO");
+                }
+            }
+            return dayZones.absorb(day, trendHigh, trendLow, topCand, topSrc, bottomCand, bottomSrc);
+        }
+        if (cur != null && day.equals(cur.day())) {
+            return cur;
+        }
+        // Ephemeral unlocked snapshot for desk — not persisted
+        return new DayZoneLock.Snapshot(day, trendHigh, trendLow, null, null, null, null);
+    }
+
+    /**
+     * Checklist: when placing today's TOP/BOT, prefer previous day's volume-traded shelves.
+     * Live shelf wins only if prior is missing or today's extreme already broke through prior.
+     */
+    private ZonePair dayLockCandidates(
+            TrendBarSeries series,
+            double liveHigh,
+            double liveLow,
+            Optional<ZoneCandidate> topLive,
+            Optional<ZoneCandidate> botLive
+    ) {
+        PriorDayZones prior = priorDayVolumeZones(series);
+        MergedVolumeRange top = chooseShelf(prior.top(), topLive.map(ZoneCandidate::range).orElse(null),
+                liveHigh, true);
+        String topSrc = sourceFor(top, prior.top(), topLive.map(ZoneCandidate::source).orElse(null), true);
+        MergedVolumeRange bot = chooseShelf(prior.bottom(), botLive.map(ZoneCandidate::range).orElse(null),
+                liveLow, false);
+        String botSrc = sourceFor(bot, prior.bottom(), botLive.map(ZoneCandidate::source).orElse(null), false);
+        return new ZonePair(top, topSrc, bot, botSrc);
+    }
+
+    private MergedVolumeRange chooseShelf(
+            MergedVolumeRange prior,
+            MergedVolumeRange live,
+            double liveExtreme,
+            boolean atHigh
+    ) {
+        double point = settings.instrument().pointSize();
+        double breakPts = Math.max(settings.instrument().zoneMaxPoints(), 20) * point;
+        if (prior != null && prior.low() < prior.high()) {
+            boolean broken = atHigh
+                    ? Double.isFinite(liveExtreme) && liveExtreme > prior.high() + breakPts
+                    : Double.isFinite(liveExtreme) && liveExtreme < prior.low() - breakPts;
+            if (!broken) {
+                return prior;
+            }
+        }
+        if (live != null && live.low() < live.high()) {
+            return live;
+        }
+        return prior;
+    }
+
+    private static String sourceFor(
+            MergedVolumeRange chosen,
+            MergedVolumeRange prior,
+            String liveSrc,
+            boolean atHigh
+    ) {
+        if (chosen == null) {
+            return null;
+        }
+        if (prior != null && Math.abs(chosen.low() - prior.low()) < 1e-9
+                && Math.abs(chosen.high() - prior.high()) < 1e-9) {
+            return atHigh ? "PRIOR_DAY_TOP" : "PRIOR_DAY_BOT";
+        }
+        return liveSrc == null ? "BARS" : liveSrc;
+    }
+
+    /**
+     * Volume TOP/BOT from the previous calendar day in the series (warmup + today).
+     */
+    PriorDayZones priorDayVolumeZones(TrendBarSeries series) {
+        if (series == null || series.isEmpty()) {
+            return PriorDayZones.empty();
+        }
+        java.time.LocalDate today = series.last().time().toLocalDate();
+        java.time.LocalDate priorDay = today.minusDays(1);
+        // skip weekend gap: walk back until we find bars
+        List<TrendBar> priorBars = new ArrayList<>();
+        for (int back = 1; back <= 4; back++) {
+            java.time.LocalDate d = today.minusDays(back);
+            priorBars = series.bars().stream()
+                    .filter(b -> b.time().toLocalDate().equals(d))
+                    .toList();
+            if (!priorBars.isEmpty()) {
+                priorDay = d;
+                break;
+            }
+        }
+        if (priorBars.isEmpty()) {
+            return PriorDayZones.empty();
+        }
+        double priorHigh = priorBars.stream().mapToDouble(TrendBar::high).max().orElse(Double.NaN);
+        double priorLow = priorBars.stream().mapToDouble(TrendBar::low).min().orElse(Double.NaN);
+        Optional<ZoneCandidate> top = buildZoneAtAnchor(series.instrument(), priorBars, priorHigh, true, true);
+        Optional<ZoneCandidate> bot = buildZoneAtAnchor(series.instrument(), priorBars, priorLow, true, false);
+        return new PriorDayZones(
+                priorDay,
+                top.map(ZoneCandidate::range).orElse(null),
+                bot.map(ZoneCandidate::range).orElse(null)
+        );
+    }
+
+    private record ZonePair(
+            MergedVolumeRange topRange,
+            String topSource,
+            MergedVolumeRange bottomRange,
+            String bottomSource
+    ) {
+    }
+
+    record PriorDayZones(java.time.LocalDate day, MergedVolumeRange top, MergedVolumeRange bottom) {
+        static PriorDayZones empty() {
+            return new PriorDayZones(null, null, null);
+        }
+    }
+
+    private String checklistNote(
+            HtfTrend htf,
+            TrendBias bias,
+            TrendStructureSnapshot.Zone zoneTop,
+            TrendStructureSnapshot.Zone zoneBottom,
+            double zero,
+            boolean zeroBroken,
+            boolean topBrokenHeld,
+            boolean bottomBrokenHeld
+    ) {
+        StringBuilder sb = new StringBuilder();
+        if (htf.isFlat()) {
+            sb.append("HTF FLAT — bounce у day-locked TOP/BOT; RETEST после break+hold тоже по §7–8. ");
+        }
+        if (Double.isFinite(zero)) {
+            sb.append("§4 zero=").append(String.format(Locale.ROOT, "%.2f", zero))
+                    .append(zeroBroken ? " (пробита)" : " (не пробита)").append(". ");
+        }
+        if (bias == TrendBias.UP) {
+            sb.append(topBrokenHeld
+                    ? "§8 TOP break+hold — можно RETEST верха или bounce низа. "
+                    : "§8 пока нет пробоя TOP — торгуем только BOT bounce. ");
+        } else if (bias == TrendBias.DOWN) {
+            sb.append(bottomBrokenHeld
+                    ? "§8 BOT break+hold — можно RETEST низа или bounce верха. "
+                    : "§8 пока нет пробоя BOT — торгуем только TOP bounce. ");
+        } else {
+            if (topBrokenHeld) {
+                sb.append("§7–8 TOP break+hold — RETEST long с верха. ");
+            }
+            if (bottomBrokenHeld) {
+                sb.append("§7–8 BOT break+hold — RETEST short с низа. ");
+            }
+            if (!topBrokenHeld && !bottomBrokenHeld) {
+                sb.append("§8 без пробоя — bounce между day-locked TOP/BOT. ");
+            }
+        }
+        if (zoneTop == null && zoneBottom == null) {
+            sb.append("Нет профиля у max/min текущего тренда.");
+        } else if (zoneTop == null) {
+            sb.append("Есть BOT; TOP пока нет.");
+        } else if (zoneBottom == null) {
+            sb.append("Есть TOP; BOT пока нет.");
+        } else {
+            sb.append("Два диапазона TOP+BOT (§6); торговля между ними.");
+        }
+        return sb.toString().trim();
+    }
+
+    /** §3: max/min of entire available series. */
+    static double[] historicalExtremes(List<TrendBar> bars) {
+        if (bars == null || bars.isEmpty()) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+        double hi = bars.stream().mapToDouble(TrendBar::high).max().orElse(Double.NaN);
+        double lo = bars.stream().mapToDouble(TrendBar::low).min().orElse(Double.NaN);
+        return new double[]{hi, lo};
+    }
+
+    /**
+     * Current-trend high/low for structure (checklist §5).
+     * Uses a recent window (~session), not the full multi-day lookback spike.
+     */
+    double[] currentTrendExtremes(List<TrendBar> window) {
+        if (window == null || window.isEmpty()) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+        int n = Math.min(window.size(), Math.max(48, settings.sessionBiasBars() * 2));
+        List<TrendBar> trend = window.subList(window.size() - n, window.size());
+        double hi = trend.stream().mapToDouble(TrendBar::high).max().orElse(Double.NaN);
+        double lo = trend.stream().mapToDouble(TrendBar::low).min().orElse(Double.NaN);
+        return new double[]{hi, lo};
+    }
+
+    /**
+     * §4: origin of the previous opposing trend.
+     * UP → last swing high before current trendLow; DOWN → last swing low before trendHigh.
+     */
+    static double previousTrendZeroPoint(
+            List<TrendBar> window,
+            TrendBias bias,
+            double trendHigh,
+            double trendLow
+    ) {
+        if (window == null || window.isEmpty() || bias == TrendBias.NONE) {
+            return Double.NaN;
+        }
+        List<Swing> sw = swings(window, 3);
+        if (sw.isEmpty()) {
+            return Double.NaN;
+        }
+        if (bias == TrendBias.UP) {
+            // Find index of trendLow, then last swing high before that bar
+            int loIdx = indexOfExtreme(window, trendLow, false);
+            return sw.stream()
+                    .filter(Swing::high)
+                    .filter(s -> s.index() < loIdx || loIdx < 0)
+                    .reduce((a, b) -> b)
+                    .map(s -> s.price)
+                    .orElse(Double.NaN);
+        }
+        if (bias == TrendBias.DOWN) {
+            int hiIdx = indexOfExtreme(window, trendHigh, true);
+            return sw.stream()
+                    .filter(s -> !s.high())
+                    .filter(s -> s.index() < hiIdx || hiIdx < 0)
+                    .reduce((a, b) -> b)
+                    .map(s -> s.price)
+                    .orElse(Double.NaN);
+        }
+        return Double.NaN;
+    }
+
+    static boolean zeroPointBroken(
+            TrendBias bias,
+            double trendHigh,
+            double trendLow,
+            double zero,
+            double pointSize
+    ) {
+        if (!Double.isFinite(zero) || !(pointSize > 0)) {
+            return false;
+        }
+        double need = pointSize; // ≥1 point through zero
+        if (bias == TrendBias.UP) {
+            return Double.isFinite(trendHigh) && trendHigh >= zero + need;
+        }
+        if (bias == TrendBias.DOWN) {
+            return Double.isFinite(trendLow) && trendLow <= zero - need;
+        }
+        return false;
+    }
+
+    private static int indexOfExtreme(List<TrendBar> window, double price, boolean high) {
+        if (!Double.isFinite(price)) {
+            return -1;
+        }
+        for (int i = window.size() - 1; i >= 0; i--) {
+            TrendBar b = window.get(i);
+            if (high && Math.abs(b.high() - price) < 1e-9) {
+                return i;
+            }
+            if (!high && Math.abs(b.low() - price) < 1e-9) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Market profile on candles that touch {@code anchor} (HI or LO).
+     * Checklist §6: 5–6 candles per bounce → merge into 15–20 pt range.
+     *
+     * @param structureSoft if true, draw with ≥1 touch cluster and soft pad for desk
+     * @param atHigh        true → TOP (band under HI); false → BOT (band above LO)
+     */
+    private Optional<ZoneCandidate> buildZoneAtAnchor(
             String instrument,
             List<TrendBar> window,
-            List<Double> levels,
-            double lastClose,
-            TrendBias bias
+            double anchor,
+            boolean structureSoft,
+            boolean atHigh
+    ) {
+        if (!Double.isFinite(anchor) || window == null || window.isEmpty()) {
+            return Optional.empty();
+        }
+        int candlesPerTouch = Math.max(5, settings.candlesPerTouch()); // checklist 5–6
+        int touchLookback = Math.max(3, settings.touchLookback());
+        int minTouches = structureSoft ? 1 : settings.minTouchCount();
+
+        List<double[]> tape = tapePrints(instrument);
+        boolean useTape = settings.preferMarketDataZones() && tape != null && !tape.isEmpty();
+        MergedVolumeRange range;
+        String src;
+        if (useTape) {
+            range = vap.buildAroundLevelFromPrints(tape, anchor, minTouches);
+            src = "TAPE";
+            if (!range.validForEntry()) {
+                range = vap.buildAroundLevel(
+                        window, anchor, touchLookback, candlesPerTouch, minTouches);
+                src = "BARS";
+            }
+        } else {
+            range = vap.buildAroundLevel(
+                    window, anchor, touchLookback, candlesPerTouch, minTouches);
+            src = "BARS";
+        }
+
+        if (range.validForEntry()) {
+            double maxDrift = settings.instrument().zoneMaxPoints() * settings.instrument().pointSize();
+            // Must stay at the HI or LO — not a mid-channel shelf from candle bodies
+            if (Math.abs(range.mid() - anchor) <= maxDrift) {
+                return Optional.of(new ZoneCandidate(anchor, range, src));
+            }
+            // Clamp valid shelf toward the extreme if volume was found but POC drifted
+            if (structureSoft) {
+                double width = Math.min(
+                        range.width(),
+                        settings.instrument().zoneMaxPoints() * settings.instrument().pointSize());
+                width = Math.max(width,
+                        settings.instrument().zoneMinPoints() * settings.instrument().pointSize());
+                double low = atHigh ? anchor - width : anchor;
+                double high = atHigh ? anchor : anchor + width;
+                MergedVolumeRange clamped = new MergedVolumeRange(
+                        low, high, range.totalVolume(), range.sourceBands(), true, null);
+                return Optional.of(new ZoneCandidate(anchor, clamped, src + "+CLAMP"));
+            }
+            return Optional.empty();
+        }
+
+        if (!structureSoft) {
+            return Optional.empty();
+        }
+
+        // Desk: still show a 15 pt band at the extreme if candles touched it
+        double tol = settings.instrument().pointSize() * 2;
+        boolean anyTouch = window.stream().anyMatch(b -> b.valid() && b.touches(anchor, tol));
+        if (!anyTouch) {
+            return Optional.empty();
+        }
+        double width = settings.instrument().zoneMinPoints() * settings.instrument().pointSize();
+        double low = atHigh ? anchor - width : anchor;
+        double high = atHigh ? anchor : anchor + width;
+        MergedVolumeRange soft = new MergedVolumeRange(
+                low,
+                high,
+                range.totalVolume(),
+                List.of(),
+                false,
+                range.invalidReason() != null ? range.invalidReason() : "structure soft zone"
+        );
+        return Optional.of(new ZoneCandidate(anchor, soft, src + "+SOFT"));
+    }
+
+    private TrendStructureSnapshot.Zone toZoneDto(ZoneCandidate z, TrendInstrumentSpec spec, String role) {
+        MergedVolumeRange r = z.range();
+        return new TrendStructureSnapshot.Zone(
+                r.low(),
+                r.high(),
+                r.mid(),
+                z.source(),
+                r.widthPoints(spec.pointSize()),
+                r.validForEntry(),
+                role
+        );
+    }
+
+    private List<ZoneCandidate> collectValidZones(
+            String instrument,
+            List<TrendBar> window,
+            List<Double> levels
     ) {
         List<ZoneCandidate> ok = new ArrayList<>();
         List<double[]> tape = tapePrints(instrument);
@@ -246,6 +688,470 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 ok.add(new ZoneCandidate(level, range, src));
             }
         }
+        return ok;
+    }
+
+    @Override
+    public Optional<TrendRobotPlan> evaluate(TrendBarSeries series, TrendAccountContext account) {
+        // §1–2
+        if (series == null || series.isEmpty() || series.size() < 30) {
+            return Optional.of(noTrade(series, "need ≥30 M5 bars"));
+        }
+        String tf = series.timeframe() == null ? "" : series.timeframe().toUpperCase(Locale.ROOT);
+        if (!tf.contains("M5") && !tf.equals("5")) {
+            return Optional.of(noTrade(series, "§2: timeframe must be M5 (got " + series.timeframe() + ")"));
+        }
+        String inst = series.instrument() == null ? "" : series.instrument().toUpperCase(Locale.ROOT);
+        if (!inst.startsWith("BR")) {
+            return Optional.of(noTrade(series, "§1: playbook #1 is BR futures only (got " + series.instrument() + ")"));
+        }
+
+        TrendInstrumentSpec spec = settings.instrument();
+        List<TrendBar> bars = series.bars();
+        int lookback = Math.min(bars.size(), Math.max(60, settings.levelLookbackBars()));
+        List<TrendBar> window = bars.subList(bars.size() - lookback, bars.size());
+
+        HtfTrend htf = HtfTrend.resolve(window, series.last().time(), settings);
+        MarketState marketState = ChecklistStructure.detectMarketState(
+                window, settings.sessionBiasMinPoints(), spec.pointSize());
+        TrendBias bias = marketState.toBias();
+        if (bias == TrendBias.NONE) {
+            bias = detectBias(window);
+        }
+
+        SessionBias session = SessionBias.fromBars(
+                window, settings.sessionBiasBars(), settings.sessionBiasMinPoints(), spec.pointSize());
+
+        double lastClose = series.last().close();
+        double[] extremes = currentTrendExtremes(window);
+        double liveHigh = extremes[0];
+        double liveLow = extremes[1];
+
+        // Extension: day-lock TOP/BOT shelves (prior-day seed)
+        Optional<ZoneCandidate> topLive = buildZoneAtAnchor(series.instrument(), window, liveHigh, false, true);
+        Optional<ZoneCandidate> botLive = buildZoneAtAnchor(series.instrument(), window, liveLow, false, false);
+        if (topLive.isEmpty()) {
+            topLive = buildZoneAtAnchor(series.instrument(), window, liveHigh, true, true);
+        }
+        if (botLive.isEmpty()) {
+            botLive = buildZoneAtAnchor(series.instrument(), window, liveLow, true, false);
+        }
+        ZonePair lockCands = dayLockCandidates(series, liveHigh, liveLow, topLive, botLive);
+        java.time.LocalDate day = series.last().time().toLocalDate();
+        DayZoneLock.Snapshot locked = resolveDayZones(
+                series.last().time(),
+                day, liveHigh, liveLow,
+                lockCands.topRange(),
+                lockCands.topSource(),
+                lockCands.bottomRange(),
+                lockCands.bottomSource()
+        );
+        double trendHigh = Double.isFinite(locked.trendHigh()) && (locked.hasTop() || locked.hasBottom())
+                ? locked.trendHigh() : liveHigh;
+        double trendLow = Double.isFinite(locked.trendLow()) && (locked.hasTop() || locked.hasBottom())
+                ? locked.trendLow() : liveLow;
+
+        // §4 zero
+        double zero = previousTrendZeroPoint(window, bias, trendHigh, trendLow);
+        if (Double.isFinite(zero) && marketState.isTrend()
+                && !zeroPointBroken(bias, trendHigh, trendLow, zero, spec.pointSize())) {
+            return Optional.of(noTrade(series, String.format(Locale.ROOT,
+                    "§4 zero point %.2f not broken by current trend — no trade", zero)));
+        }
+
+        // §4–§7: 2–4 levels + profile ranges; day-lock level set
+        List<ChecklistLevel> levelsLive = buildProfiledLevels(
+                series.instrument(), window, marketState, trendHigh, trendLow, zero, lastClose);
+        // Extension: stamp day-locked TOP/BOT shelves onto TREND_HI / TREND_LO
+        levelsLive = applyDayLockedShelves(levelsLive, locked, trendHigh, trendLow, window);
+        List<ChecklistLevel> levels = checklistDayLock.absorb(day, levelsLive);
+        if (levels.isEmpty()) {
+            return Optional.of(noTrade(series, "§4: no 2–4 TA levels with valid §6–7 profile"));
+        }
+
+        ChecklistLevel active = ChecklistStructure.pickActive(
+                levels, lastClose, marketState,
+                settings.retestArmMaxDistancePoints(), spec.pointSize());
+        if (active == null || !active.hasValidRange()) {
+            return Optional.of(noTrade(series, "§6–7: no valid profiled range on active level"));
+        }
+
+        // Unstick: if chosen level is broken+held but price is far (not approaching), drop it and re-pick
+        {
+            MergedVolumeRange ar = active.range();
+            boolean bu = breakHoldSatisfied(window, ar, true, Math.max(1, settings.confirmBarsAfterBreak()));
+            boolean bd = breakHoldSatisfied(window, ar, false, Math.max(1, settings.confirmBarsAfterBreak()));
+            double distPts = Math.abs(lastClose - ar.mid()) / spec.pointSize();
+            double arm = settings.retestArmMaxDistancePoints();
+            if ((bu || bd) && distPts > arm) {
+                List<ChecklistLevel> rest = new ArrayList<>();
+                for (ChecklistLevel l : levels) {
+                    if (Math.abs(l.price() - active.price()) > spec.pointSize()) {
+                        rest.add(l);
+                    }
+                }
+                ChecklistLevel alt = ChecklistStructure.pickActive(
+                        rest, lastClose, marketState, arm, spec.pointSize());
+                if (alt != null && alt.hasValidRange()) {
+                    active = alt;
+                } else {
+                    // Hard kick shelves once — new extreme must re-lock
+                    dayZones.forceClearShelves(liveHigh, liveLow);
+                    checklistDayLock.dropRoles("TREND_HI", "TREND_LO", "ACCUM");
+                    levelsLive = buildProfiledLevels(
+                            series.instrument(), window, marketState, liveHigh, liveLow, zero, lastClose);
+                    levelsLive = applyDayLockedShelves(levelsLive, dayZones.get(), liveHigh, liveLow, window);
+                    levels = checklistDayLock.absorb(day, levelsLive);
+                    active = ChecklistStructure.pickActive(
+                            levels, lastClose, marketState, arm, spec.pointSize());
+                    if (active == null || !active.hasValidRange()) {
+                        return Optional.of(noTrade(series, "§6–7: no valid profiled range after unstick"));
+                    }
+                }
+            }
+        }
+
+        MergedVolumeRange range = active.range();
+        boolean brokenUp = breakHoldSatisfied(window, range, true, Math.max(1, settings.confirmBarsAfterBreak()));
+        boolean brokenDown = breakHoldSatisfied(window, range, false, Math.max(1, settings.confirmBarsAfterBreak()));
+        active = active.withBrokenHeld(brokenUp || brokenDown);
+
+        ModeDecision md = decideChecklistAtLevel(window, active, brokenUp, brokenDown);
+
+        if (md.mode() == null) {
+            return Optional.of(plan(
+                    series,
+                    TrendRobotState.ZONE_READY,
+                    null,
+                    active.preferBuy(),
+                    range,
+                    null,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    "§" + (active.preferBuy() ? "14" : "14") + " level " + active.role()
+                            + " " + fmt(range) + " — waiting: " + md.reason()
+                            + " | " + ChecklistStructure.majorityNote(levels, marketState),
+                    List.of(md.reason(), "htf=" + htf, "state=" + marketState, "session=" + session)
+            ));
+        }
+
+        if (settings.aSetupBounceOnly() && md.mode() == TrendTradeMode.RETEST) {
+            return Optional.of(plan(
+                    series, TrendRobotState.ZONE_READY, null, md.buy(), range, null,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    "a-setup-bounce-only=true — RETEST skipped (research cut)",
+                    List.of("htf=" + htf)
+            ));
+        }
+
+        boolean buy = md.buy();
+        boolean against = htf.againstTrend(buy);
+        boolean checklistRetestContinuation = md.mode() == TrendTradeMode.RETEST
+                && ((buy && brokenUp) || (!buy && brokenDown));
+
+        if (against && settings.counterTrendBounceOnly() && md.mode() == TrendTradeMode.RETEST
+                && !checklistRetestContinuation) {
+            return Optional.of(noTrade(series,
+                    "HTF " + htf + " counter — RETEST blocked (bounce only)"));
+        }
+        if ((settings.requireBounceConfirm() || (against && settings.counterTrendRequireConfirm()))
+                && md.mode() == TrendTradeMode.BOUNCE
+                && !bounceConfirmed(window, range, buy)) {
+            return Optional.of(plan(
+                    series, TrendRobotState.ZONE_READY, null, buy, range, null,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    "§14 bounce — waiting closed rejection confirm",
+                    List.of("htf=" + htf, "state=" + marketState)
+            ));
+        }
+        if (against && md.mode() == TrendTradeMode.RETEST && !checklistRetestContinuation) {
+            double maxDist = settings.counterTrendMaxDistancePoints();
+            if (!retestEntryAllowed(window, range, buy, maxDist, spec.pointSize())) {
+                return Optional.of(plan(
+                        series, TrendRobotState.ZONE_READY, null, buy, range, null,
+                        Double.NaN, Double.NaN, Double.NaN,
+                        "HTF counter retest — need touch / within " + (int) maxDist + " pts",
+                        List.of("htf=" + htf)
+                ));
+            }
+        }
+
+        TrendAccountContext acct = account == null
+                ? TrendAccountContext.of(100_000, 15_000, 16_000, settings.maxRiskPctEquity())
+                : new TrendAccountContext(
+                account.equityRub(),
+                account.goLongRub(),
+                account.goShortRub(),
+                account.maxRiskPctEquity() > 0 ? account.maxRiskPctEquity() : settings.maxRiskPctEquity()
+        );
+
+        int contracts = TrendPositionSizer.sizeContracts(acct, spec, buy, spec.stopPoints());
+        double initFrac = settings.initialSizeFraction() > 0 ? settings.initialSizeFraction() : 0.4;
+        contracts = Math.max(1, (int) Math.round(contracts * initFrac));
+        if (against && !checklistRetestContinuation) {
+            double frac = settings.counterTrendSizeFraction() > 0 ? settings.counterTrendSizeFraction() : 0.6;
+            contracts = Math.max(1, (int) Math.round(contracts * frac));
+        }
+        if (contracts < 1) {
+            return Optional.of(noTrade(series, "size=0 after GO/risk / initial fraction"));
+        }
+
+        // §9 / §14 grid
+        LimitGridPlan grid = LimitGridBuilder.build(range, buy, contracts, settings.gridStyle());
+        double avg = grid.averagePrice();
+        // §10 / §15 stop ≤ speculative; §12 / §17 TP1 = checklist pts
+        double stopPtsPrice = spec.stopPoints() * spec.pointSize();
+        double tp1PtsPrice = spec.tp1Points() * spec.pointSize();
+        double rrFloor = (against && !checklistRetestContinuation)
+                ? Math.max(settings.minRewardRisk(), settings.counterTrendMinRewardRisk())
+                : Math.max(1.0, settings.minRewardRisk());
+        tp1PtsPrice = Math.max(tp1PtsPrice, stopPtsPrice * Math.min(rrFloor, 1.0));
+        // §13 RETEST ×1.5 / §18 BOUNCE ×2
+        double runnerMult = md.mode() == TrendTradeMode.BOUNCE ? 2.0 : 1.5;
+        double stop;
+        double tp1;
+        double tp2;
+        if (buy) {
+            stop = Math.max(avg - stopPtsPrice, range.low() - stopPtsPrice);
+            // Cap stop distance at speculative stop
+            if (avg - stop > stopPtsPrice) {
+                stop = avg - stopPtsPrice;
+            }
+            tp1 = avg + tp1PtsPrice;
+            tp2 = avg + stopPtsPrice * runnerMult;
+            if (tp2 < tp1) {
+                tp2 = tp1 + stopPtsPrice * 0.5;
+            }
+        } else {
+            stop = Math.min(avg + stopPtsPrice, range.high() + stopPtsPrice);
+            if (stop - avg > stopPtsPrice) {
+                stop = avg + stopPtsPrice;
+            }
+            tp1 = avg - tp1PtsPrice;
+            tp2 = avg - stopPtsPrice * runnerMult;
+            if (tp2 > tp1) {
+                tp2 = tp1 - stopPtsPrice * 0.5;
+            }
+        }
+
+        TrendRobotState state = md.mode() == TrendTradeMode.BOUNCE
+                ? TrendRobotState.ARMED_BOUNCE
+                : TrendRobotState.ARMED_RETEST;
+
+        String tilt = against ? "COUNTER×" + settings.counterTrendSizeFraction() : "WITH";
+        String domNote = domSoftNote(series.instrument(), range);
+        String runnerTag = md.mode() == TrendTradeMode.BOUNCE ? "§18×2" : "§13×1.5";
+        String rationale = String.format(Locale.ROOT,
+                "%s %s | %s | htf=%s %s | level=%s %s [%s] (%.0f pts) | size×%.2f until BE | grid=%s %d | SL=%.2f TP1=%.2f(%s) TP2=%.2f %s | stopQty→⅔ after TP1%s",
+                md.mode(), buy ? "BUY" : "SELL",
+                ChecklistStructure.majorityNote(levels, marketState),
+                htf, tilt,
+                active.role(), active.source(), fmt(range), range.widthPoints(spec.pointSize()),
+                initFrac, settings.gridStyle(), grid.totalQty(), stop, tp1,
+                "§12/17 " + (int) spec.tp1Points() + "pts",
+                tp2, runnerTag,
+                domNote.isEmpty() ? "" : " | " + domNote);
+
+        return Optional.of(plan(
+                series, state, md.mode(), buy, range, grid, stop, tp1, tp2, rationale,
+                List.of(md.reason(), "htf=" + htf, tilt, "state=" + marketState,
+                        "level=" + active.role(), "session=" + session, "initialSize=" + initFrac)
+        ));
+    }
+
+    /**
+     * Stamp day-locked TOP/BOT onto TREND_HI / TREND_LO so bounce uses the same shelves as desk.
+     */
+    private List<ChecklistLevel> applyDayLockedShelves(
+            List<ChecklistLevel> levels,
+            DayZoneLock.Snapshot locked,
+            double trendHigh,
+            double trendLow,
+            List<TrendBar> window
+    ) {
+        if (levels == null) {
+            levels = new ArrayList<>();
+        } else {
+            levels = new ArrayList<>(levels);
+        }
+        int need = Math.max(1, settings.confirmBarsAfterBreak());
+        if (locked != null && locked.hasTop()) {
+            boolean broken = breakHoldSatisfied(window, locked.top(), true, need);
+            ChecklistLevel top = new ChecklistLevel(
+                    trendHigh, "TREND_HI",
+                    (locked.topSource() == null ? "DAY" : locked.topSource()) + "+DAY",
+                    false, locked.top(), broken);
+            levels.removeIf(l -> "TREND_HI".equals(l.role()));
+            levels.add(top);
+        }
+        if (locked != null && locked.hasBottom()) {
+            boolean broken = breakHoldSatisfied(window, locked.bottom(), false, need);
+            ChecklistLevel bot = new ChecklistLevel(
+                    trendLow, "TREND_LO",
+                    (locked.bottomSource() == null ? "DAY" : locked.bottomSource()) + "+DAY",
+                    true, locked.bottom(), broken);
+            levels.removeIf(l -> "TREND_LO".equals(l.role()));
+            levels.add(bot);
+        }
+        return levels;
+    }
+
+    /**
+     * §4 discover + §6–7 profile each level (last 2–3 bounces × 1–3 candles; tape if available).
+     */
+    List<ChecklistLevel> buildProfiledLevels(
+            String instrument,
+            List<TrendBar> window,
+            MarketState state,
+            double trendHigh,
+            double trendLow,
+            double zero,
+            double lastClose
+    ) {
+        List<ChecklistLevel> raw = ChecklistStructure.discoverLevels(
+                window, state, trendHigh, trendLow, zero, lastClose, settings.instrument(), vap);
+        List<ChecklistLevel> out = new ArrayList<>();
+        List<double[]> tape = tapePrints(instrument);
+        boolean useTape = settings.preferMarketDataZones() && tape != null && !tape.isEmpty();
+        for (ChecklistLevel l : raw) {
+            MergedVolumeRange range = vap.buildFromLastBounces(window, l.price(), 3, 3);
+            String src = "BARS§6";
+            if (!range.validForEntry() && useTape) {
+                MergedVolumeRange tapeR = vap.buildAroundLevelFromPrints(tape, l.price(), 2);
+                if (tapeR.validForEntry()) {
+                    range = tapeR;
+                    src = "TAPE§6";
+                }
+            }
+            if (!range.validForEntry()) {
+                range = vap.buildAroundLevel(window, l.price(),
+                        settings.touchLookback(), settings.candlesPerTouch(), 2);
+                src = "BARS-FALLBACK";
+            }
+            // Structural HI/LO must always get a shelf — new extremes have no 2–3 bounces yet
+            if (!range.validForEntry()
+                    && ("TREND_HI".equals(l.role()) || "TREND_LO".equals(l.role()))) {
+                double width = settings.instrument().zoneMinPoints() * settings.instrument().pointSize();
+                double low = "TREND_HI".equals(l.role()) ? l.price() - width : l.price();
+                double high = "TREND_HI".equals(l.role()) ? l.price() : l.price() + width;
+                range = new MergedVolumeRange(low, high, 1, List.of(), true, null);
+                src = "SOFT§6";
+            }
+            if (range.validForEntry()) {
+                boolean brokenUp = breakHoldSatisfied(window, range, true, Math.max(1, settings.confirmBarsAfterBreak()));
+                boolean brokenDown = breakHoldSatisfied(window, range, false, Math.max(1, settings.confirmBarsAfterBreak()));
+                out.add(new ChecklistLevel(l.price(), l.role(), src + "+" + l.source(),
+                        l.preferBuy(), range, brokenUp || brokenDown));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * §8 RETEST after break+hold, else §14 bounce by preferBuy side.
+     */
+    private ModeDecision decideChecklistAtLevel(
+            List<TrendBar> window,
+            ChecklistLevel level,
+            boolean brokenUp,
+            boolean brokenDown
+    ) {
+        MergedVolumeRange range = level.range();
+        double maxDist = settings.retestArmMaxDistancePoints();
+        double pt = settings.instrument().pointSize();
+
+        if (brokenUp) {
+            // §8: retest long from above
+            if (!retestEntryAllowed(window, range, true, maxDist, pt)) {
+                return new ModeDecision(null, true,
+                        "§8 TOP/level break+hold — waiting retest from above");
+            }
+            return new ModeDecision(TrendTradeMode.RETEST, true, "§8 break+hold+retest long");
+        }
+        if (brokenDown) {
+            if (!retestEntryAllowed(window, range, false, maxDist, pt)) {
+                return new ModeDecision(null, false,
+                        "§8 BOT/level break+hold — waiting retest from below");
+            }
+            return new ModeDecision(TrendTradeMode.RETEST, false, "§8 break+hold+retest short");
+        }
+
+        // §14 bounce: preferBuy → long bounce, else short bounce
+        boolean zoneIsTop = !level.preferBuy();
+        return decideBounceAtShelf(window, range, zoneIsTop);
+    }
+
+    /**
+     * Dual day-locked TOP+BOT: trade between shelves — nearest zone to price.
+     * After a far-range break+hold, prefer that broken shelf for retest approach.
+     */
+    private Optional<ZoneCandidate> pickChecklistZone(
+            Optional<ZoneCandidate> top,
+            Optional<ZoneCandidate> bottom,
+            TrendBias bias,
+            boolean topBrokenHeld,
+            boolean bottomBrokenHeld,
+            double lastClose
+    ) {
+        if (top.isPresent() && bottom.isPresent()) {
+            // After far-shelf break+hold — stick to that shelf for RETEST approach (§7–8)
+            if (topBrokenHeld && !bottomBrokenHeld) {
+                return top;
+            }
+            if (bottomBrokenHeld && !topBrokenHeld) {
+                return bottom;
+            }
+            // Both broken or neither — nearest shelf
+            double dTop = Math.abs(top.get().range().mid() - lastClose);
+            double dBot = Math.abs(bottom.get().range().mid() - lastClose);
+            return dBot <= dTop ? bottom : top;
+        }
+        if (bias == TrendBias.UP) {
+            return bottom.isPresent() ? bottom : top;
+        }
+        if (bias == TrendBias.DOWN) {
+            return top.isPresent() ? top : bottom;
+        }
+        return pickSideZone(top, bottom, lastClose, bias);
+    }
+
+    /**
+     * Checklist: trade between the two ranges — UP prefers lower (BOT) bounce,
+     * DOWN prefers upper (TOP) rejection; otherwise nearest to last price.
+     */
+    private Optional<ZoneCandidate> pickSideZone(
+            Optional<ZoneCandidate> top,
+            Optional<ZoneCandidate> bottom,
+            double lastClose,
+            TrendBias bias
+    ) {
+        if (top.isEmpty() && bottom.isEmpty()) {
+            return Optional.empty();
+        }
+        if (top.isEmpty()) {
+            return bottom;
+        }
+        if (bottom.isEmpty()) {
+            return top;
+        }
+        if (bias == TrendBias.UP) {
+            return bottom; // buy support band
+        }
+        if (bias == TrendBias.DOWN) {
+            return top; // sell resistance band
+        }
+        double dTop = Math.abs(top.get().range().mid() - lastClose);
+        double dBot = Math.abs(bottom.get().range().mid() - lastClose);
+        return dBot <= dTop ? bottom : top;
+    }
+
+    private Optional<ZoneCandidate> pickBestZone(
+            String instrument,
+            List<TrendBar> window,
+            List<Double> levels,
+            double lastClose,
+            TrendBias bias
+    ) {
+        List<ZoneCandidate> ok = collectValidZones(instrument, window, levels);
         if (ok.isEmpty()) {
             return Optional.empty();
         }
@@ -303,6 +1209,87 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             return "DOM@zone empty";
         }
         return String.format(Locale.ROOT, "DOM@zone bid=%d ask=%d", bidLots, askLots);
+    }
+
+    /**
+     * Full checklist at a day-locked shelf (§7–8):
+     * <ul>
+     *   <li>TOP unbroken → bounce short into the range</li>
+     *   <li>TOP broken+held → RETEST long from above (continuation)</li>
+     *   <li>BOT unbroken → bounce long into the range</li>
+     *   <li>BOT broken+held → RETEST short from below (continuation)</li>
+     * </ul>
+     */
+    private ModeDecision decideChecklistAtShelf(
+            List<TrendBar> window,
+            MergedVolumeRange range,
+            boolean zoneIsTop,
+            boolean topBrokenHeld,
+            boolean bottomBrokenHeld
+    ) {
+        double maxDist = settings.retestArmMaxDistancePoints();
+        double pt = settings.instrument().pointSize();
+
+        if (zoneIsTop) {
+            if (topBrokenHeld) {
+                if (!retestEntryAllowed(window, range, true, maxDist, pt)) {
+                    return new ModeDecision(null, true,
+                            "TOP break+hold — waiting retest from above (touch / within "
+                                    + (int) maxDist + " pts)");
+                }
+                return new ModeDecision(TrendTradeMode.RETEST, true,
+                        "§7–8 TOP break+hold+retest long from above");
+            }
+            return decideBounceAtShelf(window, range, true);
+        }
+
+        if (bottomBrokenHeld) {
+            if (!retestEntryAllowed(window, range, false, maxDist, pt)) {
+                return new ModeDecision(null, false,
+                        "BOT break+hold — waiting retest from below (touch / within "
+                                + (int) maxDist + " pts)");
+            }
+            return new ModeDecision(TrendTradeMode.RETEST, false,
+                    "§7–8 BOT break+hold+retest short from below");
+        }
+        return decideBounceAtShelf(window, range, false);
+    }
+
+    /**
+     * Bounce at a day-locked shelf: BOT → BUY, TOP → SELL (mean-reversion between ranges).
+     */
+    private ModeDecision decideBounceAtShelf(List<TrendBar> window, MergedVolumeRange range, boolean zoneIsTop) {
+        boolean buy = !zoneIsTop;
+        boolean above = window.get(window.size() - 1).close() > range.high();
+        boolean below = window.get(window.size() - 1).close() < range.low();
+        boolean inside = !above && !below;
+        double lastClose = window.get(window.size() - 1).close();
+
+        if (buy) {
+            // BOT long: need touch / reject from lower shelf
+            if (below || (inside && lastClose <= range.mid())) {
+                if (settings.requireBounceConfirm() && !bounceConfirmed(window, range, true)) {
+                    return new ModeDecision(null, true, "BOT bounce: waiting closed rejection candle in zone");
+                }
+                return new ModeDecision(TrendTradeMode.BOUNCE, true, "BOT shelf: bounce long (confirmed)");
+            }
+            if (above) {
+                return new ModeDecision(null, true, "price above BOT — waiting return to shelf");
+            }
+            return new ModeDecision(null, true, "BOT shelf — mid-zone, no bounce confirm yet");
+        }
+
+        // TOP short
+        if (above || (inside && lastClose >= range.mid())) {
+            if (settings.requireBounceConfirm() && !bounceConfirmed(window, range, false)) {
+                return new ModeDecision(null, false, "TOP bounce: waiting closed rejection candle in zone");
+            }
+            return new ModeDecision(TrendTradeMode.BOUNCE, false, "TOP shelf: bounce short (confirmed)");
+        }
+        if (below) {
+            return new ModeDecision(null, false, "price below TOP — waiting return to shelf");
+        }
+        return new ModeDecision(null, false, "TOP shelf — mid-zone, no bounce confirm yet");
     }
 
     private ModeDecision decideMode(List<TrendBar> window, MergedVolumeRange range, TrendBias bias, double lastClose) {
@@ -608,9 +1595,21 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         return String.format(Locale.ROOT, "%.2f–%.2f", r.low(), r.high());
     }
 
-    enum TrendBias {UP, DOWN, NONE}
-
     private record Swing(int index, double price, boolean high) {
+    }
+
+    /**
+     * Day-locked range is tradable for the session even if originally soft —
+     * checklist freezes the shelf and trades it.
+     */
+    private ZoneCandidate asDayZone(double level, MergedVolumeRange range, String source) {
+        MergedVolumeRange r = range;
+        if (r != null && !r.validForEntry() && r.low() < r.high()) {
+            r = new MergedVolumeRange(
+                    r.low(), r.high(), r.totalVolume(), r.sourceBands(), true, null);
+        }
+        String src = source == null ? "DAY" : source + "+DAY";
+        return new ZoneCandidate(level, r, src);
     }
 
     private record ZoneCandidate(double level, MergedVolumeRange range, String source) {

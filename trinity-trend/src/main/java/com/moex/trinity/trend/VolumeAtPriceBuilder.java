@@ -52,6 +52,81 @@ public final class VolumeAtPriceBuilder {
     }
 
     /**
+     * Checklist §6–7: profile on last {@code maxBounces} (2–3) bounce clusters,
+     * each cluster using up to {@code candlesPerBounce} (1–3) candles that touch the level.
+     */
+    public MergedVolumeRange buildFromLastBounces(
+            List<TrendBar> bars,
+            double level,
+            int maxBounces,
+            int candlesPerBounce
+    ) {
+        if (bars == null || bars.isEmpty() || Double.isNaN(level)) {
+            return MergedVolumeRange.invalid("empty bars or level");
+        }
+        int bounces = Math.min(3, Math.max(2, maxBounces));
+        int per = Math.min(3, Math.max(1, candlesPerBounce));
+        double tol = pointSize * 2;
+        List<Integer> touchIdx = new ArrayList<>();
+        for (int i = 0; i < bars.size(); i++) {
+            TrendBar b = bars.get(i);
+            if (b.valid() && b.touches(level, tol)) {
+                touchIdx.add(i);
+            }
+        }
+        if (touchIdx.isEmpty()) {
+            return MergedVolumeRange.invalid("no candle touches level");
+        }
+        int gap = Math.max(3, per + 1);
+        // Split into clusters (oldest → newest), keep last N clusters
+        List<List<Integer>> clusters = new ArrayList<>();
+        List<Integer> cur = new ArrayList<>();
+        int prev = -gap;
+        for (int idx : touchIdx) {
+            if (cur.isEmpty() || idx - prev < gap) {
+                cur.add(idx);
+            } else {
+                clusters.add(cur);
+                cur = new ArrayList<>();
+                cur.add(idx);
+            }
+            prev = idx;
+        }
+        if (!cur.isEmpty()) {
+            clusters.add(cur);
+        }
+        if (clusters.size() < 2) {
+            return MergedVolumeRange.invalid(
+                    String.format("§6 need ≥2 bounce clusters, got %d", clusters.size()));
+        }
+        int from = Math.max(0, clusters.size() - bounces);
+        List<TrendBar> window = new ArrayList<>();
+        for (int c = from; c < clusters.size(); c++) {
+            List<Integer> cl = clusters.get(c);
+            int take = Math.min(per, cl.size());
+            for (int t = cl.size() - take; t < cl.size(); t++) {
+                window.add(bars.get(cl.get(t)));
+            }
+        }
+        NavigableMap<Long, Double> vap = accumulate(window);
+        if (vap.isEmpty()) {
+            return MergedVolumeRange.invalid("no volume in bounce window");
+        }
+        double halfShelf = (zoneMaxPoints * pointSize) / 2.0;
+        NavigableMap<Long, Double> near = new TreeMap<>();
+        for (Map.Entry<Long, Double> e : vap.entrySet()) {
+            double px = bucketToPrice(e.getKey());
+            if (Math.abs(px - level) <= halfShelf) {
+                near.put(e.getKey(), e.getValue());
+            }
+        }
+        if (near.isEmpty()) {
+            return MergedVolumeRange.invalid("no volume near level shelf");
+        }
+        return mergeFromVolumeMap(near);
+    }
+
+    /**
      * Build VAP from candles that touched {@code level}.
      * Requires {@code minTouchCount} distinct touch clusters (bounces).
      */
@@ -90,7 +165,23 @@ public final class VolumeAtPriceBuilder {
                 window.add(bars.get(j));
             }
         }
-        return mergeFromBars(window);
+        NavigableMap<Long, Double> vap = accumulate(window);
+        if (vap.isEmpty()) {
+            return MergedVolumeRange.invalid("no volume in touch window");
+        }
+        // Footprint only near the S/R line — not the whole candle body into the channel
+        double halfShelf = (zoneMaxPoints * pointSize) / 2.0;
+        NavigableMap<Long, Double> near = new TreeMap<>();
+        for (Map.Entry<Long, Double> e : vap.entrySet()) {
+            double px = bucketToPrice(e.getKey());
+            if (Math.abs(px - level) <= halfShelf) {
+                near.put(e.getKey(), e.getValue());
+            }
+        }
+        if (near.isEmpty()) {
+            return MergedVolumeRange.invalid("no volume near level shelf");
+        }
+        return mergeFromVolumeMap(near);
     }
 
     /** Distinct bounce clusters: touches separated by ≥ gap bars. */
@@ -377,6 +468,31 @@ public final class VolumeAtPriceBuilder {
                     String.format("range too wide: %.1f pts > %.0f", widthPts, zoneMaxPoints));
         }
         return new MergedVolumeRange(low, high, vol, List.copyOf(best), true, null);
+    }
+
+    /**
+     * Horizontal market profile levels for desk overlay (volume-at-price).
+     * Uses last {@code maxBars} of the series (or all if smaller).
+     */
+    public List<ProfileLevel> profileLevels(List<TrendBar> bars, int maxBars) {
+        if (bars == null || bars.isEmpty()) {
+            return List.of();
+        }
+        int n = Math.min(bars.size(), Math.max(12, maxBars));
+        List<TrendBar> window = bars.subList(bars.size() - n, bars.size());
+        NavigableMap<Long, Double> vap = accumulate(window);
+        if (vap.isEmpty()) {
+            return List.of();
+        }
+        double maxVol = vap.values().stream().mapToDouble(Double::doubleValue).max().orElse(1);
+        List<ProfileLevel> out = new ArrayList<>(vap.size());
+        for (Map.Entry<Long, Double> e : vap.entrySet()) {
+            out.add(new ProfileLevel(bucketToPrice(e.getKey()), e.getValue(), e.getValue() / maxVol));
+        }
+        return out;
+    }
+
+    public record ProfileLevel(double price, double volume, double strength) {
     }
 
     private long priceBucket(double price) {

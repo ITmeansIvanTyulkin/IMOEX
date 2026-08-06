@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LevelsProfileBrPlaybookTest {
@@ -40,11 +41,35 @@ class LevelsProfileBrPlaybookTest {
     }
 
     @Test
+    void topBreakHoldArmsRetestLongFromAbove() {
+        MergedVolumeRange top = new MergedVolumeRange(80.00, 80.20, 100, List.of(), true, null);
+        List<TrendBar> bars = new ArrayList<>();
+        LocalDateTime t = LocalDateTime.of(2026, 8, 6, 12, 0);
+        // in TOP zone
+        bars.add(bar(t, 80.05, 80.15, 80.00, 80.10));
+        // break up + hold outside
+        bars.add(bar(t.plusMinutes(5), 80.25, 80.35, 80.22, 80.30));
+        bars.add(bar(t.plusMinutes(10), 80.30, 80.40, 80.25, 80.35));
+        bars.add(bar(t.plusMinutes(15), 80.35, 80.45, 80.28, 80.40));
+        // retest touch from above
+        bars.add(bar(t.plusMinutes(20), 80.30, 80.35, 80.15, 80.22));
+
+        assertTrue(LevelsProfileBrPlaybook.breakHoldSatisfied(bars, top, true, 2));
+        assertTrue(LevelsProfileBrPlaybook.retestEntryAllowed(bars, top, true, 10, 0.01));
+        assertFalse(TrendPlaybookSettings.brDefaults().aSetupBounceOnly(),
+                "defaults must run full checklist (bounce+retest)");
+    }
+
+    @Test
     void researchServiceSelectsPlaybookInTrend() {
         TrendPlaybook pb = new LevelsProfileBrPlaybook();
         TrendResearchService svc = new TrendResearchService(List.of(pb), new DefaultTrendRegimeSelector());
         assertTrue(svc.activePlaybook(new TrendRegimeContext("TREND", 34, true)).isPresent());
         assertEquals(LevelsProfileBrPlaybook.ID, svc.activePlaybook(new TrendRegimeContext("TREND", 34, true)).orElseThrow().id());
+    }
+
+    private static TrendBar bar(LocalDateTime t, double o, double h, double l, double c) {
+        return new TrendBar(t, o, h, l, c, 1000);
     }
 
     /**

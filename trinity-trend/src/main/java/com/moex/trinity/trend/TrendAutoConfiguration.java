@@ -8,6 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 
+import java.nio.file.Path;
 import java.util.List;
 
 @AutoConfiguration
@@ -22,8 +23,8 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.max-risk-pct-equity:1.0}") double maxRiskPct,
             @Value("${imoex.strategies.trend.br.zone-min-points:15}") double zoneMin,
             @Value("${imoex.strategies.trend.br.zone-max-points:20}") double zoneMax,
-            @Value("${imoex.strategies.trend.br.stop-points:15}") double stopPts,
-            @Value("${imoex.strategies.trend.br.tp1-points:25}") double tp1Pts,
+            @Value("${imoex.strategies.trend.br.stop-points:20}") double stopPts,
+            @Value("${imoex.strategies.trend.br.tp1-points:20}") double tp1Pts,
             @Value("${imoex.strategies.trend.br.rub-per-point:7.0}") double rubPerPoint,
             @Value("${imoex.strategies.trend.one-setup-per-zone:true}") boolean oneSetupPerZone,
             @Value("${imoex.strategies.trend.unlock-distance-points:40}") double unlockDistancePoints,
@@ -34,13 +35,13 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.session-bias-min-points:40}") double sessionBiasMinPoints,
             @Value("${imoex.strategies.trend.require-bounce-confirm:true}") boolean requireBounceConfirm,
             @Value("${imoex.strategies.trend.min-reward-risk:1.5}") double minRewardRisk,
-            @Value("${imoex.strategies.trend.max-setups-per-day:2}") int maxSetupsPerDay,
+            @Value("${imoex.strategies.trend.max-setups-per-day:0}") int maxSetupsPerDay,
             @Value("${imoex.strategies.trend.cooldown-bars-after-sl:12}") int cooldownBarsAfterSl,
             @Value("${imoex.strategies.trend.retest-arm-max-distance-points:10}") double retestArmMaxDistancePoints,
             @Value("${imoex.strategies.trend.trade-session-open:09:00}") String tradeSessionOpen,
             @Value("${imoex.strategies.trend.trade-session-close:23:50}") String tradeSessionClose,
             @Value("${imoex.strategies.trend.no-trade-after-open-minutes:40}") int noTradeAfterOpenMinutes,
-            @Value("${imoex.strategies.trend.no-trade-before-close-minutes:40}") int noTradeBeforeCloseMinutes,
+            @Value("${imoex.strategies.trend.no-trade-before-close-minutes:30}") int noTradeBeforeCloseMinutes,
             @Value("${imoex.strategies.trend.htf-min-move-points:50}") double htfMinMovePoints,
             @Value("${imoex.strategies.trend.htf-slope-bars:24}") int htfSlopeBars,
             @Value("${imoex.strategies.trend.htf-require-agreement:true}") boolean htfRequireAgreement,
@@ -53,7 +54,7 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.event-calendar-file:data/trend-event-calendar.json}") String eventCalendarFile,
             @Value("${imoex.strategies.trend.event-block-minutes-before:45}") int eventBlockMinutesBefore,
             @Value("${imoex.strategies.trend.event-block-minutes-after:30}") int eventBlockMinutesAfter,
-            @Value("${imoex.strategies.trend.a-setup-bounce-only:true}") boolean aSetupBounceOnly,
+            @Value("${imoex.strategies.trend.a-setup-bounce-only:false}") boolean aSetupBounceOnly,
             @Value("${imoex.strategies.trend.initial-size-fraction:0.4}") double initialSizeFraction,
             @Value("${imoex.strategies.trend.prefer-marketdata-zones:true}") boolean preferMarketDataZones
     ) {
@@ -113,9 +114,11 @@ public class TrendAutoConfiguration {
     @ConditionalOnMissingBean(TrendPlaybook.class)
     TrendPlaybook levelsProfileBrPlaybook(
             TrendPlaybookSettings settings,
-            ObjectProvider<MarketDataFeed> marketDataFeed
+            ObjectProvider<MarketDataFeed> marketDataFeed,
+            @Value("${imoex.data-dir:data}") String dataDir
     ) {
-        return new LevelsProfileBrPlaybook(settings, marketDataFeed.getIfAvailable());
+        Path dayZones = Path.of(dataDir, "trend-day-zones.json");
+        return new LevelsProfileBrPlaybook(settings, marketDataFeed.getIfAvailable(), dayZones);
     }
 
     @Bean

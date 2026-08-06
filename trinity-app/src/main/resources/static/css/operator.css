@@ -1694,7 +1694,7 @@ body[data-upsell="off"] .full-core-badge {
   display: none !important;
 }
 
-/* Paper trade alerts — top-right toast stack (macOS-like) */
+/* Paper / trend trade alerts — premium toast stack */
 .toast-stack {
   position: fixed;
   top: 1rem;
@@ -1702,34 +1702,83 @@ body[data-upsell="off"] .full-core-badge {
   z-index: 10000;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  max-width: min(22rem, calc(100vw - 2rem));
+  gap: 0.65rem;
+  max-width: min(24rem, calc(100vw - 2rem));
   pointer-events: none;
 }
 
 .toast {
   pointer-events: auto;
-  background: rgba(30, 42, 50, 0.94);
-  color: #f7f4ee;
-  border-radius: 12px;
-  padding: 0.85rem 1rem;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(145deg, rgba(28, 36, 42, 0.96), rgba(18, 24, 28, 0.94));
+  color: #f4f1ea;
+  border-radius: 14px;
+  padding: 0.95rem 1.05rem 0.9rem 1.15rem;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  animation: toast-in 0.35s ease-out;
+  animation: toast-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
   font-size: 0.88rem;
+  backdrop-filter: blur(10px);
+}
+
+.toast::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent, #5ec4b0);
+}
+
+.toast.toast--enter::before { background: #5ec4b0; }
+.toast.toast--signal::before { background: #c4a35e; }
+.toast.toast--exit-win::before { background: #6fbf8a; }
+.toast.toast--exit-loss::before { background: #d17a6c; }
+
+.toast .toast-kicker {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.55);
+  margin-bottom: 0.2rem;
+  font-weight: 600;
 }
 
 .toast strong {
   display: block;
   font-family: var(--sans);
   font-weight: 600;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.2rem;
+  font-size: 0.95rem;
 }
 
+.toast .toast-body {
+  color: rgba(244, 241, 234, 0.88);
+  line-height: 1.35;
+}
+
+.toast .toast-pnl {
+  margin-top: 0.45rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.toast .toast-pnl.is-win { color: #8fd9a8; }
+.toast .toast-pnl.is-loss { color: #e8a090; }
+.toast .toast-pnl.is-potential { color: #d4c08a; font-size: 1.02rem; }
+
 .toast .toast-meta {
-  color: #c8d0d6;
-  font-size: 0.8rem;
-  margin-top: 0.35rem;
+  color: #a8b2ba;
+  font-size: 0.78rem;
+  margin-top: 0.4rem;
+}
+
+.toast .toast-instrument {
+  color: #d5dde2;
 }
 
 .toast a {
@@ -1742,14 +1791,14 @@ body[data-upsell="off"] .full-core-badge {
   border: none;
   color: #aab4bc;
   cursor: pointer;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   line-height: 1;
   padding: 0 0 0 0.5rem;
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(1.5rem); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateX(1.25rem) translateY(-0.25rem); }
+  to { opacity: 1; transform: translateX(0) translateY(0); }
 }
 
 .alert-prefs {
@@ -2332,4 +2381,265 @@ body[data-upsell="off"] .full-core-badge {
   margin: 0.75rem 0;
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+/* Trend signal desk */
+.signal-desk-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+.signal-desk-head h2 {
+  margin: 0.15rem 0 0.25rem;
+  font-family: var(--sans);
+}
+.signal-desk-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.signal-desk-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 0.75rem 0 0.5rem;
+}
+.signal-chip {
+  background: rgba(30, 42, 50, 0.06);
+  border: 1px solid rgba(30, 42, 50, 0.1);
+  border-radius: 10px;
+  padding: 0.45rem 0.7rem;
+  min-width: 6.5rem;
+}
+.signal-chip .k {
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #6a7580);
+  margin-bottom: 0.15rem;
+}
+.signal-chip strong {
+  font-family: var(--mono, "IBM Plex Mono", monospace);
+  font-size: 0.95rem;
+}
+.signal-chip strong.is-buy { color: #2f8a55; }
+.signal-chip strong.is-sell { color: #b85a4c; }
+.signal-paper-panel {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(30, 42, 50, 0.12);
+  border-radius: 10px;
+  background: rgba(30, 42, 50, 0.03);
+}
+.signal-paper-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  font-family: var(--mono, "IBM Plex Mono", monospace);
+}
+.signal-paper-table th,
+.signal-paper-table td {
+  text-align: left;
+  padding: 0.28rem 0.4rem;
+  border-bottom: 1px solid rgba(30, 42, 50, 0.08);
+}
+.signal-paper-table th {
+  color: var(--muted, #6a7580);
+  font-weight: 600;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.signal-paper-table td.is-buy { color: #2f8a55; }
+.signal-paper-table td.is-sell { color: #b85a4c; }
+.signal-summary {
+  margin: 0 0 1rem;
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.signal-desk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .signal-desk-grid { grid-template-columns: 1fr; }
+}
+.signal-chart {
+  position: relative;
+  min-height: 420px;
+  border-radius: 12px;
+  border: 1px solid rgba(30, 42, 50, 0.12);
+  background: #ffffff;
+  overflow: hidden;
+}
+/* Zone bands like ATAS/Quik screenshots — translucent rectangles, not thin lines */
+.signal-zone-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  overflow: hidden;
+}
+.signal-profile-overlay {
+  position: absolute;
+  top: 0;
+  right: 56px;
+  bottom: 28px;
+  width: 80px;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
+}
+.signal-vap-bar {
+  position: absolute;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(109, 40, 217, 0.15), rgba(109, 40, 217, 0.75));
+  border-radius: 1px 0 0 1px;
+}
+.signal-footprint-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+}
+.signal-fp-col {
+  position: absolute;
+  top: 0;
+  bottom: 28px;
+  width: 40px;
+}
+.signal-fp-cell {
+  position: absolute;
+  left: 0;
+  right: 0;
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+}
+.signal-fp-cell .b { color: #15803d; font-weight: 600; }
+.signal-fp-cell .s { color: #b91c1c; font-weight: 600; }
+.signal-fp-cell .x { color: #94a3b8; margin: 0 1px; }
+.signal-zone-band {
+  position: absolute;
+  left: 8px;
+  right: 56px;
+  box-sizing: border-box;
+  min-height: 14px;
+  border-top: 2px solid rgba(109, 40, 217, 0.85);
+  border-bottom: 2px solid rgba(109, 40, 217, 0.85);
+  border-left: 4px solid rgba(109, 40, 217, 0.95);
+  background: rgba(167, 139, 250, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+.signal-zone-band.is-top {
+  background: rgba(167, 139, 250, 0.30);
+}
+.signal-zone-band.is-bot {
+  background: rgba(196, 181, 253, 0.26);
+}
+.signal-zone-label {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgba(76, 29, 149, 0.9);
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.9);
+}
+.signal-volume-wrap {
+  margin-top: 0.35rem;
+}
+.signal-volume {
+  height: 120px;
+  border-radius: 10px;
+  border: 1px solid rgba(30, 42, 50, 0.12);
+  background: #ffffff;
+}
+.lg-hi { color: #b91c1c; font-weight: 600; }
+.lg-hist { color: #64748b; font-weight: 600; }
+.lg-zone { color: #6d28d9; font-weight: 600; }
+.lg-zone-bot { color: #7c3aed; font-weight: 600; }
+.signal-chart-wrap .meta {
+  margin-top: 0.35rem;
+}
+.signal-brief {
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(30, 42, 50, 0.1);
+  background: rgba(30, 42, 50, 0.03);
+}
+.signal-brief-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted, #6a7580);
+  font-weight: 650;
+}
+.signal-brief-body {
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.signal-brief-body p {
+  margin: 0 0 0.55rem;
+}
+.signal-brief-body p:last-child {
+  margin-bottom: 0;
+}
+.signal-brief-note {
+  color: var(--muted, #4a5560);
+}
+.signal-brief-body code {
+  font-family: var(--mono, "IBM Plex Mono", monospace);
+  font-size: 0.85em;
+  background: rgba(30, 42, 50, 0.06);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+.signal-follow-label {
+  font-size: 0.85rem;
+  color: var(--ink);
+  margin-right: 0.25rem;
+}
+.signal-desk-actions {
+  align-items: center;
+}
+.signal-dom h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+.signal-dom-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono, "IBM Plex Mono", monospace);
+  font-size: 0.78rem;
+}
+.signal-dom-table th,
+.signal-dom-table td {
+  padding: 0.2rem 0.3rem;
+  text-align: right;
+  border-bottom: 1px solid rgba(30, 42, 50, 0.06);
+}
+.signal-dom-table .bid { color: #2f8a55; }
+.signal-dom-table .ask { color: #b85a4c; }
+.signal-dom-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid rgba(30, 42, 50, 0.08);
+  border-radius: 10px;
 }

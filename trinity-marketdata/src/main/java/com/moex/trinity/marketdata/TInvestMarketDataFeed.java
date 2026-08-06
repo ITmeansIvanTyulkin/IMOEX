@@ -217,6 +217,14 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         return MarketDataProviderId.T_INVEST;
     }
 
+    public int tapeSize() {
+        return tape.size();
+    }
+
+    public Optional<DomBook> anyBook() {
+        return books.values().stream().findFirst();
+    }
+
     @Override
     public String statusMessage() {
         return status.get() + " | tape=" + tape.size() + " | depth=" + orderbookDepth;

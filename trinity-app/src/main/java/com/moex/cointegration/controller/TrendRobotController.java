@@ -1,6 +1,9 @@
 package com.moex.cointegration.controller;
 
+import com.moex.cointegration.service.OperatorTradeToastService;
+import com.moex.cointegration.service.TrendDeskService;
 import com.moex.cointegration.service.TrendExecutionBridge;
+import com.moex.cointegration.service.TrendPaperJournalService;
 import com.moex.cointegration.service.TrendSettingsService;
 import com.moex.trinity.trend.LimitGridPlan;
 import com.moex.trinity.trend.MergedVolumeRange;
@@ -40,17 +43,26 @@ public class TrendRobotController {
     private final TrendRobotEngine engine;
     private final TrendExecutionBridge bridge;
     private final TrendSettingsService trendSettings;
+    private final OperatorTradeToastService tradeToasts;
+    private final TrendDeskService deskService;
+    private final TrendPaperJournalService paperJournal;
 
     public TrendRobotController(
             TrendResearchService researchService,
             TrendRobotEngine engine,
             TrendExecutionBridge bridge,
-            TrendSettingsService trendSettings
+            TrendSettingsService trendSettings,
+            OperatorTradeToastService tradeToasts,
+            TrendDeskService deskService,
+            TrendPaperJournalService paperJournal
     ) {
         this.researchService = researchService;
         this.engine = engine;
         this.bridge = bridge;
         this.trendSettings = trendSettings;
+        this.tradeToasts = tradeToasts;
+        this.deskService = deskService;
+        this.paperJournal = paperJournal;
     }
 
     @GetMapping("/settings")
@@ -80,6 +92,7 @@ public class TrendRobotController {
         m.put("liveExecution", bridge.liveExecution());
         m.put("delivery", bridge.autoExecution() ? "AUTO_JOURNAL" : "SIGNAL_ONLY");
         m.put("engineState", engine.state().name());
+        m.put("kickCountToday", engine.kickCountToday());
         m.put("playbooks", researchService.playbooks().stream().map(p -> Map.of(
                 "id", p.id(),
                 "name", p.displayName(),
@@ -92,6 +105,34 @@ public class TrendRobotController {
             m.put("signal", TrendSignal.from(p));
         });
         return m;
+    }
+
+    /**
+     * Operator signal desk: M5 bars (tape + ISS warmup), DOM, full plan markers.
+     */
+    @GetMapping("/desk")
+    public Map<String, Object> desk() {
+        return deskService.desk();
+    }
+
+    /**
+     * Kick stuck robot: soft = clear arm/spent/cooldown; hard (default) = also wipe day shelves
+     * and re-discover levels. Does not touch paper statement.
+     */
+    @PostMapping("/kick")
+    public Map<String, Object> kick(
+            @RequestParam(defaultValue = "hard") String mode,
+            @RequestParam(required = false) String reason
+    ) {
+        Map<String, Object> result = "soft".equalsIgnoreCase(mode)
+                ? engine.kickSoft(reason == null ? "api-soft" : reason)
+                : engine.kickAwake(reason == null ? "api-hard" : reason);
+        // Re-evaluate desk immediately so UI sees fresh plan
+        Map<String, Object> desk = deskService.desk();
+        result.put("deskState", desk.get("plan") instanceof Map<?, ?> p ? p.get("state") : null);
+        result.put("deskSummary", desk.get("summary"));
+        result.put("actionable", desk.get("actionable"));
+        return result;
     }
 
     /**
@@ -148,6 +189,9 @@ public class TrendRobotController {
                     "signal", TrendSignal.from(null)));
         }
         TrendRobotPlan p = plan.get();
+        if (!bridge.autoExecution() && p.actionable() && tradeToasts != null) {
+            tradeToasts.recordTrendSignal(p);
+        }
         boolean includeFull = full || bridge.autoExecution();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("signal", TrendSignal.from(p));
@@ -186,6 +230,32 @@ public class TrendRobotController {
     @GetMapping("/journal")
     public TrendExecutionBridge.JournalFile journal() {
         return bridge.journal();
+    }
+
+    /** Closed paper trades + statement (research PnL track-record). */
+    @GetMapping("/paper")
+    public Map<String, Object> paper() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("statement", paperJournal.statement());
+        m.put("trades", paperJournal.journal().trades());
+        return m;
+    }
+
+    @PostMapping("/paper/reload")
+    public Map<String, Object> paperReload() {
+        paperJournal.reload();
+        return paper();
+    }
+
+    @PostMapping("/paper/trade")
+    public ResponseEntity<?> recordPaperTrade(@RequestBody TrendPaperJournalService.Trade trade) {
+        if (trade == null || trade.id() == null || trade.id().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "id required"));
+        }
+        return ResponseEntity.ok(Map.of(
+                "trade", paperJournal.record(trade),
+                "statement", paperJournal.statement()
+        ));
     }
 
     private static Map<String, Object> summarize(TrendRobotPlan p, boolean full) {

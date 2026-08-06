@@ -153,4 +153,9 @@ public class AnalysisViewController {
     ) {
         return htmlRenderer.renderChartPage(tickerY.toUpperCase(), tickerX.toUpperCase());
     }
+
+    @GetMapping(value = "/trend-signal", produces = MediaType.TEXT_HTML_VALUE)
+    public String trendSignal() {
+        return htmlRenderer.renderTrendSignalPage();
+    }
 }
