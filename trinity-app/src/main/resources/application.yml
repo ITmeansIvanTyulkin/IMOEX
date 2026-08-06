@@ -247,6 +247,9 @@ imoex:
       cooldown-bars-after-sl: 12
       retest-arm-max-distance-points: 10
       a-setup-bounce-only: false     # full checklist: BOUNCE + RETEST after break+hold
+      prefer-structural-entries: true  # operator: skip ACCUM/ZERO RETEST noise — TOP/BOT shelves
+      macro-bias-enabled: true         # FA/macro proxy: no knife BUY on dump / SELL on melt-up
+      macro-min-day-move-points: 80
       initial-size-fraction: 0.4     # ~⅓–½ size until BE
       prefer-marketdata-zones: true  # tape VAP when broker feed streaming
       trade-session-open: "09:00"
@@ -268,8 +271,8 @@ imoex:
       br:
         zone-min-points: 15
         zone-max-points: 20
-        stop-points: 20
-        tp1-points: 20
+        stop-points: 22              # checklist 15–20; operator pad +2 against false SL
+        tp1-points: 22
         rub-per-point: 7.0
     calendar-arb:
       enabled: false

@@ -23,8 +23,8 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.max-risk-pct-equity:1.0}") double maxRiskPct,
             @Value("${imoex.strategies.trend.br.zone-min-points:15}") double zoneMin,
             @Value("${imoex.strategies.trend.br.zone-max-points:20}") double zoneMax,
-            @Value("${imoex.strategies.trend.br.stop-points:20}") double stopPts,
-            @Value("${imoex.strategies.trend.br.tp1-points:20}") double tp1Pts,
+            @Value("${imoex.strategies.trend.br.stop-points:22}") double stopPts,
+            @Value("${imoex.strategies.trend.br.tp1-points:22}") double tp1Pts,
             @Value("${imoex.strategies.trend.br.rub-per-point:7.0}") double rubPerPoint,
             @Value("${imoex.strategies.trend.one-setup-per-zone:true}") boolean oneSetupPerZone,
             @Value("${imoex.strategies.trend.unlock-distance-points:40}") double unlockDistancePoints,
@@ -56,7 +56,10 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.event-block-minutes-after:30}") int eventBlockMinutesAfter,
             @Value("${imoex.strategies.trend.a-setup-bounce-only:false}") boolean aSetupBounceOnly,
             @Value("${imoex.strategies.trend.initial-size-fraction:0.4}") double initialSizeFraction,
-            @Value("${imoex.strategies.trend.prefer-marketdata-zones:true}") boolean preferMarketDataZones
+            @Value("${imoex.strategies.trend.prefer-marketdata-zones:true}") boolean preferMarketDataZones,
+            @Value("${imoex.strategies.trend.prefer-structural-entries:true}") boolean preferStructuralEntries,
+            @Value("${imoex.strategies.trend.macro-bias-enabled:true}") boolean macroBiasEnabled,
+            @Value("${imoex.strategies.trend.macro-min-day-move-points:80}") double macroMinDayMovePoints
     ) {
         LimitGridStyle style;
         try {
@@ -106,7 +109,10 @@ public class TrendAutoConfiguration {
                 eventBlockMinutesAfter,
                 aSetupBounceOnly,
                 initialSizeFraction,
-                preferMarketDataZones
+                preferMarketDataZones,
+                preferStructuralEntries,
+                macroBiasEnabled,
+                macroMinDayMovePoints
         );
     }
 

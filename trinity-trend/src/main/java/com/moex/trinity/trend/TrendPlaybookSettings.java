@@ -46,7 +46,18 @@ public record TrendPlaybookSettings(
         /** Fraction of full size at entry until BE (e.g. 0.4 ≈ ⅓–½). */
         double initialSizeFraction,
         /** Prefer broker tape VAP when marketdata streaming. */
-        boolean preferMarketDataZones
+        boolean preferMarketDataZones,
+        /**
+         * Operator style: trade TREND_HI/LO day shelves; skip noisy ACCUM/ZERO RETEST.
+         * Checklist still discovers mid levels for context.
+         */
+        boolean preferStructuralEntries,
+        /**
+         * Operator FA/macro proxy for BR: block knife-catch BUY on dump / SELL on melt-up.
+         */
+        boolean macroBiasEnabled,
+        /** Day open→now move (points) that marks directional macro bias. */
+        double macroMinDayMovePoints
 ) {
     public static TrendPlaybookSettings brDefaults() {
         TrendInstrumentSpec br = TrendInstrumentSpec.brDefaults();
@@ -90,7 +101,10 @@ public record TrendPlaybookSettings(
                 30,
                 false,
                 0.4,
-                true
+                true,
+                true,
+                true,
+                80
         );
     }
 
@@ -107,7 +121,8 @@ public record TrendPlaybookSettings(
                 counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
                 counterTrendMaxDistancePoints, counterTrendRequireConfirm,
                 eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
-                bounceOnly, initialSizeFraction, preferMarketDataZones
+                bounceOnly, initialSizeFraction, preferMarketDataZones,
+                preferStructuralEntries, macroBiasEnabled, macroMinDayMovePoints
         );
     }
 }

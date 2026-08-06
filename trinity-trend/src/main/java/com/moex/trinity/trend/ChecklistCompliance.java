@@ -31,7 +31,10 @@ public enum ChecklistCompliance {
     EXT_HTF_SOFT(Status.EXTENSION, "HTF filter; must not kill §8 after break+hold"),
     EXT_ONE_SETUP(Status.EXTENSION, "one setup per zone until unlock"),
     EXT_INITIAL_SIZE(Status.EXTENSION, "fractional size until BE"),
-    EXT_RISK_PCT(Status.EXTENSION, "risk % equity + GO long≠short");
+    EXT_RISK_PCT(Status.EXTENSION, "risk % equity + GO long≠short"),
+    EXT_STRUCTURAL_ONLY(Status.EXTENSION, "operator: skip ACCUM/ZERO RETEST — TOP/BOT shelves"),
+    EXT_MACRO_BIAS(Status.EXTENSION, "FA/macro proxy: no knife BUY on dump / SELL on melt-up"),
+    EXT_STOP_PAD(Status.EXTENSION, "operator stop/TP1 pad beyond checklist 20 (default 22)");
 
     public enum Status { IMPLEMENTED, EXTENSION }
 

@@ -843,7 +843,70 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             ));
         }
 
+        // Operator style: skip noisy ACCUM POC; ZERO retest only with HTF (not knife noise)
+        if (settings.preferStructuralEntries()) {
+            String role = active.role() == null ? "" : active.role();
+            if ("ACCUM".equals(role)) {
+                return Optional.of(plan(
+                        series, TrendRobotState.ZONE_READY, null, md.buy(), range, null,
+                        Double.NaN, Double.NaN, Double.NaN,
+                        "operator: ACCUM POC skipped — prefer day TOP/BOT / ZERO shelves",
+                        List.of("htf=" + htf, "state=" + marketState)
+                ));
+            }
+            // TOP shelf → prefer short bounce/retest down, not long into the high unless HTF-up continuation
+            if ("TREND_HI".equals(role) && md.buy() && md.mode() == TrendTradeMode.RETEST
+                    && htf != HtfTrend.UP) {
+                return Optional.of(plan(
+                        series, TrendRobotState.ZONE_READY, null, true, range, null,
+                        Double.NaN, Double.NaN, Double.NaN,
+                        "operator: TREND_HI long only with HTF UP continuation",
+                        List.of("htf=" + htf)
+                ));
+            }
+            // BOT shelf → prefer long; skip short into the low unless HTF-down continuation
+            if ("TREND_LO".equals(role) && !md.buy() && md.mode() == TrendTradeMode.RETEST
+                    && htf != HtfTrend.DOWN) {
+                return Optional.of(plan(
+                        series, TrendRobotState.ZONE_READY, null, false, range, null,
+                        Double.NaN, Double.NaN, Double.NaN,
+                        "operator: TREND_LO short only with HTF DOWN continuation",
+                        List.of("htf=" + htf)
+                ));
+            }
+        }
+
         boolean buy = md.buy();
+        BrMacroBias macro = settings.macroBiasEnabled()
+                ? BrMacroBias.resolve(
+                window, series.last().time(), htf, marketState, settings,
+                settings.macroMinDayMovePoints())
+                : BrMacroBias.NEUTRAL;
+        // Knife-catch only: no BUY into dump. TOP bounce SELL still allowed on rally days.
+        if (macro.blocksBuy() && buy) {
+            return Optional.of(noTrade(series,
+                    "FA/macro " + macro + " — no BUY (knife-catch filter); day dump / HTF down"));
+        }
+        if (macro.blocksSell() && !buy && md.mode() == TrendTradeMode.RETEST
+                && !"TREND_HI".equals(active.role())) {
+            return Optional.of(noTrade(series,
+                    "FA/macro " + macro + " — no mid/LO SELL into melt-up; wait TOP shelf bounce"));
+        }
+
+        // ZERO mid-retest only with HTF (operator: don't invent mean-reversion mid-noise)
+        if (settings.preferStructuralEntries()
+                && "ZERO".equals(active.role())
+                && md.mode() == TrendTradeMode.RETEST
+                && !htf.withTrend(buy)
+                && !(md.buy() && brokenUp || !md.buy() && brokenDown)) {
+            return Optional.of(plan(
+                    series, TrendRobotState.ZONE_READY, null, buy, range, null,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    "operator: ZERO RETEST only with HTF / break+hold continuation",
+                    List.of("htf=" + htf)
+            ));
+        }
+
         boolean against = htf.againstTrend(buy);
         boolean checklistRetestContinuation = md.mode() == TrendTradeMode.RETEST
                 && ((buy && brokenUp) || (!buy && brokenDown));
@@ -938,6 +1001,9 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 : TrendRobotState.ARMED_RETEST;
 
         String tilt = against ? "COUNTER×" + settings.counterTrendSizeFraction() : "WITH";
+        if (macro != BrMacroBias.NEUTRAL) {
+            tilt = tilt + " macro=" + macro;
+        }
         String domNote = domSoftNote(series.instrument(), range);
         String runnerTag = md.mode() == TrendTradeMode.BOUNCE ? "§18×2" : "§13×1.5";
         String rationale = String.format(Locale.ROOT,

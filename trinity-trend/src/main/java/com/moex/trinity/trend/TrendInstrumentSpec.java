@@ -18,7 +18,7 @@ public record TrendInstrumentSpec(
     }
 
     public static TrendInstrumentSpec brDefaults() {
-        // Checklist BR speculative: zone 15–20, stop 15–20 (use 20), TP1 15–20 (use 20)
-        return br(15, 20, 20, 20, 7.0);
+        // Checklist BR speculative 15–20; operator pad stop/TP1=22 (fewer false SL, mild)
+        return br(15, 20, 22, 22, 7.0);
     }
 }
