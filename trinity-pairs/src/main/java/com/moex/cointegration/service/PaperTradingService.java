@@ -253,6 +253,7 @@ public class PaperTradingService {
         for (PaperTradeEntry e : updated) {
             replace(e);
         }
+        notifyCloses(updated);
         return updated.size();
     }
 
@@ -268,6 +269,7 @@ public class PaperTradingService {
         for (PaperTradeEntry e : updated) {
             replace(e);
         }
+        notifyCloses(updated);
         return updated.size();
     }
 
@@ -519,7 +521,23 @@ public class PaperTradingService {
         for (PaperTradeEntry e : updated) {
             replace(e);
         }
-        return (int) updated.stream().filter(e -> "CLOSED".equals(e.status())).count();
+        List<PaperTradeEntry> closed = updated.stream()
+                .filter(e -> "CLOSED".equals(e.status()))
+                .toList();
+        notifyCloses(closed);
+        return closed.size();
+    }
+
+    private void notifyCloses(List<PaperTradeEntry> closedOrUpdated) {
+        if (alertService == null || closedOrUpdated == null || closedOrUpdated.isEmpty()) {
+            return;
+        }
+        List<PaperTradeEntry> closed = closedOrUpdated.stream()
+                .filter(e -> e != null && "CLOSED".equals(e.status()))
+                .toList();
+        if (!closed.isEmpty()) {
+            alertService.recordCloses(closed);
+        }
     }
 
     private int barsHeld(PaperTradeEntry open, LocalDate quoteAsOf, BookKind book) {

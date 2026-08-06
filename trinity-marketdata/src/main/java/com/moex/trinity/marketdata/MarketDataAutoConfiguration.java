@@ -56,8 +56,15 @@ public class MarketDataAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(MarketDataResearchService.class)
-    MarketDataResearchService marketDataResearchService(MarketDataFeed feed) {
-        return new MarketDataResearchService(feed);
+    MarketDataResearchService marketDataResearchService(
+            MarketDataFeed feed,
+            @Value("${imoex.marketdata.auto-resolve-instrument:BRU6}") String instrument
+    ) {
+        return new MarketDataResearchService(
+                feed,
+                new com.moex.trinity.marketdata.BrokerTapeArchive(java.nio.file.Path.of("data", "broker-tape")),
+                instrument
+        );
     }
 
     /** Format: {@code BRU6=FIGIxxxx,BRQ6=FIGIyyyy} */

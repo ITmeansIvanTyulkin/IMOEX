@@ -1,0 +1,16 @@
+---
+description: Exclusive checklist must be transferred 100% before hardenings; never ship truncated playbook rules
+alwaysApply: true
+---
+
+# Checklist fidelity (Exclusive «Уровни + Объемы»)
+
+When the user asks to take the checklist / ready strategy and put it in code **fully**:
+
+1. Implement every numbered checklist item (§1–18 + day-wipe note) at **100%** first.
+2. Only then add our improvements — **additive only** (filters, risk, UX).
+3. Never ship bounce-only / truncated modes as the default when full transfer was requested.
+4. If a hardening conflicts with the checklist (e.g. blocks §8 RETEST after break+hold), the **checklist wins**.
+5. `a-setup-bounce-only` default must stay `false` unless the user explicitly asks for an A/B research cut.
+
+Playbook reference: Exclusive 2024 PDF «Уровни + Объемы» → `LevelsProfileBrPlaybook` + `ChecklistCompliance`.

@@ -62,7 +62,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260805-trend-switch">
+              <link rel="stylesheet" href="/css/operator.css?v=20260806-vap-fp">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}">
               <header class="site-header">
@@ -433,6 +433,7 @@ public class AnalysisHtmlRenderer {
                         <div class="widget-meta">
                           <div class="widget-stat"><span class="k"><i class="swatch info"></i>Сводка</span><span class="v" id="dash-broker-status">—</span></div>
                           <div class="widget-stat"><span class="k"><i class="swatch gold"></i>Контур</span><span class="v" id="widget-broker-mode">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Лента</span><span class="v" id="widget-broker-tape">—</span></div>
                         </div>
                         """,
                         """
@@ -690,19 +691,19 @@ public class AnalysisHtmlRenderer {
                         <div class="widget-meta">
                           <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
                           <div class="widget-stat"><span class="k">Активный</span><span class="v">Уровни+профиль</span></div>
-                          <div class="widget-stat"><span class="k">Инстр.</span><span class="v">BR M5</span></div>
+                          <div class="widget-stat"><span class="k">Лента</span><span class="v" id="pillar-trend-tape">…</span></div>
                         </div>
                         """.formatted(trendPct, escape(trendCenter), trendSwatch, escape(trendStatus)),
                         """
                         <p class="widget-back-lead">Стратегия #2 — робот по playbook’ам. Сейчас один:
                           «Уровни + профиль рынка» (BR). Одновременно на инструменте — не больше одного
                           playbook’а; переключение — через селектор режима (см. ниже / настройки).</p>
-                        <div class="widget-back-stats">
+                        <div class="widget-back-stats" id="pillar-trend-back-stats">
                           <div class="widget-stat"><span class="k">Playbook</span><span class="v">levels-profile-br-m5</span></div>
                           <div class="widget-stat"><span class="k">Режим</span><span class="v">сигнал / авто</span></div>
                           <div class="widget-stat"><span class="k">Данные</span><span class="v">T-Invest tape+DOM</span></div>
                         </div>
-                        <a class="widget-back-link" href="/view/settings#trend-playbook-settings">Настройки trend →</a>
+                        <a class="widget-back-link" href="/view/trend-signal">Экран сигнала →</a>
                         """
                 ),
                 flipCard(
@@ -1888,6 +1889,878 @@ public class AnalysisHtmlRenderer {
         return page("График " + tickerY + "/" + tickerX, body, nav("none"));
     }
 
+    /** Лёгкий экран сигнала trend: M5 + DOM + entry/SL/TP. */
+    public String renderTrendSignalPage() {
+        String body = """
+                <section class="signal-desk" id="trend-signal-desk">
+                  <div class="signal-desk-head">
+                    <div>
+                      <p class="meta"><a href="/view">← дашборд</a></p>
+                      <h2>Сигнал · Trend BR</h2>
+                      <p class="meta" id="signal-desk-meta">Загрузка desk…</p>
+                    </div>
+                    <div class="signal-desk-actions">
+                      <label class="check-label signal-follow-label">
+                        <input type="checkbox" id="signal-desk-follow" checked>
+                        Следить за свечой
+                      </label>
+                      <label class="check-label signal-follow-label">
+                        <input type="checkbox" id="signal-desk-profile" checked>
+                        Профиль
+                      </label>
+                      <label class="check-label signal-follow-label">
+                        <input type="checkbox" id="signal-desk-footprint">
+                        Footprint
+                      </label>
+                      <label class="check-label signal-follow-label">
+                        <input type="checkbox" id="signal-desk-volume">
+                        Объём M5
+                      </label>
+                      <button type="button" class="btn btn-ghost" id="signal-desk-fit">Весь график</button>
+                      <button type="button" class="btn btn-ghost" id="signal-desk-refresh">Обновить</button>
+                      <a class="btn btn-ghost" href="/view/settings#trend-playbook-settings">Режим</a>
+                    </div>
+                  </div>
+                  <div class="signal-desk-strip" id="signal-desk-strip">
+                    <div class="signal-chip"><span class="k">Инструмент</span><strong id="sig-instrument">—</strong></div>
+                    <div class="signal-chip"><span class="k">Delivery</span><strong id="sig-delivery">—</strong></div>
+                    <div class="signal-chip"><span class="k">Side</span><strong id="sig-side">—</strong></div>
+                    <div class="signal-chip"><span class="k">Mode</span><strong id="sig-mode">—</strong></div>
+                    <div class="signal-chip"><span class="k">Потенциал TP1</span><strong id="sig-potential">—</strong></div>
+                    <div class="signal-chip"><span class="k">Paper сегодня</span><strong id="sig-paper-today">—</strong></div>
+                    <div class="signal-chip"><span class="k">Statement</span><strong id="sig-paper-total">—</strong></div>
+                  </div>
+                  <p class="signal-summary" id="sig-summary">—</p>
+                  <div class="signal-paper-panel" id="signal-paper-panel" hidden>
+                    <p class="signal-brief-title">Paper statement · BR</p>
+                    <p class="meta" id="signal-paper-meta">—</p>
+                    <table class="signal-paper-table">
+                      <thead><tr><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th></tr></thead>
+                      <tbody id="signal-paper-body"></tbody>
+                    </table>
+                  </div>
+                  <div class="signal-desk-grid">
+                    <div class="signal-chart-wrap">
+                      <div id="signal-chart" class="chart signal-chart"></div>
+                      <div id="signal-volume-wrap" class="signal-volume-wrap" hidden>
+                        <div id="signal-volume" class="chart signal-volume"></div>
+                      </div>
+                      <p class="meta" id="signal-chart-hint">
+                        M5 · чек-лист:
+                        <span class="lg-hi">HI/LO</span> тренд ·
+                        <span class="lg-hist">HIST</span> история ·
+                        <span class="lg-zone">TOP/BOT</span> зоны ·
+                        <span class="lg-hist">профиль</span> горизонтальный VAP ·
+                        footprint · ENTRY/SL/TP при сетапе
+                      </p>
+                      <div class="signal-brief" id="signal-desk-brief" aria-live="polite">
+                        <p class="signal-brief-title">
+                          Сейчас на рынке
+                          <button type="button" class="btn btn-ghost btn-xs" id="sig-kick-btn" title="Сбросить залипание: day-lock + one-setup + cooldown">
+                            Пинок робота
+                          </button>
+                        </p>
+                        <div class="signal-brief-body" id="signal-desk-brief-body">Загрузка среза…</div>
+                      </div>
+                    </div>
+                    <aside class="signal-dom" aria-label="Стакан">
+                      <h3>Стакан</h3>
+                      <p class="meta" id="signal-dom-meta">—</p>
+                      <div class="signal-dom-table-wrap">
+                        <table class="signal-dom-table">
+                          <thead><tr><th>Bid</th><th>Qty</th><th>Ask</th><th>Qty</th></tr></thead>
+                          <tbody id="signal-dom-body"><tr><td colspan="4">…</td></tr></tbody>
+                        </table>
+                      </div>
+                    </aside>
+                  </div>
+                </section>
+                <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+                <script>
+                (function () {
+                  let chart = null;
+                  let volumeChart = null;
+                  let candleSeries = null;
+                  let volumeSeries = null;
+                  let priceLines = [];
+                  let lastOverlayKey = "";
+                  let overlayStructure = {};
+                  let lastCandleTime = null;
+                  let lastBarsRaw = [];
+                  let userPinned = false;
+                  let followLive = true;
+                  let showVolume = false;
+                  let showProfile = true;
+                  let showFootprint = false;
+                  let lastProfile = [];
+                  let lastFootprint = [];
+                  const DESK_MS = 8000;
+                  const BOOK_MS = 2000;
+                  const HI_LO_COLOR = "#b91c1c";
+                  const ZONE_EDGE = "#6d28d9";
+
+                  function $(id) { return document.getElementById(id); }
+                  function fmtPot(v) {
+                    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
+                    return "~" + (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ru-RU") + " ₽";
+                  }
+                  function fmtPnl(v) {
+                    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
+                    const s = (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ru-RU") + " ₽";
+                    return s;
+                  }
+                  function shortTime(iso) {
+                    if (!iso) return "—";
+                    const m = String(iso).match(/T(\\d{2}:\\d{2})/);
+                    return m ? m[1] : iso;
+                  }
+                  function renderPaper(paper) {
+                    const st = (paper && paper.statement) || {};
+                    const todayEl = $("sig-paper-today");
+                    const totalEl = $("sig-paper-total");
+                    if (todayEl) {
+                      todayEl.textContent = fmtPnl(st.todayPnlRub);
+                      todayEl.classList.toggle("is-buy", (st.todayPnlRub || 0) > 0);
+                      todayEl.classList.toggle("is-sell", (st.todayPnlRub || 0) < 0);
+                    }
+                    if (totalEl) {
+                      const w = (st.wins || 0) + "/" + (st.losses || 0);
+                      totalEl.textContent = fmtPnl(st.realizedPnlRub) + " · " + w;
+                      totalEl.classList.toggle("is-buy", (st.realizedPnlRub || 0) > 0);
+                      totalEl.classList.toggle("is-sell", (st.realizedPnlRub || 0) < 0);
+                    }
+                    const panel = $("signal-paper-panel");
+                    const body = $("signal-paper-body");
+                    const meta = $("signal-paper-meta");
+                    const rows = (paper && paper.recentTrades) || [];
+                    if (!panel || !body) return;
+                    if (!rows.length) {
+                      panel.hidden = true;
+                      return;
+                    }
+                    panel.hidden = false;
+                    if (meta) {
+                      meta.textContent = "Закрыто " + (st.closedCount || rows.length)
+                        + " · сегодня " + fmtPnl(st.todayPnlRub)
+                        + " · всего " + fmtPnl(st.realizedPnlRub)
+                        + (st.note ? " · " + st.note : "");
+                    }
+                    body.innerHTML = rows.map(function (t) {
+                      const pnl = t.pnlRub;
+                      const cls = pnl > 0 ? "is-buy" : (pnl < 0 ? "is-sell" : "");
+                      return "<tr>"
+                        + "<td>" + shortTime(t.openedAt) + "</td>"
+                        + "<td>" + shortTime(t.closedAt) + "</td>"
+                        + "<td>" + (t.side || "—") + "</td>"
+                        + "<td>" + (t.qty != null ? t.qty : "—") + "</td>"
+                        + "<td>" + (t.exitReason || "—") + "</td>"
+                        + "<td class='" + cls + "'>" + fmtPnl(pnl) + "</td>"
+                        + "<td>" + (t.tag || "—") + "</td>"
+                        + "</tr>";
+                    }).join("");
+                  }
+                  function fmtPx(v) {
+                    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
+                    return v.toFixed(2);
+                  }
+                  function buildOperatorBrief(data) {
+                    const bars = data.bars || [];
+                    const last = bars.length ? bars[bars.length - 1] : null;
+                    const close = last && typeof last.close === "number" ? last.close : null;
+                    const look = bars.slice(Math.max(0, bars.length - 12));
+                    let peak = null;
+                    let trough = null;
+                    look.forEach(function (b) {
+                      if (!b) return;
+                      if (typeof b.high === "number") peak = peak == null ? b.high : Math.max(peak, b.high);
+                      if (typeof b.low === "number") trough = trough == null ? b.low : Math.min(trough, b.low);
+                    });
+                    const pts = function (a, b) {
+                      if (a == null || b == null || !isFinite(a) || !isFinite(b)) return null;
+                      return Math.round(Math.abs(a - b) / 0.01);
+                    };
+                    const nearZone = function (z, px) {
+                      if (!z || px == null) return false;
+                      const pad = 0.12;
+                      return px >= (z.low - pad) && px <= (z.high + pad);
+                    };
+                    const relZone = function (z, px, name) {
+                      if (!z || px == null) return "";
+                      if (px > z.high + 0.05) return "выше " + name + " (+" + pts(px, z.high) + "п)";
+                      if (px < z.low - 0.05) return "ниже " + name + " (−" + pts(z.low, px) + "п)";
+                      return "в полосе " + name + " (" + fmtPx(z.low) + "–" + fmtPx(z.high) + ")";
+                    };
+
+                    const sig = data.signal || {};
+                    const plan = data.plan || {};
+                    const st = data.structure || {};
+                    const paperSt = (data.paper && data.paper.statement) || {};
+                    const actionable = !!data.actionable || !!plan.actionable;
+                    const state = plan.state || sig.state || data.engineState || "—";
+                    const reason = data.summary || plan.rationale || sig.summary || "";
+                    const side = sig.side || plan.side || "NONE";
+                    const htf = st.htf || "?";
+                    const bias = st.bias || "?";
+                    const tapeLive = (data.barsSource === "tape")
+                      || String(data.barsSource || "").indexOf("tape") >= 0;
+
+                    // 1) What is happening on the tape right now
+                    let nowLine = "Цена <strong>" + (close != null ? fmtPx(close) : "—") + "</strong>";
+                    const topRel = relZone(st.zoneTop, close, "TOP");
+                    const botRel = relZone(st.zoneBottom, close, "BOT");
+                    if (topRel && nearZone(st.zoneTop, close)) {
+                      nowLine += " — " + topRel;
+                    } else if (botRel && nearZone(st.zoneBottom, close)) {
+                      nowLine += " — " + botRel;
+                    } else if (topRel && botRel) {
+                      nowLine += " — между зонами: " + topRel + ", " + botRel;
+                    } else if (topRel || botRel) {
+                      nowLine += " — " + (topRel || botRel);
+                    }
+                    const dropPts = (peak != null && close != null && peak > close + 0.08) ? pts(peak, close) : null;
+                    const rallyPts = (trough != null && close != null && close > trough + 0.08) ? pts(close, trough) : null;
+                    if (dropPts != null && (rallyPts == null || dropPts >= rallyPts)) {
+                      nowLine += ". За ~1ч срыв с " + fmtPx(peak) + " (−" + dropPts + "п)";
+                    } else if (rallyPts != null) {
+                      nowLine += ". За ~1ч отскок от " + fmtPx(trough) + " (+" + rallyPts + "п)";
+                    }
+                    nowLine += ". Лента " + (tapeLive ? "живая" : "архив/ISS")
+                      + ", на графике ~" + (data.barCount || 0) + " M5.";
+
+                    // 2) Robot decision in plain language
+                    let robotLine;
+                    let nextLine;
+                    if (actionable && side !== "NONE") {
+                      robotLine = "Робот: сигнал <strong>" + side + "</strong>"
+                        + (plan.mode ? (" · " + plan.mode) : "")
+                        + " · <code>" + state + "</code>"
+                        + " — уровни ENTRY/SL/TP на графике.";
+                      nextLine = reason
+                        ? ("Почему: " + reason)
+                        : "Разбирайте вход по сетке лимитов и стопу на графике.";
+                    } else {
+                      robotLine = "Робот <strong>не входит</strong> · <code>" + state + "</code>"
+                        + (reason ? (" — " + reason) : "") + ".";
+                      const r = String(reason).toUpperCase();
+                      if (r.indexOf("HTF FLAT") >= 0 || htf === "FLAT") {
+                        nextLine = "HTF плоский: bounce у day-locked TOP/BOT; после break+hold — RETEST той же полки (§7–8). "
+                          + "Следите за касанием фиолетовой полосы.";
+                      } else if (state === "ZONE_READY" || r.indexOf("BOUNCE") >= 0 || r.indexOf("RETEST") >= 0) {
+                        nextLine = "Зоны готовы, ждём подтверждение (bounce/retest) на следующей M5 у фиолетовой полосы.";
+                      } else if (r.indexOf("SESSION") >= 0 || r.indexOf("EDGE") >= 0) {
+                        nextLine = "Вне торгового окна playbook — новых входов не будет.";
+                      } else if (r.indexOf("EVENT") >= 0) {
+                        nextLine = "Календарный блок: рядом событие, входы закрыты.";
+                      } else if (state === "WORKING_ORDERS") {
+                        nextLine = "Лимитки/позиция в работе — следите за fill и §12 (BE→trail после TP1).";
+                      } else {
+                        nextLine = "Наблюдение. При выполнении условий появится BUY/SELL + стрелка.";
+                      }
+                    }
+
+                    // 3) Day zones + what is allowed (short)
+                    let zoneLine = "Зоны дня";
+                    if (st.zoneTop) {
+                      zoneLine += ": <span class='lg-zone'>TOP</span> "
+                        + fmtPx(st.zoneTop.low) + "–" + fmtPx(st.zoneTop.high);
+                    }
+                    if (st.zoneBottom) {
+                      zoneLine += (st.zoneTop ? "," : ":")
+                        + " <span class='lg-zone-bot'>BOT</span> "
+                        + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high);
+                    }
+                    if (!st.zoneTop && !st.zoneBottom) {
+                      zoneLine += " пока не размечены";
+                    }
+                    zoneLine += ". HI/LO тренда " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow)
+                      + "; HTF=" + htf + ", bias=" + bias + ".";
+                    if (bias === "UP") {
+                      zoneLine += st.topBrokenHeld
+                        ? " После пробоя TOP допустим RETEST верха."
+                        : " Без пробоя TOP — только bounce от BOT.";
+                    } else if (bias === "DOWN") {
+                      zoneLine += st.bottomBrokenHeld
+                        ? " После пробоя BOT допустим RETEST низа."
+                        : " Без пробоя BOT — только bounce от TOP.";
+                    }
+                    if (st.previousZeroPoint != null) {
+                      zoneLine += " Zero §4 " + fmtPx(st.previousZeroPoint)
+                        + (st.zeroPointBroken ? " (пробита)." : " (держится).");
+                    }
+
+                    // 4) Paper statement pulse
+                    let paperLine = "";
+                    if (paperSt && typeof paperSt.todayPnlRub === "number") {
+                      const tag = (paperSt.todayPnlRub >= 0 ? "+" : "")
+                        + Math.round(paperSt.todayPnlRub).toLocaleString("ru-RU") + " ₽";
+                      paperLine = "Paper сегодня: <strong>" + tag + "</strong>"
+                        + " · W/L " + (paperSt.wins || 0) + "/" + (paperSt.losses || 0)
+                        + " · statement "
+                        + ((paperSt.realizedPnlRub >= 0 ? "+" : "")
+                          + Math.round(paperSt.realizedPnlRub || 0).toLocaleString("ru-RU") + " ₽")
+                        + ".";
+                      if (paperSt.note && String(paperSt.note).indexOf("MISSED") >= 0
+                          || paperSt.note && String(paperSt.note).indexOf("HTF") >= 0) {
+                        paperLine += " В журнале есть backfill упущенных bounce (HTF FLAT).";
+                      }
+                    }
+
+                    let html = "<p>" + nowLine + "</p>"
+                      + "<p>" + robotLine + "</p>"
+                      + "<p class='signal-brief-note'>" + nextLine + "</p>"
+                      + "<p>" + zoneLine + "</p>";
+                    if (paperLine) html += "<p class='signal-brief-note'>" + paperLine + "</p>";
+                    if (data.manage && data.manage.note) {
+                      html += "<p class='signal-brief-note'>Manage: " + data.manage.note + "</p>";
+                    }
+                    return html;
+                  }
+                  function clearLines() {
+                    if (!candleSeries) return;
+                    priceLines.forEach(function (l) { try { candleSeries.removePriceLine(l); } catch (_) {} });
+                    priceLines = [];
+                  }
+                  function addLine(price, color, title, opts) {
+                    if (!candleSeries || !(price > 0)) return;
+                    const o = opts || {};
+                    const line = candleSeries.createPriceLine({
+                      price: price,
+                      color: color,
+                      lineWidth: o.lineWidth != null ? o.lineWidth : 1,
+                      lineStyle: o.lineStyle != null ? o.lineStyle : 2,
+                      axisLabelVisible: o.axisLabelVisible !== false,
+                      title: title
+                    });
+                    priceLines.push(line);
+                  }
+                  function finitePrice(v) {
+                    return typeof v === "number" && isFinite(v) && v > 0;
+                  }
+                  function ensureZoneOverlay() {
+                    const el = $("signal-chart");
+                    if (!el) return null;
+                    let ov = $("signal-zone-overlay");
+                    if (!ov) {
+                      ov = document.createElement("div");
+                      ov.id = "signal-zone-overlay";
+                      ov.className = "signal-zone-overlay";
+                      el.appendChild(ov);
+                    }
+                    return ov;
+                  }
+                  function layoutZoneBands() {
+                    const ov = ensureZoneOverlay();
+                    if (!ov || !candleSeries) return;
+                    ov.innerHTML = "";
+                    const st = overlayStructure || {};
+                    const items = [];
+                    if (st.zoneTop) items.push({ z: st.zoneTop, role: "top", title: "TOP" });
+                    if (st.zoneBottom) items.push({ z: st.zoneBottom, role: "bot", title: "BOT" });
+                    items.forEach(function (item) {
+                      if (!finitePrice(item.z.high) || !finitePrice(item.z.low)) return;
+                      const y1 = candleSeries.priceToCoordinate(item.z.high);
+                      const y2 = candleSeries.priceToCoordinate(item.z.low);
+                      if (y1 == null || y2 == null) return;
+                      const top = Math.min(y1, y2);
+                      const height = Math.abs(y2 - y1);
+                      if (!(height >= 1)) return;
+                      const band = document.createElement("div");
+                      band.className = "signal-zone-band is-" + item.role;
+                      band.style.height = Math.max(height, 14) + "px";
+                      // Keep band centered on true mid when we pad for visibility
+                      if (height < 14) {
+                        band.style.top = (top - (14 - height) / 2) + "px";
+                      } else {
+                        band.style.top = top + "px";
+                      }
+                      const label = document.createElement("span");
+                      label.className = "signal-zone-label";
+                      label.textContent = item.title + " "
+                        + Number(item.z.low).toFixed(2) + "–" + Number(item.z.high).toFixed(2);
+                      band.appendChild(label);
+                      ov.appendChild(band);
+                    });
+                  }
+                  function ensureProfileOverlay() {
+                    const el = $("signal-chart");
+                    if (!el) return null;
+                    let ov = $("signal-profile-overlay");
+                    if (!ov) {
+                      ov = document.createElement("div");
+                      ov.id = "signal-profile-overlay";
+                      ov.className = "signal-profile-overlay";
+                      el.appendChild(ov);
+                    }
+                    return ov;
+                  }
+                  function layoutProfile(levels) {
+                    const ov = ensureProfileOverlay();
+                    if (!ov || !candleSeries) return;
+                    ov.innerHTML = "";
+                    ov.hidden = !showProfile;
+                    if (!showProfile || !levels || !levels.length) return;
+                    const maxW = 72;
+                    levels.forEach(function (lvl) {
+                      if (!finitePrice(lvl.price) || !(lvl.volume > 0)) return;
+                      const y = candleSeries.priceToCoordinate(lvl.price);
+                      if (y == null) return;
+                      const bar = document.createElement("div");
+                      bar.className = "signal-vap-bar";
+                      const w = Math.max(2, Math.round((lvl.strength || 0) * maxW));
+                      bar.style.top = (y - 1) + "px";
+                      bar.style.width = w + "px";
+                      bar.title = Number(lvl.price).toFixed(2) + " · vol " + Math.round(lvl.volume);
+                      ov.appendChild(bar);
+                    });
+                  }
+                  function ensureFootprintOverlay() {
+                    const el = $("signal-chart");
+                    if (!el) return null;
+                    let ov = $("signal-footprint-overlay");
+                    if (!ov) {
+                      ov = document.createElement("div");
+                      ov.id = "signal-footprint-overlay";
+                      ov.className = "signal-footprint-overlay";
+                      el.appendChild(ov);
+                    }
+                    return ov;
+                  }
+                  function layoutFootprint(fps) {
+                    const ov = ensureFootprintOverlay();
+                    if (!ov || !candleSeries || !chart) return;
+                    ov.innerHTML = "";
+                    ov.hidden = !showFootprint;
+                    if (!showFootprint || !fps || !fps.length) return;
+                    const ts = chart.timeScale();
+                    // last 8 footprint bars only (readable)
+                    const slice = fps.slice(Math.max(0, fps.length - 8));
+                    slice.forEach(function (fb) {
+                      const t = toChartTime(fb.time);
+                      if (t == null) return;
+                      const x = ts.timeToCoordinate(t);
+                      if (x == null) return;
+                      const col = document.createElement("div");
+                      col.className = "signal-fp-col";
+                      col.style.left = (x - 18) + "px";
+                      const levels = (fb.levels || []).slice(0, 14);
+                      levels.forEach(function (lv) {
+                        if (!finitePrice(lv.price)) return;
+                        const y = candleSeries.priceToCoordinate(lv.price);
+                        if (y == null) return;
+                        const cell = document.createElement("div");
+                        cell.className = "signal-fp-cell";
+                        cell.style.top = (y - 6) + "px";
+                        const buy = lv.buy || 0;
+                        const sell = lv.sell || 0;
+                        cell.innerHTML = "<span class=\\"b\\">" + buy + "</span>"
+                          + "<span class=\\"x\\">×</span>"
+                          + "<span class=\\"s\\">" + sell + "</span>";
+                        col.appendChild(cell);
+                      });
+                      ov.appendChild(col);
+                    });
+                  }
+                  function layoutMarketOverlays() {
+                    layoutZoneBands();
+                    layoutProfile(lastProfile);
+                    layoutFootprint(lastFootprint);
+                  }
+                  function overlayKey(plan, sig, st) {
+                    const zt = st && st.zoneTop ? (st.zoneTop.low + "/" + st.zoneTop.high) : "";
+                    const zb = st && st.zoneBottom ? (st.zoneBottom.low + "/" + st.zoneBottom.high) : "";
+                    return [
+                      st && st.lookbackHigh, st && st.lookbackLow,
+                      st && st.historicalHigh, st && st.historicalLow, st && st.previousZeroPoint,
+                      zt, zb,
+                      plan && plan.side, plan && plan.entry, plan && plan.stopLoss,
+                      plan && plan.tp1, plan && plan.actionable, sig && sig.side
+                    ].join("|");
+                  }
+                  function applyOverlays(plan, sig, candles, structure) {
+                    const st = structure || {};
+                    overlayStructure = st;
+                    const key = overlayKey(plan, sig, st);
+                    if (key !== lastOverlayKey) {
+                      lastOverlayKey = key;
+                      clearLines();
+                      // §3 historical — dashed gray
+                      if (finitePrice(st.historicalHigh)
+                          && st.historicalHigh !== st.lookbackHigh) {
+                        addLine(st.historicalHigh, "#94a3b8", "HIST↑", { lineWidth: 1, lineStyle: 2 });
+                      }
+                      if (finitePrice(st.historicalLow)
+                          && st.historicalLow !== st.lookbackLow) {
+                        addLine(st.historicalLow, "#94a3b8", "HIST↓", { lineWidth: 1, lineStyle: 2 });
+                      }
+                      // §4 zero
+                      if (finitePrice(st.previousZeroPoint)) {
+                        addLine(st.previousZeroPoint, "#ca8a04", "ZERO", { lineWidth: 1, lineStyle: 2 });
+                      }
+                      // §5 current trend extremes — thick solid red
+                      if (finitePrice(st.lookbackHigh)) {
+                        addLine(st.lookbackHigh, HI_LO_COLOR, "HI", { lineWidth: 2, lineStyle: 0 });
+                      }
+                      if (finitePrice(st.lookbackLow)) {
+                        addLine(st.lookbackLow, HI_LO_COLOR, "LO", { lineWidth: 2, lineStyle: 0 });
+                      }
+                      // Zone edges as thin purple guides (fill = HTML band)
+                      if (st.zoneTop) {
+                        if (finitePrice(st.zoneTop.high)) {
+                          addLine(st.zoneTop.high, ZONE_EDGE, "TOP↑", { lineWidth: 1, lineStyle: 0 });
+                        }
+                        if (finitePrice(st.zoneTop.low)) {
+                          addLine(st.zoneTop.low, ZONE_EDGE, "TOP↓", { lineWidth: 1, lineStyle: 0 });
+                        }
+                      }
+                      if (st.zoneBottom) {
+                        if (finitePrice(st.zoneBottom.high)) {
+                          addLine(st.zoneBottom.high, ZONE_EDGE, "BOT↑", { lineWidth: 1, lineStyle: 0 });
+                        }
+                        if (finitePrice(st.zoneBottom.low)) {
+                          addLine(st.zoneBottom.low, ZONE_EDGE, "BOT↓", { lineWidth: 1, lineStyle: 0 });
+                        }
+                      }
+                      if (plan) {
+                        const entry = plan.entry || (plan.grid && plan.grid.avg);
+                        if (finitePrice(entry)) addLine(entry, "#0f766e", "ENTRY", { lineWidth: 2, lineStyle: 0 });
+                        if (finitePrice(plan.stopLoss)) addLine(plan.stopLoss, "#b91c1c", "SL", { lineWidth: 1, lineStyle: 2 });
+                        if (finitePrice(plan.tp1)) addLine(plan.tp1, "#16a34a", "TP1", { lineWidth: 1, lineStyle: 2 });
+                        if (finitePrice(plan.tp2)) addLine(plan.tp2, "#15803d", "TP2", { lineWidth: 1, lineStyle: 2 });
+                      }
+                      if (plan && plan.actionable && candles && candles.length) {
+                        const last = candles[candles.length - 1];
+                        const buy = plan.buy === true || (sig && sig.side === "BUY");
+                        candleSeries.setMarkers([{
+                          time: last.time,
+                          position: buy ? "belowBar" : "aboveBar",
+                          color: buy ? "#16a34a" : "#dc2626",
+                          shape: buy ? "arrowUp" : "arrowDown",
+                          text: buy ? "BUY" : "SELL"
+                        }]);
+                      } else if (candleSeries) {
+                        candleSeries.setMarkers([]);
+                      }
+                    }
+                    layoutMarketOverlays();
+                  }
+                  function ensureVolumeChart() {
+                    const wrap = $("signal-volume-wrap");
+                    const el = $("signal-volume");
+                    if (!el || !wrap) return;
+                    wrap.hidden = !showVolume;
+                    if (!showVolume) return;
+                    if (volumeChart) {
+                      volumeChart.applyOptions({ width: el.clientWidth });
+                      return;
+                    }
+                    volumeChart = LightweightCharts.createChart(el, {
+                      width: el.clientWidth,
+                      height: 120,
+                      layout: { backgroundColor: "#ffffff", textColor: "#1a2228" },
+                      grid: { vertLines: { color: "#eef1f3" }, horzLines: { color: "#eef1f3" } },
+                      rightPriceScale: { borderColor: "#d5dde2" },
+                      timeScale: { borderColor: "#d5dde2", visible: false },
+                      handleScroll: false,
+                      handleScale: false
+                    });
+                    volumeSeries = volumeChart.addHistogramSeries({
+                      color: "rgba(2, 132, 199, 0.45)",
+                      priceFormat: { type: "volume" }
+                    });
+                    if (chart) {
+                      chart.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
+                        if (range && volumeChart) {
+                          try { volumeChart.timeScale().setVisibleLogicalRange(range); } catch (_) {}
+                        }
+                      });
+                    }
+                  }
+                  function updateVolume(bars) {
+                    if (!showVolume) return;
+                    ensureVolumeChart();
+                    if (!volumeSeries || !bars || !bars.length) return;
+                    const data = bars.map(function (b) {
+                      const t = toChartTime(b.time);
+                      if (t == null) return null;
+                      const up = b.close >= b.open;
+                      return {
+                        time: t,
+                        value: b.volume || 0,
+                        color: up ? "rgba(22, 163, 74, 0.45)" : "rgba(220, 38, 38, 0.4)"
+                      };
+                    }).filter(Boolean);
+                    volumeSeries.setData(data);
+                    if (chart) {
+                      const range = chart.timeScale().getVisibleLogicalRange();
+                      if (range) {
+                        try { volumeChart.timeScale().setVisibleLogicalRange(range); } catch (_) {}
+                      }
+                    }
+                  }
+                  function atRightEdge() {
+                    if (!chart) return true;
+                    try {
+                      const ts = chart.timeScale();
+                      const range = ts.getVisibleLogicalRange();
+                      if (!range) return true;
+                      const barsInfo = candleSeries.barsInLogicalRange(range);
+                      if (!barsInfo) return true;
+                      return barsInfo.barsAfter != null && barsInfo.barsAfter < 3;
+                    } catch (_) {
+                      return true;
+                    }
+                  }
+                  function ensureChart() {
+                    const el = $("signal-chart");
+                    if (!el || chart) return;
+                    chart = LightweightCharts.createChart(el, {
+                      width: el.clientWidth,
+                      height: 420,
+                      layout: {
+                        backgroundColor: "#ffffff",
+                        textColor: "#1a2228"
+                      },
+                      grid: {
+                        vertLines: { color: "#eef1f3" },
+                        horzLines: { color: "#eef1f3" }
+                      },
+                      crosshair: {
+                        mode: 1,
+                        vertLine: { color: "rgba(30,42,50,0.35)", labelBackgroundColor: "#1a2228" },
+                        horzLine: { color: "rgba(30,42,50,0.35)", labelBackgroundColor: "#1a2228" }
+                      },
+                      rightPriceScale: { borderColor: "#d5dde2" },
+                      timeScale: {
+                        borderColor: "#d5dde2",
+                        timeVisible: true,
+                        secondsVisible: false,
+                        rightOffset: 6,
+                        barSpacing: 8
+                      },
+                      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
+                      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+                    });
+                    candleSeries = chart.addCandlestickSeries({
+                      upColor: "#16a34a", downColor: "#dc2626",
+                      borderUpColor: "#16a34a", borderDownColor: "#dc2626",
+                      wickUpColor: "#16a34a", wickDownColor: "#dc2626"
+                    });
+                    chart.timeScale().subscribeVisibleLogicalRangeChange(function () {
+                      layoutMarketOverlays();
+                      if (!followLive) {
+                        userPinned = true;
+                        return;
+                      }
+                      userPinned = !atRightEdge();
+                    });
+                    window.addEventListener("resize", function () {
+                      if (chart && el) chart.applyOptions({ width: el.clientWidth });
+                      layoutMarketOverlays();
+                    });
+                    ensureZoneOverlay();
+                    ensureProfileOverlay();
+                    ensureFootprintOverlay();
+                  }
+                  function toChartTime(iso) {
+                    if (!iso) return null;
+                    const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T"));
+                    if (isNaN(d.getTime())) return null;
+                    return Math.floor(d.getTime() / 1000);
+                  }
+                  function updateCandles(candles, forceFit) {
+                    if (!candleSeries || !candles.length) return;
+                    const prevRange = chart.timeScale().getVisibleLogicalRange();
+                    const stickRight = forceFit || (followLive && !userPinned) || atRightEdge();
+                    if (lastCandleTime == null || forceFit || candles.length < 3) {
+                      candleSeries.setData(candles);
+                    } else {
+                      const last = candles[candles.length - 1];
+                      const prev = candles[candles.length - 2];
+                      if (last.time === lastCandleTime) {
+                        candleSeries.update(last);
+                      } else if (prev && prev.time === lastCandleTime) {
+                        candleSeries.update(last);
+                      } else {
+                        candleSeries.setData(candles);
+                      }
+                    }
+                    lastCandleTime = candles[candles.length - 1].time;
+                    if (forceFit) {
+                      chart.timeScale().fitContent();
+                      userPinned = false;
+                    } else if (stickRight) {
+                      chart.timeScale().scrollToRealTime();
+                    } else if (prevRange) {
+                      try { chart.timeScale().setVisibleLogicalRange(prevRange); } catch (_) {}
+                    }
+                    requestAnimationFrame(layoutMarketOverlays);
+                  }
+                  function renderDom(book) {
+                    const body = $("signal-dom-body");
+                    const meta = $("signal-dom-meta");
+                    if (!body) return;
+                    if (!book || (!book.bids && !book.asks)) {
+                      body.innerHTML = "<tr><td colspan=\\"4\\">Нет DOM</td></tr>";
+                      if (meta) meta.textContent = "—";
+                      return;
+                    }
+                    if (meta) {
+                      const age = book.asOf ? (" · " + new Date(book.asOf).toLocaleTimeString("ru-RU")) : "";
+                      meta.textContent = (book.instrumentId || "") + age + " · live";
+                    }
+                    const bids = book.bids || [];
+                    const asks = book.asks || [];
+                    const n = Math.max(bids.length, asks.length, 1);
+                    let html = "";
+                    for (let i = 0; i < Math.min(n, 15); i++) {
+                      const b = bids[i];
+                      const a = asks[i];
+                      html += "<tr>"
+                        + "<td class=\\"bid\\">" + (b ? b.p : "") + "</td>"
+                        + "<td>" + (b ? b.q : "") + "</td>"
+                        + "<td class=\\"ask\\">" + (a ? a.p : "") + "</td>"
+                        + "<td>" + (a ? a.q : "") + "</td>"
+                        + "</tr>";
+                    }
+                    body.innerHTML = html;
+                  }
+                  async function kickRobot() {
+                    const btn = $("sig-kick-btn");
+                    if (btn) btn.disabled = true;
+                    try {
+                      const res = await fetch("/api/trend/kick?mode=hard&reason=desk-button", {
+                        method: "POST",
+                        headers: { Accept: "application/json" }
+                      });
+                      const data = await res.json().catch(function () { return {}; });
+                      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+                      await loadDesk(true);
+                      const brief = $("signal-desk-brief-body");
+                      if (brief) {
+                        brief.innerHTML = "<p><strong>Пинок:</strong> "
+                          + (data.reason || "hard")
+                          + " · kicksToday=" + (data.kickCountToday || "?")
+                          + " · " + (data.deskSummary || data.engineState || "")
+                          + "</p>" + brief.innerHTML;
+                      }
+                    } catch (e) {
+                      alert("Пинок не удался: " + (e && e.message ? e.message : e));
+                    } finally {
+                      if (btn) btn.disabled = false;
+                    }
+                  }
+                  async function loadBook() {
+                    try {
+                      const res = await fetch("/api/marketdata/book", { headers: { Accept: "application/json" } });
+                      if (!res.ok) return;
+                      renderDom(await res.json());
+                    } catch (_) {}
+                  }
+                  async function loadDesk(forceFit) {
+                    const meta = $("signal-desk-meta");
+                    try {
+                      const res = await fetch("/api/trend/desk", { headers: { Accept: "application/json" } });
+                      if (!res.ok) throw new Error("HTTP " + res.status);
+                      const data = await res.json();
+                      if (meta) {
+                        meta.textContent = (data.instrument || "BR") + " · bars=" + (data.barCount || 0)
+                          + " · source=" + (data.barsSource || "?")
+                          + " · " + (data.engineState || "")
+                          + (followLive && !userPinned ? " · follow" : " · zoom locked");
+                      }
+                      $("sig-instrument").textContent = data.instrument || "—";
+                      $("sig-delivery").textContent = data.delivery || "—";
+                      const sig = data.signal || {};
+                      const plan = data.plan || {};
+                      $("sig-side").textContent = sig.side || plan.side || "—";
+                      $("sig-mode").textContent = sig.mode || plan.mode || "—";
+                      $("sig-potential").textContent = fmtPot(data.potentialPnlRub);
+                      $("sig-summary").textContent = data.summary || sig.summary || "—";
+                      $("sig-side").classList.toggle("is-buy", (sig.side || plan.side) === "BUY");
+                      $("sig-side").classList.toggle("is-sell", (sig.side || plan.side) === "SELL");
+                      renderPaper(data.paper);
+                      const briefBody = $("signal-desk-brief-body");
+                      if (briefBody) briefBody.innerHTML = buildOperatorBrief(data);
+
+                      ensureChart();
+                      const candles = (data.bars || []).map(function (b) {
+                        const t = toChartTime(b.time);
+                        if (t == null) return null;
+                        return { time: t, open: b.open, high: b.high, low: b.low, close: b.close };
+                      }).filter(Boolean);
+                      if (candles.length) {
+                        updateCandles(candles, !!forceFit);
+                        applyOverlays(plan, sig, candles, data.structure || {});
+                      }
+                      lastBarsRaw = data.bars || [];
+                      lastProfile = data.profile || [];
+                      lastFootprint = data.footprint || [];
+                      updateVolume(lastBarsRaw);
+                      layoutMarketOverlays();
+                      if (data.book) renderDom(data.book);
+                    } catch (err) {
+                      if (meta) meta.textContent = "Ошибка desk: " + (err.message || err);
+                    }
+                  }
+                  const btn = $("signal-desk-refresh");
+                  if (btn) btn.addEventListener("click", function () { loadDesk(true); });
+                  const kickBtn = $("sig-kick-btn");
+                  if (kickBtn) kickBtn.addEventListener("click", kickRobot);
+                  const fitBtn = $("signal-desk-fit");
+                  if (fitBtn) fitBtn.addEventListener("click", function () {
+                    userPinned = false;
+                    followLive = true;
+                    const follow = $("signal-desk-follow");
+                    if (follow) follow.checked = true;
+                    if (chart) chart.timeScale().fitContent();
+                    loadDesk(true);
+                  });
+                  const follow = $("signal-desk-follow");
+                  if (follow) {
+                    follow.checked = true;
+                    follow.addEventListener("change", function () {
+                      followLive = !!follow.checked;
+                      if (followLive) {
+                        userPinned = false;
+                        if (chart) chart.timeScale().scrollToRealTime();
+                      }
+                    });
+                  }
+                  const volToggle = $("signal-desk-volume");
+                  if (volToggle) {
+                    volToggle.addEventListener("change", function () {
+                      showVolume = !!volToggle.checked;
+                      ensureVolumeChart();
+                      if (showVolume) updateVolume(lastBarsRaw);
+                      else if ($("signal-volume-wrap")) $("signal-volume-wrap").hidden = true;
+                    });
+                  }
+                  const profToggle = $("signal-desk-profile");
+                  if (profToggle) {
+                    showProfile = !!profToggle.checked;
+                    profToggle.addEventListener("change", function () {
+                      showProfile = !!profToggle.checked;
+                      layoutProfile(lastProfile);
+                    });
+                  }
+                  const fpToggle = $("signal-desk-footprint");
+                  if (fpToggle) {
+                    showFootprint = !!fpToggle.checked;
+                    fpToggle.addEventListener("change", function () {
+                      showFootprint = !!fpToggle.checked;
+                      layoutFootprint(lastFootprint);
+                    });
+                  }
+                  loadDesk(true);
+                  loadBook();
+                  setInterval(function () { loadDesk(false); }, DESK_MS);
+                  setInterval(loadBook, BOOK_MS);
+                })();
+                </script>
+                """;
+        return page("TRINITY — сигнал Trend", body, nav("trend-signal"), OpsMode.NONE);
+    }
+
     /**
      * Итоговая таблица: техника + новости + решение ENTER/REDUCE/WATCH/BLOCK.
      */
@@ -2477,15 +3350,15 @@ public class AnalysisHtmlRenderer {
 
         if (entries.isEmpty()) {
             body.append("<div class=\"callout\">");
-            body.append("<p><strong>Журнал пуст</strong> — за последний прогон нечего открывать в paper.</p>");
-            body.append("<p>Paper создаёт сделки только при <strong>ENTER</strong> / <strong>REDUCE_SIZE</strong> ");
-            body.append("(после техники и FA для DAILY; для INTRADAY — только техника).</p>");
+            body.append("<p><strong>Журнал пуст</strong> — сегодня нет paper-входов (вариантов сделок нет).</p>");
+            body.append("<p>Сделки появляются только при <strong>ENTER</strong> / <strong>REDUCE_SIZE</strong> ");
+            body.append("после техники и FA (DAILY). Сейчас сигналы ниже порога |Z|≥2 — это нормально.</p>");
             body.append("<ul>");
             body.append("<li>").append(bookDiag("DAILY", dailyRecs)).append("</li>");
             body.append("<li>").append(bookDiag("INTRADAY", intradayRecs)).append("</li>");
             body.append("</ul>");
             body.append("<p class=\"meta\">Типичные причины: |Z| &lt; 2, half-life вне порога, режим TREND (ADX), ");
-            body.append("нет коинтегрированных пар после FDR. Это нормально — стратегия не форсирует входы.</p>");
+            body.append("нет коинтегрированных пар после FDR. Нажмите «Анализ + paper», когда Z вырастет.</p>");
             body.append("</div>");
         } else {
             body.append("<div class=\"table-wrap\"><table><thead><tr>");
@@ -2582,6 +3455,7 @@ public class AnalysisHtmlRenderer {
                 <nav class="topnav">
                   <a href="/view" class="%s">Дашборд</a>
                   <a href="/view/settings" class="%s">Настройки</a>
+                  <a href="/view/trend-signal" class="%s">Сигнал Trend</a>
                   <a href="/view/guide" class="%s">Как пользоваться системой</a>
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
@@ -2594,6 +3468,7 @@ public class AnalysisHtmlRenderer {
                 """.formatted(
                 active.equals("dashboard") ? "active" : "",
                 active.equals("settings") ? "active" : "",
+                active.equals("trend-signal") ? "active" : "",
                 active.equals("guide") ? "active" : "",
                 active.equals("final") ? "active" : "",
                 active.equals("signals") ? "active" : "",

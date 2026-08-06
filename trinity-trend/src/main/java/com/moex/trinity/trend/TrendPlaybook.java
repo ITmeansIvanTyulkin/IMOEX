@@ -24,4 +24,11 @@ public interface TrendPlaybook {
      * Evaluate M5 series + account → optional order plan (limits / SL / staged TP).
      */
     Optional<TrendRobotPlan> evaluate(TrendBarSeries series, TrendAccountContext account);
+
+    /**
+     * Structure for operator chart (levels/zone) — no entry gates. Empty if unsupported.
+     */
+    default TrendStructureSnapshot structure(TrendBarSeries series) {
+        return TrendStructureSnapshot.empty("playbook has no structure overlay");
+    }
 }

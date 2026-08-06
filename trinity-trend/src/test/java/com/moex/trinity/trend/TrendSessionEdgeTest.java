@@ -25,10 +25,11 @@ class TrendSessionEdgeTest {
     }
 
     @Test
-    void blocksLastFortyMinutesBeforeClose() {
-        // close 23:50 − 40 → from 23:10
-        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 10), settings));
-        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 40), settings));
+    void blocksLastThirtyMinutesBeforeClose() {
+        // close 23:50 − 30 → from 23:20
         assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 5), settings));
+        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 15), settings));
+        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 20), settings));
+        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 40), settings));
     }
 }

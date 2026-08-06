@@ -14,6 +14,10 @@ class MarketDataResearchServiceTest {
         assertEquals(MarketDataProviderId.NOOP, svc.feed().providerId());
         assertFalse(svc.liveReady());
         assertTrue(svc.statusMessage().contains("NOOP"));
+        MarketDataResearchService.Status status = svc.status();
+        assertFalse(status.streaming());
+        assertEquals("NOOP", status.provider());
+        assertTrue(status.summary() != null && !status.summary().isBlank());
     }
 
     @Test

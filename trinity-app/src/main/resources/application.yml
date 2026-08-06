@@ -243,19 +243,19 @@ imoex:
       session-bias-min-points: 40
       require-bounce-confirm: true
       min-reward-risk: 1.5
-      max-setups-per-day: 2          # fills only; A-setup scarcity
+      max-setups-per-day: 0          # 0 = unlimited; take every valid checklist bounce
       cooldown-bars-after-sl: 12
       retest-arm-max-distance-points: 10
-      a-setup-bounce-only: true      # no RETEST chase — bounce confirm only
+      a-setup-bounce-only: false     # full checklist: BOUNCE + RETEST after break+hold
       initial-size-fraction: 0.4     # ~⅓–½ size until BE
       prefer-marketdata-zones: true  # tape VAP when broker feed streaming
       trade-session-open: "09:00"
       trade-session-close: "23:50"
       no-trade-after-open-minutes: 40
-      no-trade-before-close-minutes: 40
+      no-trade-before-close-minutes: 30
       htf-min-move-points: 50
       htf-slope-bars: 24
-      htf-require-agreement: true
+      htf-require-agreement: true    # HTF filter; day-shelf RETEST after break+hold still arms (§7–8)
       counter-trend-size-fraction: 0.6
       counter-trend-min-reward-risk: 2.0
       counter-trend-bounce-only: true
@@ -268,8 +268,8 @@ imoex:
       br:
         zone-min-points: 15
         zone-max-points: 20
-        stop-points: 15
-        tp1-points: 25
+        stop-points: 20
+        tp1-points: 20
         rub-per-point: 7.0
     calendar-arb:
       enabled: false

@@ -1,5 +1,7 @@
 package com.moex.trinity.trend.replay;
 
+import com.moex.trinity.trend.BarAggregator;
+import com.moex.trinity.trend.IssFuturesM1Client;
 import com.moex.trinity.trend.LevelsProfileBrPlaybook;
 import com.moex.trinity.trend.LimitGridPlan;
 import com.moex.trinity.trend.MergedVolumeRange;
@@ -7,6 +9,7 @@ import com.moex.trinity.trend.TrendAccountContext;
 import com.moex.trinity.trend.TrendBar;
 import com.moex.trinity.trend.TrendBarSeries;
 import com.moex.trinity.trend.TrendPlaybookSettings;
+import com.moex.trinity.trend.TrendPositionManager;
 import com.moex.trinity.trend.TrendRobotEngine;
 import com.moex.trinity.trend.TrendRobotPlan;
 import com.moex.trinity.trend.TrendRobotState;
@@ -138,12 +141,13 @@ public final class BrM5DayReplay {
                     tapeBundle.book().asks().size());
         }
 
-        TrendPlaybookSettings settings = TrendPlaybookSettings.brDefaults();
+        TrendPlaybookSettings settings = TrendPlaybookSettings.brDefaults().withASetupBounceOnly(false);
         if (withRetest) {
-            settings = settings.withASetupBounceOnly(false);
-            System.out.println("Mode: with-retest (aSetupBounceOnly=false) — PnL probe");
+            System.out.println("Mode: FULL checklist (bounce + RETEST after break+hold) + hardenings");
         } else {
-            System.out.println("Mode: A-setup bounce-only");
+            // Default is full checklist; --bounce-only would be the only way to restrict (flag unused → full)
+            System.out.println("Mode: FULL checklist (aSetupBounceOnly=false)");
+            withRetest = true; // report filename + note reflect full strategy
         }
         LevelsProfileBrPlaybook playbook = new LevelsProfileBrPlaybook(settings, tapeFeed);
         TrendRobotEngine engine = new TrendRobotEngine(playbook, settings);
@@ -158,6 +162,8 @@ public final class BrM5DayReplay {
         int lockedBars = 0;
         int zoneReadyBars = 0;
         int noTradeBars = 0;
+        Map<String, Integer> reasonHist = new TreeMap<>();
+        String lastReasonPrinted = null;
 
         // Fair paper: limits from next bar; no SL on fill bar; SL vs TP same bar → SL first
         OpenPaper open = null;
@@ -227,6 +233,11 @@ public final class BrM5DayReplay {
             }
             TrendRobotPlan plan = opt.get();
             TrendRobotState st = plan.state();
+            String why = plan.rationale() == null ? "" : plan.rationale();
+            if (!why.isBlank()) {
+                String key = why.length() > 120 ? why.substring(0, 120) : why;
+                reasonHist.merge(key, 1, Integer::sum);
+            }
             if (st == TrendRobotState.NO_TRADE) {
                 noTradeBars++;
                 if (open == null && pending != null && plan.rationale() != null
@@ -265,7 +276,10 @@ public final class BrM5DayReplay {
                         plan.mode(), bar.close(), plan.rationale());
             } else if (st != prev && (st == TrendRobotState.ZONE_READY || st == TrendRobotState.NO_TRADE
                     || st == TrendRobotState.WORKING_ORDERS)) {
-                System.out.printf(Locale.ROOT, "%s  %-14s C=%.2f%n", bar.time(), st, bar.close());
+                System.out.printf(Locale.ROOT, "%s  %-14s C=%.2f  %s%n",
+                        bar.time(), st, bar.close(),
+                        why.length() > 100 ? why.substring(0, 100) + "…" : why);
+                lastReasonPrinted = why;
             }
             prev = st;
         }
@@ -297,6 +311,14 @@ public final class BrM5DayReplay {
                 today.size(), newSetups, trades.size(), wins, losses, dayPnl);
         System.out.printf(Locale.ROOT, "ZONE_READY bars≈%d | locked≈%d | NO_TRADE≈%d%n",
                 zoneReadyBars, lockedBars, noTradeBars);
+        System.out.println("Top rationales:");
+        reasonHist.entrySet().stream()
+                .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
+                .limit(12)
+                .forEach(e -> System.out.printf(Locale.ROOT, "  %4d × %s%n", e.getValue(), e.getKey()));
+        if (lastReasonPrinted != null) {
+            System.out.println("(last state change reason kept for debug)");
+        }
 
         Path out = Path.of("data", "trend-day-replay-" + day + "-" + secid
                 + (withRetest ? "-retest" : "-asetup") + ".json");
@@ -334,13 +356,14 @@ public final class BrM5DayReplay {
         settingsMap.put("preferMarketDataZones", settings.preferMarketDataZones());
         settingsMap.put("stopPoints", settings.instrument().stopPoints());
         settingsMap.put("tp1Points", settings.instrument().tp1Points());
+        report.put("reasonHist", reasonHist);
         report.put("settings", settingsMap);
         report.put("tapePrints", tapeFeed.tapeSize());
         report.put("tapeSource", tapeBundle.source());
         report.put("domSnapshots", tapeFeed.domSnapshots());
         report.put("domDepth", com.moex.trinity.marketdata.TInvestBrokerMarketData.MAX_ORDERBOOK_DEPTH);
         report.put("note", "Broker-only tape+hist DOM archive (depth 50 max). "
-                + (withRetest ? "with-retest probe." : "A-setup bounce-only."));
+                + "FULL checklist bounce+retest + day-lock/prior/session/HTF.");
         MAPPER.writerWithDefaultPrettyPrinter().writeValue(out.toFile(), report);
         System.out.println("Wrote " + out.toAbsolutePath());
     }
@@ -482,6 +505,26 @@ public final class BrM5DayReplay {
             return null;
         }
         boolean buy = open.buy;
+
+        // §12: after TP1 — BE + trail on each bar (close-based trail)
+        if (open.tp1Done) {
+            double trailPts = Math.abs(open.avg - open.sl) > 0
+                    ? 20 // default BR stop points when already at BE
+                    : 20;
+            // Prefer instrument-typical 20 pts trail after BE
+            trailPts = 20;
+            var advice = TrendPositionManager.update(
+                    buy, open.avg, open.sl, open.tp1, bar.close(), point, trailPts,
+                    open.qty, open.tp1Fraction, true);
+            if (Double.isFinite(advice.stop())) {
+                open.sl = advice.stop();
+            }
+            // §12.2: stop qty must match remainder after TP1
+            if (advice.stopQty() > 0 && advice.stopQty() < open.qty) {
+                open.qty = advice.stopQty();
+            }
+        }
+
         // Gap through stop at open
         if (buy && bar.open() <= open.sl) {
             return new ExitResult(open.realized + cashPnl(open, bar.open(), open.qty, point, rubPerPoint),
@@ -511,6 +554,16 @@ public final class BrM5DayReplay {
             open.qty -= q1;
             open.sl = open.avg;
             open.tp1Done = true;
+            // §12.2: remainder stays on BE stop
+            var advice = TrendPositionManager.update(
+                    buy, open.avg, open.sl, open.tp1, bar.close(), point, 20,
+                    open.qty + q1, open.tp1Fraction, true);
+            if (advice.stopQty() > 0) {
+                open.qty = advice.stopQty();
+            }
+            if (Double.isFinite(advice.stop()) && advice.trailing()) {
+                open.sl = advice.stop();
+            }
             if (open.qty <= 0) {
                 return new ExitResult(open.realized, "TP1_FULL");
             }
@@ -605,60 +658,11 @@ public final class BrM5DayReplay {
     }
 
     static List<TrendBar> fetchM1(String secid, LocalDate from, LocalDate till) throws Exception {
-        List<TrendBar> out = new ArrayList<>();
-        int start = 0;
-        while (true) {
-            String url = String.format(Locale.ROOT,
-                    "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/%s/candles.json"
-                            + "?from=%s&till=%s&interval=1&start=%d&iss.meta=off",
-                    secid, from, till, start);
-            JsonNode root = getJson(url);
-            JsonNode candles = root.path("candles");
-            JsonNode data = candles.path("data");
-            if (!data.isArray() || data.isEmpty()) {
-                break;
-            }
-            Map<String, Integer> ci = colIndex(candles.path("columns"));
-            for (JsonNode row : data) {
-                LocalDateTime t = LocalDateTime.parse(row.get(ci.get("begin")).asText(), MOEX_DT);
-                out.add(new TrendBar(
-                        t,
-                        row.get(ci.get("open")).asDouble(),
-                        row.get(ci.get("high")).asDouble(),
-                        row.get(ci.get("low")).asDouble(),
-                        row.get(ci.get("close")).asDouble(),
-                        row.get(ci.get("volume")).asDouble()
-                ));
-            }
-            if (data.size() < 500) {
-                break;
-            }
-            start += 500;
-            System.out.printf(Locale.ROOT, "  … fetched %d 1m bars so far%n", out.size());
-        }
-        out.sort(Comparator.comparing(TrendBar::time));
-        return out;
+        return IssFuturesM1Client.fetchM1(secid, from, till);
     }
 
     static List<TrendBar> aggregateM5(List<TrendBar> m1) {
-        Map<LocalDateTime, List<TrendBar>> buckets = new TreeMap<>();
-        for (TrendBar b : m1) {
-            int m = b.time().getMinute();
-            int floored = m - (m % 5);
-            LocalDateTime key = b.time().withMinute(floored).withSecond(0).withNano(0);
-            buckets.computeIfAbsent(key, k -> new ArrayList<>()).add(b);
-        }
-        List<TrendBar> out = new ArrayList<>();
-        for (Map.Entry<LocalDateTime, List<TrendBar>> e : buckets.entrySet()) {
-            List<TrendBar> g = e.getValue();
-            double open = g.get(0).open();
-            double close = g.get(g.size() - 1).close();
-            double high = g.stream().mapToDouble(TrendBar::high).max().orElse(open);
-            double low = g.stream().mapToDouble(TrendBar::low).min().orElse(open);
-            double vol = g.stream().mapToDouble(TrendBar::volume).sum();
-            out.add(new TrendBar(e.getKey(), open, high, low, close, vol));
-        }
-        return out;
+        return BarAggregator.aggregateM5(m1);
     }
 
     private static Map<String, Integer> colIndex(JsonNode columns) {

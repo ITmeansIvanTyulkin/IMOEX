@@ -37,16 +37,19 @@ public class TrendExecutionBridge {
     private final ReentrantLock lock = new ReentrantLock();
     private final TrendRobotEngine engine;
     private final TrendSettingsService settings;
+    private final OperatorTradeToastService tradeToasts;
     private JournalFile data = JournalFile.empty();
 
     public TrendExecutionBridge(
             ImoexProperties imoexProperties,
             TrendSettingsService settings,
-            @Autowired(required = false) TrendRobotEngine engine
+            @Autowired(required = false) TrendRobotEngine engine,
+            @Autowired(required = false) OperatorTradeToastService tradeToasts
     ) {
         this.journalFile = Path.of(imoexProperties.dataDir(), "trend-robot-journal.json");
         this.settings = settings;
         this.engine = engine;
+        this.tradeToasts = tradeToasts;
         this.mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -115,6 +118,9 @@ public class TrendExecutionBridge {
         }
         if (engine != null) {
             engine.markWorking();
+        }
+        if (tradeToasts != null) {
+            tradeToasts.recordTrendEntry(plan);
         }
         log.info("Trend robot plan journaled ({}) playbook={} qty={}",
                 channel, plan.playbookId(), plan.grid().totalQty());
