@@ -204,11 +204,14 @@
           <li><strong>После дампа / ралли</strong> — приоритет отскока у противоположной полки (BOT / TOP).</li>
           <li><strong>Продолжение тренда</strong> — приоритет ретеста в сторону ветра.</li>
           <li><strong>Касание</strong> — нужен wick в зону и закрытие обратно (reject).
-            Бычья/медвежья свеча и давление стакана — мягкий бонус, не обязательный сигнал.
-            Дивергенция MACD на графике — подсказка глазу, робот по ней не входит.</li>
+            Бычья/медвежья свеча и давление стакана — мягкий бонус.
+            MACD-дивергенция на графике — только подсказка глазу.</li>
+          <li>Ясный reject у BOT/TOP важнее «ожидания ретеста» на этой же полке
+            (не путать восстановление над BOT с §8 ретестом TOP).</li>
         </ul>
         <p class="signal-guide-note">
-          В блоке «Робот» видно: ветер, фазу дня, качество касания и смену фокуса полки.
+          Сейчас идёт <strong>обкатка на paper (SANDBOX_FAIR)</strong> по живой ленте T-Invest —
+          смотрите блок «Робот» и statement. Реальные ордера выключены.
         </p>
       </article>
 
@@ -290,4 +293,4 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trend-signal-desk.js?v=20260807-intel5"></script>
+<script src="/js/trend-signal-desk.js?v=20260807-breakin"></script>

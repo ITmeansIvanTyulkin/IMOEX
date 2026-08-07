@@ -258,11 +258,11 @@ imoex:
       trade-session-close: "23:50"
       no-trade-after-open-minutes: 40
       no-trade-before-close-minutes: 30
-      htf-min-move-points: 50
+      htf-min-move-points: 40          # calibrated: slightly earlier H1/M5 wind (was 50)
       htf-slope-bars: 24
       htf-require-agreement: true    # M5 proxy fallback only
       htf-aggregated-minutes: 60     # H1 from M5; 15=M15; 0=off (M5 proxy only)
-      htf-aggregated-bars: 3         # completed H1 lookback; refreshes each hour close
+      htf-aggregated-bars: 2         # calibrated: 2 completed H1 (faster than 3)
       counter-trend-size-fraction: 0.6
       counter-trend-min-reward-risk: 2.0
       counter-trend-bounce-only: true

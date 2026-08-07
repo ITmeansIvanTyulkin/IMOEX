@@ -888,8 +888,24 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         PlaybookIntelligence.SessionPhase phase = PlaybookIntelligence.resolvePhase(
                 dayMovePts, htf, settings.macroMinDayMovePoints());
 
-        // Day-phase soft priority: after dump/rally, arm bounce when reject already confirmed
-        if (md.mode() == null) {
+        // Clear bounce beats stuck wait / wrong-direction retest on the same shelf (§8 actionable RETEST kept)
+        if (isBotShelfRole(active.role()) && bounceConfirmed(window, range, true)) {
+            if (md.mode() == null || (md.mode() == TrendTradeMode.RETEST && !md.buy())) {
+                md = new ModeDecision(TrendTradeMode.BOUNCE, true,
+                        "clear BOT bounce (reject) — prefer over wait-retest");
+            }
+        } else if (("TREND_HI".equals(active.role()) || "TOP".equals(active.role()))
+                && bounceConfirmed(window, range, false)) {
+            if (md.mode() == null || (md.mode() == TrendTradeMode.RETEST && md.buy())) {
+                // Rejection short only when not a valid §8 long already armed with touch —
+                // if RETEST long is armed, keep §8 unless close already rejected below shelf
+                TrendBar last = window.get(window.size() - 1);
+                if (md.mode() == null || last.close() < range.low()) {
+                    md = new ModeDecision(TrendTradeMode.BOUNCE, false,
+                            "clear TOP bounce (reject) — prefer over wait-retest");
+                }
+            }
+        } else if (md.mode() == null) {
             if (phase == PlaybookIntelligence.SessionPhase.MEAN_REVERT_AFTER_DUMP
                     && isBotShelfRole(active.role())
                     && bounceConfirmed(window, range, true)) {
@@ -1247,7 +1263,9 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
     }
 
     /**
-     * §8 RETEST after break+hold, else §14 bounce by preferBuy side.
+     * §8 RETEST after break+hold on the matching shelf side, else §14 bounce.
+     * Broken-up on BOT (price recovered above LO shelf) is not a TOP retest — bounce path.
+     * Broken-down on TOP is not a BOT retest — bounce path.
      */
     private ModeDecision decideChecklistAtLevel(
             List<TrendBar> window,
@@ -1259,26 +1277,28 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         double maxDist = settings.retestArmMaxDistancePoints();
         double pt = settings.instrument().pointSize();
         String role = level.role() == null ? "" : level.role();
-        boolean structuralTop = "TREND_HI".equals(role) || !level.preferBuy();
-        boolean structuralBot = "TREND_LO".equals(role) || level.preferBuy();
+        boolean structuralTop = "TREND_HI".equals(role) || "TOP".equals(role)
+                || (!level.preferBuy() && !"TREND_LO".equals(role) && !"BOTTOM".equals(role) && !"BOT".equals(role));
+        boolean structuralBot = "TREND_LO".equals(role) || "BOTTOM".equals(role) || "BOT".equals(role)
+                || (level.preferBuy() && !structuralTop);
 
-        if (brokenUp) {
-            // Operator TOP rejection out of the shelf — not a from-above RETEST long touch
+        // TOP / resistance shelf: only upward break+hold arms §8 long retest
+        if (brokenUp && structuralTop) {
             TrendBar last = window.get(window.size() - 1);
-            if (structuralTop && bounceConfirmed(window, range, false) && last.close() < range.low()) {
+            if (bounceConfirmed(window, range, false) && last.close() < range.low()) {
                 return new ModeDecision(TrendTradeMode.BOUNCE, false,
                         "TOP rejection bounce short (confirmed below shelf) — prefer over §8 RETEST long");
             }
-            // §8: retest long from above
             if (!retestEntryAllowed(window, range, true, maxDist, pt)) {
                 return new ModeDecision(null, true,
                         "§8 TOP/level break+hold — waiting retest from above");
             }
             return new ModeDecision(TrendTradeMode.RETEST, true, "§8 break+hold+retest long");
         }
-        if (brokenDown) {
+        // BOT / support shelf: only downward break+hold arms §8 short retest
+        if (brokenDown && structuralBot) {
             TrendBar last = window.get(window.size() - 1);
-            if (structuralBot && bounceConfirmed(window, range, true) && last.close() > range.high()) {
+            if (bounceConfirmed(window, range, true) && last.close() > range.high()) {
                 return new ModeDecision(TrendTradeMode.BOUNCE, true,
                         "BOT rejection bounce long (confirmed above shelf) — prefer over §8 RETEST short");
             }
@@ -1289,8 +1309,13 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             return new ModeDecision(TrendTradeMode.RETEST, false, "§8 break+hold+retest short");
         }
 
-        // §14 bounce: preferBuy → long bounce, else short bounce
-        boolean zoneIsTop = !level.preferBuy();
+        // §14 bounce at shelf (incl. BOT recovered above after poke — not §8 TOP path)
+        boolean zoneIsTop = structuralTop && !structuralBot ? true : !level.preferBuy();
+        if (structuralBot && !structuralTop) {
+            zoneIsTop = false;
+        } else if (structuralTop && !structuralBot) {
+            zoneIsTop = true;
+        }
         return decideBounceAtShelf(window, range, zoneIsTop);
     }
 

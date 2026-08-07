@@ -305,7 +305,7 @@
     if (side && side !== "NONE") robotHtml += " · " + esc(side) + (mode ? (" " + esc(mode)) : "");
     robotHtml += " · канал: "
       + (liveBroker ? "LIVE (осторожно)"
-        : (autoJ ? "SANDBOX_FAIR (вирт. paper → statement)" : "SIGNAL_ONLY"))
+        : (autoJ ? "SANDBOX_FAIR · обкатка paper" : "SIGNAL_ONLY"))
       + ".</p>";
 
     // Senior TF wind — always visible in robot block
@@ -401,6 +401,8 @@
         next = "Вне торгового окна playbook — входы откроются в сессии.";
       } else if (r.indexOf("§6") >= 0 || r.indexOf("PROFILE") >= 0) {
         next = "Нет валидного профиля на активном уровне — ждите касание TOP/BOT с объёмом или сброс залипания.";
+      } else if (r.indexOf("CLEAR BOT") >= 0 || r.indexOf("PREFER OVER WAIT") >= 0) {
+        next = "Ясный reject у полки — робот предпочитает bounce, а не ожидание чужого ретеста.";
       } else if (r.indexOf("TOUCH") >= 0 || r.indexOf("QUALITY") >= 0) {
         next = "Касание полки слабое — нужен wick в зону и закрытие обратно (reject). DOM может дать бонус.";
       } else if (r.indexOf("MACRO") >= 0 || r.indexOf("KNIFE") >= 0 || r.indexOf("FA/") >= 0) {
