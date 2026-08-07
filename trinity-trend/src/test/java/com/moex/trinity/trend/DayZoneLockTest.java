@@ -71,6 +71,58 @@ class DayZoneLockTest {
     }
 
     @Test
+    void lockableShelfRejectsSoftAndAcceptsValidBars() {
+        MergedVolumeRange soft = new MergedVolumeRange(84.56, 84.71, 10, List.of(), false, "thin");
+        MergedVolumeRange ok = new MergedVolumeRange(81.92, 82.12, 5000, List.of(), true, null);
+        assertNull(LevelsProfileBrPlaybook.lockableShelf(soft, "BARS+SOFT"));
+        assertNull(LevelsProfileBrPlaybook.lockableShelf(ok, "PRIOR_DAY_BOT+SOFT"));
+        assertNull(LevelsProfileBrPlaybook.lockableShelf(soft, "PRIOR_DAY_BOT"));
+        assertNotNull(LevelsProfileBrPlaybook.lockableShelf(ok, "BARS"));
+        assertNotNull(LevelsProfileBrPlaybook.lockableShelf(ok, "TAPE"));
+    }
+
+    @Test
+    void priorDayLookbackLowMustNotClearTodaysBot() {
+        // Regression: multi-day window LO (~79.85) used to clear today's BOT (~81.92) via clearBrokenShelves
+        DayZoneLock lock = new DayZoneLock();
+        LocalDate day = LocalDate.of(2026, 8, 7);
+        MergedVolumeRange bot = new MergedVolumeRange(81.915, 82.115, 5000, List.of(), true, null);
+        MergedVolumeRange top = new MergedVolumeRange(84.085, 84.285, 5000, List.of(), true, null);
+        lock.absorb(day, 84.28, 82.01, top, "BARS", bot, "BARS");
+
+        // Today session low still above BOT − break threshold — prior-day 79.85 must NOT be passed here
+        lock.clearBrokenShelves(84.28, 82.01, 20, 0.01);
+        assertNotNull(lock.get().bottom());
+        assertEquals(81.915, lock.get().bottom().low(), 1e-9);
+
+        // Genuine same-day breakdown clears
+        lock.clearBrokenShelves(84.28, 81.60, 20, 0.01);
+        assertNull(lock.get().bottom());
+    }
+
+    @Test
+    void unstickMustNotWipeDayLockWithoutZoneBreak() {
+        // Regression: forceClear on far broken+held used to let BOT float with LO
+        DayZoneLock lock = new DayZoneLock();
+        LocalDate day = LocalDate.of(2026, 8, 7);
+        MergedVolumeRange bot = new MergedVolumeRange(82.27, 82.42, 5000, List.of(), true, null);
+        MergedVolumeRange top = new MergedVolumeRange(84.56, 84.71, 5000, List.of(), true, null);
+        lock.absorb(day, 84.71, 82.28, top, "TAPE", bot, "TAPE");
+        assertEquals(82.27, lock.get().bottom().low(), 1e-9);
+
+        // Price sits far below BOT mid but has NOT broken shelf by ≥20 pts — lock stays
+        lock.clearBrokenShelves(84.71, 82.11, 20, 0.01);
+        assertNotNull(lock.get().bottom());
+        assertEquals(82.27, lock.get().bottom().low(), 1e-9);
+
+        // Absorb of a shifted live shelf must not move the locked BOT
+        MergedVolumeRange shifted = new MergedVolumeRange(82.20, 82.35, 5000, List.of(), true, null);
+        var s = lock.absorb(day, 84.71, 82.11, top, "TAPE", shifted, "TAPE");
+        assertEquals(82.27, s.bottom().low(), 1e-9);
+        assertEquals(82.42, s.bottom().high(), 1e-9);
+    }
+
+    @Test
     void kickHardClearsPlaybookLocks() {
         LevelsProfileBrPlaybook pb = new LevelsProfileBrPlaybook();
         List<TrendBar> bars = channel();

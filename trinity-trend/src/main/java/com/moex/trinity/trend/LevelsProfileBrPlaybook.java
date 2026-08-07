@@ -156,28 +156,23 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 lockCands.bottomSource()
         );
 
-        // Display / trade anchors = locked day ranges; before 09:40 show live candidates only
+        // Display: locked sides are frozen; unlocked side may show live candidate until first absorb
         double trendHigh;
         double trendLow;
         TrendStructureSnapshot.Zone zoneTop;
         TrendStructureSnapshot.Zone zoneBottom;
-        if (locked.hasTop() || locked.hasBottom()) {
-            trendHigh = Double.isFinite(locked.trendHigh()) ? locked.trendHigh() : liveHigh;
-            trendLow = Double.isFinite(locked.trendLow()) ? locked.trendLow() : liveLow;
-            zoneTop = locked.hasTop()
-                    ? toZoneDto(new ZoneCandidate(trendHigh, locked.top(),
-                    locked.topSource() == null ? "DAY" : locked.topSource() + "+DAY"), spec, "TOP")
-                    : null;
-            zoneBottom = locked.hasBottom()
-                    ? toZoneDto(new ZoneCandidate(trendLow, locked.bottom(),
-                    locked.bottomSource() == null ? "DAY" : locked.bottomSource() + "+DAY"), spec, "BOTTOM")
-                    : null;
-        } else {
-            trendHigh = liveHigh;
-            trendLow = liveLow;
-            zoneTop = topLive.map(c -> toZoneDto(c, spec, "TOP")).orElse(null);
-            zoneBottom = botLive.map(c -> toZoneDto(c, spec, "BOTTOM")).orElse(null);
-        }
+        trendHigh = Double.isFinite(locked.trendHigh()) && (locked.hasTop() || locked.hasBottom())
+                ? locked.trendHigh() : liveHigh;
+        trendLow = Double.isFinite(locked.trendLow()) && (locked.hasTop() || locked.hasBottom())
+                ? locked.trendLow() : liveLow;
+        zoneTop = locked.hasTop()
+                ? toZoneDto(new ZoneCandidate(trendHigh, locked.top(),
+                locked.topSource() == null ? "DAY" : locked.topSource() + "+DAY"), spec, "TOP")
+                : topLive.map(c -> toZoneDto(c, spec, "TOP")).orElse(null);
+        zoneBottom = locked.hasBottom()
+                ? toZoneDto(new ZoneCandidate(trendLow, locked.bottom(),
+                locked.bottomSource() == null ? "DAY" : locked.bottomSource() + "+DAY"), spec, "BOTTOM")
+                : botLive.map(c -> toZoneDto(c, spec, "BOTTOM")).orElse(null);
 
         // §4: previous-trend zero point
         double zero = previousTrendZeroPoint(window, bias, trendHigh, trendLow);
@@ -327,6 +322,29 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         MergedVolumeRange bot = chooseShelf(prior.bottom(), botLive.map(ZoneCandidate::range).orElse(null),
                 liveLow, false);
         String botSrc = sourceFor(bot, prior.bottom(), botLive.map(ZoneCandidate::source).orElse(null), false);
+        // Soft/thin prior must not block today's lockable shelf (checklist: freeze real §6–7 volume)
+        if (lockableShelf(top, topSrc) == null) {
+            MergedVolumeRange liveTop = topLive.map(ZoneCandidate::range).orElse(null);
+            String liveTopSrc = topLive.map(ZoneCandidate::source).orElse(null);
+            if (lockableShelf(liveTop, liveTopSrc) != null) {
+                top = liveTop;
+                topSrc = liveTopSrc;
+            } else {
+                top = null;
+                topSrc = null;
+            }
+        }
+        if (lockableShelf(bot, botSrc) == null) {
+            MergedVolumeRange liveBot = botLive.map(ZoneCandidate::range).orElse(null);
+            String liveBotSrc = botLive.map(ZoneCandidate::source).orElse(null);
+            if (lockableShelf(liveBot, liveBotSrc) != null) {
+                bot = liveBot;
+                botSrc = liveBotSrc;
+            } else {
+                bot = null;
+                botSrc = null;
+            }
+        }
         return new ZonePair(top, topSrc, bot, botSrc);
     }
 
@@ -477,17 +495,29 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
     }
 
     /**
-     * Current-trend high/low for structure (checklist §5).
-     * Uses a recent window (~session), not the full multi-day lookback spike.
+     * Current-trend high/low for structure (checklist §5) and day-lock break detection.
+     * Same calendar day as the last bar — never use prior-day LO/HI to "break" today's shelves.
      */
     double[] currentTrendExtremes(List<TrendBar> window) {
         if (window == null || window.isEmpty()) {
             return new double[]{Double.NaN, Double.NaN};
         }
-        int n = Math.min(window.size(), Math.max(48, settings.sessionBiasBars() * 2));
-        List<TrendBar> trend = window.subList(window.size() - n, window.size());
-        double hi = trend.stream().mapToDouble(TrendBar::high).max().orElse(Double.NaN);
-        double lo = trend.stream().mapToDouble(TrendBar::low).min().orElse(Double.NaN);
+        java.time.LocalDate day = window.get(window.size() - 1).time() == null
+                ? null
+                : window.get(window.size() - 1).time().toLocalDate();
+        List<TrendBar> sameDay = new ArrayList<>();
+        if (day != null) {
+            for (TrendBar b : window) {
+                if (b != null && b.time() != null && day.equals(b.time().toLocalDate())) {
+                    sameDay.add(b);
+                }
+            }
+        }
+        List<TrendBar> trend = sameDay.isEmpty() ? window : sameDay;
+        int n = Math.min(trend.size(), Math.max(48, settings.sessionBiasBars() * 2));
+        List<TrendBar> slice = trend.subList(trend.size() - n, trend.size());
+        double hi = slice.stream().mapToDouble(TrendBar::high).max().orElse(Double.NaN);
+        double lo = slice.stream().mapToDouble(TrendBar::low).min().orElse(Double.NaN);
         return new double[]{hi, lo};
     }
 
@@ -782,7 +812,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             return Optional.of(noTrade(series, "§6–7: no valid profiled range on active level"));
         }
 
-        // Unstick: if chosen level is broken+held but price is far (not approaching), drop it and re-pick
+        // Unstick: broken+held level far from price → pick another level.
+        // Checklist day TOP/BOT stay fixed until clearBrokenShelves (±zone break) — never forceClear here.
         {
             MergedVolumeRange ar = active.range();
             boolean bu = breakHoldSatisfied(window, ar, true, Math.max(1, settings.confirmBarsAfterBreak()));
@@ -790,6 +821,7 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             double distPts = Math.abs(lastClose - ar.mid()) / spec.pointSize();
             double arm = settings.retestArmMaxDistancePoints();
             if ((bu || bd) && distPts > arm) {
+                String dropRole = active.role();
                 List<ChecklistLevel> rest = new ArrayList<>();
                 for (ChecklistLevel l : levels) {
                     if (Math.abs(l.price() - active.price()) > spec.pointSize()) {
@@ -801,12 +833,25 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 if (alt != null && alt.hasValidRange()) {
                     active = alt;
                 } else {
-                    // Hard kick shelves once — new extreme must re-lock
-                    dayZones.forceClearShelves(liveHigh, liveLow);
-                    checklistDayLock.dropRoles("TREND_HI", "TREND_LO", "ACCUM");
+                    if (dropRole != null && !dropRole.isBlank()) {
+                        checklistDayLock.dropRoles(dropRole);
+                    }
+                    // Re-resolve day shelves (may clear only if extreme broke the lock by ≥ zone break)
+                    locked = resolveDayZones(
+                            series.last().time(),
+                            day, liveHigh, liveLow,
+                            lockCands.topRange(),
+                            lockCands.topSource(),
+                            lockCands.bottomRange(),
+                            lockCands.bottomSource()
+                    );
+                    trendHigh = Double.isFinite(locked.trendHigh()) && (locked.hasTop() || locked.hasBottom())
+                            ? locked.trendHigh() : liveHigh;
+                    trendLow = Double.isFinite(locked.trendLow()) && (locked.hasTop() || locked.hasBottom())
+                            ? locked.trendLow() : liveLow;
                     levelsLive = buildProfiledLevels(
-                            series.instrument(), window, marketState, liveHigh, liveLow, zero, lastClose);
-                    levelsLive = applyDayLockedShelves(levelsLive, dayZones.get(), liveHigh, liveLow, window);
+                            series.instrument(), window, marketState, trendHigh, trendLow, zero, lastClose);
+                    levelsLive = applyDayLockedShelves(levelsLive, locked, trendHigh, trendLow, window);
                     levels = checklistDayLock.absorb(day, levelsLive);
                     active = ChecklistStructure.pickActive(
                             levels, lastClose, marketState, arm, spec.pointSize());

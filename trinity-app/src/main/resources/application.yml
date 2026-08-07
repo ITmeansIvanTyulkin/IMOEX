@@ -229,8 +229,8 @@ imoex:
       enabled: true
     trend:
       enabled: true
-      auto-execution: false   # false = signal-only UI; true = sandbox journal / auto path for playbooks
-      live-execution: false
+      auto-execution: true    # fair-paper live → SANDBOX_FAIR append to trend-paper-journal
+      live-execution: false   # real T-Invest FORTS orders still deferred
       playbook: levels-profile-br-m5
       grid: MODERATE
       max-risk-pct-equity: 1.0

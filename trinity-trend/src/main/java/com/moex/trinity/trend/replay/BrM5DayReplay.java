@@ -1,15 +1,14 @@
 package com.moex.trinity.trend.replay;
 
 import com.moex.trinity.trend.BarAggregator;
+import com.moex.trinity.trend.FairPaperSimulator;
 import com.moex.trinity.trend.IssFuturesM1Client;
 import com.moex.trinity.trend.LevelsProfileBrPlaybook;
-import com.moex.trinity.trend.LimitGridPlan;
 import com.moex.trinity.trend.MergedVolumeRange;
 import com.moex.trinity.trend.TrendAccountContext;
 import com.moex.trinity.trend.TrendBar;
 import com.moex.trinity.trend.TrendBarSeries;
 import com.moex.trinity.trend.TrendPlaybookSettings;
-import com.moex.trinity.trend.TrendPositionManager;
 import com.moex.trinity.trend.TrendRobotEngine;
 import com.moex.trinity.trend.TrendRobotPlan;
 import com.moex.trinity.trend.TrendRobotState;
@@ -195,7 +194,7 @@ public final class BrM5DayReplay {
         int noTradeBars = 0;
         Map<String, Integer> reasonHist = new TreeMap<>();
 
-        OpenPaper open = null;
+        FairPaperSimulator.OpenPaper open = null;
         TrendRobotPlan pending = null;
 
         List<TrendBar> seriesBars = new ArrayList<>(warmup);
@@ -205,22 +204,22 @@ public final class BrM5DayReplay {
             tapeFeed.setAsOf(bar.time());
 
             if (open != null) {
-                ExitResult er = manageFair(open, bar, rubPerPoint, point);
+                FairPaperSimulator.ExitResult er = FairPaperSimulator.manage(open, bar, rubPerPoint, point);
                 if (er != null) {
                     Map<String, Object> t = new LinkedHashMap<>();
                     t.put("entry", open.entryTime.toString());
                     t.put("exit", bar.time().toString());
                     t.put("side", open.buy ? "BUY" : "SELL");
                     t.put("mode", open.mode);
-                    t.put("pnl", er.pnl);
-                    t.put("reason", er.reason);
+                    t.put("pnl", er.pnl());
+                    t.put("reason", er.reason());
                     trades.add(t);
-                    engine.registerRealizedPnl(er.pnl);
+                    engine.registerRealizedPnl(er.pnl());
                     if (verbose) {
                         System.out.printf(Locale.ROOT, "TRADE %s %s → %s  PnL=%+.0f ₽ (%s)%n",
-                                open.entryTime, open.buy ? "BUY" : "SELL", er.reason, er.pnl, bar.time());
+                                open.entryTime, open.buy ? "BUY" : "SELL", er.reason(), er.pnl(), bar.time());
                     }
-                    if ("SL".equals(er.reason)) {
+                    if ("SL".equals(er.reason())) {
                         engine.registerStopLoss(bar.time());
                     } else {
                         engine.registerFlatWin(bar.time());
@@ -244,7 +243,7 @@ public final class BrM5DayReplay {
                     }
                 }
                 if (pending != null) {
-                    OpenPaper filled = tryOpenFair(pending, bar);
+                    FairPaperSimulator.OpenPaper filled = FairPaperSimulator.tryOpen(pending, bar);
                     if (filled != null) {
                         open = filled;
                         pending = null;
@@ -322,7 +321,7 @@ public final class BrM5DayReplay {
 
         if (open != null) {
             TrendBar last = today.get(today.size() - 1);
-            double pnl = open.realized + cashPnl(open, last.close(), open.qty, point, rubPerPoint);
+            double pnl = FairPaperSimulator.markToMarket(open, last.close(), point, rubPerPoint);
             Map<String, Object> t = new LinkedHashMap<>();
             t.put("entry", open.entryTime.toString());
             t.put("exit", last.time().toString());
@@ -514,175 +513,6 @@ public final class BrM5DayReplay {
             System.out.println("  DOM fetch skip: " + ex.getMessage());
             return null;
         }
-    }
-
-    private static OpenPaper tryOpenFair(TrendRobotPlan plan, TrendBar bar) {
-        LimitGridPlan g = plan.grid();
-        boolean buy = plan.buy();
-        List<double[]> fills = new ArrayList<>(); // price, qty
-        double[][] limits = {
-                {g.nearPrice(), g.nearQty()},
-                {g.midPrice(), g.midQty()},
-                {g.farPrice(), g.farQty()}
-        };
-        for (double[] lim : limits) {
-            if (lim[1] <= 0) {
-                continue;
-            }
-            if (bar.low() <= lim[0] && lim[0] <= bar.high()) {
-                fills.add(new double[]{lim[0], lim[1]});
-            }
-        }
-        if (fills.isEmpty()) {
-            return null; // keep pending for later bars
-        }
-        double qty = fills.stream().mapToDouble(f -> f[1]).sum();
-        double avg = fills.stream().mapToDouble(f -> f[0] * f[1]).sum() / qty;
-        // Re-anchor SL/TP to fill avg (plan levels were vs full-grid theoretical avg)
-        double gridAvg = g.averagePrice();
-        double risk = Math.abs(plan.stopLossPrice() - gridAvg);
-        double r1 = Math.abs(plan.tp1Price() - gridAvg);
-        double r2 = Math.abs(plan.tp2Price() - gridAvg);
-        double sl = buy ? avg - risk : avg + risk;
-        double tp1 = buy ? avg + r1 : avg - r1;
-        double tp2 = buy ? avg + r2 : avg - r2;
-        return new OpenPaper(
-                bar.time(),
-                buy,
-                plan.mode() == null ? "?" : plan.mode().name(),
-                avg,
-                (int) qty,
-                sl,
-                tp1,
-                tp2,
-                plan.tp1Fraction(),
-                false,
-                true // fill bar — no SL this bar
-        );
-    }
-
-    private static ExitResult manageFair(OpenPaper open, TrendBar bar, double rubPerPoint, double point) {
-        if (open.fillBar) {
-            open.fillBar = false;
-            return null;
-        }
-        boolean buy = open.buy;
-
-        // §12: after TP1 — BE + trail on each bar (close-based trail)
-        if (open.tp1Done) {
-            double trailPts = Math.abs(open.avg - open.sl) > 0
-                    ? 20 // default BR stop points when already at BE
-                    : 20;
-            // Prefer instrument-typical 20 pts trail after BE
-            trailPts = 20;
-            var advice = TrendPositionManager.update(
-                    buy, open.avg, open.sl, open.tp1, bar.close(), point, trailPts,
-                    open.qty, open.tp1Fraction, true);
-            if (Double.isFinite(advice.stop())) {
-                open.sl = advice.stop();
-            }
-            // §12.2: stop qty must match remainder after TP1
-            if (advice.stopQty() > 0 && advice.stopQty() < open.qty) {
-                open.qty = advice.stopQty();
-            }
-        }
-
-        // Gap through stop at open
-        if (buy && bar.open() <= open.sl) {
-            return new ExitResult(open.realized + cashPnl(open, bar.open(), open.qty, point, rubPerPoint),
-                    open.tp1Done ? "BE_STOP" : "SL");
-        }
-        if (!buy && bar.open() >= open.sl) {
-            return new ExitResult(open.realized + cashPnl(open, bar.open(), open.qty, point, rubPerPoint),
-                    open.tp1Done ? "BE_STOP" : "SL");
-        }
-        boolean hitSl = buy ? bar.low() <= open.sl : bar.high() >= open.sl;
-        boolean hitTp1 = !open.tp1Done && (buy ? bar.high() >= open.tp1 : bar.low() <= open.tp1);
-        boolean hitTp2 = open.tp1Done && (buy ? bar.high() >= open.tp2 : bar.low() <= open.tp2);
-
-        if (hitSl && (hitTp1 || hitTp2)) {
-            // adverse first on ambiguous bar
-            return new ExitResult(open.realized + cashPnl(open, open.sl, open.qty, point, rubPerPoint),
-                    open.tp1Done ? "BE_STOP" : "SL");
-        }
-        if (hitSl) {
-            double pnl = open.realized + cashPnl(open, open.sl, open.qty, point, rubPerPoint);
-            return new ExitResult(pnl, open.tp1Done ? "BE_STOP" : "SL");
-        }
-        if (hitTp1) {
-            int q1 = Math.max(1, (int) Math.round(open.qty * open.tp1Fraction));
-            q1 = Math.min(q1, open.qty);
-            open.realized += cashPnl(open, open.tp1, q1, point, rubPerPoint);
-            open.qty -= q1;
-            open.sl = open.avg;
-            open.tp1Done = true;
-            // §12.2: remainder stays on BE stop
-            var advice = TrendPositionManager.update(
-                    buy, open.avg, open.sl, open.tp1, bar.close(), point, 20,
-                    open.qty + q1, open.tp1Fraction, true);
-            if (advice.stopQty() > 0) {
-                open.qty = advice.stopQty();
-            }
-            if (Double.isFinite(advice.stop()) && advice.trailing()) {
-                open.sl = advice.stop();
-            }
-            if (open.qty <= 0) {
-                return new ExitResult(open.realized, "TP1_FULL");
-            }
-            // continue; if also TP2 same bar
-            if (buy ? bar.high() >= open.tp2 : bar.low() <= open.tp2) {
-                open.realized += cashPnl(open, open.tp2, open.qty, point, rubPerPoint);
-                return new ExitResult(open.realized, "TP2");
-            }
-            return null;
-        }
-        if (hitTp2) {
-            open.realized += cashPnl(open, open.tp2, open.qty, point, rubPerPoint);
-            return new ExitResult(open.realized, "TP2");
-        }
-        return null;
-    }
-
-    private static double cashPnl(OpenPaper open, double exit, int qty, double point, double rubPerPoint) {
-        if (qty <= 0 || point <= 0) {
-            return 0;
-        }
-        double pts = (exit - open.avg) / point;
-        double signed = open.buy ? pts : -pts;
-        return signed * qty * rubPerPoint;
-    }
-
-    private static final class OpenPaper {
-        final LocalDateTime entryTime;
-        final boolean buy;
-        final String mode;
-        final double avg;
-        int qty;
-        double sl;
-        final double tp1;
-        final double tp2;
-        final double tp1Fraction;
-        boolean tp1Done;
-        boolean fillBar;
-        double realized;
-
-        OpenPaper(LocalDateTime entryTime, boolean buy, String mode, double avg, int qty,
-                  double sl, double tp1, double tp2, double tp1Fraction, boolean tp1Done, boolean fillBar) {
-            this.entryTime = entryTime;
-            this.buy = buy;
-            this.mode = mode;
-            this.avg = avg;
-            this.qty = qty;
-            this.sl = sl;
-            this.tp1 = tp1;
-            this.tp2 = tp2;
-            this.tp1Fraction = tp1Fraction;
-            this.tp1Done = tp1Done;
-            this.fillBar = fillBar;
-        }
-    }
-
-    private record ExitResult(double pnl, String reason) {
     }
 
     static String resolveFrontBr() throws Exception {

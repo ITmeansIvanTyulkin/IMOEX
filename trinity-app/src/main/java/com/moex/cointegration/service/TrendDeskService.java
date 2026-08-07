@@ -57,6 +57,7 @@ public class TrendDeskService {
     private final TrendPaperJournalService paperJournal;
     private final TrendEventCalendar eventCalendar;
     private final TrendPlaybookSettings settings;
+    private final ObjectProvider<TrendFairPaperLiveService> fairPaper;
     private final ObjectProvider<MarketDataResearchService> marketData;
     private final String configuredInstrument;
     private final double equityRub;
@@ -71,6 +72,7 @@ public class TrendDeskService {
             TrendPaperJournalService paperJournal,
             TrendEventCalendar eventCalendar,
             TrendPlaybookSettings settings,
+            ObjectProvider<TrendFairPaperLiveService> fairPaper,
             ObjectProvider<MarketDataResearchService> marketData,
             @Value("${imoex.marketdata.auto-resolve-instrument:BRU6}") String instrument,
             @Value("${imoex.capital.equity-rub:100000}") double equityRub,
@@ -84,6 +86,7 @@ public class TrendDeskService {
         this.paperJournal = paperJournal;
         this.eventCalendar = eventCalendar == null ? TrendEventCalendar.empty() : eventCalendar;
         this.settings = settings == null ? TrendPlaybookSettings.brDefaults() : settings;
+        this.fairPaper = fairPaper;
         this.marketData = marketData;
         this.configuredInstrument = instrument == null || instrument.isBlank() ? "BRU6" : instrument.trim();
         this.equityRub = equityRub > 0 ? equityRub : 100_000;
@@ -91,12 +94,32 @@ public class TrendDeskService {
         this.goShortRub = goShortRub > 0 ? goShortRub : 16_000;
     }
 
-    public Map<String, Object> desk() {
-        String instrument = configuredInstrument;
+    public String resolveInstrument() {
         MarketDataResearchService md = marketData.getIfAvailable();
         if (md != null && md.defaultInstrument() != null && !md.defaultInstrument().isBlank()) {
-            instrument = md.defaultInstrument();
+            return md.defaultInstrument();
         }
+        return configuredInstrument;
+    }
+
+    /** Bars for desk / fair-paper live (tape preferred over ISS on overlap). */
+    public List<TrendBar> loadBarsPublic(String instrument) {
+        return loadBars(instrument, marketData.getIfAvailable());
+    }
+
+    private String deliveryLabel() {
+        if (bridge.liveExecution()) {
+            return "LIVE_GATED";
+        }
+        if (bridge.autoExecution()) {
+            return "SANDBOX_FAIR";
+        }
+        return "SIGNAL_ONLY";
+    }
+
+    public Map<String, Object> desk() {
+        String instrument = resolveInstrument();
+        MarketDataResearchService md = marketData.getIfAvailable();
 
         List<TrendBar> bars = loadBars(instrument, md);
         Optional<DomBook> book = md == null ? Optional.empty() : md.resolveBook(instrument);
@@ -104,7 +127,7 @@ public class TrendDeskService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("instrument", instrument);
         body.put("timeframe", "M5");
-        body.put("delivery", bridge.autoExecution() ? "AUTO_JOURNAL" : "SIGNAL_ONLY");
+        body.put("delivery", deliveryLabel());
         body.put("autoExecution", bridge.autoExecution());
         body.put("engineState", engine.state().name());
         body.put("barCount", bars.size());
@@ -116,6 +139,10 @@ public class TrendDeskService {
         body.put("paper", paperJournal.deskDto());
         body.put("checklistCompliance", com.moex.trinity.trend.ChecklistCompliance.deskDto());
         body.put("blockReason", null);
+        TrendFairPaperLiveService fp = fairPaper.getIfAvailable();
+        if (fp != null) {
+            body.put("fairPaper", fp.snapshot());
+        }
 
         if (bars.size() < 10) {
             body.put("signal", TrendSignal.from(null));
@@ -256,9 +283,13 @@ public class TrendDeskService {
         s.put("waitingFill", "WAITING_FILL".equals(posture));
         s.put("engineState", engName);
         s.put("planState", planState);
-        s.put("delivery", bridge.autoExecution() ? "AUTO_JOURNAL" : "SIGNAL_ONLY");
+        s.put("delivery", deliveryLabel());
         s.put("liveExecution", bridge.liveExecution());
         s.put("autoExecution", bridge.autoExecution());
+        TrendFairPaperLiveService fp = fairPaper.getIfAvailable();
+        if (fp != null) {
+            s.put("fairPaper", fp.snapshot());
+        }
         s.put("setupsToday", engine.setupsTodayCount());
         s.put("kickCountToday", engine.kickCountToday());
         s.put("dayLossBlocks", engine.dayLossBlockCount());
@@ -274,8 +305,11 @@ public class TrendDeskService {
             }
         } else if ("WAITING_FILL".equals(posture)) {
             why = summary == null || summary.isBlank()
-                    ? "Лимитки выставлены / сетап в работе — ждём касание сетки."
+                    ? "Fair-paper: лимитки / сетап в работе — ждём касание сетки."
                     : summary;
+            if (bridge.autoExecution() && !bridge.liveExecution()) {
+                why = "Fair-paper live · " + why;
+            }
         } else if (blocked) {
             why = summary == null || summary.isBlank() ? "Новых входов нет." : summary;
         } else if ("WATCHING_ZONE".equals(posture)) {
@@ -483,7 +517,8 @@ public class TrendDeskService {
                 }
             }
             var fp = new com.moex.trinity.trend.FootprintAggregator(0.01);
-            return com.moex.trinity.trend.FootprintAggregator.toDto(fp.build(prints, 24));
+            // Full session depth so desk can pin footprint on any visible M5 (not only last 8)
+            return com.moex.trinity.trend.FootprintAggregator.toDto(fp.build(prints, 288));
         } catch (Exception ex) {
             log.debug("footprint build failed: {}", ex.getMessage());
             return List.of();
@@ -556,7 +591,7 @@ public class TrendDeskService {
     /**
      * Session / recent tape rolled up by price — buy/sell aggressor lots for DOM footprint column.
      */
-    static Map<String, Map<String, Long>> aggregateTapeByPrice(List<com.moex.trinity.marketdata.TradePrint> prints, double pointSize) {
+    public static Map<String, Map<String, Long>> aggregateTapeByPrice(List<com.moex.trinity.marketdata.TradePrint> prints, double pointSize) {
         Map<String, long[]> raw = new LinkedHashMap<>();
         if (prints == null || prints.isEmpty()) {
             return Map.of();
