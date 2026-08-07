@@ -193,6 +193,7 @@
       || sig.side || plan.side || "NONE";
     const mode = (sit.setupLevels && sit.setupLevels.mode) || plan.mode || sig.mode || "";
     const htf = sit.htf || st.htf || "?";
+    const htfSource = sit.htfSource || st.htfSource || "";
     const bias = sit.bias || st.bias || "?";
     const mkt = sit.marketState || st.marketState || "?";
     const tapeLive = (data.barsSource === "tape")
@@ -233,6 +234,7 @@
       }
     }
     marketItems.push("Режим <code>" + esc(mkt) + "</code>, HTF=" + esc(htf)
+      + (htfSource ? "@" + esc(htfSource) : "")
       + ", bias=" + esc(bias));
     if (sit.structureNote) {
       deMark(String(sit.structureNote)).split(/(?<=[.!])\s+/).forEach(function (chunk) {
@@ -305,6 +307,35 @@
       + (liveBroker ? "LIVE (осторожно)"
         : (autoJ ? "SANDBOX_FAIR (вирт. paper → statement)" : "SIGNAL_ONLY"))
       + ".</p>";
+
+    // Senior TF wind — always visible in robot block
+    const srcLabel = htfSource === "H1"
+      ? "H1 из M5 (по закрытым часам)"
+      : (htfSource === "M15"
+        ? "M15 из M5"
+        : (htfSource === "M5_PROXY"
+          ? "M5-прокси (H1 пока без явного хода)"
+          : (htfSource || "старший ТФ")));
+    let windLine;
+    if (htf === "UP") {
+      windLine = "Ветер: <strong>вверх</strong> · " + esc(srcLabel)
+        + " — лонги с ветром, шорты только осторожный отскок / меньше размер.";
+    } else if (htf === "DOWN") {
+      windLine = "Ветер: <strong>вниз</strong> · " + esc(srcLabel)
+        + " — шорты с ветром, лонги только осторожный отскок / меньше размер.";
+    } else {
+      windLine = "Ветер: <strong>боковик</strong> · " + esc(srcLabel)
+        + " — приоритет bounce у TOP/BOT; RETEST после пробоя+закрепления.";
+    }
+    robotHtml += "<p class='signal-brief-note signal-brief-htf'>" + windLine + "</p>";
+
+    if (sit.sessionPhaseRu) {
+      robotHtml += "<p class='signal-brief-note'>" + esc(sit.sessionPhaseRu);
+      if (sit.shelfLocal) robotHtml += " · фокус сдвинут на ближнюю полку";
+      if (sit.touchQ != null) robotHtml += " · качество касания " + esc(String(sit.touchQ));
+      robotHtml += ".</p>";
+    }
+
     if (sit.fairPaper && sit.fairPaper.enabled) {
       const fp = sit.fairPaper;
       if (fp.open) {
@@ -370,12 +401,28 @@
         next = "Вне торгового окна playbook — входы откроются в сессии.";
       } else if (r.indexOf("§6") >= 0 || r.indexOf("PROFILE") >= 0) {
         next = "Нет валидного профиля на активном уровне — ждите касание TOP/BOT с объёмом или сброс залипания.";
+      } else if (r.indexOf("TOUCH") >= 0 || r.indexOf("QUALITY") >= 0) {
+        next = "Касание полки слабое — нужен wick в зону и закрытие обратно (reject). DOM может дать бонус.";
       } else if (r.indexOf("MACRO") >= 0 || r.indexOf("KNIFE") >= 0 || r.indexOf("FA/") >= 0) {
-        next = "Macro-proxy режет нож против дня — не ловим дно/потолок против импульса.";
+        if (r.indexOf("ТОРМОЗ") >= 0 || r.indexOf("DECEL") >= 0 || r.indexOf("H1") >= 0 || r.indexOf("MID") >= 0) {
+          next = "Dump + HTF DOWN: нужен reject у BOT и торможение H1 или 2 close над mid — тогда bounce можно.";
+        } else if (r.indexOf("BOUNCE") >= 0 && r.indexOf("REJECT") >= 0) {
+          next = "Dump-день: BOT bounce только после закрытого reject. Ждите подтверждение у полки.";
+        } else if (r.indexOf("RETEST") >= 0) {
+          next = "Macro режет RETEST BUY против дампа — ждите отскок с reject или смену фазы.";
+        } else {
+          next = "Macro-proxy: не ловим нож. Подтверждённый BOT bounce (reject + ветер/торможение H1) можно.";
+        }
+      } else if (r.indexOf("HTF") >= 0 && r.indexOf("COUNTER") >= 0) {
+        next = "Против ветра старшего ТФ: RETEST без break+hold закрыт; смотрите bounce у полки или §8 продолжение.";
       } else if (r.indexOf("HTF") >= 0 || htf === "FLAT") {
-        next = "HTF плоский: приоритет bounce у day-locked TOP/BOT; RETEST после break+hold.";
+        next = htfSource === "H1"
+          ? "H1 без явного направления — bounce у day-locked TOP/BOT; RETEST после break+hold. Смотрите фазу дня в блоке робота."
+          : "Старший ТФ плоский: приоритет bounce у day-locked TOP/BOT; RETEST после break+hold.";
       } else if (posture === "WATCHING_ZONE") {
-        next = "Зона размечена — ждите bounce/retest confirm на следующей M5 у фиолетовой полосы.";
+        next = "Зона размечена — ждите bounce/retest confirm на M5. Учитывайте ветер "
+          + (htfSource || "HTF") + "=" + htf
+          + (sit.sessionPhaseRu ? (" · " + sit.sessionPhaseRu) : "") + ".";
       } else if (r.indexOf("COOLDOWN") >= 0) {
         next = "Cooldown после стопа — пауза до конца таймера.";
       }

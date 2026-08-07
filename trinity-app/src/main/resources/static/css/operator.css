@@ -3333,6 +3333,11 @@ body[data-upsell="off"] .full-core-badge {
   font-size: 0.86rem !important;
   color: #3d4a52 !important;
 }
+.signal-brief-htf {
+  border-left: 3px solid rgba(196, 163, 90, 0.55);
+  padding-left: 0.55rem;
+  margin-top: 0.35rem !important;
+}
 .signal-guide-foot {
   margin-top: 0.7rem !important;
   font-size: 0.8rem !important;

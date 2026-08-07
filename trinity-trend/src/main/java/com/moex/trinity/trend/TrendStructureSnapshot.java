@@ -20,6 +20,8 @@ public record TrendStructureSnapshot(
         Zone zoneTop,
         Zone zoneBottom,
         String htf,
+        /** H1 / M15 / M5_PROXY — where HTF bias came from. */
+        String htfSource,
         String bias,
         String note,
         String marketState,
@@ -30,6 +32,7 @@ public record TrendStructureSnapshot(
         swingLows = swingLows == null ? List.of() : List.copyOf(swingLows);
         marketState = marketState == null ? "RANGE" : marketState;
         checklistLevels = checklistLevels == null ? List.of() : List.copyOf(checklistLevels);
+        htfSource = htfSource == null || htfSource.isBlank() ? "M5_PROXY" : htfSource;
     }
 
     /** @deprecated use {@link #zoneTop()} / {@link #zoneBottom()} */
@@ -74,7 +77,7 @@ public record TrendStructureSnapshot(
                 false, false,
                 List.of(), List.of(),
                 null, null,
-                "FLAT", "NONE", note,
+                "FLAT", "M5_PROXY", "NONE", note,
                 "RANGE", List.of()
         );
     }

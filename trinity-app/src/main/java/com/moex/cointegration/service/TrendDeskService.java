@@ -19,6 +19,8 @@ import com.moex.trinity.trend.TrendRobotState;
 import com.moex.trinity.trend.TrendSignal;
 import com.moex.trinity.trend.TrendStructureSnapshot;
 import com.moex.trinity.trend.BrMacroBias;
+import com.moex.trinity.trend.HtfTrend;
+import com.moex.trinity.trend.PlaybookIntelligence;
 import com.moex.trinity.trend.TrendSessionEdge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -339,6 +341,32 @@ public class TrendDeskService {
                 bars, now, settings.tradeSessionOpen(), settings.instrument().pointSize());
         s.put("dayMovePoints", Double.isFinite(dayMove) ? Math.round(dayMove) : null);
         s.put("htf", structure == null ? "FLAT" : structure.htf());
+        s.put("htfSource", structure == null ? "M5_PROXY" : structure.htfSource());
+        String htfName = structure == null || structure.htf() == null ? "FLAT" : structure.htf();
+        HtfTrend htfEnum;
+        try {
+            htfEnum = HtfTrend.valueOf(htfName);
+        } catch (Exception ex) {
+            htfEnum = HtfTrend.FLAT;
+        }
+        var phase = PlaybookIntelligence.resolvePhase(
+                Double.isFinite(dayMove) ? dayMove : 0,
+                htfEnum,
+                settings.macroMinDayMovePoints());
+        s.put("sessionPhase", phase.name());
+        s.put("sessionPhaseRu", PlaybookIntelligence.phaseRu(phase));
+        // Surface playbook notes for robot brief (phase/touch/shelf)
+        if (p != null && p.notes() != null) {
+            for (String n : p.notes()) {
+                if (n == null) continue;
+                if (n.startsWith("phase=")) s.put("planPhase", n.substring(6));
+                if (n.startsWith("touchQ=")) s.put("touchQ", n.substring(7));
+                if (n.contains("shelf→local") || n.contains("shelf->local")) s.put("shelfLocal", true);
+            }
+            if (p.rationale() != null && p.rationale().contains("shelf→local")) {
+                s.put("shelfLocal", true);
+            }
+        }
         s.put("bias", structure == null ? null : structure.bias());
         s.put("structureNote", structure == null ? null : structure.note());
         s.put("marketState", structure == null ? null : structure.marketState());
@@ -414,6 +442,7 @@ public class TrendDeskService {
         m.put("swingHighs", s.swingHighs());
         m.put("swingLows", s.swingLows());
         m.put("htf", s.htf());
+        m.put("htfSource", s.htfSource());
         m.put("bias", s.bias());
         m.put("note", s.note());
         m.put("zoneTop", zoneMap(s.zoneTop()));

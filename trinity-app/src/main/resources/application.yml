@@ -248,7 +248,7 @@ imoex:
       retest-arm-max-distance-points: 10
       a-setup-bounce-only: false     # full checklist: BOUNCE + RETEST after break+hold
       prefer-structural-entries: true  # operator: skip ACCUM/ZERO RETEST noise — TOP/BOT shelves
-      macro-bias-enabled: true         # FA/macro proxy: no knife BUY on dump / SELL on melt-up
+      macro-bias-enabled: true         # smart macro: knife BUY/RETEST blocked; confirmed BOT bounce OK if HTF≠DOWN
       macro-min-day-move-points: 80
       min-shelf-volume: 30             # anti-thin: bar vol / tape lots floor for entry shelves
       max-day-loss-rub: 1500           # block new setups when realized day PnL ≤ −limit (0=off)
@@ -260,7 +260,9 @@ imoex:
       no-trade-before-close-minutes: 30
       htf-min-move-points: 50
       htf-slope-bars: 24
-      htf-require-agreement: true    # HTF filter; day-shelf RETEST after break+hold still arms (§7–8)
+      htf-require-agreement: true    # M5 proxy fallback only
+      htf-aggregated-minutes: 60     # H1 from M5; 15=M15; 0=off (M5 proxy only)
+      htf-aggregated-bars: 3         # completed H1 lookback; refreshes each hour close
       counter-trend-size-fraction: 0.6
       counter-trend-min-reward-risk: 2.0
       counter-trend-bounce-only: true

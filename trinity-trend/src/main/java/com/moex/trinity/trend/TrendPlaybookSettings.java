@@ -32,6 +32,13 @@ public record TrendPlaybookSettings(
         double htfMinMovePoints,
         int htfSlopeBars,
         boolean htfRequireAgreement,
+        /**
+         * Aggregate M5 into senior TF for HTF bias: 60=H1, 15=M15, 0=off (M5 proxy only).
+         * Bias refreshes when a completed bucket closes (hourly for H1).
+         */
+        int htfAggregatedMinutes,
+        /** Lookback of completed aggregated bars for slope (default 3 H1). */
+        int htfAggregatedBars,
         double counterTrendSizeFraction,
         double counterTrendMinRewardRisk,
         boolean counterTrendBounceOnly,
@@ -53,7 +60,8 @@ public record TrendPlaybookSettings(
          */
         boolean preferStructuralEntries,
         /**
-         * Operator FA/macro proxy for BR: block knife-catch BUY on dump / SELL on melt-up.
+         * Operator FA/macro proxy for BR: smart knife filter on dump / melt-up
+         * (confirmed BOT bounce may still pass when HTF ≠ DOWN).
          */
         boolean macroBiasEnabled,
         /** Day open→now move (points) that marks directional macro bias. */
@@ -94,6 +102,8 @@ public record TrendPlaybookSettings(
                 50,
                 24,
                 true,
+                60,
+                3,
                 0.6,
                 2.0,
                 true,
@@ -123,7 +133,7 @@ public record TrendPlaybookSettings(
                 sessionBiasBars, sessionBiasMinPoints, requireBounceConfirm, minRewardRisk,
                 maxSetupsPerDay, cooldownBarsAfterSl, retestArmMaxDistancePoints,
                 tradeSessionOpen, tradeSessionClose, noTradeAfterOpenMinutes, noTradeBeforeCloseMinutes,
-                htfMinMovePoints, htfSlopeBars, htfRequireAgreement,
+                htfMinMovePoints, htfSlopeBars, htfRequireAgreement, htfAggregatedMinutes, htfAggregatedBars,
                 counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
                 counterTrendMaxDistancePoints, counterTrendRequireConfirm,
                 eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
@@ -141,7 +151,7 @@ public record TrendPlaybookSettings(
                 sessionBiasBars, sessionBiasMinPoints, requireBounceConfirm, minRewardRisk,
                 max, cooldownBarsAfterSl, retestArmMaxDistancePoints,
                 tradeSessionOpen, tradeSessionClose, noTradeAfterOpenMinutes, noTradeBeforeCloseMinutes,
-                htfMinMovePoints, htfSlopeBars, htfRequireAgreement,
+                htfMinMovePoints, htfSlopeBars, htfRequireAgreement, htfAggregatedMinutes, htfAggregatedBars,
                 counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
                 counterTrendMaxDistancePoints, counterTrendRequireConfirm,
                 eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
@@ -159,7 +169,7 @@ public record TrendPlaybookSettings(
                 sessionBiasBars, sessionBiasMinPoints, requireBounceConfirm, minRewardRisk,
                 maxSetupsPerDay, cooldownBarsAfterSl, retestArmMaxDistancePoints,
                 tradeSessionOpen, tradeSessionClose, noTradeAfterOpenMinutes, noTradeBeforeCloseMinutes,
-                htfMinMovePoints, htfSlopeBars, htfRequireAgreement,
+                htfMinMovePoints, htfSlopeBars, htfRequireAgreement, htfAggregatedMinutes, htfAggregatedBars,
                 counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
                 counterTrendMaxDistancePoints, counterTrendRequireConfirm,
                 eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
@@ -198,6 +208,8 @@ public record TrendPlaybookSettings(
             double htfMinMovePoints,
             int htfSlopeBars,
             boolean htfRequireAgreement,
+            int htfAggregatedMinutes,
+            int htfAggregatedBars,
             double counterTrendSizeFraction,
             double counterTrendMinRewardRisk,
             boolean counterTrendBounceOnly,
@@ -223,7 +235,7 @@ public record TrendPlaybookSettings(
                 sessionBiasBars, sessionBiasMinPoints, requireBounceConfirm, minRewardRisk,
                 maxSetupsPerDay, cooldownBarsAfterSl, retestArmMaxDistancePoints,
                 tradeSessionOpen, tradeSessionClose, noTradeAfterOpenMinutes, noTradeBeforeCloseMinutes,
-                htfMinMovePoints, htfSlopeBars, htfRequireAgreement,
+                htfMinMovePoints, htfSlopeBars, htfRequireAgreement, htfAggregatedMinutes, htfAggregatedBars,
                 counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
                 counterTrendMaxDistancePoints, counterTrendRequireConfirm,
                 eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,

@@ -9,6 +9,8 @@ import java.util.List;
  * Lightweight FA/macro proxy for BR futures (no equity-style news FA).
  * Combines HTF + session day impulse so we do not buy knives on dump days
  * or short melt-ups — operator-style filter, additive to checklist.
+ * Playbook applies this smartly: confirmed BOT bounce may still arm when HTF ≠ DOWN;
+ * RETEST long into dump stays blocked.
  */
 public enum BrMacroBias {
     BULLISH,
