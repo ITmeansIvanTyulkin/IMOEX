@@ -4,11 +4,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.DoubleAdder;
 
 /**
  * Robot engine: one-zone lock + max fills/day + cooldown after SL.
@@ -34,6 +36,9 @@ public class TrendRobotEngine {
     private final AtomicInteger stuckBars = new AtomicInteger(0);
     private final AtomicReference<String> stuckSignature = new AtomicReference<>("");
     private final AtomicInteger kickCountToday = new AtomicInteger(0);
+    /** Realized cash PnL for the session day (replay / paper register). */
+    private final DoubleAdder realizedDayPnlRub = new DoubleAdder();
+    private final AtomicInteger dayLossBlocks = new AtomicInteger(0);
 
     private static final int AUTO_KICK_AFTER_BARS = 8; // ~40 min M5
 
@@ -149,6 +154,21 @@ public class TrendRobotEngine {
         openManage.set(null);
         lastManage.set(null);
         state.set(TrendRobotState.FLAT);
+    }
+
+    /** Accumulate realized cash PnL for the day (replay / paper). */
+    public void registerRealizedPnl(double rub) {
+        if (Double.isFinite(rub)) {
+            realizedDayPnlRub.add(rub);
+        }
+    }
+
+    public double realizedDayPnlRub() {
+        return realizedDayPnlRub.sum();
+    }
+
+    public int dayLossBlockCount() {
+        return dayLossBlocks.get();
     }
 
     /** Unlock / cancel without fill — does not spend zone or burn quota. */
@@ -313,6 +333,15 @@ public class TrendRobotEngine {
             return Optional.of(noTradePlan(series, raw, eventEdge));
         }
 
+        double maxLoss = settings.maxDayLossRub();
+        if (maxLoss > 0 && realizedDayPnlRub.sum() <= -maxLoss) {
+            dayLossBlocks.incrementAndGet();
+            clearSetupLock();
+            return Optional.of(noTradePlan(series, raw,
+                    String.format(Locale.ROOT, "max day loss reached (%.0f ₽, PnL=%.0f)",
+                            maxLoss, realizedDayPnlRub.sum())));
+        }
+
         LocalDateTime cd = cooldownUntil.get();
         if (cd != null && !now.isBefore(cd)) {
             cooldownUntil.set(null);
@@ -422,6 +451,8 @@ public class TrendRobotEngine {
             kickCountToday.set(0);
             stuckBars.set(0);
             stuckSignature.set("");
+            realizedDayPnlRub.reset();
+            dayLossBlocks.set(0);
             spentZones.clear();
             if (prev != null) {
                 lock.set(null);

@@ -44,7 +44,8 @@ class HtfTrendTest {
             px -= 0.02; // recent slope down
             bars.add(new TrendBar(t.plusMinutes(i * 5L), px + 0.01, px + 0.02, px - 0.01, px, 1000));
         }
-        assertEquals(HtfTrend.FLAT, HtfTrend.resolve(bars, bars.get(bars.size() - 1).time(), s));
+        LocalDateTime now = bars.get(bars.size() - 1).time();
+        assertEquals(HtfTrend.FLAT, HtfTrend.resolveM5Proxy(bars, now, s, 50, 0.01));
     }
 
     @Test

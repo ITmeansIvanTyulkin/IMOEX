@@ -60,7 +60,9 @@ public class TrendSettingsService {
         return new View(
                 s.autoExecution(),
                 s.liveExecution(),
-                s.autoExecution() ? "AUTO" : "SIGNAL_ONLY",
+                s.autoExecution()
+                        ? (s.liveExecution() ? "LIVE_GATED" : "SANDBOX_FAIR")
+                        : "SIGNAL_ONLY",
                 s.updatedAt()
         );
     }

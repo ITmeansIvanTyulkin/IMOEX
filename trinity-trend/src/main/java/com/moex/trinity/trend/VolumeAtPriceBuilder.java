@@ -19,19 +19,31 @@ public final class VolumeAtPriceBuilder {
     private final int maxBandsToMerge;
     private final boolean allowZonePad;
     private final int minHvnBands;
+    /** Reject shelves with totalVolume below this (bar vol / tape lots). */
+    private final double minShelfVolume;
 
     public VolumeAtPriceBuilder(TrendInstrumentSpec spec) {
-        this(spec, false, 2);
+        this(spec, false, 2, 30);
     }
 
     public VolumeAtPriceBuilder(TrendInstrumentSpec spec, boolean allowZonePad, int minHvnBands) {
+        this(spec, allowZonePad, minHvnBands, 30);
+    }
+
+    public VolumeAtPriceBuilder(
+            TrendInstrumentSpec spec,
+            boolean allowZonePad,
+            int minHvnBands,
+            double minShelfVolume
+    ) {
         this(
                 spec.pointSize(),
                 spec.zoneMinPoints(),
                 spec.zoneMaxPoints(),
                 8,
                 allowZonePad,
-                minHvnBands
+                minHvnBands,
+                minShelfVolume
         );
     }
 
@@ -43,12 +55,25 @@ public final class VolumeAtPriceBuilder {
             boolean allowZonePad,
             int minHvnBands
     ) {
+        this(pointSize, zoneMinPoints, zoneMaxPoints, maxBandsToMerge, allowZonePad, minHvnBands, 30);
+    }
+
+    public VolumeAtPriceBuilder(
+            double pointSize,
+            double zoneMinPoints,
+            double zoneMaxPoints,
+            int maxBandsToMerge,
+            boolean allowZonePad,
+            int minHvnBands,
+            double minShelfVolume
+    ) {
         this.pointSize = pointSize > 0 ? pointSize : 0.01;
         this.zoneMinPoints = zoneMinPoints;
         this.zoneMaxPoints = zoneMaxPoints;
         this.maxBandsToMerge = Math.max(2, maxBandsToMerge);
         this.allowZonePad = allowZonePad;
         this.minHvnBands = Math.max(1, minHvnBands);
+        this.minShelfVolume = Math.max(0, minShelfVolume);
     }
 
     /**
@@ -234,7 +259,8 @@ public final class VolumeAtPriceBuilder {
                 touchIdx.add(i);
             }
         }
-        if (vap.isEmpty() || lotsNear < 30) {
+        double thinFloor = minShelfVolume > 0 ? minShelfVolume : 30;
+        if (vap.isEmpty() || lotsNear < thinFloor) {
             return MergedVolumeRange.invalid("tape shelf too thin near level");
         }
         // Visits: gap of 40 prints ≈ leave-and-return on a busy FORTS tape
@@ -253,14 +279,14 @@ public final class VolumeAtPriceBuilder {
                 && raw.low() < raw.high()) {
             double mid = (raw.low() + raw.high()) / 2.0;
             double half = (zoneMinPoints * pointSize) / 2.0;
-            return new MergedVolumeRange(
+            return gateMinShelfVolume(new MergedVolumeRange(
                     mid - half,
                     mid + half,
                     raw.totalVolume(),
                     raw.sourceBands(),
                     true,
                     null
-            );
+            ));
         }
         // Fallback: POC-centered zoneMin band from the shelf map
         long poc = vap.entrySet().stream()
@@ -269,14 +295,14 @@ public final class VolumeAtPriceBuilder {
                 .orElse(priceBucket(level));
         double pocPx = bucketToPrice(poc) + pointSize / 2.0;
         double half = (zoneMinPoints * pointSize) / 2.0;
-        return new MergedVolumeRange(
+        return gateMinShelfVolume(new MergedVolumeRange(
                 pocPx - half,
                 pocPx + half,
                 lotsNear,
                 List.of(new MarketProfileBand(pocPx - half, pocPx + half, lotsNear)),
                 true,
                 null
-        );
+        ));
     }
 
     public MergedVolumeRange mergeFromVolumeMap(NavigableMap<Long, Double> vap) {
@@ -288,7 +314,26 @@ public final class VolumeAtPriceBuilder {
             return MergedVolumeRange.invalid(
                     String.format("need ≥%d HVN bands, got %d", minHvnBands, hvn.size()));
         }
-        return rangeAroundPoc(vap, hvn);
+        return gateMinShelfVolume(rangeAroundPoc(vap, hvn));
+    }
+
+    /** Reject otherwise-valid shelves with too little volume (anti-thin). */
+    MergedVolumeRange gateMinShelfVolume(MergedVolumeRange range) {
+        if (range == null || !range.validForEntry() || minShelfVolume <= 0) {
+            return range;
+        }
+        if (range.totalVolume() < minShelfVolume) {
+            return new MergedVolumeRange(
+                    range.low(),
+                    range.high(),
+                    range.totalVolume(),
+                    range.sourceBands(),
+                    false,
+                    String.format("shelf too thin: vol=%.0f < min=%.0f",
+                            range.totalVolume(), minShelfVolume)
+            );
+        }
+        return range;
     }
 
     public MergedVolumeRange mergeFromBars(List<TrendBar> window) {

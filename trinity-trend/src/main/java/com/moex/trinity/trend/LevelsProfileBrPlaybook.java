@@ -45,7 +45,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         this.vap = new VolumeAtPriceBuilder(
                 this.settings.instrument(),
                 this.settings.allowZonePad(),
-                this.settings.minHvnBands()
+                this.settings.minHvnBands(),
+                this.settings.minShelfVolume()
         );
         this.marketData = marketData;
         this.dayZones = new DayZoneLock(dayZoneFile);
@@ -128,7 +129,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         double liveHigh = extremes[0];
         double liveLow = extremes[1];
 
-        HtfTrend htf = HtfTrend.resolve(window, series.last().time(), settings);
+        HtfTrend.Resolved htfRes = HtfTrend.resolveDetailed(window, series.last().time(), settings);
+        HtfTrend htf = htfRes.trend();
         MarketState marketState = ChecklistStructure.detectMarketState(
                 window, settings.sessionBiasMinPoints(), spec.pointSize());
         TrendBias bias = marketState.toBias();
@@ -155,28 +157,23 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 lockCands.bottomSource()
         );
 
-        // Display / trade anchors = locked day ranges; before 09:40 show live candidates only
+        // Display: locked sides are frozen; unlocked side may show live candidate until first absorb
         double trendHigh;
         double trendLow;
         TrendStructureSnapshot.Zone zoneTop;
         TrendStructureSnapshot.Zone zoneBottom;
-        if (locked.hasTop() || locked.hasBottom()) {
-            trendHigh = Double.isFinite(locked.trendHigh()) ? locked.trendHigh() : liveHigh;
-            trendLow = Double.isFinite(locked.trendLow()) ? locked.trendLow() : liveLow;
-            zoneTop = locked.hasTop()
-                    ? toZoneDto(new ZoneCandidate(trendHigh, locked.top(),
-                    locked.topSource() == null ? "DAY" : locked.topSource() + "+DAY"), spec, "TOP")
-                    : null;
-            zoneBottom = locked.hasBottom()
-                    ? toZoneDto(new ZoneCandidate(trendLow, locked.bottom(),
-                    locked.bottomSource() == null ? "DAY" : locked.bottomSource() + "+DAY"), spec, "BOTTOM")
-                    : null;
-        } else {
-            trendHigh = liveHigh;
-            trendLow = liveLow;
-            zoneTop = topLive.map(c -> toZoneDto(c, spec, "TOP")).orElse(null);
-            zoneBottom = botLive.map(c -> toZoneDto(c, spec, "BOTTOM")).orElse(null);
-        }
+        trendHigh = Double.isFinite(locked.trendHigh()) && (locked.hasTop() || locked.hasBottom())
+                ? locked.trendHigh() : liveHigh;
+        trendLow = Double.isFinite(locked.trendLow()) && (locked.hasTop() || locked.hasBottom())
+                ? locked.trendLow() : liveLow;
+        zoneTop = locked.hasTop()
+                ? toZoneDto(new ZoneCandidate(trendHigh, locked.top(),
+                locked.topSource() == null ? "DAY" : locked.topSource() + "+DAY"), spec, "TOP")
+                : topLive.map(c -> toZoneDto(c, spec, "TOP")).orElse(null);
+        zoneBottom = locked.hasBottom()
+                ? toZoneDto(new ZoneCandidate(trendLow, locked.bottom(),
+                locked.bottomSource() == null ? "DAY" : locked.bottomSource() + "+DAY"), spec, "BOTTOM")
+                : botLive.map(c -> toZoneDto(c, spec, "BOTTOM")).orElse(null);
 
         // §4: previous-trend zero point
         double zero = previousTrendZeroPoint(window, bias, trendHigh, trendLow);
@@ -213,7 +210,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 .map(c -> breakHoldSatisfied(window, c.range(), false, Math.max(1, settings.confirmBarsAfterBreak())))
                 .orElse(false);
 
-        String note = checklistNote(htf, bias, zoneTop, zoneBottom, zero, zeroBroken, topBrokenHeld, bottomBrokenHeld);
+        String note = "HTF " + htf.name() + "@" + htfRes.source() + ". "
+                + checklistNote(htf, bias, zoneTop, zoneBottom, zero, zeroBroken, topBrokenHeld, bottomBrokenHeld);
         List<ChecklistLevel> levelsLive = buildProfiledLevels(
                 series.instrument(), window, marketState, trendHigh, trendLow, zero, series.last().close());
         List<ChecklistLevel> levels = checklistDayLock.absorb(day, levelsLive);
@@ -253,6 +251,7 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 zoneTop,
                 zoneBottom,
                 htf.name(),
+                htfRes.source(),
                 bias.name(),
                 note,
                 marketState.name(),
@@ -294,7 +293,12 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                     checklistDayLock.dropRoles("TREND_LO");
                 }
             }
-            return dayZones.absorb(day, trendHigh, trendLow, topCand, topSrc, bottomCand, bottomSrc);
+            // Anti-thin: never day-lock soft / invalid shelves (desk may still draw them)
+            MergedVolumeRange topLock = lockableShelf(topCand, topSrc);
+            String topLockSrc = topLock == null ? null : topSrc;
+            MergedVolumeRange botLock = lockableShelf(bottomCand, bottomSrc);
+            String botLockSrc = botLock == null ? null : bottomSrc;
+            return dayZones.absorb(day, trendHigh, trendLow, topLock, topLockSrc, botLock, botLockSrc);
         }
         if (cur != null && day.equals(cur.day())) {
             return cur;
@@ -321,6 +325,29 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         MergedVolumeRange bot = chooseShelf(prior.bottom(), botLive.map(ZoneCandidate::range).orElse(null),
                 liveLow, false);
         String botSrc = sourceFor(bot, prior.bottom(), botLive.map(ZoneCandidate::source).orElse(null), false);
+        // Soft/thin prior must not block today's lockable shelf (checklist: freeze real §6–7 volume)
+        if (lockableShelf(top, topSrc) == null) {
+            MergedVolumeRange liveTop = topLive.map(ZoneCandidate::range).orElse(null);
+            String liveTopSrc = topLive.map(ZoneCandidate::source).orElse(null);
+            if (lockableShelf(liveTop, liveTopSrc) != null) {
+                top = liveTop;
+                topSrc = liveTopSrc;
+            } else {
+                top = null;
+                topSrc = null;
+            }
+        }
+        if (lockableShelf(bot, botSrc) == null) {
+            MergedVolumeRange liveBot = botLive.map(ZoneCandidate::range).orElse(null);
+            String liveBotSrc = botLive.map(ZoneCandidate::source).orElse(null);
+            if (lockableShelf(liveBot, liveBotSrc) != null) {
+                bot = liveBot;
+                botSrc = liveBotSrc;
+            } else {
+                bot = null;
+                botSrc = null;
+            }
+        }
         return new ZonePair(top, topSrc, bot, botSrc);
     }
 
@@ -471,17 +498,29 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
     }
 
     /**
-     * Current-trend high/low for structure (checklist §5).
-     * Uses a recent window (~session), not the full multi-day lookback spike.
+     * Current-trend high/low for structure (checklist §5) and day-lock break detection.
+     * Same calendar day as the last bar — never use prior-day LO/HI to "break" today's shelves.
      */
     double[] currentTrendExtremes(List<TrendBar> window) {
         if (window == null || window.isEmpty()) {
             return new double[]{Double.NaN, Double.NaN};
         }
-        int n = Math.min(window.size(), Math.max(48, settings.sessionBiasBars() * 2));
-        List<TrendBar> trend = window.subList(window.size() - n, window.size());
-        double hi = trend.stream().mapToDouble(TrendBar::high).max().orElse(Double.NaN);
-        double lo = trend.stream().mapToDouble(TrendBar::low).min().orElse(Double.NaN);
+        java.time.LocalDate day = window.get(window.size() - 1).time() == null
+                ? null
+                : window.get(window.size() - 1).time().toLocalDate();
+        List<TrendBar> sameDay = new ArrayList<>();
+        if (day != null) {
+            for (TrendBar b : window) {
+                if (b != null && b.time() != null && day.equals(b.time().toLocalDate())) {
+                    sameDay.add(b);
+                }
+            }
+        }
+        List<TrendBar> trend = sameDay.isEmpty() ? window : sameDay;
+        int n = Math.min(trend.size(), Math.max(48, settings.sessionBiasBars() * 2));
+        List<TrendBar> slice = trend.subList(trend.size() - n, trend.size());
+        double hi = slice.stream().mapToDouble(TrendBar::high).max().orElse(Double.NaN);
+        double lo = slice.stream().mapToDouble(TrendBar::low).min().orElse(Double.NaN);
         return new double[]{hi, lo};
     }
 
@@ -711,7 +750,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         int lookback = Math.min(bars.size(), Math.max(60, settings.levelLookbackBars()));
         List<TrendBar> window = bars.subList(bars.size() - lookback, bars.size());
 
-        HtfTrend htf = HtfTrend.resolve(window, series.last().time(), settings);
+        HtfTrend.Resolved htfRes = HtfTrend.resolveDetailed(window, series.last().time(), settings);
+        HtfTrend htf = htfRes.trend();
         MarketState marketState = ChecklistStructure.detectMarketState(
                 window, settings.sessionBiasMinPoints(), spec.pointSize());
         TrendBias bias = marketState.toBias();
@@ -776,7 +816,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             return Optional.of(noTrade(series, "§6–7: no valid profiled range on active level"));
         }
 
-        // Unstick: if chosen level is broken+held but price is far (not approaching), drop it and re-pick
+        // Unstick: broken+held level far from price → pick another level.
+        // Checklist day TOP/BOT stay fixed until clearBrokenShelves (±zone break) — never forceClear here.
         {
             MergedVolumeRange ar = active.range();
             boolean bu = breakHoldSatisfied(window, ar, true, Math.max(1, settings.confirmBarsAfterBreak()));
@@ -784,6 +825,7 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             double distPts = Math.abs(lastClose - ar.mid()) / spec.pointSize();
             double arm = settings.retestArmMaxDistancePoints();
             if ((bu || bd) && distPts > arm) {
+                String dropRole = active.role();
                 List<ChecklistLevel> rest = new ArrayList<>();
                 for (ChecklistLevel l : levels) {
                     if (Math.abs(l.price() - active.price()) > spec.pointSize()) {
@@ -795,12 +837,25 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 if (alt != null && alt.hasValidRange()) {
                     active = alt;
                 } else {
-                    // Hard kick shelves once — new extreme must re-lock
-                    dayZones.forceClearShelves(liveHigh, liveLow);
-                    checklistDayLock.dropRoles("TREND_HI", "TREND_LO", "ACCUM");
+                    if (dropRole != null && !dropRole.isBlank()) {
+                        checklistDayLock.dropRoles(dropRole);
+                    }
+                    // Re-resolve day shelves (may clear only if extreme broke the lock by ≥ zone break)
+                    locked = resolveDayZones(
+                            series.last().time(),
+                            day, liveHigh, liveLow,
+                            lockCands.topRange(),
+                            lockCands.topSource(),
+                            lockCands.bottomRange(),
+                            lockCands.bottomSource()
+                    );
+                    trendHigh = Double.isFinite(locked.trendHigh()) && (locked.hasTop() || locked.hasBottom())
+                            ? locked.trendHigh() : liveHigh;
+                    trendLow = Double.isFinite(locked.trendLow()) && (locked.hasTop() || locked.hasBottom())
+                            ? locked.trendLow() : liveLow;
                     levelsLive = buildProfiledLevels(
-                            series.instrument(), window, marketState, liveHigh, liveLow, zero, lastClose);
-                    levelsLive = applyDayLockedShelves(levelsLive, dayZones.get(), liveHigh, liveLow, window);
+                            series.instrument(), window, marketState, trendHigh, trendLow, zero, lastClose);
+                    levelsLive = applyDayLockedShelves(levelsLive, locked, trendHigh, trendLow, window);
                     levels = checklistDayLock.absorb(day, levelsLive);
                     active = ChecklistStructure.pickActive(
                             levels, lastClose, marketState, arm, spec.pointSize());
@@ -811,12 +866,56 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             }
         }
 
+        // Prefer local shelf when price dwells at BOT/TOP while active is far broken retest target
+        ChecklistLevel switched = PlaybookIntelligence.preferLocalShelf(
+                active, levels, window, lastClose,
+                settings.retestArmMaxDistancePoints(), spec.pointSize(), 24);
+        boolean shelfSwitched = switched != null && switched != active
+                && Math.abs(switched.price() - active.price()) > spec.pointSize();
+        if (shelfSwitched) {
+            active = switched;
+        }
+
         MergedVolumeRange range = active.range();
         boolean brokenUp = breakHoldSatisfied(window, range, true, Math.max(1, settings.confirmBarsAfterBreak()));
         boolean brokenDown = breakHoldSatisfied(window, range, false, Math.max(1, settings.confirmBarsAfterBreak()));
         active = active.withBrokenHeld(brokenUp || brokenDown);
 
         ModeDecision md = decideChecklistAtLevel(window, active, brokenUp, brokenDown);
+
+        double dayMovePts = BrMacroBias.dayMovePoints(
+                window, series.last().time(), settings.tradeSessionOpen(), spec.pointSize());
+        PlaybookIntelligence.SessionPhase phase = PlaybookIntelligence.resolvePhase(
+                dayMovePts, htf, settings.macroMinDayMovePoints());
+
+        // Clear bounce beats stuck wait / wrong-direction retest on the same shelf (§8 actionable RETEST kept)
+        if (isBotShelfRole(active.role()) && bounceConfirmed(window, range, true)) {
+            if (md.mode() == null || (md.mode() == TrendTradeMode.RETEST && !md.buy())) {
+                md = new ModeDecision(TrendTradeMode.BOUNCE, true,
+                        "clear BOT bounce (reject) — prefer over wait-retest");
+            }
+        } else if (("TREND_HI".equals(active.role()) || "TOP".equals(active.role()))
+                && bounceConfirmed(window, range, false)) {
+            if (md.mode() == null || (md.mode() == TrendTradeMode.RETEST && md.buy())) {
+                // Rejection short only when not a valid §8 long already armed with touch —
+                // if RETEST long is armed, keep §8 unless close already rejected below shelf
+                TrendBar last = window.get(window.size() - 1);
+                if (md.mode() == null || last.close() < range.low()) {
+                    md = new ModeDecision(TrendTradeMode.BOUNCE, false,
+                            "clear TOP bounce (reject) — prefer over wait-retest");
+                }
+            }
+        } else if (md.mode() == null) {
+            if (phase == PlaybookIntelligence.SessionPhase.MEAN_REVERT_AFTER_DUMP
+                    && isBotShelfRole(active.role())
+                    && bounceConfirmed(window, range, true)) {
+                md = new ModeDecision(TrendTradeMode.BOUNCE, true, "phase dump→BOT bounce (reject confirm)");
+            } else if (phase == PlaybookIntelligence.SessionPhase.MEAN_REVERT_AFTER_RALLY
+                    && ("TREND_HI".equals(active.role()) || "TOP".equals(active.role()))
+                    && bounceConfirmed(window, range, false)) {
+                md = new ModeDecision(TrendTradeMode.BOUNCE, false, "phase rally→TOP bounce (reject confirm)");
+            }
+        }
 
         if (md.mode() == null) {
             return Optional.of(plan(
@@ -827,10 +926,13 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                     range,
                     null,
                     Double.NaN, Double.NaN, Double.NaN,
-                    "§" + (active.preferBuy() ? "14" : "14") + " level " + active.role()
+                    "§14 level " + active.role()
                             + " " + fmt(range) + " — waiting: " + md.reason()
+                            + " | " + PlaybookIntelligence.phaseRu(phase)
+                            + (shelfSwitched ? " | shelf→local" : "")
                             + " | " + ChecklistStructure.majorityNote(levels, marketState),
-                    List.of(md.reason(), "htf=" + htf, "state=" + marketState, "session=" + session)
+                    List.of(md.reason(), "htf=" + htf, "htfSrc=" + htfRes.source(),
+                            "phase=" + phase, "state=" + marketState, "session=" + session)
             ));
         }
 
@@ -843,7 +945,74 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             ));
         }
 
+        // Operator style: skip noisy ACCUM POC; ZERO retest only with HTF (not knife noise)
+        if (settings.preferStructuralEntries()) {
+            String role = active.role() == null ? "" : active.role();
+            if ("ACCUM".equals(role)) {
+                return Optional.of(plan(
+                        series, TrendRobotState.ZONE_READY, null, md.buy(), range, null,
+                        Double.NaN, Double.NaN, Double.NaN,
+                        "operator: ACCUM POC skipped — prefer day TOP/BOT / ZERO shelves",
+                        List.of("htf=" + htf, "state=" + marketState)
+                ));
+            }
+            // TOP shelf → prefer short bounce/retest down, not long into the high unless HTF-up continuation
+            if ("TREND_HI".equals(role) && md.buy() && md.mode() == TrendTradeMode.RETEST
+                    && htf != HtfTrend.UP) {
+                return Optional.of(plan(
+                        series, TrendRobotState.ZONE_READY, null, true, range, null,
+                        Double.NaN, Double.NaN, Double.NaN,
+                        "operator: TREND_HI long only with HTF UP continuation",
+                        List.of("htf=" + htf)
+                ));
+            }
+            // BOT shelf → prefer long; skip short into the low unless HTF-down continuation
+            if ("TREND_LO".equals(role) && !md.buy() && md.mode() == TrendTradeMode.RETEST
+                    && htf != HtfTrend.DOWN) {
+                return Optional.of(plan(
+                        series, TrendRobotState.ZONE_READY, null, false, range, null,
+                        Double.NaN, Double.NaN, Double.NaN,
+                        "operator: TREND_LO short only with HTF DOWN continuation",
+                        List.of("htf=" + htf)
+                ));
+            }
+        }
+
         boolean buy = md.buy();
+        BrMacroBias macro = settings.macroBiasEnabled()
+                ? BrMacroBias.resolve(
+                window, series.last().time(), htf, marketState, settings,
+                settings.macroMinDayMovePoints())
+                : BrMacroBias.NEUTRAL;
+        // Smart knife filter: dump day blocks blind BUY / RETEST long; BOT bounce may pass with
+        // reject + (HTF≠DOWN | H1 decelerating | held above mid).
+        if (macro.blocksBuy() && buy) {
+            Optional<TrendRobotPlan> macroBuy = smartMacroBuyGate(
+                    series, window, range, md, active, htf, macro, series.last().time(), spec.pointSize());
+            if (macroBuy.isPresent()) {
+                return macroBuy;
+            }
+        }
+        if (macro.blocksSell() && !buy && md.mode() == TrendTradeMode.RETEST
+                && !"TREND_HI".equals(active.role())) {
+            return Optional.of(noTrade(series,
+                    "FA/macro " + macro + " — no mid/LO SELL into melt-up; wait TOP shelf bounce"));
+        }
+
+        // ZERO mid-retest only with HTF (operator: don't invent mean-reversion mid-noise)
+        if (settings.preferStructuralEntries()
+                && "ZERO".equals(active.role())
+                && md.mode() == TrendTradeMode.RETEST
+                && !htf.withTrend(buy)
+                && !(md.buy() && brokenUp || !md.buy() && brokenDown)) {
+            return Optional.of(plan(
+                    series, TrendRobotState.ZONE_READY, null, buy, range, null,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    "operator: ZERO RETEST only with HTF / break+hold continuation",
+                    List.of("htf=" + htf)
+            ));
+        }
+
         boolean against = htf.againstTrend(buy);
         boolean checklistRetestContinuation = md.mode() == TrendTradeMode.RETEST
                 && ((buy && brokenUp) || (!buy && brokenDown));
@@ -851,7 +1020,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         if (against && settings.counterTrendBounceOnly() && md.mode() == TrendTradeMode.RETEST
                 && !checklistRetestContinuation) {
             return Optional.of(noTrade(series,
-                    "HTF " + htf + " counter — RETEST blocked (bounce only)"));
+                    "HTF " + htf + "@" + htfRes.source()
+                            + " counter — RETEST blocked (bounce only; §8 break+hold still allowed)"));
         }
         if ((settings.requireBounceConfirm() || (against && settings.counterTrendRequireConfirm()))
                 && md.mode() == TrendTradeMode.BOUNCE
@@ -860,9 +1030,39 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                     series, TrendRobotState.ZONE_READY, null, buy, range, null,
                     Double.NaN, Double.NaN, Double.NaN,
                     "§14 bounce — waiting closed rejection confirm",
-                    List.of("htf=" + htf, "state=" + marketState)
+                    List.of("htf=" + htf, "state=" + marketState, "phase=" + phase)
             ));
         }
+
+        // Touch quality: poke + reject required; strong body / DOM = soft bonus in rationale
+        int touchQ = PlaybookIntelligence.touchQuality(window, range, buy);
+        int domBonus = 0;
+        if (marketData != null) {
+            try {
+                Optional<DomBook> book = marketData.latestBook(series.instrument());
+                if (book.isPresent()) {
+                    DomBook b = book.get();
+                    double bids = b.bids() == null ? 0 : b.bids().stream().limit(5)
+                            .mapToLong(DomBook.DomLevel::quantityLots).sum();
+                    double asks = b.asks() == null ? 0 : b.asks().stream().limit(5)
+                            .mapToLong(DomBook.DomLevel::quantityLots).sum();
+                    domBonus = PlaybookIntelligence.domSoftBonus(buy, bids, asks);
+                }
+            } catch (Exception ignored) {
+                // soft only
+            }
+        }
+        int touchTotal = touchQ + domBonus;
+        if (md.mode() == TrendTradeMode.BOUNCE && touchQ < 2) {
+            return Optional.of(plan(
+                    series, TrendRobotState.ZONE_READY, TrendTradeMode.BOUNCE, buy, range, null,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    "touch quality " + touchQ + "/3 — need poke+reject у полки"
+                            + (domBonus > 0 ? " (DOM+" + domBonus + ")" : ""),
+                    List.of("touchQ=" + touchQ, "phase=" + phase, "htf=" + htf)
+            ));
+        }
+
         if (against && md.mode() == TrendTradeMode.RETEST && !checklistRetestContinuation) {
             double maxDist = settings.counterTrendMaxDistancePoints();
             if (!retestEntryAllowed(window, range, buy, maxDist, spec.pointSize())) {
@@ -938,6 +1138,16 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                 : TrendRobotState.ARMED_RETEST;
 
         String tilt = against ? "COUNTER×" + settings.counterTrendSizeFraction() : "WITH";
+        if (macro != BrMacroBias.NEUTRAL) {
+            tilt = tilt + " macro=" + macro;
+        }
+        tilt = tilt + " htfSrc=" + htfRes.source() + " " + PlaybookIntelligence.phaseRu(phase);
+        if (shelfSwitched) {
+            tilt = tilt + " shelf→local";
+        }
+        if (touchTotal > 0) {
+            tilt = tilt + " touch=" + touchQ + (domBonus > 0 ? "+" + domBonus + "DOM" : "");
+        }
         String domNote = domSoftNote(series.instrument(), range);
         String runnerTag = md.mode() == TrendTradeMode.BOUNCE ? "§18×2" : "§13×1.5";
         String rationale = String.format(Locale.ROOT,
@@ -954,7 +1164,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         return Optional.of(plan(
                 series, state, md.mode(), buy, range, grid, stop, tp1, tp2, rationale,
                 List.of(md.reason(), "htf=" + htf, tilt, "state=" + marketState,
-                        "level=" + active.role(), "session=" + session, "initialSize=" + initFrac)
+                        "level=" + active.role(), "session=" + session, "initialSize=" + initFrac,
+                        "phase=" + phase, "touchQ=" + touchTotal)
         ));
     }
 
@@ -1027,14 +1238,19 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                         settings.touchLookback(), settings.candlesPerTouch(), 2);
                 src = "BARS-FALLBACK";
             }
-            // Structural HI/LO must always get a shelf — new extremes have no 2–3 bounces yet
+            // Structural HI/LO desk shelf — geometry only; not tradable without real §6–7 volume
             if (!range.validForEntry()
                     && ("TREND_HI".equals(l.role()) || "TREND_LO".equals(l.role()))) {
                 double width = settings.instrument().zoneMinPoints() * settings.instrument().pointSize();
                 double low = "TREND_HI".equals(l.role()) ? l.price() - width : l.price();
                 double high = "TREND_HI".equals(l.role()) ? l.price() : l.price() + width;
-                range = new MergedVolumeRange(low, high, 1, List.of(), true, null);
+                range = new MergedVolumeRange(low, high, range.totalVolume(), List.of(), false,
+                        range.invalidReason() != null ? range.invalidReason() : "SOFT§6 desk only");
                 src = "SOFT§6";
+                // Keep for overlay context but do not mark as entry-valid
+                out.add(new ChecklistLevel(l.price(), l.role(), src + "+" + l.source(),
+                        l.preferBuy(), range, false));
+                continue;
             }
             if (range.validForEntry()) {
                 boolean brokenUp = breakHoldSatisfied(window, range, true, Math.max(1, settings.confirmBarsAfterBreak()));
@@ -1047,7 +1263,9 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
     }
 
     /**
-     * §8 RETEST after break+hold, else §14 bounce by preferBuy side.
+     * §8 RETEST after break+hold on the matching shelf side, else §14 bounce.
+     * Broken-up on BOT (price recovered above LO shelf) is not a TOP retest — bounce path.
+     * Broken-down on TOP is not a BOT retest — bounce path.
      */
     private ModeDecision decideChecklistAtLevel(
             List<TrendBar> window,
@@ -1058,16 +1276,32 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         MergedVolumeRange range = level.range();
         double maxDist = settings.retestArmMaxDistancePoints();
         double pt = settings.instrument().pointSize();
+        String role = level.role() == null ? "" : level.role();
+        boolean structuralTop = "TREND_HI".equals(role) || "TOP".equals(role)
+                || (!level.preferBuy() && !"TREND_LO".equals(role) && !"BOTTOM".equals(role) && !"BOT".equals(role));
+        boolean structuralBot = "TREND_LO".equals(role) || "BOTTOM".equals(role) || "BOT".equals(role)
+                || (level.preferBuy() && !structuralTop);
 
-        if (brokenUp) {
-            // §8: retest long from above
+        // TOP / resistance shelf: only upward break+hold arms §8 long retest
+        if (brokenUp && structuralTop) {
+            TrendBar last = window.get(window.size() - 1);
+            if (bounceConfirmed(window, range, false) && last.close() < range.low()) {
+                return new ModeDecision(TrendTradeMode.BOUNCE, false,
+                        "TOP rejection bounce short (confirmed below shelf) — prefer over §8 RETEST long");
+            }
             if (!retestEntryAllowed(window, range, true, maxDist, pt)) {
                 return new ModeDecision(null, true,
                         "§8 TOP/level break+hold — waiting retest from above");
             }
             return new ModeDecision(TrendTradeMode.RETEST, true, "§8 break+hold+retest long");
         }
-        if (brokenDown) {
+        // BOT / support shelf: only downward break+hold arms §8 short retest
+        if (brokenDown && structuralBot) {
+            TrendBar last = window.get(window.size() - 1);
+            if (bounceConfirmed(window, range, true) && last.close() > range.high()) {
+                return new ModeDecision(TrendTradeMode.BOUNCE, true,
+                        "BOT rejection bounce long (confirmed above shelf) — prefer over §8 RETEST short");
+            }
             if (!retestEntryAllowed(window, range, false, maxDist, pt)) {
                 return new ModeDecision(null, false,
                         "§8 BOT/level break+hold — waiting retest from below");
@@ -1075,8 +1309,13 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             return new ModeDecision(TrendTradeMode.RETEST, false, "§8 break+hold+retest short");
         }
 
-        // §14 bounce: preferBuy → long bounce, else short bounce
-        boolean zoneIsTop = !level.preferBuy();
+        // §14 bounce at shelf (incl. BOT recovered above after poke — not §8 TOP path)
+        boolean zoneIsTop = structuralTop && !structuralBot ? true : !level.preferBuy();
+        if (structuralBot && !structuralTop) {
+            zoneIsTop = false;
+        } else if (structuralTop && !structuralBot) {
+            zoneIsTop = true;
+        }
         return decideBounceAtShelf(window, range, zoneIsTop);
     }
 
@@ -1232,6 +1471,12 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
 
         if (zoneIsTop) {
             if (topBrokenHeld) {
+                TrendBar last = window.get(window.size() - 1);
+                // Only steal §8 RETEST when rejection closes fully below the shelf
+                if (bounceConfirmed(window, range, false) && last.close() < range.low()) {
+                    return new ModeDecision(TrendTradeMode.BOUNCE, false,
+                            "TOP rejection bounce short (confirmed below shelf) — prefer over break RETEST long");
+                }
                 if (!retestEntryAllowed(window, range, true, maxDist, pt)) {
                     return new ModeDecision(null, true,
                             "TOP break+hold — waiting retest from above (touch / within "
@@ -1244,6 +1489,11 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         }
 
         if (bottomBrokenHeld) {
+            TrendBar last = window.get(window.size() - 1);
+            if (bounceConfirmed(window, range, true) && last.close() > range.high()) {
+                return new ModeDecision(TrendTradeMode.BOUNCE, true,
+                        "BOT rejection bounce long (confirmed above shelf) — prefer over break RETEST short");
+            }
             if (!retestEntryAllowed(window, range, false, maxDist, pt)) {
                 return new ModeDecision(null, false,
                         "BOT break+hold — waiting retest from below (touch / within "
@@ -1257,39 +1507,64 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
 
     /**
      * Bounce at a day-locked shelf: BOT → BUY, TOP → SELL (mean-reversion between ranges).
+     * Operator rejection: wick into shelf then close out of zone still arms bounce.
      */
     private ModeDecision decideBounceAtShelf(List<TrendBar> window, MergedVolumeRange range, boolean zoneIsTop) {
+        BounceShelfArm arm = armBounceAtShelf(window, range, zoneIsTop, settings.requireBounceConfirm());
+        return new ModeDecision(arm.mode(), arm.buy(), arm.reason());
+    }
+
+    /**
+     * TOP/BOT bounce arm logic. Package-visible for tests.
+     * When {@code bounceConfirmed}, arms even if close already left the shelf.
+     */
+    static BounceShelfArm armBounceAtShelf(
+            List<TrendBar> window,
+            MergedVolumeRange range,
+            boolean zoneIsTop,
+            boolean requireConfirm
+    ) {
         boolean buy = !zoneIsTop;
         boolean above = window.get(window.size() - 1).close() > range.high();
         boolean below = window.get(window.size() - 1).close() < range.low();
         boolean inside = !above && !below;
         double lastClose = window.get(window.size() - 1).close();
 
-        if (buy) {
-            // BOT long: need touch / reject from lower shelf
-            if (below || (inside && lastClose <= range.mid())) {
-                if (settings.requireBounceConfirm() && !bounceConfirmed(window, range, true)) {
-                    return new ModeDecision(null, true, "BOT bounce: waiting closed rejection candle in zone");
-                }
-                return new ModeDecision(TrendTradeMode.BOUNCE, true, "BOT shelf: bounce long (confirmed)");
+        // Operator path: rejection candle may close outside the shelf.
+        if (bounceConfirmed(window, range, buy)) {
+            if (buy) {
+                return new BounceShelfArm(TrendTradeMode.BOUNCE, true, "BOT shelf: bounce long (confirmed)");
             }
-            if (above) {
-                return new ModeDecision(null, true, "price above BOT — waiting return to shelf");
-            }
-            return new ModeDecision(null, true, "BOT shelf — mid-zone, no bounce confirm yet");
+            return new BounceShelfArm(TrendTradeMode.BOUNCE, false, "TOP shelf: bounce short (confirmed)");
         }
 
-        // TOP short
-        if (above || (inside && lastClose >= range.mid())) {
-            if (settings.requireBounceConfirm() && !bounceConfirmed(window, range, false)) {
-                return new ModeDecision(null, false, "TOP bounce: waiting closed rejection candle in zone");
+        if (buy) {
+            if (below || (inside && lastClose <= range.mid())) {
+                if (requireConfirm) {
+                    return new BounceShelfArm(null, true, "BOT bounce: waiting closed rejection candle in zone");
+                }
+                return new BounceShelfArm(TrendTradeMode.BOUNCE, true, "BOT shelf: bounce long (confirmed)");
             }
-            return new ModeDecision(TrendTradeMode.BOUNCE, false, "TOP shelf: bounce short (confirmed)");
+            if (above) {
+                return new BounceShelfArm(null, true, "price above BOT — waiting return to shelf");
+            }
+            return new BounceShelfArm(null, true, "BOT shelf — mid-zone, no bounce confirm yet");
+        }
+
+        if (above || (inside && lastClose >= range.mid())) {
+            if (requireConfirm) {
+                return new BounceShelfArm(null, false, "TOP bounce: waiting closed rejection candle in zone");
+            }
+            return new BounceShelfArm(TrendTradeMode.BOUNCE, false, "TOP shelf: bounce short (confirmed)");
         }
         if (below) {
-            return new ModeDecision(null, false, "price below TOP — waiting return to shelf");
+            return new BounceShelfArm(null, false, "price below TOP — waiting return to shelf");
         }
-        return new ModeDecision(null, false, "TOP shelf — mid-zone, no bounce confirm yet");
+        return new BounceShelfArm(null, false, "TOP shelf — mid-zone, no bounce confirm yet");
+    }
+
+    /** Result of {@link #armBounceAtShelf} — package-visible for tests. */
+    record BounceShelfArm(TrendTradeMode mode, boolean buy, String reason) {
     }
 
     private ModeDecision decideMode(List<TrendBar> window, MergedVolumeRange range, TrendBias bias, double lastClose) {
@@ -1338,6 +1613,65 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             return new ModeDecision(null, false, "broke below range — waiting confirm bars");
         }
         return new ModeDecision(null, false, "price mid-range — no bounce/retest yet");
+    }
+
+    /**
+     * Dump-day BUY gate: hard-block knife / RETEST long; allow BOT bounce with reject when
+     * HTF≠DOWN, or HTF DOWN but H1 decelerating / held above mid.
+     *
+     * @return empty → proceed with entry path; present → return that plan (wait or NO_TRADE)
+     */
+    private Optional<TrendRobotPlan> smartMacroBuyGate(
+            TrendBarSeries series,
+            List<TrendBar> window,
+            MergedVolumeRange range,
+            ModeDecision md,
+            ChecklistLevel active,
+            HtfTrend htf,
+            BrMacroBias macro,
+            java.time.LocalDateTime now,
+            double pointSize
+    ) {
+        if (PlaybookIntelligence.allowsDumpDayBotBounce(
+                md.mode(), active == null ? null : active.role(), htf, window, range, now, pointSize)) {
+            return Optional.empty();
+        }
+        boolean botShelf = isBotShelfRole(active == null ? null : active.role());
+        if (md.mode() == TrendTradeMode.BOUNCE && botShelf) {
+            String wait = htf == HtfTrend.DOWN
+                    ? "dump day + HTF DOWN: нужен reject и (H1 тормозит dump ИЛИ 2 close над mid BOT)"
+                    : "dump day: BOT bounce only after closed reject";
+            return Optional.of(plan(
+                    series, TrendRobotState.ZONE_READY, TrendTradeMode.BOUNCE, true, range, null,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    "FA/macro " + macro + " — " + wait,
+                    List.of("htf=" + htf, "macro=" + macro, "waiting=bounce-confirm")
+            ));
+        }
+        String why = md.mode() == TrendTradeMode.RETEST
+                ? "FA/macro " + macro + " — no RETEST BUY into dump (knife filter)"
+                : "FA/macro " + macro + " — no BUY (knife-catch filter); day dump / HTF down";
+        return Optional.of(noTrade(series, why));
+    }
+
+    /** Confirmed long bounce off day BOT / TREND_LO while HTF is not DOWN. */
+    static boolean macroAllowsConfirmedBotBounce(
+            TrendTradeMode mode,
+            String role,
+            HtfTrend htf,
+            List<TrendBar> window,
+            MergedVolumeRange range
+    ) {
+        return PlaybookIntelligence.allowsDumpDayBotBounce(
+                mode, role, htf, window, range, null, 0.01)
+                && htf != HtfTrend.DOWN;
+    }
+
+    static boolean isBotShelfRole(String role) {
+        if (role == null || role.isBlank()) {
+            return false;
+        }
+        return "TREND_LO".equals(role) || "BOTTOM".equals(role) || "BOT".equals(role);
     }
 
     /** Closed candle wicked into zone and closed back in trade direction. */
@@ -1599,17 +1933,31 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
     }
 
     /**
-     * Day-locked range is tradable for the session even if originally soft —
-     * checklist freezes the shelf and trades it.
+     * Day-locked range keeps geometry for desk; never promotes soft/invalid to tradable entry.
      */
     private ZoneCandidate asDayZone(double level, MergedVolumeRange range, String source) {
         MergedVolumeRange r = range;
-        if (r != null && !r.validForEntry() && r.low() < r.high()) {
-            r = new MergedVolumeRange(
-                    r.low(), r.high(), r.totalVolume(), r.sourceBands(), true, null);
-        }
         String src = source == null ? "DAY" : source + "+DAY";
         return new ZoneCandidate(level, r, src);
+    }
+
+    /** Soft / thin shelves may appear on desk but must not freeze as the day's tradable lock. */
+    static boolean isSoftSource(String source) {
+        if (source == null || source.isBlank()) {
+            return false;
+        }
+        String u = source.toUpperCase(Locale.ROOT);
+        return u.contains("SOFT");
+    }
+
+    static MergedVolumeRange lockableShelf(MergedVolumeRange cand, String source) {
+        if (cand == null || !(cand.low() < cand.high())) {
+            return null;
+        }
+        if (isSoftSource(source) || !cand.validForEntry()) {
+            return null;
+        }
+        return cand;
     }
 
     private record ZoneCandidate(double level, MergedVolumeRange range, String source) {

@@ -88,9 +88,10 @@ public class TrendRobotController {
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("enabled", true);
+        m.put("delivery", bridge.liveExecution() ? "LIVE_GATED"
+                : (bridge.autoExecution() ? "SANDBOX_FAIR" : "SIGNAL_ONLY"));
         m.put("autoExecution", bridge.autoExecution());
         m.put("liveExecution", bridge.liveExecution());
-        m.put("delivery", bridge.autoExecution() ? "AUTO_JOURNAL" : "SIGNAL_ONLY");
         m.put("engineState", engine.state().name());
         m.put("kickCountToday", engine.kickCountToday());
         m.put("playbooks", researchService.playbooks().stream().map(p -> Map.of(
@@ -195,7 +196,8 @@ public class TrendRobotController {
         boolean includeFull = full || bridge.autoExecution();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("signal", TrendSignal.from(p));
-        body.put("delivery", bridge.autoExecution() ? "AUTO_JOURNAL" : "SIGNAL_ONLY");
+        body.put("delivery", bridge.liveExecution() ? "LIVE_GATED"
+                : (bridge.autoExecution() ? "SANDBOX_FAIR" : "SIGNAL_ONLY"));
         if (includeFull) {
             body.putAll(summarize(p, true));
         } else {

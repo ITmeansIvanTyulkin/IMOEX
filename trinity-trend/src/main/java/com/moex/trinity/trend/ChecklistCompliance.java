@@ -1,5 +1,10 @@
 package com.moex.trinity.trend;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Exclusive checklist §1–18 + day-wipe note. Core must be {@link Status#IMPLEMENTED}.
  * Hardenings are {@link Status#EXTENSION} and must never disable core entry/exit rules.
@@ -26,12 +31,20 @@ public enum ChecklistCompliance {
     NOTE_NEW_DAY_WIPE(Status.IMPLEMENTED, "clear levels on new calendar day"),
     EXT_DAY_LOCK(Status.EXTENSION, "lock 2–4 levels for the MSK day"),
     EXT_PRIOR_DAY(Status.EXTENSION, "seed shelves from prior session volume"),
-    EXT_SESSION_EDGE(Status.EXTENSION, "no new setups open+N / close−M"),
+    EXT_SESSION_EDGE(Status.EXTENSION, "main session only 10:00–19:00; no evening thin tape"),
     EXT_EVENT_CALENDAR(Status.EXTENSION, "EIA/API block window"),
-    EXT_HTF_SOFT(Status.EXTENSION, "HTF filter; must not kill §8 after break+hold"),
+    EXT_HTF_SOFT(Status.EXTENSION, "H1/M15 from M5 (hourly); soft against=bounce/size; must not kill §8"),
     EXT_ONE_SETUP(Status.EXTENSION, "one setup per zone until unlock"),
     EXT_INITIAL_SIZE(Status.EXTENSION, "fractional size until BE"),
-    EXT_RISK_PCT(Status.EXTENSION, "risk % equity + GO long≠short");
+    EXT_RISK_PCT(Status.EXTENSION, "risk % equity + GO long≠short"),
+    EXT_STRUCTURAL_ONLY(Status.EXTENSION, "operator: skip ACCUM/ZERO RETEST — TOP/BOT shelves"),
+    EXT_MACRO_BIAS(Status.EXTENSION, "smart macro: knife/RETEST dump blocked; BOT bounce if reject+(HTF≠DOWN|H1 decel|hold mid)"),
+    EXT_DAY_PHASE(Status.EXTENSION, "day phase mean-revert after dump/rally vs continuation"),
+    EXT_TOUCH_QUALITY(Status.EXTENSION, "bounce touch score poke+reject(+DOM soft); MACD div UI-only"),
+    EXT_LOCAL_SHELF(Status.EXTENSION, "switch focus to BOT/TOP when price dwells there 2–3h"),
+    EXT_STOP_PAD(Status.EXTENSION, "operator stop/TP1 pad beyond checklist 20 (default 22)"),
+    EXT_ANTI_THIN(Status.EXTENSION, "min shelf volume + SOFT non-tradable / no soft day-lock"),
+    EXT_DAY_LOSS_CAP(Status.EXTENSION, "max day loss ₽ + max setups/day risk caps");
 
     public enum Status { IMPLEMENTED, EXTENSION }
 
@@ -49,6 +62,19 @@ public enum ChecklistCompliance {
 
     public String note() {
         return note;
+    }
+
+    /** Runtime desk / API snapshot of §1–18 + extensions. */
+    public static List<Map<String, String>> deskDto() {
+        List<Map<String, String>> out = new ArrayList<>();
+        for (ChecklistCompliance c : values()) {
+            Map<String, String> row = new LinkedHashMap<>();
+            row.put("id", c.name());
+            row.put("status", c.status.name());
+            row.put("note", c.note);
+            out.add(row);
+        }
+        return out;
     }
 
     public static boolean coreComplete() {

@@ -85,7 +85,7 @@ imoex:
     daily-gross-share: 1.0
     intraday-gross-share: 0.0
   session:
-    # DUAL = оба горизонта в одном analysis cycle (не exclusive switch)
+    # DUAL keeps dual-book code paths; operator cycle runs DAILY only (INTRADAY via runIntradayOnly).
     mode: DUAL
     candle-interval: 60
     hours-per-session: 7
@@ -116,7 +116,8 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
-    # INTRADAY: research-only (без paper-торговли); cron выключен
+    # INTRADAY pairs: detached from operator UX / «Анализ + paper» / DAILY cron.
+    # Research entrypoint remains runIntradayOnly + this cron (kept off).
     auto-run-intraday: false
     intraday-research-only: true
     intraday-cron: "0 5 10-18 * * MON-FRI"
@@ -149,6 +150,10 @@ imoex:
     min-profit-factor: 1.10
     min-closed-trades: 4
     exclude-oil-gas: true
+  # Simulated SKU for operator UX locks (no billing). Override in Settings at runtime.
+  # PAIRS | PAIRS_TREND | FULL
+  product:
+    edition: FULL
   # Soft upsell Full Core / calendar arbitrage (scaffolding, no billing)
   upsell:
     enabled: true
@@ -229,8 +234,8 @@ imoex:
       enabled: true
     trend:
       enabled: true
-      auto-execution: false   # false = signal-only UI; true = sandbox journal / auto path for playbooks
-      live-execution: false
+      auto-execution: true    # fair-paper live → SANDBOX_FAIR append to trend-paper-journal
+      live-execution: false   # real T-Invest FORTS orders still deferred
       playbook: levels-profile-br-m5
       grid: MODERATE
       max-risk-pct-equity: 1.0
@@ -243,19 +248,26 @@ imoex:
       session-bias-min-points: 40
       require-bounce-confirm: true
       min-reward-risk: 1.5
-      max-setups-per-day: 0          # 0 = unlimited; take every valid checklist bounce
+      max-setups-per-day: 4          # risk cap; 0 = unlimited
       cooldown-bars-after-sl: 12
       retest-arm-max-distance-points: 10
       a-setup-bounce-only: false     # full checklist: BOUNCE + RETEST after break+hold
+      prefer-structural-entries: true  # operator: skip ACCUM/ZERO RETEST noise — TOP/BOT shelves
+      macro-bias-enabled: true         # smart macro: knife BUY/RETEST blocked; confirmed BOT bounce OK if HTF≠DOWN
+      macro-min-day-move-points: 80
+      min-shelf-volume: 30             # anti-thin: bar vol / tape lots floor for entry shelves
+      max-day-loss-rub: 1500           # block new setups when realized day PnL ≤ −limit (0=off)
       initial-size-fraction: 0.4     # ~⅓–½ size until BE
       prefer-marketdata-zones: true  # tape VAP when broker feed streaming
-      trade-session-open: "09:00"
-      trade-session-close: "23:50"
-      no-trade-after-open-minutes: 40
-      no-trade-before-close-minutes: 30
-      htf-min-move-points: 50
+      trade-session-open: "10:00"      # основная сессия FORTS (не утренняя доп.)
+      trade-session-close: "19:00"     # конец основной; вечер 19–23:50 не торгуем (тонкий рынок)
+      no-trade-after-open-minutes: 20
+      no-trade-before-close-minutes: 30  # новые сетапы до 18:30
+      htf-min-move-points: 40          # calibrated: slightly earlier H1/M5 wind (was 50)
       htf-slope-bars: 24
-      htf-require-agreement: true    # HTF filter; day-shelf RETEST after break+hold still arms (§7–8)
+      htf-require-agreement: true    # M5 proxy fallback only
+      htf-aggregated-minutes: 60     # H1 from M5; 15=M15; 0=off (M5 proxy only)
+      htf-aggregated-bars: 2         # calibrated: 2 completed H1 (faster than 3)
       counter-trend-size-fraction: 0.6
       counter-trend-min-reward-risk: 2.0
       counter-trend-bounce-only: true
@@ -268,8 +280,8 @@ imoex:
       br:
         zone-min-points: 15
         zone-max-points: 20
-        stop-points: 20
-        tp1-points: 20
+        stop-points: 22              # checklist 15–20; operator pad +2 against false SL
+        tp1-points: 22
         rub-per-point: 7.0
     calendar-arb:
       enabled: false

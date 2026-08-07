@@ -13,11 +13,13 @@ import com.moex.cointegration.service.TradingRecommendationService;
 import com.moex.cointegration.service.WalkForwardService;
 import com.moex.cointegration.storage.MarketDataStorage;
 import com.moex.cointegration.web.AnalysisHtmlRenderer;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.view.RedirectView;
 
 import java.io.IOException;
 import java.util.List;
@@ -101,14 +103,20 @@ public class AnalysisViewController {
         );
     }
 
-    @GetMapping(value = "/paper", produces = MediaType.TEXT_HTML_VALUE)
-    public String paperJournal() {
+    @GetMapping(value = "/statement", produces = MediaType.TEXT_HTML_VALUE)
+    public String statementHub() {
         PaperJournal journal = paperTradingService.summary();
-        return htmlRenderer.renderPaperJournal(
+        return htmlRenderer.renderStatementHub(
                 journal,
-                recommendationService.getLastRecommendations(),
-                recommendationService.getLastIntradayRecommendations()
+                recommendationService.getLastRecommendations()
         );
+    }
+
+    @GetMapping(value = "/paper")
+    public RedirectView paperJournalRedirect() {
+        RedirectView rv = new RedirectView("/view/statement");
+        rv.setStatusCode(HttpStatus.FOUND);
+        return rv;
     }
 
     @GetMapping(value = "/walk-forward", produces = MediaType.TEXT_HTML_VALUE)

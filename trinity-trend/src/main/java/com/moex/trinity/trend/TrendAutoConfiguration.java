@@ -23,8 +23,8 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.max-risk-pct-equity:1.0}") double maxRiskPct,
             @Value("${imoex.strategies.trend.br.zone-min-points:15}") double zoneMin,
             @Value("${imoex.strategies.trend.br.zone-max-points:20}") double zoneMax,
-            @Value("${imoex.strategies.trend.br.stop-points:20}") double stopPts,
-            @Value("${imoex.strategies.trend.br.tp1-points:20}") double tp1Pts,
+            @Value("${imoex.strategies.trend.br.stop-points:22}") double stopPts,
+            @Value("${imoex.strategies.trend.br.tp1-points:22}") double tp1Pts,
             @Value("${imoex.strategies.trend.br.rub-per-point:7.0}") double rubPerPoint,
             @Value("${imoex.strategies.trend.one-setup-per-zone:true}") boolean oneSetupPerZone,
             @Value("${imoex.strategies.trend.unlock-distance-points:40}") double unlockDistancePoints,
@@ -35,16 +35,18 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.session-bias-min-points:40}") double sessionBiasMinPoints,
             @Value("${imoex.strategies.trend.require-bounce-confirm:true}") boolean requireBounceConfirm,
             @Value("${imoex.strategies.trend.min-reward-risk:1.5}") double minRewardRisk,
-            @Value("${imoex.strategies.trend.max-setups-per-day:0}") int maxSetupsPerDay,
+            @Value("${imoex.strategies.trend.max-setups-per-day:4}") int maxSetupsPerDay,
             @Value("${imoex.strategies.trend.cooldown-bars-after-sl:12}") int cooldownBarsAfterSl,
             @Value("${imoex.strategies.trend.retest-arm-max-distance-points:10}") double retestArmMaxDistancePoints,
-            @Value("${imoex.strategies.trend.trade-session-open:09:00}") String tradeSessionOpen,
-            @Value("${imoex.strategies.trend.trade-session-close:23:50}") String tradeSessionClose,
-            @Value("${imoex.strategies.trend.no-trade-after-open-minutes:40}") int noTradeAfterOpenMinutes,
+            @Value("${imoex.strategies.trend.trade-session-open:10:00}") String tradeSessionOpen,
+            @Value("${imoex.strategies.trend.trade-session-close:19:00}") String tradeSessionClose,
+            @Value("${imoex.strategies.trend.no-trade-after-open-minutes:20}") int noTradeAfterOpenMinutes,
             @Value("${imoex.strategies.trend.no-trade-before-close-minutes:30}") int noTradeBeforeCloseMinutes,
-            @Value("${imoex.strategies.trend.htf-min-move-points:50}") double htfMinMovePoints,
+            @Value("${imoex.strategies.trend.htf-min-move-points:40}") double htfMinMovePoints,
             @Value("${imoex.strategies.trend.htf-slope-bars:24}") int htfSlopeBars,
             @Value("${imoex.strategies.trend.htf-require-agreement:true}") boolean htfRequireAgreement,
+            @Value("${imoex.strategies.trend.htf-aggregated-minutes:60}") int htfAggregatedMinutes,
+            @Value("${imoex.strategies.trend.htf-aggregated-bars:2}") int htfAggregatedBars,
             @Value("${imoex.strategies.trend.counter-trend-size-fraction:0.6}") double counterTrendSizeFraction,
             @Value("${imoex.strategies.trend.counter-trend-min-reward-risk:2.0}") double counterTrendMinRewardRisk,
             @Value("${imoex.strategies.trend.counter-trend-bounce-only:true}") boolean counterTrendBounceOnly,
@@ -56,7 +58,12 @@ public class TrendAutoConfiguration {
             @Value("${imoex.strategies.trend.event-block-minutes-after:30}") int eventBlockMinutesAfter,
             @Value("${imoex.strategies.trend.a-setup-bounce-only:false}") boolean aSetupBounceOnly,
             @Value("${imoex.strategies.trend.initial-size-fraction:0.4}") double initialSizeFraction,
-            @Value("${imoex.strategies.trend.prefer-marketdata-zones:true}") boolean preferMarketDataZones
+            @Value("${imoex.strategies.trend.prefer-marketdata-zones:true}") boolean preferMarketDataZones,
+            @Value("${imoex.strategies.trend.prefer-structural-entries:true}") boolean preferStructuralEntries,
+            @Value("${imoex.strategies.trend.macro-bias-enabled:true}") boolean macroBiasEnabled,
+            @Value("${imoex.strategies.trend.macro-min-day-move-points:80}") double macroMinDayMovePoints,
+            @Value("${imoex.strategies.trend.min-shelf-volume:30}") double minShelfVolume,
+            @Value("${imoex.strategies.trend.max-day-loss-rub:1500}") double maxDayLossRub
     ) {
         LimitGridStyle style;
         try {
@@ -95,6 +102,8 @@ public class TrendAutoConfiguration {
                 htfMinMovePoints,
                 htfSlopeBars,
                 htfRequireAgreement,
+                htfAggregatedMinutes,
+                htfAggregatedBars,
                 counterTrendSizeFraction,
                 counterTrendMinRewardRisk,
                 counterTrendBounceOnly,
@@ -106,7 +115,12 @@ public class TrendAutoConfiguration {
                 eventBlockMinutesAfter,
                 aSetupBounceOnly,
                 initialSizeFraction,
-                preferMarketDataZones
+                preferMarketDataZones,
+                preferStructuralEntries,
+                macroBiasEnabled,
+                macroMinDayMovePoints,
+                minShelfVolume,
+                maxDayLossRub
         );
     }
 

@@ -9,8 +9,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Часовой автопрогон INTRADAY: refresh 1H → tech → paper (без FA).
- * По умолчанию пн–пт в :05 каждого часа 10–18 (после закрытия часового бара).
+ * Research-only INTRADAY cron (detached from operator UX / «Анализ + paper»).
+ * Off by default ({@code imoex.paper.auto-run-intraday=false}).
+ * When enabled: refresh 1H → tech → optional paper if not research-only.
  */
 @Component
 public class IntradayPaperAnalysisScheduler {

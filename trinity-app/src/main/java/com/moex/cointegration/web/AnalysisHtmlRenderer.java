@@ -1,6 +1,10 @@
 package com.moex.cointegration.web;
 
 import com.moex.cointegration.config.CapitalProperties;
+import com.moex.cointegration.config.ProductProperties;
+import com.moex.cointegration.product.ProductEdition;
+import com.moex.cointegration.product.ProductEditionService;
+import com.moex.cointegration.service.TrendPaperJournalService;
 import com.moex.cointegration.upsell.UpsellAccess;
 import com.moex.cointegration.upsell.UpsellService;
 import com.moex.cointegration.model.AnalysisReport;
@@ -25,6 +29,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Формирует HTML-страницы с таблицами для просмотра в браузере.
@@ -34,6 +39,8 @@ public class AnalysisHtmlRenderer {
 
     private final UpsellService upsellService;
     private final CapitalProperties capitalProperties;
+    private final ProductEditionService productEdition;
+    private final Optional<TrendPaperJournalService> trendPaperJournal;
     private final boolean strategyPairsEnabled;
     private final boolean strategyTrendEnabled;
     private final boolean strategyCalendarArbEnabled;
@@ -41,12 +48,18 @@ public class AnalysisHtmlRenderer {
     public AnalysisHtmlRenderer(
             UpsellService upsellService,
             CapitalProperties capitalProperties,
+            ProductEditionService productEdition,
+            Optional<TrendPaperJournalService> trendPaperJournal,
             @Value("${imoex.strategies.pairs.enabled:true}") boolean strategyPairsEnabled,
             @Value("${imoex.strategies.trend.enabled:false}") boolean strategyTrendEnabled,
             @Value("${imoex.strategies.calendar-arb.enabled:false}") boolean strategyCalendarArbEnabled
     ) {
         this.upsellService = upsellService;
         this.capitalProperties = capitalProperties;
+        this.productEdition = productEdition != null
+                ? productEdition
+                : new ProductEditionService(ProductProperties.defaults());
+        this.trendPaperJournal = trendPaperJournal != null ? trendPaperJournal : Optional.empty();
         this.strategyPairsEnabled = strategyPairsEnabled;
         this.strategyTrendEnabled = strategyTrendEnabled;
         this.strategyCalendarArbEnabled = strategyCalendarArbEnabled;
@@ -62,9 +75,11 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260806-vap-fp">
+              <link rel="stylesheet" href="/css/operator.css?v=20260807-statement">
             </head>
-            <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}">
+            <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
+                  data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
+                  data-nav-strategy="{{NAV_STRATEGY}}">
               <header class="site-header">
                 <div class="brand-row">
                   <div class="trinity-logo" aria-hidden="true">
@@ -86,7 +101,8 @@ public class AnalysisHtmlRenderer {
                 {{BODY}}
                 <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
                 <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
-                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
+                <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
+                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
               </main>
               <div id="trinity-auth-gate" class="trinity-auth-gate" hidden aria-hidden="true">
                 <canvas id="trinity-auth-canvas" class="trinity-auth-canvas" aria-hidden="true"></canvas>
@@ -132,7 +148,7 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260805-trend-switch"></script>
+              <script src="/js/operator.js?v=20260807-statement-nav"></script>
             </body>
             </html>
             """;
@@ -296,14 +312,49 @@ public class AnalysisHtmlRenderer {
                   %s
                   %s
                   %s
+                  %s
                 </div>
                 """.formatted(
                 trialBanner(),
+                productEditionPanel(),
                 opsPanel(),
                 trendPlaybookPanel(),
                 brokerConsolePanel()
         );
         return page("TRINITY — настройки", body, nav("settings"), OpsMode.NONE);
+    }
+
+    private String productEditionPanel() {
+        ProductEdition cur = productEdition.current();
+        String configured = productEdition.configured().name();
+        return """
+                <section class="dash-section strategy-doc" id="product-edition-settings">
+                  <h2>Версия продукта (демо)</h2>
+                  <p class="meta">
+                    Симуляция купленного тарифа без биллинга. YAML default:
+                    <code>imoex.product.edition=%s</code>. Переключатель ниже — runtime override в памяти.
+                  </p>
+                  <div class="callout">
+                    <label for="product-edition-select"><strong>Активная версия</strong></label>
+                    <select id="product-edition-select" class="input-select">
+                      <option value="PAIRS"%s>Коинтеграция (light)</option>
+                      <option value="PAIRS_TREND"%s>Коинтеграция + тренд</option>
+                      <option value="FULL"%s>Full Core</option>
+                    </select>
+                    <div class="ops-row" style="margin-top:0.75rem">
+                      <button type="button" class="btn btn-primary" id="product-edition-save">Применить</button>
+                      <button type="button" class="btn btn-ghost" id="product-edition-reset">Сбросить к YAML</button>
+                      <span class="meta" id="product-edition-status">текущая: %s</span>
+                    </div>
+                  </div>
+                </section>
+                """.formatted(
+                escape(configured),
+                cur == ProductEdition.PAIRS ? " selected" : "",
+                cur == ProductEdition.PAIRS_TREND ? " selected" : "",
+                cur == ProductEdition.FULL ? " selected" : "",
+                escape(cur.labelRu())
+        );
     }
 
     private String trendPlaybookPanel() {
@@ -372,7 +423,6 @@ public class AnalysisHtmlRenderer {
         var capital = capitalProperties;
         double equity = capital.equityRub() != null ? capital.equityRub() : 100_000.0;
         int dailyPct = (int) Math.round((capital.dailyGrossShare() != null ? capital.dailyGrossShare() : 1.0) * 100);
-        int intraPct = (int) Math.round((capital.intradayGrossShare() != null ? capital.intradayGrossShare() : 0.0) * 100);
         String equityLabel = String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' ');
         String leverage = capital.leverageAllowed() ? "доступно" : "выкл <1M";
 
@@ -401,7 +451,7 @@ public class AnalysisHtmlRenderer {
                 """.formatted(
                 flipCard(
                         "widget-paper",
-                        "Paper",
+                        "Statement",
                         """
                         <div class="donut" id="widget-paper-donut" style="--p:0;--c:var(--accent)">
                           <div class="donut-center">
@@ -415,9 +465,9 @@ public class AnalysisHtmlRenderer {
                         </div>
                         """,
                         """
-                        <p class="widget-back-lead" id="widget-paper-back-lead">Загрузка journal…</p>
+                        <p class="widget-back-lead" id="widget-paper-back-lead">Загрузка statement…</p>
                         <div class="widget-back-stats" id="widget-paper-back-stats"></div>
-                        <a class="widget-back-link" href="/view/paper">Открыть paper journal →</a>
+                        <a class="widget-back-link" href="/view/statement">Открыть Statement →</a>
                         """
                 ),
                 flipCard(
@@ -507,20 +557,18 @@ public class AnalysisHtmlRenderer {
                         </div>
                         <div class="widget-meta">
                           <div class="widget-stat"><span class="k"><i class="swatch gold"></i>DAILY</span><span class="v">%d%%</span></div>
-                          <div class="widget-stat"><span class="k"><i class="swatch info"></i>INTRADAY</span><span class="v">%d%%</span></div>
                           <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
                         </div>
-                        """.formatted(dailyPct, escape(equityLabel), dailyPct, intraPct, escape(leverage)),
+                        """.formatted(dailyPct, escape(equityLabel), dailyPct, escape(leverage)),
                         """
-                        <p class="widget-back-lead">Операторский профиль капитала для paper / research.</p>
+                        <p class="widget-back-lead">Капитал paper для коинтеграции — книга DAILY.</p>
                         <div class="widget-back-stats">
                           <div class="widget-stat"><span class="k">Equity</span><span class="v">%s</span></div>
                           <div class="widget-stat"><span class="k">Книга DAILY</span><span class="v">%d%% капитала</span></div>
-                          <div class="widget-stat"><span class="k">INTRADAY</span><span class="v">%d%% · research-only</span></div>
                           <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
                         </div>
                         <a class="widget-back-link" href="/view/settings">Конфиг в Настройках →</a>
-                        """.formatted(escape(equityLabel), dailyPct, intraPct, escape(leverage))
+                        """.formatted(escape(equityLabel), dailyPct, escape(leverage))
                 ),
                 flipCard(
                         "widget-signals",
@@ -1038,7 +1086,7 @@ public class AnalysisHtmlRenderer {
                   <p class="lead">
                     TRINITY сейчас в live paper ведёт <strong>DAILY</strong> pairs mean-reversion в боковике
                     (фокус — металлы / mining; нефть в equities-парах отложена на фьючерсы/опционы).
-                    <strong>INTRADAY</strong> — только research (1H EG/Z/метрики), без paper-торговли.
+                    <strong>INTRADAY pairs</strong> выведены из операторского цикла (код research остаётся, без автозапуска и UI).
                     Мы не угадываем направление рынка: ищем временный разрыв связанной пары и ставим на сжатие.
                     Календарный арбитраж %s и опционы — следующие стратегии бренда, пока в дорожной карте.
                   </p>
@@ -1152,7 +1200,7 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#exits">Как выходим</a></li>
                       <li><a href="#paper">Paper и проверка на истории</a></li>
                       <li><a href="#validation">Валидация: replay и издержки</a></li>
-                      <li><a href="#intraday-events">INTRADAY: календарь событий</a></li>
+                      <li><a href="#intraday-events">Research: INTRADAY / календарь (не в ops)</a></li>
                       <li><a href="#limits">Честные ограничения</a></li>
                     </ol>
                   </nav>
@@ -1182,18 +1230,16 @@ public class AnalysisHtmlRenderer {
                     <span>MOEX daily</span><i>→</i>
                     <span>Capital → DAILY</span><i>→</i>
                     <span>EG/FDR + cluster</span><i>→</i>
-                    <span>FA → paper</span><i>→</i>
-                    <span>INTRADAY research</span>
+                    <span>FA → paper</span>
                   </div>
                   <ol class="pipeline">
-                    <li><strong>Капитал.</strong> Equity → слоты DAILY (INTRADAY share = 0 при research-only). Без плеча до 1M.</li>
+                    <li><strong>Капитал.</strong> Equity → слоты DAILY (100%% gross). Без плеча до 1M.</li>
                     <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → monthly cluster gate → фундамент (MOEX+RSS) → paper-journal.json.</li>
-                    <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/Z/метрики (и ATAS-gate в коде) → <strong>без paper-открытий</strong>. Cron выключен.</li>
                     <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы DAILY при TREND.</li>
                   </ol>
                   <div class="callout">
-                    Торговый фокус — DAILY metals. INTRADAY остаётся в пайплайне как research-слой
-                    (`imoex.paper.intraday-research-only`), не как вторая торговая книга.
+                    Операторский цикл («Анализ + paper», вечерний cron) — только DAILY metals.
+                    INTRADAY pairs-код остаётся для research (`runIntradayOnly`), без автозапуска и без UI.
                     Источник свечей — только MOEX ISS.
                   </div>
                 """.formatted(arbBadge, roadmapBlock, trendBadge);
@@ -1216,9 +1262,6 @@ public class AnalysisHtmlRenderer {
                     <li>мало дней с нулевым объёмом;</li>
                     <li>привилегированные акции (<code>*P</code>) обычно исключены;</li>
                     <li>тикер должен быть в секторном каталоге, если включён секторный режим.</li>
-                    <li><strong>только INTRADAY:</strong> дополнительно whitelist <strong>1-го эшелона</strong>
-                      (~30 голубых фишек) — <code>imoex.universe.intraday-tier-one-only</code>.
-                      DAILY может оставаться шире при том же ADV-фильтре.</li>
                   </ul>
                   <p>
                     Смысл: не тестировать illiquid «мусор», где спред нельзя нормально набрать и закрыть.
@@ -1307,8 +1350,6 @@ public class AnalysisHtmlRenderer {
                     <li><strong>LONG / SHORT</strong> — есть подтверждённый вход.</li>
                     <li><strong>WATCH</strong> — спред экстремальный, но разворота ещё нет (или зона внимания).</li>
                     <li><strong>HOLD / NO_SIGNAL</strong> — сейчас не входим.</li>
-                    <li><strong>WATCH (microstructure)</strong> — Z и разворот ок, но INTRADAY gate ATAS заблокировал вход
-                      (тонкий объём, широкий spread proxy, несогласованность ног).</li>
                   </ul>
                   <p>
                     Смотреть картинку удобнее на странице пары: стрелки входа, зона «ждём разворот»,
@@ -1320,7 +1361,6 @@ public class AnalysisHtmlRenderer {
                     Порядок жёсткий: <strong>сначала техника</strong>, затем фундамент,
                     и только потом итоговая рекомендация и paper.
                     Фильтр работает в режиме <strong>DAILY / multi-day</strong> (удержание несколько дней).
-                    В <strong>INTRADAY</strong> фундамент намеренно пропускается — новости запаздывают.
                   </p>
                   <p>
                     Источники: MOEX sitenews и RSS (<code>imoex.news.rss-feeds</code> — Interfax / RBC / Vedomosti и др.).
@@ -1342,7 +1382,7 @@ public class AnalysisHtmlRenderer {
                     развёрнутый explain (пайплайн, причины пустой таблицы, словарь ENTER/REDUCE/WATCH/BLOCK),
                     сводка «почему такие», expandable-разбор по строкам и RSS-контекст.
                     В JSON и UI у каждой строки поле <strong><code>rationale</code></strong> — краткое «почему»:
-                    Z, фундамент (или «пропущен INTRADAY»), режим ADX, решение и слоты.</p>
+                    Z, фундамент, режим ADX, решение и слоты.</p>
 
                   <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
                   <p>
@@ -1354,11 +1394,10 @@ public class AnalysisHtmlRenderer {
                     Плечо в модели не используется, пока equity ниже порога (~1 млн ₽).
                   </p>
                   <ul>
-                    <li>dual-book: слоты от equity (~100k → 1 daily + 2 intraday); gross 40/60 <strong>независимо</strong> по книгам;</li>
-                    <li>если DAILY без сигналов — его gross остаётся неиспользованным, INTRADAY не «добирает» остаток;</li>
+                    <li>капитал 100% на DAILY; слоты от equity (~100k → 1–2 пары);</li>
                     <li>без плеча при equity &lt; 1M;</li>
-                    <li>не больше 1 открытой пары на сектор внутри книги;</li>
-                    <li>DAILY: удержание несколько дней + FA; INTRADAY: flatten к close, без FA;</li>
+                    <li>не больше 1 открытой пары на сектор;</li>
+                    <li>DAILY: удержание несколько дней + FA;</li>
                     <li>качество пары для входа: R², half-life в разумных границах, минимум сделок в бэктесте;</li>
                     <li>не открываем, если |Z| уже слишком близко к стоп-уровню.</li>
                   </ul>
@@ -1367,7 +1406,7 @@ public class AnalysisHtmlRenderer {
                   <p>Выход — не только «дождались Z≈0». В paper работают несколько правил:</p>
                   <ul>
                     <li><strong>Mean-reversion</strong> — спред вернулся к цели около нуля;</li>
-                    <li><strong>Partial take-profit</strong> — на полпути к нулю по Z <em>или</em> у POC ноги (INTRADAY, ±15 bps);</li>
+                    <li><strong>Partial take-profit</strong> — на полпути к нулю по Z;</li>
                     <li><strong>Trailing по Z</strong> — отдали от лучшей точки — закрываем;</li>
                     <li><strong>Stop по |Z|</strong> (в т.ч. адаптивный) — спред ушёл ещё дальше против нас;</li>
                     <li><strong>Time-stop</strong> — слишком долго в позиции без результата;</li>
@@ -1377,11 +1416,11 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="paper">10. Paper trading и walk-forward</h3>
                   <p>
-                    <a href="/view/paper">Paper journal</a> — учебный журнал без брокера.
+                    <a href="/view/statement">Statement</a> — paper / research PnL по стратегиям.
                     На каждом анализе система сама открывает ENTER/REDUCE, ведёт mark-to-market
                     и закрывает по правилам выше. PnL считается по количествам и ценам ног
                     (с учётом slippage и borrow), а не как «1 Z = 1%».
-                    Slippage задаётся <strong>отдельно по книгам</strong>: DAILY ~20 bps, INTRADAY ~40 bps (stress).
+                    Slippage DAILY ~20 bps.
                     На закрытых сделках — колонка <strong>«Комментарий к закрытию»</strong>:
                     <code>mean-reversion</code>, <code>stop</code>, <code>time-stop</code>, <code>flatten</code>, <code>partial-tp</code>
                     (полный текст причины остаётся в Notes).
@@ -1407,25 +1446,20 @@ public class AnalysisHtmlRenderer {
                     Долгий локальный candle-архив и deep research replay — профиль Full Core (roadmap).
                   </p>
 
-                  <h3 id="intraday-events">12. INTRADAY: календарь событий</h3>
+                  <h3 id="intraday-events">12. Research: INTRADAY / календарь (не в ops)</h3>
                   <p>
-                    Фундаментальный фильтр для INTRADAY намеренно отключён (новости запаздывают),
-                    но добавлен <strong>event overlay</strong>: файл <code>data/event-calendar.json</code>
-                    (шаблон — <code>event-calendar.example.json</code> в корне репозитория).
+                    Код INTRADAY pairs и event-overlay сохранён для research
+                    (<code>runIntradayOnly</code>, <code>data/event-calendar.json</code>),
+                    но <strong>не входит</strong> в операторский UX и автозапуски.
+                    При будущем включении: блок входов за ~45 мин до события, flatten затронутых тикеров.
                   </p>
-                  <ul>
-                    <li>за <strong>45 минут</strong> до события (отчётность, макро, дивиденды) — блок новых входов INTRADAY;</li>
-                    <li>открытые INTRADAY-позиции по затронутым тикерам — принудительный flatten;</li>
-                    <li>тикер <code>*</code> — событие для всего рынка.</li>
-                  </ul>
-                  <p>Конфиг: <code>imoex.session.event-calendar-enabled</code>, <code>event-flatten-minutes-before</code>.</p>
 
                   <h3 id="limits">13. Честные ограничения</h3>
                   <ul>
                     <li>Стратегия классическая (textbook pairs) — только боковик, без трендового модуля.</li>
                     <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
                     <li>Новости по ISS — эвристика, не полный fundamental research.</li>
-                    <li>Slippage в paper — модельный (bps), не стакан MOEX; INTRADAY может быть хуже 40 bps.</li>
+                    <li>Slippage в paper — модельный (bps), не стакан MOEX.</li>
                     <li>ATAS-слой в TRINITY — прокси по OHLCV ISS, не полная лента сделок; с T-Invest sandbox точность исполнения вырастет.</li>
                     <li>Historical replay не заменяет брокерский demo (T-Invest sandbox) — следующий шаг к live.</li>
                     <li>Нужны месяцы чистого paper track-record, прежде чем судить об alpha.</li>
@@ -1461,7 +1495,7 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#daily">Ежедневный цикл</a></li>
                       <li><a href="#auto">Автопрогоны (cron)</a></li>
                       <li><a href="#alerts">Алерты и звук</a></li>
-                      <li><a href="#dual">Две книги: DAILY и INTRADAY</a></li>
+                      <li><a href="#book">Книга DAILY</a></li>
                       <li><a href="#empty">Пустой journal — это нормально?</a></li>
                       <li><a href="#checklist">Чеклист</a></li>
                     </ol>
@@ -1492,8 +1526,8 @@ public class AnalysisHtmlRenderer {
                   <table class="params">
                     <thead><tr><th>Кнопка</th><th>Что делает</th></tr></thead>
                     <tbody>
-                      <tr><td><strong>Анализ + paper</strong></td><td>Полный цикл обеих книг (DAILY → INTRADAY) без скачивания свечей. Типичный будний пересчёт.</td></tr>
-                      <tr><td><strong>Анализ + скачать свечи</strong></td><td>То же, но с <code>refresh=true</code> — обновляет дневные и часовые свечи с биржи.</td></tr>
+                      <tr><td><strong>Анализ + paper</strong></td><td>Цикл DAILY: техника → FA → paper, без скачивания свечей. Типичный будний пересчёт.</td></tr>
+                      <tr><td><strong>Анализ + скачать свечи</strong></td><td>То же с <code>refresh=true</code> — обновляет дневные свечи с биржи.</td></tr>
                       <tr><td><strong>Только новости / paper</strong></td><td>Быстро: новости MOEX/RSS + синхронизация paper без полного Engle–Granger.</td></tr>
                       <tr><td><strong>Walk-forward</strong></td><td>Пересчёт OOS-отчёта по топ-парам (daily).</td></tr>
                       <tr><td><strong>Скачать свечи</strong></td><td>Только загрузка данных, без анализа.</td></tr>
@@ -1509,10 +1543,10 @@ public class AnalysisHtmlRenderer {
                     <tbody>
                       <tr><td><a href="/view">Дашборд</a></td><td>Спокойный обзор: KPI (Paper / Брокер / Final / Режим), сигналы и топ-пары.</td></tr>
                       <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера (токен, песочница, сверка).</td></tr>
-                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY), развёрнутый explain-panel (почему 0 или N строк), словарь действий и RSS-контекст для FA (не сигнал). INTRADAY FA/RSS пропускает.</td></tr>
+                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY), развёрнутый explain-panel, словарь действий и RSS-контекст для FA (не сигнал).</td></tr>
                       <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
                       <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>
-                      <tr><td><a href="/view/paper">Paper</a></td><td>Журнал бумажных сделок: OPEN / CLOSED, PnL ₽, колонка «Книга» (DAILY / INTRADAY).</td></tr>
+                      <tr><td><a href="/view/statement">Statement</a></td><td>Депозит + стейтменты стратегий (pairs / trend / arb).</td></tr>
                       <tr><td><a href="/view/walk-forward">Walk-forward</a></td><td>Out-of-sample проверка на истории (не гарантия будущего).</td></tr>
                       <tr><td><a href="/view/strategy">Описание стратегии</a></td><td>Теория: коинтеграция, Z-score, режим боковика, выходы.</td></tr>
                     </tbody>
@@ -1527,30 +1561,27 @@ public class AnalysisHtmlRenderer {
                     <li>Убедиться, что приложение запущено (<code>mvn -pl trinity-app -am spring-boot:run</code>).</li>
                     <li>Нажать «Анализ + paper» (или дождаться вечернего cron — см. ниже).</li>
                     <li>Открыть <a href="/view/final">Итог + новости</a> — что разрешено по DAILY после FA.</li>
-                    <li>Открыть <a href="/view/paper">Paper</a> — что реально открылось в обеих книгах.</li>
+                    <li>Открыть <a href="/view/statement">Statement</a> — что реально открылось в DAILY / Trend.</li>
                     <li>При сомнениях — график пары и виджет «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
                   </ol>
 
                   <h3 id="auto">5. Автопрогоны (cron)</h3>
                   <p>
-                    Пока сервер работает, планировщик сам гоняет анализ — ручная кнопка не обязательна каждый раз.
-                    Статус последних прогонов пишется в лог пульта (строки <code>INTRADAY cron: …</code>).
+                    Пока сервер работает, планировщик сам гоняет DAILY — ручная кнопка не обязательна каждый раз.
+                    Статус пишется в лог пульта (строки <code>DAILY cron: …</code>).
                   </p>
                   <table class="params">
                     <thead><tr><th>Книга</th><th>Расписание (по умолчанию)</th><th>Что внутри</th></tr></thead>
                     <tbody>
                       <tr><td><strong>DAILY</strong></td><td>Пн–Пт <strong>19:05</strong></td><td>Дневные свечи → техника → FA → paper (<code>paper-journal.json</code>)</td></tr>
-                      <tr><td><strong>INTRADAY</strong></td><td>Пн–Пт <strong>:05</strong> с 10:00 до 18:00</td><td>1H свечи ISS → техника → paper без FA (<code>paper-journal-intraday.json</code>), flatten ~18:30</td></tr>
                     </tbody>
                   </table>
                   <p>
-                    Включение/выключение и cron — в <code>application.yml</code>:
-                    <code>imoex.paper.auto-run-daily</code>, <code>auto-run-intraday</code>,
-                    <code>daily-cron</code>, <code>intraday-cron</code>.
+                    Включение/выключение: <code>imoex.paper.auto-run-daily</code>, <code>daily-cron</code>.
+                    INTRADAY pairs cron выключен и не показывается в пульте.
                   </p>
                   <div class="callout">
                     На выходных новых дневных свечей нет — вечерний DAILY почти ничего не меняет.
-                    INTRADAY в нерабочие дни не запускается.
                   </div>
 
                   <h3 id="alerts">6. Алерты при новой paper-сделке</h3>
@@ -1578,27 +1609,24 @@ public class AnalysisHtmlRenderer {
                     Первый визит: уже существующие сделки в journal не спамят алертами — их id запоминаются автоматически.
                   </div>
 
-                  <h3 id="dual">7. Две книги: DAILY и INTRADAY</h3>
+                  <h3 id="book">7. Книга DAILY</h3>
                   <p>
-                    Один цикл «Анализ + paper» всегда гоняет <strong>обе</strong> книги подряд. Ручного переключателя «сегодня daily / intraday» нет.
+                    Операторский цикл («Анализ + paper», вечерний cron) ведёт <strong>только DAILY</strong>:
+                    удержание несколько дней, фундамент (новости), 100% gross капитала.
+                    INTRADAY pairs выведены из UX и автозапусков (research-код остаётся в репозитории).
                   </p>
-                  <ul>
-                    <li><strong>DAILY</strong> — удержание несколько дней, проходит фундамент (новости), ~40% gross капитала.</li>
-                    <li><strong>INTRADAY</strong> — 1H бары, без FA, закрытие к концу сессии, ~60% gross.</li>
-                    <li>Лимиты <strong>независимы</strong>: если DAILY пустой, его доля <em>не перетекает</em> в INTRADAY.</li>
-                  </ul>
 
                   <h3 id="empty">8. Пустой journal — это нормально?</h3>
                   <p>Да, если сейчас нет подходящих сигналов. Paper открывается только при:</p>
                   <ul>
                     <li>LONG / SHORT с подтверждённым разворотом Z (не WATCH);</li>
-                    <li>для DAILY — итог ENTER или REDUCE после FA;</li>
+                    <li>итог ENTER или REDUCE после FA;</li>
                     <li>режим не TREND (ADX);</li>
                     <li>пара проходит фильтры качества (half-life, R², |Z| не у стопа);</li>
-                    <li>есть свободный слот в книге.</li>
+                    <li>есть свободный слот.</li>
                   </ul>
                   <p>
-                    На странице <a href="/view/paper">Paper</a> в пустом журнале показывается диагностика по каждой книге
+                    На странице <a href="/view/statement">Statement</a> в пустом журнале показывается диагностика
                     (сколько пар, max |Z|, лидер).
                   </p>
 
@@ -1891,874 +1919,38 @@ public class AnalysisHtmlRenderer {
 
     /** Лёгкий экран сигнала trend: M5 + DOM + entry/SL/TP. */
     public String renderTrendSignalPage() {
+        if (!productEdition.hasTrend()) {
+            return renderStrategyLockedPage("TREND", "trend-signal");
+        }
+        return page("TRINITY — сигнал Trend", loadClasspathUtf8("trend-signal-desk.html"), nav("trend-signal"), OpsMode.NONE);
+    }
+
+    private String renderStrategyLockedPage(String strategy, String activeNav) {
+        String title = productEdition.lockTitle(strategy);
+        String bodyText = productEdition.lockBody(strategy);
+        String href = productEdition.lockCtaHref(strategy);
+        String cta = productEdition.lockCtaLabel(strategy);
         String body = """
-                <section class="signal-desk" id="trend-signal-desk">
-                  <div class="signal-desk-head">
-                    <div>
-                      <p class="meta"><a href="/view">← дашборд</a></p>
-                      <h2>Сигнал · Trend BR</h2>
-                      <p class="meta" id="signal-desk-meta">Загрузка desk…</p>
+                <section class="strategy-lock-page" data-strategy-lock="%s">
+                  <div class="strategy-lock-card">
+                    <span class="strategy-lock-badge">Заблокировано</span>
+                    <h2>%s</h2>
+                    <p>%s</p>
+                    <div class="ops-row">
+                      <a class="btn btn-primary" href="%s">%s</a>
+                      <a class="btn btn-ghost" href="/view/settings#product-edition-settings">Сменить версию (демо)</a>
+                      <a class="btn btn-ghost" href="/view">На дашборд</a>
                     </div>
-                    <div class="signal-desk-actions">
-                      <label class="check-label signal-follow-label">
-                        <input type="checkbox" id="signal-desk-follow" checked>
-                        Следить за свечой
-                      </label>
-                      <label class="check-label signal-follow-label">
-                        <input type="checkbox" id="signal-desk-profile" checked>
-                        Профиль
-                      </label>
-                      <label class="check-label signal-follow-label">
-                        <input type="checkbox" id="signal-desk-footprint">
-                        Footprint
-                      </label>
-                      <label class="check-label signal-follow-label">
-                        <input type="checkbox" id="signal-desk-volume">
-                        Объём M5
-                      </label>
-                      <button type="button" class="btn btn-ghost" id="signal-desk-fit">Весь график</button>
-                      <button type="button" class="btn btn-ghost" id="signal-desk-refresh">Обновить</button>
-                      <a class="btn btn-ghost" href="/view/settings#trend-playbook-settings">Режим</a>
-                    </div>
-                  </div>
-                  <div class="signal-desk-strip" id="signal-desk-strip">
-                    <div class="signal-chip"><span class="k">Инструмент</span><strong id="sig-instrument">—</strong></div>
-                    <div class="signal-chip"><span class="k">Delivery</span><strong id="sig-delivery">—</strong></div>
-                    <div class="signal-chip"><span class="k">Side</span><strong id="sig-side">—</strong></div>
-                    <div class="signal-chip"><span class="k">Mode</span><strong id="sig-mode">—</strong></div>
-                    <div class="signal-chip"><span class="k">Потенциал TP1</span><strong id="sig-potential">—</strong></div>
-                    <div class="signal-chip"><span class="k">Paper сегодня</span><strong id="sig-paper-today">—</strong></div>
-                    <div class="signal-chip"><span class="k">Statement</span><strong id="sig-paper-total">—</strong></div>
-                  </div>
-                  <p class="signal-summary" id="sig-summary">—</p>
-                  <div class="signal-paper-panel" id="signal-paper-panel" hidden>
-                    <p class="signal-brief-title">Paper statement · BR</p>
-                    <p class="meta" id="signal-paper-meta">—</p>
-                    <table class="signal-paper-table">
-                      <thead><tr><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th></tr></thead>
-                      <tbody id="signal-paper-body"></tbody>
-                    </table>
-                  </div>
-                  <div class="signal-desk-grid">
-                    <div class="signal-chart-wrap">
-                      <div id="signal-chart" class="chart signal-chart"></div>
-                      <div id="signal-volume-wrap" class="signal-volume-wrap" hidden>
-                        <div id="signal-volume" class="chart signal-volume"></div>
-                      </div>
-                      <p class="meta" id="signal-chart-hint">
-                        M5 · чек-лист:
-                        <span class="lg-hi">HI/LO</span> тренд ·
-                        <span class="lg-hist">HIST</span> история ·
-                        <span class="lg-zone">TOP/BOT</span> зоны ·
-                        <span class="lg-hist">профиль</span> горизонтальный VAP ·
-                        footprint · ENTRY/SL/TP при сетапе
-                      </p>
-                      <div class="signal-brief" id="signal-desk-brief" aria-live="polite">
-                        <p class="signal-brief-title">
-                          Сейчас на рынке
-                          <button type="button" class="btn btn-ghost btn-xs" id="sig-kick-btn" title="Сбросить залипание: day-lock + one-setup + cooldown">
-                            Пинок робота
-                          </button>
-                        </p>
-                        <div class="signal-brief-body" id="signal-desk-brief-body">Загрузка среза…</div>
-                      </div>
-                    </div>
-                    <aside class="signal-dom" aria-label="Стакан">
-                      <h3>Стакан</h3>
-                      <p class="meta" id="signal-dom-meta">—</p>
-                      <div class="signal-dom-table-wrap">
-                        <table class="signal-dom-table">
-                          <thead><tr><th>Bid</th><th>Qty</th><th>Ask</th><th>Qty</th></tr></thead>
-                          <tbody id="signal-dom-body"><tr><td colspan="4">…</td></tr></tbody>
-                        </table>
-                      </div>
-                    </aside>
                   </div>
                 </section>
-                <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-                <script>
-                (function () {
-                  let chart = null;
-                  let volumeChart = null;
-                  let candleSeries = null;
-                  let volumeSeries = null;
-                  let priceLines = [];
-                  let lastOverlayKey = "";
-                  let overlayStructure = {};
-                  let lastCandleTime = null;
-                  let lastBarsRaw = [];
-                  let userPinned = false;
-                  let followLive = true;
-                  let showVolume = false;
-                  let showProfile = true;
-                  let showFootprint = false;
-                  let lastProfile = [];
-                  let lastFootprint = [];
-                  const DESK_MS = 8000;
-                  const BOOK_MS = 2000;
-                  const HI_LO_COLOR = "#b91c1c";
-                  const ZONE_EDGE = "#6d28d9";
-
-                  function $(id) { return document.getElementById(id); }
-                  function fmtPot(v) {
-                    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
-                    return "~" + (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ru-RU") + " ₽";
-                  }
-                  function fmtPnl(v) {
-                    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
-                    const s = (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ru-RU") + " ₽";
-                    return s;
-                  }
-                  function shortTime(iso) {
-                    if (!iso) return "—";
-                    const m = String(iso).match(/T(\\d{2}:\\d{2})/);
-                    return m ? m[1] : iso;
-                  }
-                  function renderPaper(paper) {
-                    const st = (paper && paper.statement) || {};
-                    const todayEl = $("sig-paper-today");
-                    const totalEl = $("sig-paper-total");
-                    if (todayEl) {
-                      todayEl.textContent = fmtPnl(st.todayPnlRub);
-                      todayEl.classList.toggle("is-buy", (st.todayPnlRub || 0) > 0);
-                      todayEl.classList.toggle("is-sell", (st.todayPnlRub || 0) < 0);
-                    }
-                    if (totalEl) {
-                      const w = (st.wins || 0) + "/" + (st.losses || 0);
-                      totalEl.textContent = fmtPnl(st.realizedPnlRub) + " · " + w;
-                      totalEl.classList.toggle("is-buy", (st.realizedPnlRub || 0) > 0);
-                      totalEl.classList.toggle("is-sell", (st.realizedPnlRub || 0) < 0);
-                    }
-                    const panel = $("signal-paper-panel");
-                    const body = $("signal-paper-body");
-                    const meta = $("signal-paper-meta");
-                    const rows = (paper && paper.recentTrades) || [];
-                    if (!panel || !body) return;
-                    if (!rows.length) {
-                      panel.hidden = true;
-                      return;
-                    }
-                    panel.hidden = false;
-                    if (meta) {
-                      meta.textContent = "Закрыто " + (st.closedCount || rows.length)
-                        + " · сегодня " + fmtPnl(st.todayPnlRub)
-                        + " · всего " + fmtPnl(st.realizedPnlRub)
-                        + (st.note ? " · " + st.note : "");
-                    }
-                    body.innerHTML = rows.map(function (t) {
-                      const pnl = t.pnlRub;
-                      const cls = pnl > 0 ? "is-buy" : (pnl < 0 ? "is-sell" : "");
-                      return "<tr>"
-                        + "<td>" + shortTime(t.openedAt) + "</td>"
-                        + "<td>" + shortTime(t.closedAt) + "</td>"
-                        + "<td>" + (t.side || "—") + "</td>"
-                        + "<td>" + (t.qty != null ? t.qty : "—") + "</td>"
-                        + "<td>" + (t.exitReason || "—") + "</td>"
-                        + "<td class='" + cls + "'>" + fmtPnl(pnl) + "</td>"
-                        + "<td>" + (t.tag || "—") + "</td>"
-                        + "</tr>";
-                    }).join("");
-                  }
-                  function fmtPx(v) {
-                    if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
-                    return v.toFixed(2);
-                  }
-                  function buildOperatorBrief(data) {
-                    const bars = data.bars || [];
-                    const last = bars.length ? bars[bars.length - 1] : null;
-                    const close = last && typeof last.close === "number" ? last.close : null;
-                    const look = bars.slice(Math.max(0, bars.length - 12));
-                    let peak = null;
-                    let trough = null;
-                    look.forEach(function (b) {
-                      if (!b) return;
-                      if (typeof b.high === "number") peak = peak == null ? b.high : Math.max(peak, b.high);
-                      if (typeof b.low === "number") trough = trough == null ? b.low : Math.min(trough, b.low);
-                    });
-                    const pts = function (a, b) {
-                      if (a == null || b == null || !isFinite(a) || !isFinite(b)) return null;
-                      return Math.round(Math.abs(a - b) / 0.01);
-                    };
-                    const nearZone = function (z, px) {
-                      if (!z || px == null) return false;
-                      const pad = 0.12;
-                      return px >= (z.low - pad) && px <= (z.high + pad);
-                    };
-                    const relZone = function (z, px, name) {
-                      if (!z || px == null) return "";
-                      if (px > z.high + 0.05) return "выше " + name + " (+" + pts(px, z.high) + "п)";
-                      if (px < z.low - 0.05) return "ниже " + name + " (−" + pts(z.low, px) + "п)";
-                      return "в полосе " + name + " (" + fmtPx(z.low) + "–" + fmtPx(z.high) + ")";
-                    };
-
-                    const sig = data.signal || {};
-                    const plan = data.plan || {};
-                    const st = data.structure || {};
-                    const paperSt = (data.paper && data.paper.statement) || {};
-                    const actionable = !!data.actionable || !!plan.actionable;
-                    const state = plan.state || sig.state || data.engineState || "—";
-                    const reason = data.summary || plan.rationale || sig.summary || "";
-                    const side = sig.side || plan.side || "NONE";
-                    const htf = st.htf || "?";
-                    const bias = st.bias || "?";
-                    const tapeLive = (data.barsSource === "tape")
-                      || String(data.barsSource || "").indexOf("tape") >= 0;
-
-                    // 1) What is happening on the tape right now
-                    let nowLine = "Цена <strong>" + (close != null ? fmtPx(close) : "—") + "</strong>";
-                    const topRel = relZone(st.zoneTop, close, "TOP");
-                    const botRel = relZone(st.zoneBottom, close, "BOT");
-                    if (topRel && nearZone(st.zoneTop, close)) {
-                      nowLine += " — " + topRel;
-                    } else if (botRel && nearZone(st.zoneBottom, close)) {
-                      nowLine += " — " + botRel;
-                    } else if (topRel && botRel) {
-                      nowLine += " — между зонами: " + topRel + ", " + botRel;
-                    } else if (topRel || botRel) {
-                      nowLine += " — " + (topRel || botRel);
-                    }
-                    const dropPts = (peak != null && close != null && peak > close + 0.08) ? pts(peak, close) : null;
-                    const rallyPts = (trough != null && close != null && close > trough + 0.08) ? pts(close, trough) : null;
-                    if (dropPts != null && (rallyPts == null || dropPts >= rallyPts)) {
-                      nowLine += ". За ~1ч срыв с " + fmtPx(peak) + " (−" + dropPts + "п)";
-                    } else if (rallyPts != null) {
-                      nowLine += ". За ~1ч отскок от " + fmtPx(trough) + " (+" + rallyPts + "п)";
-                    }
-                    nowLine += ". Лента " + (tapeLive ? "живая" : "архив/ISS")
-                      + ", на графике ~" + (data.barCount || 0) + " M5.";
-
-                    // 2) Robot decision in plain language
-                    let robotLine;
-                    let nextLine;
-                    if (actionable && side !== "NONE") {
-                      robotLine = "Робот: сигнал <strong>" + side + "</strong>"
-                        + (plan.mode ? (" · " + plan.mode) : "")
-                        + " · <code>" + state + "</code>"
-                        + " — уровни ENTRY/SL/TP на графике.";
-                      nextLine = reason
-                        ? ("Почему: " + reason)
-                        : "Разбирайте вход по сетке лимитов и стопу на графике.";
-                    } else {
-                      robotLine = "Робот <strong>не входит</strong> · <code>" + state + "</code>"
-                        + (reason ? (" — " + reason) : "") + ".";
-                      const r = String(reason).toUpperCase();
-                      if (r.indexOf("HTF FLAT") >= 0 || htf === "FLAT") {
-                        nextLine = "HTF плоский: bounce у day-locked TOP/BOT; после break+hold — RETEST той же полки (§7–8). "
-                          + "Следите за касанием фиолетовой полосы.";
-                      } else if (state === "ZONE_READY" || r.indexOf("BOUNCE") >= 0 || r.indexOf("RETEST") >= 0) {
-                        nextLine = "Зоны готовы, ждём подтверждение (bounce/retest) на следующей M5 у фиолетовой полосы.";
-                      } else if (r.indexOf("SESSION") >= 0 || r.indexOf("EDGE") >= 0) {
-                        nextLine = "Вне торгового окна playbook — новых входов не будет.";
-                      } else if (r.indexOf("EVENT") >= 0) {
-                        nextLine = "Календарный блок: рядом событие, входы закрыты.";
-                      } else if (state === "WORKING_ORDERS") {
-                        nextLine = "Лимитки/позиция в работе — следите за fill и §12 (BE→trail после TP1).";
-                      } else {
-                        nextLine = "Наблюдение. При выполнении условий появится BUY/SELL + стрелка.";
-                      }
-                    }
-
-                    // 3) Day zones + what is allowed (short)
-                    let zoneLine = "Зоны дня";
-                    if (st.zoneTop) {
-                      zoneLine += ": <span class='lg-zone'>TOP</span> "
-                        + fmtPx(st.zoneTop.low) + "–" + fmtPx(st.zoneTop.high);
-                    }
-                    if (st.zoneBottom) {
-                      zoneLine += (st.zoneTop ? "," : ":")
-                        + " <span class='lg-zone-bot'>BOT</span> "
-                        + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high);
-                    }
-                    if (!st.zoneTop && !st.zoneBottom) {
-                      zoneLine += " пока не размечены";
-                    }
-                    zoneLine += ". HI/LO тренда " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow)
-                      + "; HTF=" + htf + ", bias=" + bias + ".";
-                    if (bias === "UP") {
-                      zoneLine += st.topBrokenHeld
-                        ? " После пробоя TOP допустим RETEST верха."
-                        : " Без пробоя TOP — только bounce от BOT.";
-                    } else if (bias === "DOWN") {
-                      zoneLine += st.bottomBrokenHeld
-                        ? " После пробоя BOT допустим RETEST низа."
-                        : " Без пробоя BOT — только bounce от TOP.";
-                    }
-                    if (st.previousZeroPoint != null) {
-                      zoneLine += " Zero §4 " + fmtPx(st.previousZeroPoint)
-                        + (st.zeroPointBroken ? " (пробита)." : " (держится).");
-                    }
-
-                    // 4) Paper statement pulse
-                    let paperLine = "";
-                    if (paperSt && typeof paperSt.todayPnlRub === "number") {
-                      const tag = (paperSt.todayPnlRub >= 0 ? "+" : "")
-                        + Math.round(paperSt.todayPnlRub).toLocaleString("ru-RU") + " ₽";
-                      paperLine = "Paper сегодня: <strong>" + tag + "</strong>"
-                        + " · W/L " + (paperSt.wins || 0) + "/" + (paperSt.losses || 0)
-                        + " · statement "
-                        + ((paperSt.realizedPnlRub >= 0 ? "+" : "")
-                          + Math.round(paperSt.realizedPnlRub || 0).toLocaleString("ru-RU") + " ₽")
-                        + ".";
-                      if (paperSt.note && String(paperSt.note).indexOf("MISSED") >= 0
-                          || paperSt.note && String(paperSt.note).indexOf("HTF") >= 0) {
-                        paperLine += " В журнале есть backfill упущенных bounce (HTF FLAT).";
-                      }
-                    }
-
-                    let html = "<p>" + nowLine + "</p>"
-                      + "<p>" + robotLine + "</p>"
-                      + "<p class='signal-brief-note'>" + nextLine + "</p>"
-                      + "<p>" + zoneLine + "</p>";
-                    if (paperLine) html += "<p class='signal-brief-note'>" + paperLine + "</p>";
-                    if (data.manage && data.manage.note) {
-                      html += "<p class='signal-brief-note'>Manage: " + data.manage.note + "</p>";
-                    }
-                    return html;
-                  }
-                  function clearLines() {
-                    if (!candleSeries) return;
-                    priceLines.forEach(function (l) { try { candleSeries.removePriceLine(l); } catch (_) {} });
-                    priceLines = [];
-                  }
-                  function addLine(price, color, title, opts) {
-                    if (!candleSeries || !(price > 0)) return;
-                    const o = opts || {};
-                    const line = candleSeries.createPriceLine({
-                      price: price,
-                      color: color,
-                      lineWidth: o.lineWidth != null ? o.lineWidth : 1,
-                      lineStyle: o.lineStyle != null ? o.lineStyle : 2,
-                      axisLabelVisible: o.axisLabelVisible !== false,
-                      title: title
-                    });
-                    priceLines.push(line);
-                  }
-                  function finitePrice(v) {
-                    return typeof v === "number" && isFinite(v) && v > 0;
-                  }
-                  function ensureZoneOverlay() {
-                    const el = $("signal-chart");
-                    if (!el) return null;
-                    let ov = $("signal-zone-overlay");
-                    if (!ov) {
-                      ov = document.createElement("div");
-                      ov.id = "signal-zone-overlay";
-                      ov.className = "signal-zone-overlay";
-                      el.appendChild(ov);
-                    }
-                    return ov;
-                  }
-                  function layoutZoneBands() {
-                    const ov = ensureZoneOverlay();
-                    if (!ov || !candleSeries) return;
-                    ov.innerHTML = "";
-                    const st = overlayStructure || {};
-                    const items = [];
-                    if (st.zoneTop) items.push({ z: st.zoneTop, role: "top", title: "TOP" });
-                    if (st.zoneBottom) items.push({ z: st.zoneBottom, role: "bot", title: "BOT" });
-                    items.forEach(function (item) {
-                      if (!finitePrice(item.z.high) || !finitePrice(item.z.low)) return;
-                      const y1 = candleSeries.priceToCoordinate(item.z.high);
-                      const y2 = candleSeries.priceToCoordinate(item.z.low);
-                      if (y1 == null || y2 == null) return;
-                      const top = Math.min(y1, y2);
-                      const height = Math.abs(y2 - y1);
-                      if (!(height >= 1)) return;
-                      const band = document.createElement("div");
-                      band.className = "signal-zone-band is-" + item.role;
-                      band.style.height = Math.max(height, 14) + "px";
-                      // Keep band centered on true mid when we pad for visibility
-                      if (height < 14) {
-                        band.style.top = (top - (14 - height) / 2) + "px";
-                      } else {
-                        band.style.top = top + "px";
-                      }
-                      const label = document.createElement("span");
-                      label.className = "signal-zone-label";
-                      label.textContent = item.title + " "
-                        + Number(item.z.low).toFixed(2) + "–" + Number(item.z.high).toFixed(2);
-                      band.appendChild(label);
-                      ov.appendChild(band);
-                    });
-                  }
-                  function ensureProfileOverlay() {
-                    const el = $("signal-chart");
-                    if (!el) return null;
-                    let ov = $("signal-profile-overlay");
-                    if (!ov) {
-                      ov = document.createElement("div");
-                      ov.id = "signal-profile-overlay";
-                      ov.className = "signal-profile-overlay";
-                      el.appendChild(ov);
-                    }
-                    return ov;
-                  }
-                  function layoutProfile(levels) {
-                    const ov = ensureProfileOverlay();
-                    if (!ov || !candleSeries) return;
-                    ov.innerHTML = "";
-                    ov.hidden = !showProfile;
-                    if (!showProfile || !levels || !levels.length) return;
-                    const maxW = 72;
-                    levels.forEach(function (lvl) {
-                      if (!finitePrice(lvl.price) || !(lvl.volume > 0)) return;
-                      const y = candleSeries.priceToCoordinate(lvl.price);
-                      if (y == null) return;
-                      const bar = document.createElement("div");
-                      bar.className = "signal-vap-bar";
-                      const w = Math.max(2, Math.round((lvl.strength || 0) * maxW));
-                      bar.style.top = (y - 1) + "px";
-                      bar.style.width = w + "px";
-                      bar.title = Number(lvl.price).toFixed(2) + " · vol " + Math.round(lvl.volume);
-                      ov.appendChild(bar);
-                    });
-                  }
-                  function ensureFootprintOverlay() {
-                    const el = $("signal-chart");
-                    if (!el) return null;
-                    let ov = $("signal-footprint-overlay");
-                    if (!ov) {
-                      ov = document.createElement("div");
-                      ov.id = "signal-footprint-overlay";
-                      ov.className = "signal-footprint-overlay";
-                      el.appendChild(ov);
-                    }
-                    return ov;
-                  }
-                  function layoutFootprint(fps) {
-                    const ov = ensureFootprintOverlay();
-                    if (!ov || !candleSeries || !chart) return;
-                    ov.innerHTML = "";
-                    ov.hidden = !showFootprint;
-                    if (!showFootprint || !fps || !fps.length) return;
-                    const ts = chart.timeScale();
-                    // last 8 footprint bars only (readable)
-                    const slice = fps.slice(Math.max(0, fps.length - 8));
-                    slice.forEach(function (fb) {
-                      const t = toChartTime(fb.time);
-                      if (t == null) return;
-                      const x = ts.timeToCoordinate(t);
-                      if (x == null) return;
-                      const col = document.createElement("div");
-                      col.className = "signal-fp-col";
-                      col.style.left = (x - 18) + "px";
-                      const levels = (fb.levels || []).slice(0, 14);
-                      levels.forEach(function (lv) {
-                        if (!finitePrice(lv.price)) return;
-                        const y = candleSeries.priceToCoordinate(lv.price);
-                        if (y == null) return;
-                        const cell = document.createElement("div");
-                        cell.className = "signal-fp-cell";
-                        cell.style.top = (y - 6) + "px";
-                        const buy = lv.buy || 0;
-                        const sell = lv.sell || 0;
-                        cell.innerHTML = "<span class=\\"b\\">" + buy + "</span>"
-                          + "<span class=\\"x\\">×</span>"
-                          + "<span class=\\"s\\">" + sell + "</span>";
-                        col.appendChild(cell);
-                      });
-                      ov.appendChild(col);
-                    });
-                  }
-                  function layoutMarketOverlays() {
-                    layoutZoneBands();
-                    layoutProfile(lastProfile);
-                    layoutFootprint(lastFootprint);
-                  }
-                  function overlayKey(plan, sig, st) {
-                    const zt = st && st.zoneTop ? (st.zoneTop.low + "/" + st.zoneTop.high) : "";
-                    const zb = st && st.zoneBottom ? (st.zoneBottom.low + "/" + st.zoneBottom.high) : "";
-                    return [
-                      st && st.lookbackHigh, st && st.lookbackLow,
-                      st && st.historicalHigh, st && st.historicalLow, st && st.previousZeroPoint,
-                      zt, zb,
-                      plan && plan.side, plan && plan.entry, plan && plan.stopLoss,
-                      plan && plan.tp1, plan && plan.actionable, sig && sig.side
-                    ].join("|");
-                  }
-                  function applyOverlays(plan, sig, candles, structure) {
-                    const st = structure || {};
-                    overlayStructure = st;
-                    const key = overlayKey(plan, sig, st);
-                    if (key !== lastOverlayKey) {
-                      lastOverlayKey = key;
-                      clearLines();
-                      // §3 historical — dashed gray
-                      if (finitePrice(st.historicalHigh)
-                          && st.historicalHigh !== st.lookbackHigh) {
-                        addLine(st.historicalHigh, "#94a3b8", "HIST↑", { lineWidth: 1, lineStyle: 2 });
-                      }
-                      if (finitePrice(st.historicalLow)
-                          && st.historicalLow !== st.lookbackLow) {
-                        addLine(st.historicalLow, "#94a3b8", "HIST↓", { lineWidth: 1, lineStyle: 2 });
-                      }
-                      // §4 zero
-                      if (finitePrice(st.previousZeroPoint)) {
-                        addLine(st.previousZeroPoint, "#ca8a04", "ZERO", { lineWidth: 1, lineStyle: 2 });
-                      }
-                      // §5 current trend extremes — thick solid red
-                      if (finitePrice(st.lookbackHigh)) {
-                        addLine(st.lookbackHigh, HI_LO_COLOR, "HI", { lineWidth: 2, lineStyle: 0 });
-                      }
-                      if (finitePrice(st.lookbackLow)) {
-                        addLine(st.lookbackLow, HI_LO_COLOR, "LO", { lineWidth: 2, lineStyle: 0 });
-                      }
-                      // Zone edges as thin purple guides (fill = HTML band)
-                      if (st.zoneTop) {
-                        if (finitePrice(st.zoneTop.high)) {
-                          addLine(st.zoneTop.high, ZONE_EDGE, "TOP↑", { lineWidth: 1, lineStyle: 0 });
-                        }
-                        if (finitePrice(st.zoneTop.low)) {
-                          addLine(st.zoneTop.low, ZONE_EDGE, "TOP↓", { lineWidth: 1, lineStyle: 0 });
-                        }
-                      }
-                      if (st.zoneBottom) {
-                        if (finitePrice(st.zoneBottom.high)) {
-                          addLine(st.zoneBottom.high, ZONE_EDGE, "BOT↑", { lineWidth: 1, lineStyle: 0 });
-                        }
-                        if (finitePrice(st.zoneBottom.low)) {
-                          addLine(st.zoneBottom.low, ZONE_EDGE, "BOT↓", { lineWidth: 1, lineStyle: 0 });
-                        }
-                      }
-                      if (plan) {
-                        const entry = plan.entry || (plan.grid && plan.grid.avg);
-                        if (finitePrice(entry)) addLine(entry, "#0f766e", "ENTRY", { lineWidth: 2, lineStyle: 0 });
-                        if (finitePrice(plan.stopLoss)) addLine(plan.stopLoss, "#b91c1c", "SL", { lineWidth: 1, lineStyle: 2 });
-                        if (finitePrice(plan.tp1)) addLine(plan.tp1, "#16a34a", "TP1", { lineWidth: 1, lineStyle: 2 });
-                        if (finitePrice(plan.tp2)) addLine(plan.tp2, "#15803d", "TP2", { lineWidth: 1, lineStyle: 2 });
-                      }
-                      if (plan && plan.actionable && candles && candles.length) {
-                        const last = candles[candles.length - 1];
-                        const buy = plan.buy === true || (sig && sig.side === "BUY");
-                        candleSeries.setMarkers([{
-                          time: last.time,
-                          position: buy ? "belowBar" : "aboveBar",
-                          color: buy ? "#16a34a" : "#dc2626",
-                          shape: buy ? "arrowUp" : "arrowDown",
-                          text: buy ? "BUY" : "SELL"
-                        }]);
-                      } else if (candleSeries) {
-                        candleSeries.setMarkers([]);
-                      }
-                    }
-                    layoutMarketOverlays();
-                  }
-                  function ensureVolumeChart() {
-                    const wrap = $("signal-volume-wrap");
-                    const el = $("signal-volume");
-                    if (!el || !wrap) return;
-                    wrap.hidden = !showVolume;
-                    if (!showVolume) return;
-                    if (volumeChart) {
-                      volumeChart.applyOptions({ width: el.clientWidth });
-                      return;
-                    }
-                    volumeChart = LightweightCharts.createChart(el, {
-                      width: el.clientWidth,
-                      height: 120,
-                      layout: { backgroundColor: "#ffffff", textColor: "#1a2228" },
-                      grid: { vertLines: { color: "#eef1f3" }, horzLines: { color: "#eef1f3" } },
-                      rightPriceScale: { borderColor: "#d5dde2" },
-                      timeScale: { borderColor: "#d5dde2", visible: false },
-                      handleScroll: false,
-                      handleScale: false
-                    });
-                    volumeSeries = volumeChart.addHistogramSeries({
-                      color: "rgba(2, 132, 199, 0.45)",
-                      priceFormat: { type: "volume" }
-                    });
-                    if (chart) {
-                      chart.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
-                        if (range && volumeChart) {
-                          try { volumeChart.timeScale().setVisibleLogicalRange(range); } catch (_) {}
-                        }
-                      });
-                    }
-                  }
-                  function updateVolume(bars) {
-                    if (!showVolume) return;
-                    ensureVolumeChart();
-                    if (!volumeSeries || !bars || !bars.length) return;
-                    const data = bars.map(function (b) {
-                      const t = toChartTime(b.time);
-                      if (t == null) return null;
-                      const up = b.close >= b.open;
-                      return {
-                        time: t,
-                        value: b.volume || 0,
-                        color: up ? "rgba(22, 163, 74, 0.45)" : "rgba(220, 38, 38, 0.4)"
-                      };
-                    }).filter(Boolean);
-                    volumeSeries.setData(data);
-                    if (chart) {
-                      const range = chart.timeScale().getVisibleLogicalRange();
-                      if (range) {
-                        try { volumeChart.timeScale().setVisibleLogicalRange(range); } catch (_) {}
-                      }
-                    }
-                  }
-                  function atRightEdge() {
-                    if (!chart) return true;
-                    try {
-                      const ts = chart.timeScale();
-                      const range = ts.getVisibleLogicalRange();
-                      if (!range) return true;
-                      const barsInfo = candleSeries.barsInLogicalRange(range);
-                      if (!barsInfo) return true;
-                      return barsInfo.barsAfter != null && barsInfo.barsAfter < 3;
-                    } catch (_) {
-                      return true;
-                    }
-                  }
-                  function ensureChart() {
-                    const el = $("signal-chart");
-                    if (!el || chart) return;
-                    chart = LightweightCharts.createChart(el, {
-                      width: el.clientWidth,
-                      height: 420,
-                      layout: {
-                        backgroundColor: "#ffffff",
-                        textColor: "#1a2228"
-                      },
-                      grid: {
-                        vertLines: { color: "#eef1f3" },
-                        horzLines: { color: "#eef1f3" }
-                      },
-                      crosshair: {
-                        mode: 1,
-                        vertLine: { color: "rgba(30,42,50,0.35)", labelBackgroundColor: "#1a2228" },
-                        horzLine: { color: "rgba(30,42,50,0.35)", labelBackgroundColor: "#1a2228" }
-                      },
-                      rightPriceScale: { borderColor: "#d5dde2" },
-                      timeScale: {
-                        borderColor: "#d5dde2",
-                        timeVisible: true,
-                        secondsVisible: false,
-                        rightOffset: 6,
-                        barSpacing: 8
-                      },
-                      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
-                      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
-                    });
-                    candleSeries = chart.addCandlestickSeries({
-                      upColor: "#16a34a", downColor: "#dc2626",
-                      borderUpColor: "#16a34a", borderDownColor: "#dc2626",
-                      wickUpColor: "#16a34a", wickDownColor: "#dc2626"
-                    });
-                    chart.timeScale().subscribeVisibleLogicalRangeChange(function () {
-                      layoutMarketOverlays();
-                      if (!followLive) {
-                        userPinned = true;
-                        return;
-                      }
-                      userPinned = !atRightEdge();
-                    });
-                    window.addEventListener("resize", function () {
-                      if (chart && el) chart.applyOptions({ width: el.clientWidth });
-                      layoutMarketOverlays();
-                    });
-                    ensureZoneOverlay();
-                    ensureProfileOverlay();
-                    ensureFootprintOverlay();
-                  }
-                  function toChartTime(iso) {
-                    if (!iso) return null;
-                    const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T"));
-                    if (isNaN(d.getTime())) return null;
-                    return Math.floor(d.getTime() / 1000);
-                  }
-                  function updateCandles(candles, forceFit) {
-                    if (!candleSeries || !candles.length) return;
-                    const prevRange = chart.timeScale().getVisibleLogicalRange();
-                    const stickRight = forceFit || (followLive && !userPinned) || atRightEdge();
-                    if (lastCandleTime == null || forceFit || candles.length < 3) {
-                      candleSeries.setData(candles);
-                    } else {
-                      const last = candles[candles.length - 1];
-                      const prev = candles[candles.length - 2];
-                      if (last.time === lastCandleTime) {
-                        candleSeries.update(last);
-                      } else if (prev && prev.time === lastCandleTime) {
-                        candleSeries.update(last);
-                      } else {
-                        candleSeries.setData(candles);
-                      }
-                    }
-                    lastCandleTime = candles[candles.length - 1].time;
-                    if (forceFit) {
-                      chart.timeScale().fitContent();
-                      userPinned = false;
-                    } else if (stickRight) {
-                      chart.timeScale().scrollToRealTime();
-                    } else if (prevRange) {
-                      try { chart.timeScale().setVisibleLogicalRange(prevRange); } catch (_) {}
-                    }
-                    requestAnimationFrame(layoutMarketOverlays);
-                  }
-                  function renderDom(book) {
-                    const body = $("signal-dom-body");
-                    const meta = $("signal-dom-meta");
-                    if (!body) return;
-                    if (!book || (!book.bids && !book.asks)) {
-                      body.innerHTML = "<tr><td colspan=\\"4\\">Нет DOM</td></tr>";
-                      if (meta) meta.textContent = "—";
-                      return;
-                    }
-                    if (meta) {
-                      const age = book.asOf ? (" · " + new Date(book.asOf).toLocaleTimeString("ru-RU")) : "";
-                      meta.textContent = (book.instrumentId || "") + age + " · live";
-                    }
-                    const bids = book.bids || [];
-                    const asks = book.asks || [];
-                    const n = Math.max(bids.length, asks.length, 1);
-                    let html = "";
-                    for (let i = 0; i < Math.min(n, 15); i++) {
-                      const b = bids[i];
-                      const a = asks[i];
-                      html += "<tr>"
-                        + "<td class=\\"bid\\">" + (b ? b.p : "") + "</td>"
-                        + "<td>" + (b ? b.q : "") + "</td>"
-                        + "<td class=\\"ask\\">" + (a ? a.p : "") + "</td>"
-                        + "<td>" + (a ? a.q : "") + "</td>"
-                        + "</tr>";
-                    }
-                    body.innerHTML = html;
-                  }
-                  async function kickRobot() {
-                    const btn = $("sig-kick-btn");
-                    if (btn) btn.disabled = true;
-                    try {
-                      const res = await fetch("/api/trend/kick?mode=hard&reason=desk-button", {
-                        method: "POST",
-                        headers: { Accept: "application/json" }
-                      });
-                      const data = await res.json().catch(function () { return {}; });
-                      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
-                      await loadDesk(true);
-                      const brief = $("signal-desk-brief-body");
-                      if (brief) {
-                        brief.innerHTML = "<p><strong>Пинок:</strong> "
-                          + (data.reason || "hard")
-                          + " · kicksToday=" + (data.kickCountToday || "?")
-                          + " · " + (data.deskSummary || data.engineState || "")
-                          + "</p>" + brief.innerHTML;
-                      }
-                    } catch (e) {
-                      alert("Пинок не удался: " + (e && e.message ? e.message : e));
-                    } finally {
-                      if (btn) btn.disabled = false;
-                    }
-                  }
-                  async function loadBook() {
-                    try {
-                      const res = await fetch("/api/marketdata/book", { headers: { Accept: "application/json" } });
-                      if (!res.ok) return;
-                      renderDom(await res.json());
-                    } catch (_) {}
-                  }
-                  async function loadDesk(forceFit) {
-                    const meta = $("signal-desk-meta");
-                    try {
-                      const res = await fetch("/api/trend/desk", { headers: { Accept: "application/json" } });
-                      if (!res.ok) throw new Error("HTTP " + res.status);
-                      const data = await res.json();
-                      if (meta) {
-                        meta.textContent = (data.instrument || "BR") + " · bars=" + (data.barCount || 0)
-                          + " · source=" + (data.barsSource || "?")
-                          + " · " + (data.engineState || "")
-                          + (followLive && !userPinned ? " · follow" : " · zoom locked");
-                      }
-                      $("sig-instrument").textContent = data.instrument || "—";
-                      $("sig-delivery").textContent = data.delivery || "—";
-                      const sig = data.signal || {};
-                      const plan = data.plan || {};
-                      $("sig-side").textContent = sig.side || plan.side || "—";
-                      $("sig-mode").textContent = sig.mode || plan.mode || "—";
-                      $("sig-potential").textContent = fmtPot(data.potentialPnlRub);
-                      $("sig-summary").textContent = data.summary || sig.summary || "—";
-                      $("sig-side").classList.toggle("is-buy", (sig.side || plan.side) === "BUY");
-                      $("sig-side").classList.toggle("is-sell", (sig.side || plan.side) === "SELL");
-                      renderPaper(data.paper);
-                      const briefBody = $("signal-desk-brief-body");
-                      if (briefBody) briefBody.innerHTML = buildOperatorBrief(data);
-
-                      ensureChart();
-                      const candles = (data.bars || []).map(function (b) {
-                        const t = toChartTime(b.time);
-                        if (t == null) return null;
-                        return { time: t, open: b.open, high: b.high, low: b.low, close: b.close };
-                      }).filter(Boolean);
-                      if (candles.length) {
-                        updateCandles(candles, !!forceFit);
-                        applyOverlays(plan, sig, candles, data.structure || {});
-                      }
-                      lastBarsRaw = data.bars || [];
-                      lastProfile = data.profile || [];
-                      lastFootprint = data.footprint || [];
-                      updateVolume(lastBarsRaw);
-                      layoutMarketOverlays();
-                      if (data.book) renderDom(data.book);
-                    } catch (err) {
-                      if (meta) meta.textContent = "Ошибка desk: " + (err.message || err);
-                    }
-                  }
-                  const btn = $("signal-desk-refresh");
-                  if (btn) btn.addEventListener("click", function () { loadDesk(true); });
-                  const kickBtn = $("sig-kick-btn");
-                  if (kickBtn) kickBtn.addEventListener("click", kickRobot);
-                  const fitBtn = $("signal-desk-fit");
-                  if (fitBtn) fitBtn.addEventListener("click", function () {
-                    userPinned = false;
-                    followLive = true;
-                    const follow = $("signal-desk-follow");
-                    if (follow) follow.checked = true;
-                    if (chart) chart.timeScale().fitContent();
-                    loadDesk(true);
-                  });
-                  const follow = $("signal-desk-follow");
-                  if (follow) {
-                    follow.checked = true;
-                    follow.addEventListener("change", function () {
-                      followLive = !!follow.checked;
-                      if (followLive) {
-                        userPinned = false;
-                        if (chart) chart.timeScale().scrollToRealTime();
-                      }
-                    });
-                  }
-                  const volToggle = $("signal-desk-volume");
-                  if (volToggle) {
-                    volToggle.addEventListener("change", function () {
-                      showVolume = !!volToggle.checked;
-                      ensureVolumeChart();
-                      if (showVolume) updateVolume(lastBarsRaw);
-                      else if ($("signal-volume-wrap")) $("signal-volume-wrap").hidden = true;
-                    });
-                  }
-                  const profToggle = $("signal-desk-profile");
-                  if (profToggle) {
-                    showProfile = !!profToggle.checked;
-                    profToggle.addEventListener("change", function () {
-                      showProfile = !!profToggle.checked;
-                      layoutProfile(lastProfile);
-                    });
-                  }
-                  const fpToggle = $("signal-desk-footprint");
-                  if (fpToggle) {
-                    showFootprint = !!fpToggle.checked;
-                    fpToggle.addEventListener("change", function () {
-                      showFootprint = !!fpToggle.checked;
-                      layoutFootprint(lastFootprint);
-                    });
-                  }
-                  loadDesk(true);
-                  loadBook();
-                  setInterval(function () { loadDesk(false); }, DESK_MS);
-                  setInterval(loadBook, BOOK_MS);
-                })();
-                </script>
-                """;
-        return page("TRINITY — сигнал Trend", body, nav("trend-signal"), OpsMode.NONE);
+                """.formatted(
+                escape(strategy),
+                escape(title),
+                escape(bodyText),
+                escape(href),
+                escape(cta)
+        );
+        return page("TRINITY — " + title, body, nav(activeNav), OpsMode.NONE);
     }
 
     /**
@@ -2799,7 +1991,6 @@ public class AnalysisHtmlRenderer {
                 <div class="hint">
                   <strong>Итог после фундамента (multi-day / DAILY).</strong>
                   Порядок: техника → cluster gate → фундамент (MOEX + RSS) → рекомендация → paper.
-                  В INTRADAY фундамент и RSS-контекст намеренно пропускаются — новости запаздывают.
                   Это research / decision-support, не инвестиционная рекомендация и не обещание прибыли.
                 </div>
                 """);
@@ -2883,8 +2074,7 @@ public class AnalysisHtmlRenderer {
         sb.append("<ol class=\"final-pipeline\">");
         sb.append("<li><strong>Техника</strong> — EG/FDR, Z-score, качество пары, разворот входа.</li>");
         sb.append("<li><strong>Cluster gate</strong> — месячная eligibility секторов (net&gt;0, PF≥1.1); OIL_GAS вне pairs.</li>");
-        sb.append("<li><strong>FA (только DAILY)</strong> — новости MOEX + RSS; CONFLICT с техникой снижает или блокирует вход. ")
-                .append("INTRADAY FA пропускает.</li>");
+        sb.append("<li><strong>FA</strong> — новости MOEX + RSS; CONFLICT с техникой снижает или блокирует вход.</li>");
         sb.append("<li><strong>Рекомендация</strong> — ENTER / REDUCE / WATCH / BLOCK.</li>");
         sb.append("<li><strong>Paper</strong> — журнал открывает только ENTER/REDUCE при свободном слоте и не-TREND.</li>");
         sb.append("</ol>");
@@ -2952,12 +2142,12 @@ public class AnalysisHtmlRenderer {
             sb.append("<li>Проверить виджет <strong>режима рынка</strong> на <a href=\"/view\">дашборде</a>: TREND (высокий ADX) блокирует новые входы.</li>");
             sb.append("<li>Открыть <a href=\"/view/signals\">Сигналы</a> и <a href=\"/view/recommendations\">Все рекомендации</a> — есть ли сырой LONG/SHORT до FA.</li>");
             sb.append("<li>Если техника есть, а итог пуст — пересчитать «Только новости / paper» или полный цикл (FA мог не сохраниться).</li>");
-            sb.append("<li>Смотреть <a href=\"/view/paper\">Paper</a>: пустой journal при пустом итоге — нормальная дисциплина, не «баг».</li>");
+            sb.append("<li>Смотреть <a href=\"/view/statement\">Statement</a>: пустой journal при пустом итоге — нормальная дисциплина, не «баг».</li>");
         } else {
             sb.append("<li>Сверить ENTER/REDUCE с графиком пары и размером слота (капитал без плеча до 1M).</li>");
             sb.append("<li>При CONFLICT / BLOCK — прочитать новости по ноге; не «продавливать» вход ради активности.</li>");
             sb.append("<li>Проверить режим ADX на дашборде — даже ENTER не откроется в paper при TREND.</li>");
-            sb.append("<li>Сверить, что реально легло в <a href=\"/view/paper\">Paper</a>.</li>");
+            sb.append("<li>Сверить, что реально легло в <a href=\"/view/statement\">Statement</a>.</li>");
             sb.append("<li>RSS ниже — только контекст FA, не отдельный сигнал на вход.</li>");
         }
         sb.append("</ol>");
@@ -3204,8 +2394,7 @@ public class AnalysisHtmlRenderer {
         sb.append("<h2>Новости (RSS) — контекст FA</h2>");
         sb.append("<p class=\"final-news-lead\">Лента для слоя фундамента на <strong>DAILY</strong>: помогает понять фон, ")
                 .append("в котором FA мог выставить CONFLICT / BLOCK. ")
-                .append("<em>Это не торговый сигнал и не замена разбору пары.</em> ")
-                .append("Для книги INTRADAY FA и RSS-контекст намеренно пропускаются (новости запаздывают к 1H-ритму).</p>");
+                .append("<em>Это не торговый сигнал и не замена разбору пары.</em></p>");
 
         if (!rss.enabled()) {
             sb.append("<div class=\"final-news-placeholder\">");
@@ -3307,96 +2496,256 @@ public class AnalysisHtmlRenderer {
     }
 
     /**
-     * Paper track-record таблица.
+     * Statement hub: deposit rollup + per-strategy books (pairs / trend / arb).
      */
     public String renderPaperJournal(PaperJournal journal) {
-        return renderPaperJournal(journal, List.of(), List.of());
+        return renderStatementHub(journal, List.of());
     }
 
     public String renderPaperJournal(
             PaperJournal journal,
-            List<TradingRecommendation> dailyRecs,
-            List<TradingRecommendation> intradayRecs
+            List<TradingRecommendation> dailyRecs
     ) {
+        return renderStatementHub(journal, dailyRecs);
+    }
+
+    public String renderStatementHub(
+            PaperJournal journal,
+            List<TradingRecommendation> dailyRecs
+    ) {
+        if (journal == null) {
+            journal = new PaperJournal(null, List.of());
+        }
+        if (dailyRecs == null) {
+            dailyRecs = List.of();
+        }
+
+        List<PaperTradeEntry> allEntries = journal.entries() == null ? List.of() : journal.entries();
+        List<PaperTradeEntry> pairsEntries = allEntries.stream()
+                .filter(e -> e.book() == null || e.book().isBlank() || "DAILY".equalsIgnoreCase(e.book()))
+                .toList();
+        long pairsOpen = pairsEntries.stream().filter(e -> "OPEN".equals(e.status())).count();
+        double pairsRealized = pairsEntries.stream()
+                .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
+                .mapToDouble(PaperTradeEntry::pnlRub)
+                .sum();
+        double pairsUnrealized = pairsEntries.stream()
+                .filter(e -> "OPEN".equals(e.status()) && e.unrealizedPnlRub() != null)
+                .mapToDouble(PaperTradeEntry::unrealizedPnlRub)
+                .sum();
+
+        Map<String, Object> trendSt = Map.of();
+        List<Map<String, Object>> trendTrades = List.of();
+        if (productEdition.hasTrend() && trendPaperJournal.isPresent()) {
+            TrendPaperJournalService svc = trendPaperJournal.get();
+            trendSt = svc.statement();
+            trendTrades = svc.allTradeDtos();
+        }
+        double trendRealized = num(trendSt.get("realizedPnlRub"));
+        double trendToday = num(trendSt.get("todayPnlRub"));
+        int trendClosed = (int) num(trendSt.get("closedCount"));
+
+        double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
+        double depositNet = pairsRealized + pairsUnrealized
+                + (productEdition.hasTrend() ? trendRealized : 0);
+
         StringBuilder body = new StringBuilder();
         body.append("""
-                <div class="hint">
-                  <strong>Paper journal — dual-book.</strong> DAILY и INTRADAY в одном автоматическом цикле; cash PnL по qty×price,
-                  slippage/borrow из конфига. Капитал без плеча при equity &lt; 1M; слоты/gross из CapitalAllocator
-                  (40/60 фиксированно, без перетока между книгами). INTRADAY flatten к ~18:30.
-                  Отдельные файлы journal; на этой странице — объединённый взгляд.
-                </div>
+                <article class="statement-hub">
+                  <header class="statement-hub-head">
+                    <p class="settings-eyebrow">Statement</p>
+                    <h2>Депозит и стратегии</h2>
+                    <p class="meta">Общий срез paper / research PnL по купленным стратегиям.
+                      На Trend desk над графиком — только сделки за сегодня.</p>
+                  </header>
                 """);
-        List<PaperTradeEntry> entries = journal.entries() == null ? List.of() : journal.entries();
-        long open = journal.openCount() != null ? journal.openCount()
-                : entries.stream().filter(e -> "OPEN".equals(e.status())).count();
-        long closed = journal.closedCount() != null ? journal.closedCount()
-                : entries.stream().filter(e -> "CLOSED".equals(e.status())).count();
+
+        body.append("<section class=\"statement-section\" id=\"deposit\">");
+        body.append("<h3>Депозит (общий)</h3>");
+        body.append("<div class=\"cards\">");
+        body.append(card("Equity", String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' '), false));
+        body.append(card("Pairs net", String.format("%.0f", pairsRealized + pairsUnrealized),
+                pairsRealized + pairsUnrealized >= 0));
+        if (productEdition.hasTrend()) {
+            body.append(card("Trend realized", String.format("%.0f", trendRealized), trendRealized >= 0));
+            body.append(card("Trend сегодня", String.format("%.0f", trendToday), trendToday >= 0));
+        } else {
+            body.append(card("Trend", "locked", false));
+        }
+        body.append(card("Arb", productEdition.hasArb() ? "скоро" : "locked", false));
+        body.append(card("Net* (доступное)", String.format("%.0f", depositNet), depositNet >= 0));
+        body.append("</div></section>");
+
+        // Pairs
+        body.append("<section class=\"statement-section\" id=\"pairs\">");
+        body.append("<h3>① Коинтеграция · DAILY</h3>");
+        body.append(renderPairsStatementInner(pairsEntries, pairsOpen, pairsRealized, pairsUnrealized,
+                journal.updatedAt() == null ? null : journal.updatedAt().toString(), dailyRecs));
+        body.append("</section>");
+
+        // Trend
+        body.append("<section class=\"statement-section\" id=\"trend\">");
+        body.append("<h3>② Тренд · BR</h3>");
+        if (!productEdition.hasTrend()) {
+            body.append(statementLockedBlock("TREND"));
+        } else {
+            body.append("<div class=\"cards\">");
+            body.append(card("Closed", String.valueOf(trendClosed), false));
+            body.append(card("Wins/Losses",
+                    (int) num(trendSt.get("wins")) + "/" + (int) num(trendSt.get("losses")), false));
+            body.append(card("Realized ₽*", String.format("%.0f", trendRealized), trendRealized >= 0));
+            body.append(card("Сегодня ₽*", String.format("%.0f", trendToday), trendToday >= 0));
+            body.append(card("Instrument", String.valueOf(trendSt.getOrDefault("instrument", "BR")), false));
+            Object note = trendSt.get("note");
+            body.append("</div>");
+            if (note != null && !String.valueOf(note).isBlank()) {
+                body.append("<p class=\"meta\">").append(escape(String.valueOf(note))).append("</p>");
+            }
+            body.append("<p class=\"meta\"><a href=\"/view/trend-signal\">Открыть desk →</a> ")
+                    .append("(над графиком только сделки за сегодня)</p>");
+            if (trendTrades.isEmpty()) {
+                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — закрытых paper-сделок BR ещё нет.</p></div>");
+            } else {
+                body.append("<div class=\"table-wrap\"><table><thead><tr>");
+                body.append("<th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th>");
+                body.append("</tr></thead><tbody>");
+                for (Map<String, Object> t : trendTrades) {
+                    double pnl = num(t.get("pnlRub"));
+                    String cls = pnl > 0 ? "is-buy" : (pnl < 0 ? "is-sell" : "");
+                    body.append("<tr>");
+                    body.append("<td>").append(escape(shortIso(t.get("openedAt")))).append("</td>");
+                    body.append("<td>").append(escape(shortIso(t.get("closedAt")))).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("side", "—")))).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("qty", "—")))).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("exitReason", "—")))).append("</td>");
+                    body.append("<td class=\"").append(cls).append("\">")
+                            .append(String.format("%+.0f ₽", pnl)).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("tag", "—")))).append("</td>");
+                    body.append("</tr>");
+                }
+                body.append("</tbody></table></div>");
+            }
+        }
+        body.append("</section>");
+
+        // Arb
+        body.append("<section class=\"statement-section\" id=\"arb\">");
+        body.append("<h3>③ Календарный арбитраж</h3>");
+        if (!productEdition.hasArb()) {
+            body.append(statementLockedBlock("ARB"));
+        } else {
+            body.append("""
+                    <div class="callout">
+                      <p><strong>Скоро.</strong> Statement календарного арбитража появится вместе с модулем
+                        <code>trinity-calendar-arb</code>. Пока — roadmap на
+                        <a href="/view/full-core?feature=calendar-arb">Full Core</a>.</p>
+                    </div>
+                    """);
+        }
+        body.append("</section>");
+        body.append("</article>");
+        return page("TRINITY — Statement", body.toString(), nav("statement"));
+    }
+
+    private String renderPairsStatementInner(
+            List<PaperTradeEntry> entries,
+            long open,
+            double realized,
+            double unrealized,
+            String updatedAt,
+            List<TradingRecommendation> dailyRecs
+    ) {
+        StringBuilder body = new StringBuilder();
+        long closed = entries.stream().filter(e -> "CLOSED".equals(e.status())).count();
+        double net = realized + unrealized;
         body.append("<div class=\"cards\">");
         body.append(card("Всего", String.valueOf(entries.size()), false));
         body.append(card("OPEN", String.valueOf(open), false));
         body.append(card("CLOSED", String.valueOf(closed), false));
-        body.append(card("Realized ₽*",
-                journal.realizedPnlRub() == null ? "—" : String.format("%.0f", journal.realizedPnlRub()),
-                journal.realizedPnlRub() != null && journal.realizedPnlRub() >= 0));
-        body.append(card("Unrealized ₽*",
-                journal.unrealizedPnlRub() == null ? "—" : String.format("%.0f", journal.unrealizedPnlRub()),
-                journal.unrealizedPnlRub() != null && journal.unrealizedPnlRub() >= 0));
-        double net = (journal.realizedPnlRub() == null ? 0 : journal.realizedPnlRub())
-                + (journal.unrealizedPnlRub() == null ? 0 : journal.unrealizedPnlRub());
-        body.append(card("Net ₽* (R+U)", String.format("%.0f", net), net >= 0));
-        body.append(card("Обновлено", journal.updatedAt() == null ? "—" : journal.updatedAt().toString(), false));
+        body.append(card("Realized ₽*", String.format("%.0f", realized), realized >= 0));
+        body.append(card("Unrealized ₽*", String.format("%.0f", unrealized), unrealized >= 0));
+        body.append(card("Net ₽*", String.format("%.0f", net), net >= 0));
+        body.append(card("Обновлено", updatedAt == null ? "—" : updatedAt, false));
         body.append("</div>");
-
         if (entries.isEmpty()) {
             body.append("<div class=\"callout\">");
-            body.append("<p><strong>Журнал пуст</strong> — сегодня нет paper-входов (вариантов сделок нет).</p>");
-            body.append("<p>Сделки появляются только при <strong>ENTER</strong> / <strong>REDUCE_SIZE</strong> ");
-            body.append("после техники и FA (DAILY). Сейчас сигналы ниже порога |Z|≥2 — это нормально.</p>");
-            body.append("<ul>");
-            body.append("<li>").append(bookDiag("DAILY", dailyRecs)).append("</li>");
-            body.append("<li>").append(bookDiag("INTRADAY", intradayRecs)).append("</li>");
-            body.append("</ul>");
-            body.append("<p class=\"meta\">Типичные причины: |Z| &lt; 2, half-life вне порога, режим TREND (ADX), ");
-            body.append("нет коинтегрированных пар после FDR. Нажмите «Анализ + paper», когда Z вырастет.</p>");
+            body.append("<p><strong>Журнал пуст</strong> — нет paper-входов DAILY.</p>");
+            body.append("<ul><li>").append(bookDiag("DAILY", dailyRecs)).append("</li></ul>");
             body.append("</div>");
         } else {
             body.append("<div class=\"table-wrap\"><table><thead><tr>");
-            body.append("<th>Статус</th><th>Книга</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
+            body.append("<th>Статус</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
             body.append("<th class=\"num\">Entry Z</th><th class=\"num\">Mark/Exit Z</th>");
-            body.append("<th class=\"num\">Notional Y</th>");
-            body.append("<th class=\"num\">PnL %*</th><th class=\"num\">PnL ₽*</th>");
-            body.append("<th>Opened</th><th>Closed</th><th>Комментарий к закрытию</th><th>Notes</th><th></th>");
+            body.append("<th class=\"num\">PnL ₽*</th><th>Opened</th><th>Closed</th><th></th>");
             body.append("</tr></thead><tbody>");
             for (PaperTradeEntry e : entries) {
                 Double markOrExit = e.exitZ() != null ? e.exitZ() : e.markZ();
-                Double pct = e.pnlPct() != null ? e.pnlPct() : e.unrealizedPnlPct();
                 Double rub = e.pnlRub() != null ? e.pnlRub() : e.unrealizedPnlRub();
                 body.append("<tr>");
                 body.append("<td>").append(escape(e.status())).append("</td>");
-                body.append("<td>").append(escape(e.book() == null ? "DAILY" : e.book())).append("</td>");
                 body.append("<td>").append(escape(e.tickerY())).append(" / ").append(escape(e.tickerX())).append("</td>");
                 body.append("<td>").append(signalBadge(e.signal())).append("</td>");
                 body.append("<td>").append(decisionBadge(e.decision())).append("</td>");
                 body.append("<td class=\"num\">").append(formatZ(e.entryZ())).append("</td>");
                 body.append("<td class=\"num\">")
                         .append(markOrExit == null ? "—" : formatZ(markOrExit)).append("</td>");
-                body.append("<td class=\"num\">").append(String.format("%.0f", e.notionalY())).append("</td>");
-                body.append("<td class=\"num\">")
-                        .append(pct == null ? "—" : formatPct(pct)).append("</td>");
                 body.append("<td class=\"num\">")
                         .append(rub == null ? "—" : String.format("%.0f", rub)).append("</td>");
                 body.append("<td>").append(e.openedAt() == null ? "—" : escape(e.openedAt().toString())).append("</td>");
                 body.append("<td>").append(e.closedAt() == null ? "—" : escape(e.closedAt().toString())).append("</td>");
-                body.append("<td>").append(escape(e.closeComment() == null ? "" : e.closeComment())).append("</td>");
-                body.append("<td>").append(escape(e.notes() == null ? "" : e.notes())).append("</td>");
                 body.append("<td class=\"links\">").append(chartPageLink(e.tickerY(), e.tickerX())).append("</td>");
                 body.append("</tr>");
             }
             body.append("</tbody></table></div>");
-            body.append("<p class=\"meta\">* Псевдо-PnL: 1 единица Z ≈ 1% notional Y. Не брокерский результат.</p>");
         }
-        return page("Paper journal", body.toString(), nav("paper"));
+        return body.toString();
+    }
+
+    private String statementLockedBlock(String strategy) {
+        return """
+                <div class="statement-locked" data-strategy-lock="%s">
+                  <span class="strategy-lock-badge">Заблокировано</span>
+                  <p><strong>%s</strong></p>
+                  <p class="meta">%s</p>
+                  <div class="ops-row">
+                    <a class="btn btn-primary" href="%s">%s</a>
+                    <button type="button" class="btn btn-ghost" data-strategy-lock-open="%s">Подробнее</button>
+                  </div>
+                </div>
+                """.formatted(
+                escape(strategy),
+                escape(productEdition.lockTitle(strategy)),
+                escape(productEdition.lockBody(strategy)),
+                escape(productEdition.lockCtaHref(strategy)),
+                escape(productEdition.lockCtaLabel(strategy)),
+                escape(strategy)
+        );
+    }
+
+    private static double num(Object v) {
+        if (v instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (v == null) {
+            return 0;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(v));
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private static String shortIso(Object iso) {
+        if (iso == null) {
+            return "—";
+        }
+        String s = String.valueOf(iso);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("T(\\d{2}:\\d{2})").matcher(s);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return s.length() > 16 ? s.substring(0, 16) : s;
     }
 
     /**
@@ -3451,33 +2800,107 @@ public class AnalysisHtmlRenderer {
     }
 
     private String nav(String active) {
+        String a = active == null ? "" : active;
+        boolean hasTrend = productEdition.hasTrend();
+        boolean hasArb = productEdition.hasArb();
+        String pageStrategy = navStrategyHint(a);
+        String pairsActive = "pairs".equals(pageStrategy) ? "active" : "";
+        String trendActive = "trend".equals(pageStrategy) ? "active" : "";
+        String arbActive = "arb".equals(pageStrategy) ? "active" : "";
+        String trendLock = hasTrend ? "" : " is-locked";
+        String arbLock = hasArb ? "" : " is-locked";
         return """
-                <nav class="topnav">
-                  <a href="/view" class="%s">Дашборд</a>
-                  <a href="/view/settings" class="%s">Настройки</a>
-                  <a href="/view/trend-signal" class="%s">Сигнал Trend</a>
-                  <a href="/view/guide" class="%s">Как пользоваться системой</a>
+                <nav class="topnav topnav-hub" aria-label="Основное меню" data-page-strategy="%s">
+                  <div class="topnav-shared">
+                    <a href="/view" class="%s">Дашборд</a>
+                    <a href="/view/statement" class="%s">Statement</a>
+                    <a href="/view/settings" class="%s">Настройки</a>
+                    <a href="/view/guide" class="%s">Справка</a>
+                  </div>
+                  <div class="strategy-switch" role="tablist" aria-label="Стратегия">
+                    <button type="button" class="strategy-switch-btn %s" data-strategy="pairs"
+                            role="tab" aria-selected="%s">Коинтеграция</button>
+                    <button type="button" class="strategy-switch-btn %s%s" data-strategy="trend"
+                            data-locked="%s" role="tab" aria-selected="%s">Тренд</button>
+                    <button type="button" class="strategy-switch-btn %s%s" data-strategy="arb"
+                            data-locked="%s" role="tab" aria-selected="%s">Арбитраж</button>
+                  </div>
+                </nav>
+                <nav class="topnav-secondary" data-for="pairs" hidden>
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
-                  <a href="/view/recommendations" class="%s">Все рекомендации</a>
-                  <a href="/view/paper" class="%s">Paper</a>
+                  <a href="/view/recommendations" class="%s">Рекомендации</a>
                   <a href="/view/walk-forward" class="%s">Walk-forward</a>
-                  <a href="/view/strategy" class="%s">Описание торговой стратегии</a>
+                  <a href="/view/strategy" class="%s">Описание</a>
+                </nav>
+                <nav class="topnav-secondary" data-for="trend" hidden>
+                  <a href="/view/trend-signal" class="%s" data-requires="trend">Сигнал BR</a>
+                </nav>
+                <nav class="topnav-secondary" data-for="arb" hidden>
+                  <a href="/view/full-core?feature=calendar-arb" class="%s" data-requires="arb">Календарный arb</a>
                   <a href="/view/full-core" class="%s">Full Core</a>
                 </nav>
                 """.formatted(
-                active.equals("dashboard") ? "active" : "",
-                active.equals("settings") ? "active" : "",
-                active.equals("trend-signal") ? "active" : "",
-                active.equals("guide") ? "active" : "",
-                active.equals("final") ? "active" : "",
-                active.equals("signals") ? "active" : "",
-                active.equals("recommendations") ? "active" : "",
-                active.equals("paper") ? "active" : "",
-                active.equals("walkforward") ? "active" : "",
-                active.equals("strategy") ? "active" : "",
-                active.equals("fullcore") ? "active" : ""
+                escape(pageStrategy),
+                a.equals("dashboard") ? "active" : "",
+                a.equals("statement") || a.equals("paper") ? "active" : "",
+                a.equals("settings") ? "active" : "",
+                a.equals("guide") ? "active" : "",
+                pairsActive,
+                pairsActive.isEmpty() ? "false" : "true",
+                trendActive, trendLock, hasTrend ? "false" : "true",
+                trendActive.isEmpty() ? "false" : "true",
+                arbActive, arbLock, hasArb ? "false" : "true",
+                arbActive.isEmpty() ? "false" : "true",
+                a.equals("final") ? "active" : "",
+                a.equals("signals") ? "active" : "",
+                a.equals("recommendations") ? "active" : "",
+                a.equals("walkforward") ? "active" : "",
+                a.equals("strategy") ? "active" : "",
+                a.equals("trend-signal") ? "active" : "",
+                a.equals("fullcore") ? "active" : "",
+                a.equals("fullcore") ? "active" : ""
         );
+    }
+
+    private static boolean isPairsNav(String a) {
+        return a.equals("final") || a.equals("signals") || a.equals("recommendations")
+                || a.equals("walkforward") || a.equals("strategy");
+    }
+
+    private static boolean isTrendNav(String a) {
+        return a.equals("trend-signal");
+    }
+
+    private static boolean isArbNav(String a) {
+        return a.equals("fullcore");
+    }
+
+    private String navStrategyHint(String active) {
+        String a = active == null ? "" : active;
+        if (isPairsNav(a)) {
+            return "pairs";
+        }
+        if (isTrendNav(a)) {
+            return "trend";
+        }
+        if (isArbNav(a)) {
+            return "arb";
+        }
+        return "";
+    }
+
+
+    private String loadClasspathUtf8(String resource) {
+        try (var in = AnalysisHtmlRenderer.class.getClassLoader().getResourceAsStream(resource)) {
+            if (in == null) {
+                return "<p class=\"meta\">Не найден ресурс " + escape(resource) + "</p>";
+            }
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            return "<p class=\"meta\">Ошибка загрузки " + escape(resource) + ": "
+                    + escape(String.valueOf(ex.getMessage())) + "</p>";
+        }
     }
 
     private String page(String title, String body, String nav) {
@@ -3488,10 +2911,26 @@ public class AnalysisHtmlRenderer {
         UpsellAccess access = upsellService != null ? upsellService.access() : null;
         String upsellAttr = (access != null && access.enabled()) ? "on" : "off";
         String phase = access != null ? access.phase() : "OFF";
+        ProductEdition edition = productEdition.current();
+        String navStrategy = "";
+        if (nav != null) {
+            int idx = nav.indexOf("data-page-strategy=\"");
+            if (idx >= 0) {
+                int start = idx + "data-page-strategy=\"".length();
+                int end = nav.indexOf('"', start);
+                if (end > start) {
+                    navStrategy = nav.substring(start, end);
+                }
+            }
+        }
         return PAGE_TEMPLATE
                 .replace("{{TITLE}}", escape(title))
                 .replace("{{UPSELL}}", upsellAttr)
                 .replace("{{UPSELL_PHASE}}", escape(phase))
+                .replace("{{EDITION}}", edition.name())
+                .replace("{{HAS_TREND}}", productEdition.hasTrend() ? "1" : "0")
+                .replace("{{HAS_ARB}}", productEdition.hasArb() ? "1" : "0")
+                .replace("{{NAV_STRATEGY}}", navStrategy)
                 .replace("{{NAV}}", nav)
                 .replace("{{OPS}}", opsHtml(opsMode))
                 .replace("{{BODY}}", body);

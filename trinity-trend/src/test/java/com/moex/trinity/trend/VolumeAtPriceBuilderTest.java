@@ -74,6 +74,19 @@ class VolumeAtPriceBuilderTest {
         assertTrue(pts >= 14.9 && pts <= 20.1, "width pts=" + pts);
     }
 
+    @Test
+    void rejectsThinShelfBelowMinVolume() {
+        VolumeAtPriceBuilder vap = new VolumeAtPriceBuilder(
+                TrendInstrumentSpec.brDefaults(), false, 1, 5000);
+        List<TrendBar> window = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            window.add(bar(86.40, 86.55, 86.48, 100)); // total shelf vol << 5000
+        }
+        MergedVolumeRange range = vap.mergeFromBars(window);
+        assertFalse(range.validForEntry(), "expected thin reject, got " + range);
+        assertTrue(range.invalidReason() != null && range.invalidReason().contains("thin"));
+    }
+
     private static TrendBar bar(double low, double high, double close, double vol) {
         return new TrendBar(LocalDateTime.now(), close, high, low, close, vol);
     }

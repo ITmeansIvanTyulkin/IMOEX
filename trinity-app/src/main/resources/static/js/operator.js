@@ -8,6 +8,7 @@
   const ALERTS_SOUND_KEY = "imoex.alerts.sound";
   const SEEN_IDS_KEY = "imoex.alerts.seenIds";
   const UPSELL_SHOWN_KEY = "imoex.upsell.shownId";
+  const STRATEGY_KEY = "trinity.activeStrategy";
   const POLL_MS = 60000;
 
   /** Filled from GET /api/auth/mode — Supabase shares IdP with trinity-landing cabinet. */
@@ -23,7 +24,9 @@
     "/view/recommendations": "Рекомендации",
     "/view/signals": "Сигналы",
     "/view/final": "Итог + новости",
-    "/view/paper": "Paper journal",
+    "/view/paper": "Statement",
+    "/view/statement": "Statement",
+    "/view/trend-signal": "Сигнал Trend",
     "/view/walk-forward": "Walk-forward",
     "/view/strategy": "Описание стратегии",
     "/view/full-core": "Full Core",
@@ -970,7 +973,7 @@
       }
     }
 
-    const href = evt.href || (evt.strategy === "TREND" ? "/view" : "/view/paper");
+    const href = evt.href || (evt.strategy === "TREND" ? "/view/trend-signal" : "/view/statement");
     const linkLabel = evt.strategy === "TREND" ? "Trend" : "Paper journal";
     const metaExtra = evt.instrument
       ? '<span class="toast-instrument">' + escapeHtml(evt.instrument) + "</span>"
@@ -1184,12 +1187,13 @@
       const res = await fetch("/api/ops/auto-run/status", { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       const st = await res.json();
-      if (st && st.lastIntradayRunAt && st.lastIntradayRunStatus) {
-        const key = "imoex.lastIntraLog";
-        const msg = st.lastIntradayRunAt + " " + st.lastIntradayRunStatus;
-        if (localStorage.getItem(key) !== msg && st.lastIntradayRunStatus !== "RUNNING") {
+      // INTRADAY cron detached from operator UX — ignore lastIntraday* fields
+      if (st && st.lastDailyRunAt && st.lastDailyRunStatus) {
+        const key = "imoex.lastDailyLog";
+        const msg = st.lastDailyRunAt + " " + st.lastDailyRunStatus;
+        if (localStorage.getItem(key) !== msg && st.lastDailyRunStatus !== "RUNNING") {
           localStorage.setItem(key, msg);
-          appendLog("INTRADAY cron: " + st.lastIntradayRunStatus + " @ " + st.lastIntradayRunAt, "info");
+          appendLog("DAILY cron: " + st.lastDailyRunStatus + " @ " + st.lastDailyRunAt, "info");
         }
       }
     } catch (_) {
@@ -1979,6 +1983,159 @@
     }
   }
 
+  function hasTrendAccess() {
+    return document.body.getAttribute("data-has-trend") === "1";
+  }
+  function hasArbAccess() {
+    return document.body.getAttribute("data-has-arb") === "1";
+  }
+
+  function showStrategyLockModal(strategy) {
+    const host = $("strategy-lock-host");
+    if (!host) return;
+    const key = (strategy || "TREND").toUpperCase();
+    fetch("/api/ops/strategy-lock?strategy=" + encodeURIComponent(key), {
+      headers: { Accept: "application/json" }
+    }).then(function (res) {
+      return res.ok ? res.json() : null;
+    }).then(function (data) {
+      if (!data) return;
+      host.innerHTML =
+        '<div class="strategy-lock-modal" role="dialog" aria-modal="true">' +
+        '<button type="button" class="upsell-close" aria-label="Закрыть">&times;</button>' +
+        "<strong>" + escapeHtml(data.title || "Заблокировано") + "</strong>" +
+        "<p>" + escapeHtml(data.body || "") + "</p>" +
+        '<div class="upsell-actions">' +
+        '<a class="btn btn-primary" href="' + escapeHtml(data.ctaHref || "/view/full-core") + '">' +
+        escapeHtml(data.ctaLabel || "Подробнее") + "</a>" +
+        '<a class="btn btn-ghost" href="/view/settings#product-edition-settings">Версия (демо)</a>' +
+        '<button type="button" class="upsell-dismiss">Закрыть</button>' +
+        "</div></div>" +
+        '<div class="strategy-lock-backdrop"></div>';
+      const close = function () { host.innerHTML = ""; };
+      host.querySelector(".upsell-close").addEventListener("click", close);
+      host.querySelector(".upsell-dismiss").addEventListener("click", close);
+      const bd = host.querySelector(".strategy-lock-backdrop");
+      if (bd) bd.addEventListener("click", close);
+    }).catch(function () {});
+  }
+
+  function resolveActiveStrategy() {
+    const page = (document.body.getAttribute("data-nav-strategy") || "").trim();
+    if (page === "pairs" || page === "trend" || page === "arb") return page;
+    try {
+      const stored = localStorage.getItem(STRATEGY_KEY);
+      if (stored === "pairs" || stored === "trend" || stored === "arb") return stored;
+    } catch (_) {}
+    return "pairs";
+  }
+
+  function applyStrategyNav(strategy) {
+    let s = strategy || "pairs";
+    if (s === "trend" && !hasTrendAccess()) {
+      showStrategyLockModal("TREND");
+      s = "pairs";
+    }
+    if (s === "arb" && !hasArbAccess()) {
+      showStrategyLockModal("ARB");
+      s = resolveActiveStrategy() === "arb" ? "pairs" : resolveActiveStrategy();
+      if (s === "arb") s = "pairs";
+    }
+    try { localStorage.setItem(STRATEGY_KEY, s); } catch (_) {}
+    document.querySelectorAll(".strategy-switch-btn").forEach(function (btn) {
+      const on = btn.getAttribute("data-strategy") === s;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    document.querySelectorAll(".topnav-secondary").forEach(function (nav) {
+      const show = nav.getAttribute("data-for") === s;
+      if (show) nav.removeAttribute("hidden");
+      else nav.setAttribute("hidden", "");
+    });
+  }
+
+  function bindStrategyNav() {
+    document.querySelectorAll(".strategy-switch-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const s = btn.getAttribute("data-strategy") || "pairs";
+        if (btn.getAttribute("data-locked") === "true") {
+          showStrategyLockModal(s === "arb" ? "ARB" : "TREND");
+          return;
+        }
+        applyStrategyNav(s);
+        if (s === "trend") {
+          location.href = "/view/trend-signal";
+        } else if (s === "arb") {
+          location.href = "/view/full-core?feature=calendar-arb";
+        } else if (s === "pairs" && location.pathname.indexOf("/view/trend") === 0) {
+          location.href = "/view/final";
+        }
+      });
+    });
+    document.addEventListener("click", function (ev) {
+      const openBtn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-strategy-lock-open]")
+        : null;
+      if (openBtn) {
+        ev.preventDefault();
+        showStrategyLockModal(openBtn.getAttribute("data-strategy-lock-open") || "TREND");
+        return;
+      }
+      const req = ev.target && ev.target.closest
+        ? ev.target.closest("a[data-requires]")
+        : null;
+      if (!req) return;
+      const need = req.getAttribute("data-requires");
+      if (need === "trend" && !hasTrendAccess()) {
+        ev.preventDefault();
+        showStrategyLockModal("TREND");
+      } else if (need === "arb" && !hasArbAccess()) {
+        ev.preventDefault();
+        showStrategyLockModal("ARB");
+      }
+    });
+    applyStrategyNav(resolveActiveStrategy());
+    const lockPage = document.querySelector(".strategy-lock-page[data-strategy-lock]");
+    if (lockPage) {
+      showStrategyLockModal(lockPage.getAttribute("data-strategy-lock"));
+    }
+  }
+
+  function bindProductEditionSettings() {
+    const save = $("product-edition-save");
+    const reset = $("product-edition-reset");
+    const select = $("product-edition-select");
+    const status = $("product-edition-status");
+    if (!save || !select) return;
+    async function apply(body) {
+      try {
+        const res = await fetch("/api/ops/product-edition", {
+          method: "POST",
+          headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+          appendLog("Не удалось сменить версию: HTTP " + res.status, "err");
+          return;
+        }
+        const data = await res.json();
+        if (status) status.textContent = "текущая: " + (data.label || data.edition);
+        appendLog("Версия продукта: " + (data.edition || "?") + " — перезагрузка…", "ok");
+        setTimeout(function () { location.reload(); }, 400);
+      } catch (ex) {
+        appendLog("Ошибка смены версии: " + ex, "err");
+      }
+    }
+    save.addEventListener("click", function () {
+      apply({ edition: select.value });
+    });
+    if (reset) {
+      reset.addEventListener("click", function () {
+        apply({ clear: true });
+      });
+    }
+  }
+
   function bind() {
     loadCreds();
     const map = {
@@ -2096,6 +2253,8 @@
     appendLog("Раздел: " + currentSectionTitle() + ".", "info");
     bindFullCoreTeasers();
     bindWidgetFlips();
+    bindStrategyNav();
+    bindProductEditionSettings();
     startAlertPolling();
     loadAuthMode().then(function () {
       updateSessionBar();

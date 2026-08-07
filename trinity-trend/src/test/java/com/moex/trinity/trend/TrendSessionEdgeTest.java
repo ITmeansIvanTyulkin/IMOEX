@@ -14,22 +14,24 @@ class TrendSessionEdgeTest {
     private final TrendPlaybookSettings settings = TrendPlaybookSettings.brDefaults();
 
     @Test
-    void blocksMorningNoiseUntilFortyMinutesAfterOpen() {
-        // FORTS open 09:00 + 40 min → trade from 09:40
+    void blocksMorningNoiseUntilTwentyMinutesAfterMainOpen() {
+        // Main session 10:00 + 20 min → trade from 10:20
         assertNotNull(TrendSessionEdge.blockReason(LocalDateTime.of(2026, 8, 5, 7, 20), settings));
-        assertNotNull(TrendSessionEdge.blockReason(LocalDateTime.of(2026, 8, 5, 8, 40), settings));
         assertNotNull(TrendSessionEdge.blockReason(LocalDateTime.of(2026, 8, 5, 9, 30), settings));
-        assertNull(TrendSessionEdge.blockReason(LocalDateTime.of(2026, 8, 5, 9, 40), settings));
-        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 9, 55), settings));
-        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 10, 15), settings));
+        assertNotNull(TrendSessionEdge.blockReason(LocalDateTime.of(2026, 8, 5, 10, 10), settings));
+        assertNull(TrendSessionEdge.blockReason(LocalDateTime.of(2026, 8, 5, 10, 20), settings));
+        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 10, 25), settings));
+        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 14, 0), settings));
     }
 
     @Test
-    void blocksLastThirtyMinutesBeforeClose() {
-        // close 23:50 − 30 → from 23:20
-        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 5), settings));
-        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 15), settings));
+    void blocksEveningThinSessionAndLastThirtyMinutesBeforeMainClose() {
+        // close 19:00 − 30 → from 18:30; evening 19–23:50 blocked
+        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 18, 0), settings));
+        assertTrue(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 18, 25), settings));
+        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 18, 30), settings));
+        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 19, 5), settings));
+        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 21, 0), settings));
         assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 20), settings));
-        assertFalse(TrendSessionEdge.isTradable(LocalDateTime.of(2026, 8, 5, 23, 40), settings));
     }
 }
