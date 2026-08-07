@@ -26,6 +26,7 @@ import java.util.TreeMap;
  *   -Dexec.mainClass=com.moex.trinity.trend.replay.BrM5CampaignReplay \
  *   -Dexec.args="2026-08-03 2026-08-04 2026-08-05 2026-08-06"
  * # or: --bars-only 2026-08-03 2026-08-06
+ * # or: --unlimited-setups  (maxSetupsPerDay=0 for bounce-share measure)
  * # or: data/br-m1-2026-08-04.json data/br-m1-2026-08-05.json
  * </pre>
  *
@@ -38,12 +39,15 @@ public final class BrM5CampaignReplay {
 
     public static void main(String[] args) throws Exception {
         boolean barsOnly = false;
+        boolean unlimitedSetups = false;
         List<LocalDate> days = new ArrayList<>();
         List<Path> files = new ArrayList<>();
         String secid = "BRU6";
         for (String a : args) {
             if ("--bars-only".equals(a)) {
                 barsOnly = true;
+            } else if ("--unlimited-setups".equals(a)) {
+                unlimitedSetups = true;
             } else if (a.endsWith(".json")) {
                 files.add(Path.of(a));
             } else if (a.matches("\\d{4}-\\d{2}-\\d{2}")) {
@@ -63,6 +67,9 @@ public final class BrM5CampaignReplay {
         }
 
         TrendPlaybookSettings settings = TrendPlaybookSettings.brDefaults().withASetupBounceOnly(false);
+        if (unlimitedSetups) {
+            settings = settings.withMaxSetupsPerDay(0);
+        }
         List<Map<String, Object>> dayReports = new ArrayList<>();
         List<Double> equity = new ArrayList<>();
         equity.add(0.0);

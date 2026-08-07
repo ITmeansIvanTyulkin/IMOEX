@@ -72,6 +72,51 @@ class LevelsProfileBrPlaybookTest {
     }
 
     @Test
+    void topBounceArmsWhenRejectionClosesBelowShelf() {
+        // Desk TOP ~81.55–81.70; operator 16:05 — high in zone, close below
+        MergedVolumeRange top = new MergedVolumeRange(81.55, 81.70, 5000, List.of(), true, null);
+        List<TrendBar> bars = List.of(
+                bar(LocalDateTime.of(2026, 8, 6, 16, 0), 81.50, 81.60, 81.45, 81.55),
+                bar(LocalDateTime.of(2026, 8, 6, 16, 5), 81.60, 81.71, 81.12, 81.48)
+        );
+        assertTrue(LevelsProfileBrPlaybook.bounceConfirmed(bars, top, false));
+        LevelsProfileBrPlaybook.BounceShelfArm arm =
+                LevelsProfileBrPlaybook.armBounceAtShelf(bars, top, true, true);
+        assertEquals(TrendTradeMode.BOUNCE, arm.mode());
+        assertFalse(arm.buy());
+        assertTrue(arm.reason().contains("TOP"));
+    }
+
+    @Test
+    void botBounceArmsWhenRejectionClosesAboveShelf() {
+        MergedVolumeRange bot = new MergedVolumeRange(79.47, 79.65, 5000, List.of(), true, null);
+        List<TrendBar> bars = List.of(
+                bar(LocalDateTime.of(2026, 8, 6, 8, 35), 79.70, 79.80, 79.60, 79.72),
+                bar(LocalDateTime.of(2026, 8, 6, 8, 40), 79.60, 79.90, 79.45, 79.85)
+        );
+        assertTrue(LevelsProfileBrPlaybook.bounceConfirmed(bars, bot, true));
+        LevelsProfileBrPlaybook.BounceShelfArm arm =
+                LevelsProfileBrPlaybook.armBounceAtShelf(bars, bot, false, true);
+        assertEquals(TrendTradeMode.BOUNCE, arm.mode());
+        assertTrue(arm.buy());
+        assertTrue(arm.reason().contains("BOT"));
+    }
+
+    @Test
+    void bounceConfirmedStillTrueOnBrokenTopRejectionBar() {
+        // After morning break+hold of TOP, afternoon rejection wick must still qualify
+        MergedVolumeRange top = new MergedVolumeRange(81.55, 81.70, 5000, List.of(), true, null);
+        List<TrendBar> bars = new ArrayList<>();
+        LocalDateTime t = LocalDateTime.of(2026, 8, 6, 14, 0);
+        bars.add(bar(t, 81.60, 81.68, 81.58, 81.65));
+        bars.add(bar(t.plusMinutes(5), 81.80, 81.90, 81.75, 81.85)); // outside above
+        bars.add(bar(t.plusMinutes(10), 81.85, 81.95, 81.80, 81.90));
+        bars.add(bar(t.plusMinutes(15), 81.70, 81.71, 81.12, 81.48)); // rejection
+        assertTrue(LevelsProfileBrPlaybook.breakHoldSatisfied(bars, top, true, 2));
+        assertTrue(LevelsProfileBrPlaybook.bounceConfirmed(bars, top, false));
+    }
+
+    @Test
     void researchServiceSelectsPlaybookInTrend() {
         TrendPlaybook pb = new LevelsProfileBrPlaybook();
         TrendResearchService svc = new TrendResearchService(List.of(pb), new DefaultTrendRegimeSelector());

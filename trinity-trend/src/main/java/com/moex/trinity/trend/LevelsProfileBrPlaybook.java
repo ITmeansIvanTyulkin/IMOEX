@@ -1135,8 +1135,17 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         MergedVolumeRange range = level.range();
         double maxDist = settings.retestArmMaxDistancePoints();
         double pt = settings.instrument().pointSize();
+        String role = level.role() == null ? "" : level.role();
+        boolean structuralTop = "TREND_HI".equals(role) || !level.preferBuy();
+        boolean structuralBot = "TREND_LO".equals(role) || level.preferBuy();
 
         if (brokenUp) {
+            // Operator TOP rejection out of the shelf — not a from-above RETEST long touch
+            TrendBar last = window.get(window.size() - 1);
+            if (structuralTop && bounceConfirmed(window, range, false) && last.close() < range.low()) {
+                return new ModeDecision(TrendTradeMode.BOUNCE, false,
+                        "TOP rejection bounce short (confirmed below shelf) — prefer over §8 RETEST long");
+            }
             // §8: retest long from above
             if (!retestEntryAllowed(window, range, true, maxDist, pt)) {
                 return new ModeDecision(null, true,
@@ -1145,6 +1154,11 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
             return new ModeDecision(TrendTradeMode.RETEST, true, "§8 break+hold+retest long");
         }
         if (brokenDown) {
+            TrendBar last = window.get(window.size() - 1);
+            if (structuralBot && bounceConfirmed(window, range, true) && last.close() > range.high()) {
+                return new ModeDecision(TrendTradeMode.BOUNCE, true,
+                        "BOT rejection bounce long (confirmed above shelf) — prefer over §8 RETEST short");
+            }
             if (!retestEntryAllowed(window, range, false, maxDist, pt)) {
                 return new ModeDecision(null, false,
                         "§8 BOT/level break+hold — waiting retest from below");
@@ -1309,6 +1323,12 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
 
         if (zoneIsTop) {
             if (topBrokenHeld) {
+                TrendBar last = window.get(window.size() - 1);
+                // Only steal §8 RETEST when rejection closes fully below the shelf
+                if (bounceConfirmed(window, range, false) && last.close() < range.low()) {
+                    return new ModeDecision(TrendTradeMode.BOUNCE, false,
+                            "TOP rejection bounce short (confirmed below shelf) — prefer over break RETEST long");
+                }
                 if (!retestEntryAllowed(window, range, true, maxDist, pt)) {
                     return new ModeDecision(null, true,
                             "TOP break+hold — waiting retest from above (touch / within "
@@ -1321,6 +1341,11 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         }
 
         if (bottomBrokenHeld) {
+            TrendBar last = window.get(window.size() - 1);
+            if (bounceConfirmed(window, range, true) && last.close() > range.high()) {
+                return new ModeDecision(TrendTradeMode.BOUNCE, true,
+                        "BOT rejection bounce long (confirmed above shelf) — prefer over break RETEST short");
+            }
             if (!retestEntryAllowed(window, range, false, maxDist, pt)) {
                 return new ModeDecision(null, false,
                         "BOT break+hold — waiting retest from below (touch / within "
@@ -1334,39 +1359,64 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
 
     /**
      * Bounce at a day-locked shelf: BOT → BUY, TOP → SELL (mean-reversion between ranges).
+     * Operator rejection: wick into shelf then close out of zone still arms bounce.
      */
     private ModeDecision decideBounceAtShelf(List<TrendBar> window, MergedVolumeRange range, boolean zoneIsTop) {
+        BounceShelfArm arm = armBounceAtShelf(window, range, zoneIsTop, settings.requireBounceConfirm());
+        return new ModeDecision(arm.mode(), arm.buy(), arm.reason());
+    }
+
+    /**
+     * TOP/BOT bounce arm logic. Package-visible for tests.
+     * When {@code bounceConfirmed}, arms even if close already left the shelf.
+     */
+    static BounceShelfArm armBounceAtShelf(
+            List<TrendBar> window,
+            MergedVolumeRange range,
+            boolean zoneIsTop,
+            boolean requireConfirm
+    ) {
         boolean buy = !zoneIsTop;
         boolean above = window.get(window.size() - 1).close() > range.high();
         boolean below = window.get(window.size() - 1).close() < range.low();
         boolean inside = !above && !below;
         double lastClose = window.get(window.size() - 1).close();
 
-        if (buy) {
-            // BOT long: need touch / reject from lower shelf
-            if (below || (inside && lastClose <= range.mid())) {
-                if (settings.requireBounceConfirm() && !bounceConfirmed(window, range, true)) {
-                    return new ModeDecision(null, true, "BOT bounce: waiting closed rejection candle in zone");
-                }
-                return new ModeDecision(TrendTradeMode.BOUNCE, true, "BOT shelf: bounce long (confirmed)");
+        // Operator path: rejection candle may close outside the shelf.
+        if (bounceConfirmed(window, range, buy)) {
+            if (buy) {
+                return new BounceShelfArm(TrendTradeMode.BOUNCE, true, "BOT shelf: bounce long (confirmed)");
             }
-            if (above) {
-                return new ModeDecision(null, true, "price above BOT — waiting return to shelf");
-            }
-            return new ModeDecision(null, true, "BOT shelf — mid-zone, no bounce confirm yet");
+            return new BounceShelfArm(TrendTradeMode.BOUNCE, false, "TOP shelf: bounce short (confirmed)");
         }
 
-        // TOP short
-        if (above || (inside && lastClose >= range.mid())) {
-            if (settings.requireBounceConfirm() && !bounceConfirmed(window, range, false)) {
-                return new ModeDecision(null, false, "TOP bounce: waiting closed rejection candle in zone");
+        if (buy) {
+            if (below || (inside && lastClose <= range.mid())) {
+                if (requireConfirm) {
+                    return new BounceShelfArm(null, true, "BOT bounce: waiting closed rejection candle in zone");
+                }
+                return new BounceShelfArm(TrendTradeMode.BOUNCE, true, "BOT shelf: bounce long (confirmed)");
             }
-            return new ModeDecision(TrendTradeMode.BOUNCE, false, "TOP shelf: bounce short (confirmed)");
+            if (above) {
+                return new BounceShelfArm(null, true, "price above BOT — waiting return to shelf");
+            }
+            return new BounceShelfArm(null, true, "BOT shelf — mid-zone, no bounce confirm yet");
+        }
+
+        if (above || (inside && lastClose >= range.mid())) {
+            if (requireConfirm) {
+                return new BounceShelfArm(null, false, "TOP bounce: waiting closed rejection candle in zone");
+            }
+            return new BounceShelfArm(TrendTradeMode.BOUNCE, false, "TOP shelf: bounce short (confirmed)");
         }
         if (below) {
-            return new ModeDecision(null, false, "price below TOP — waiting return to shelf");
+            return new BounceShelfArm(null, false, "price below TOP — waiting return to shelf");
         }
-        return new ModeDecision(null, false, "TOP shelf — mid-zone, no bounce confirm yet");
+        return new BounceShelfArm(null, false, "TOP shelf — mid-zone, no bounce confirm yet");
+    }
+
+    /** Result of {@link #armBounceAtShelf} — package-visible for tests. */
+    record BounceShelfArm(TrendTradeMode mode, boolean buy, String reason) {
     }
 
     private ModeDecision decideMode(List<TrendBar> window, MergedVolumeRange range, TrendBias bias, double lastClose) {
