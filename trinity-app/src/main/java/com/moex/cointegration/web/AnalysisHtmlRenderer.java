@@ -102,7 +102,7 @@ public class AnalysisHtmlRenderer {
                 <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
                 <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
                 <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
-                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
+                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
               </main>
               <div id="trinity-auth-gate" class="trinity-auth-gate" hidden aria-hidden="true">
                 <canvas id="trinity-auth-canvas" class="trinity-auth-canvas" aria-hidden="true"></canvas>
