@@ -31,7 +31,12 @@ class AnalysisHtmlRendererFinalPageTest {
                 false, false, "OFF", null, null, null, 5000, 7500, 15000
         ));
         AnalysisHtmlRenderer renderer = new AnalysisHtmlRenderer(
-                upsell, com.moex.cointegration.config.CapitalProperties.defaults(), true, false, false
+                upsell,
+                com.moex.cointegration.config.CapitalProperties.defaults(),
+                new com.moex.cointegration.product.ProductEditionService(
+                        com.moex.cointegration.config.ProductProperties.defaults()),
+                java.util.Optional.empty(),
+                true, false, false
         );
 
         String html = renderer.renderFinalTable(
@@ -61,7 +66,12 @@ class AnalysisHtmlRendererFinalPageTest {
                 false, false, "OFF", null, null, null, 5000, 7500, 15000
         ));
         AnalysisHtmlRenderer renderer = new AnalysisHtmlRenderer(
-                upsell, com.moex.cointegration.config.CapitalProperties.defaults(), true, false, false
+                upsell,
+                com.moex.cointegration.config.CapitalProperties.defaults(),
+                new com.moex.cointegration.product.ProductEditionService(
+                        com.moex.cointegration.config.ProductProperties.defaults()),
+                java.util.Optional.empty(),
+                true, false, false
         );
 
         TradingRecommendation tech = new TradingRecommendation(

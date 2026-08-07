@@ -29,11 +29,13 @@
     <div class="signal-chip"><span class="k">Mode</span><strong id="sig-mode">—</strong></div>
     <div class="signal-chip"><span class="k">Потенциал TP1</span><strong id="sig-potential">—</strong></div>
     <div class="signal-chip"><span class="k">Paper сегодня</span><strong id="sig-paper-today">—</strong></div>
-    <div class="signal-chip"><span class="k">Statement</span><strong id="sig-paper-total">—</strong></div>
+    <div class="signal-chip"><span class="k">Statement</span>
+      <strong><a id="sig-paper-total" href="/view/statement#trend">—</a></strong>
+    </div>
   </div>
   <p class="signal-summary" id="sig-summary">—</p>
   <div class="signal-paper-panel" id="signal-paper-panel" hidden>
-    <p class="signal-brief-title">Paper statement · BR</p>
+    <p class="signal-brief-title">Сделки сегодня · BR</p>
     <p class="meta" id="signal-paper-meta">—</p>
     <table class="signal-paper-table">
       <thead><tr><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th></tr></thead>
@@ -271,7 +273,8 @@
         <ul class="signal-guide-list">
           <li>Против ветра без сильного сценария; RETEST long в дамп.</li>
           <li>Нет reject / слабое касание полки.</li>
-          <li>Тонкая полка, окно EIA/API, края сессии.</li>
+          <li>Окно событий (EIA/API), края сессии и <strong>вечерняя сессия</strong> (после 19:00) —
+            тонкий рынок, новых сетапов нет. Торгуем только основную сессию ~10:20–18:30.</li>
           <li>Цена в середине между TOP и BOT без сетапа.</li>
         </ul>
         <p>Тишина чаще значит «фильтр сработал», а не «робот сломался».</p>
@@ -293,4 +296,4 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trend-signal-desk.js?v=20260807-breakin"></script>
+<script src="/js/trend-signal-desk.js?v=20260807-main-session"></script>

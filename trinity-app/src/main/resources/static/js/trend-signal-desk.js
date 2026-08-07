@@ -97,18 +97,21 @@
     const panel = $("signal-paper-panel");
     const body = $("signal-paper-body");
     const meta = $("signal-paper-meta");
-    const rows = (paper && paper.recentTrades) || [];
+    const raw = (paper && (paper.todayTrades || paper.recentTrades)) || [];
+    const today = mskTodayYmd();
+    const rows = raw.filter(function (t) {
+      return isSameMskDay(t && (t.closedAt || t.openedAt), today);
+    });
     if (!panel || !body) return;
     if (!rows.length) {
       panel.hidden = true;
+      body.innerHTML = "";
       return;
     }
     panel.hidden = false;
     if (meta) {
-      meta.textContent = "Закрыто " + (st.closedCount || rows.length)
-        + " · сегодня " + fmtPnl(st.todayPnlRub)
-        + " · всего " + fmtPnl(st.realizedPnlRub)
-        + (st.note ? " · " + st.note : "");
+      meta.textContent = "Сегодня · " + rows.length + " сделок · PnL " + fmtPnl(st.todayPnlRub)
+        + " · полный statement → /view/statement#trend";
     }
     body.innerHTML = rows.map(function (t) {
       const pnl = t.pnlRub;
@@ -123,6 +126,32 @@
         + "<td>" + (t.tag || "—") + "</td>"
         + "</tr>";
     }).join("");
+  }
+  function mskTodayYmd() {
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Moscow",
+        year: "numeric", month: "2-digit", day: "2-digit"
+      }).format(new Date());
+    } catch (_) {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }
+  function isSameMskDay(iso, ymd) {
+    if (!iso || !ymd) return false;
+    const s = String(iso);
+    if (s.length >= 10 && s.slice(0, 10) === ymd) return true;
+    try {
+      const d = new Date(s);
+      if (isNaN(d.getTime())) return false;
+      const fmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Moscow",
+        year: "numeric", month: "2-digit", day: "2-digit"
+      });
+      return fmt.format(d) === ymd;
+    } catch (_) {
+      return false;
+    }
   }
   function fmtPx(v) {
     if (v == null || typeof v !== "number" || !isFinite(v)) return "—";

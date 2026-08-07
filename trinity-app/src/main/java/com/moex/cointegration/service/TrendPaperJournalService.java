@@ -88,18 +88,35 @@ public class TrendPaperJournalService {
         return m;
     }
 
-    /** Desk payload fragment. */
+    /** Desk payload fragment: statement + today's closed trades only. */
     public Map<String, Object> deskDto() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("statement", statement());
-        List<Map<String, Object>> recent = new ArrayList<>();
+        Map<String, Object> st = statement();
+        m.put("statement", st);
+        LocalDate today = LocalDate.now(MSK);
+        List<Map<String, Object>> todayTrades = new ArrayList<>();
         List<Trade> trades = data.trades();
-        int from = Math.max(0, trades.size() - 8);
-        for (int i = trades.size() - 1; i >= from; i--) {
-            recent.add(tradeDto(trades.get(i)));
+        for (int i = trades.size() - 1; i >= 0; i--) {
+            Trade t = trades.get(i);
+            LocalDate closeDay = parseDay(t.closedAt());
+            if (today.equals(closeDay)) {
+                todayTrades.add(tradeDto(t));
+            }
         }
-        m.put("recentTrades", recent);
+        m.put("todayTrades", todayTrades);
+        // Keep recentTrades as today-only for older desk clients
+        m.put("recentTrades", todayTrades);
         return m;
+    }
+
+    /** Full journal for Statement hub (newest first). */
+    public List<Map<String, Object>> allTradeDtos() {
+        List<Trade> trades = data.trades();
+        List<Map<String, Object>> out = new ArrayList<>(trades.size());
+        for (int i = trades.size() - 1; i >= 0; i--) {
+            out.add(tradeDto(trades.get(i)));
+        }
+        return out;
     }
 
     public synchronized Trade record(Trade trade) {

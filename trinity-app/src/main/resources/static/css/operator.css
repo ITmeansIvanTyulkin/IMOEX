@@ -143,6 +143,86 @@ nav.topnav {
   gap: 0.35rem;
   flex-wrap: wrap;
   border-bottom: 1px solid #1a242b;
+  align-items: center;
+  justify-content: space-between;
+}
+
+nav.topnav-hub {
+  gap: 1rem;
+}
+
+.topnav-shared {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.strategy-switch {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.15rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.strategy-switch-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #c5d0d7;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.strategy-switch-btn:hover,
+.strategy-switch-btn.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.strategy-switch-btn.is-locked {
+  opacity: 0.55;
+}
+
+.strategy-switch-btn.is-locked::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin-left: 0.35em;
+  border-radius: 1px;
+  background: #c9a227;
+  vertical-align: middle;
+}
+
+nav.topnav-secondary {
+  background: #121a20;
+  padding: 0.35rem 1.25rem;
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #1a242b;
+}
+
+nav.topnav-secondary[hidden] {
+  display: none !important;
+}
+
+nav.topnav-secondary a {
+  color: #a8b4bc;
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
+nav.topnav-secondary a:hover,
+nav.topnav-secondary a.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 
 nav.topnav a {
@@ -158,6 +238,109 @@ nav.topnav a.active {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
+
+.statement-hub {
+  max-width: 72rem;
+}
+
+.statement-hub-head {
+  margin-bottom: 1.25rem;
+}
+
+.statement-section {
+  margin: 1.75rem 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.statement-section h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.statement-locked,
+.strategy-lock-card {
+  position: relative;
+  padding: 1.25rem 1.4rem;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f7f8f9, #eef1f3);
+}
+
+.strategy-lock-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b4a12;
+  background: var(--warn-soft);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.strategy-lock-page {
+  display: flex;
+  justify-content: center;
+  padding: 2.5rem 1rem;
+}
+
+.strategy-lock-card {
+  max-width: 32rem;
+}
+
+.strategy-lock-host {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  pointer-events: none;
+}
+
+.strategy-lock-host:empty {
+  display: none;
+}
+
+.strategy-lock-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 16, 22, 0.45);
+  pointer-events: auto;
+}
+
+.strategy-lock-modal {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(28rem, calc(100vw - 2rem));
+  background: #fff;
+  border-radius: 10px;
+  padding: 1.25rem 1.4rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.strategy-lock-modal .upsell-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.input-select {
+  display: block;
+  margin-top: 0.4rem;
+  min-width: 16rem;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+td.is-buy, .is-buy { color: var(--ok); }
+td.is-sell, .is-sell { color: var(--danger); }
 
 .auth-session-bar {
   display: flex;

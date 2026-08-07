@@ -1,6 +1,10 @@
 package com.moex.cointegration.web;
 
 import com.moex.cointegration.config.CapitalProperties;
+import com.moex.cointegration.config.ProductProperties;
+import com.moex.cointegration.product.ProductEdition;
+import com.moex.cointegration.product.ProductEditionService;
+import com.moex.cointegration.service.TrendPaperJournalService;
 import com.moex.cointegration.upsell.UpsellAccess;
 import com.moex.cointegration.upsell.UpsellService;
 import com.moex.cointegration.model.AnalysisReport;
@@ -25,6 +29,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Формирует HTML-страницы с таблицами для просмотра в браузере.
@@ -34,6 +39,8 @@ public class AnalysisHtmlRenderer {
 
     private final UpsellService upsellService;
     private final CapitalProperties capitalProperties;
+    private final ProductEditionService productEdition;
+    private final Optional<TrendPaperJournalService> trendPaperJournal;
     private final boolean strategyPairsEnabled;
     private final boolean strategyTrendEnabled;
     private final boolean strategyCalendarArbEnabled;
@@ -41,12 +48,18 @@ public class AnalysisHtmlRenderer {
     public AnalysisHtmlRenderer(
             UpsellService upsellService,
             CapitalProperties capitalProperties,
+            ProductEditionService productEdition,
+            Optional<TrendPaperJournalService> trendPaperJournal,
             @Value("${imoex.strategies.pairs.enabled:true}") boolean strategyPairsEnabled,
             @Value("${imoex.strategies.trend.enabled:false}") boolean strategyTrendEnabled,
             @Value("${imoex.strategies.calendar-arb.enabled:false}") boolean strategyCalendarArbEnabled
     ) {
         this.upsellService = upsellService;
         this.capitalProperties = capitalProperties;
+        this.productEdition = productEdition != null
+                ? productEdition
+                : new ProductEditionService(ProductProperties.defaults());
+        this.trendPaperJournal = trendPaperJournal != null ? trendPaperJournal : Optional.empty();
         this.strategyPairsEnabled = strategyPairsEnabled;
         this.strategyTrendEnabled = strategyTrendEnabled;
         this.strategyCalendarArbEnabled = strategyCalendarArbEnabled;
@@ -62,9 +75,11 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260807-breakin">
+              <link rel="stylesheet" href="/css/operator.css?v=20260807-statement">
             </head>
-            <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}">
+            <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
+                  data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
+                  data-nav-strategy="{{NAV_STRATEGY}}">
               <header class="site-header">
                 <div class="brand-row">
                   <div class="trinity-logo" aria-hidden="true">
@@ -86,7 +101,8 @@ public class AnalysisHtmlRenderer {
                 {{BODY}}
                 <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
                 <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
-                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Paper PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
+                <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
+                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт).</p>
               </main>
               <div id="trinity-auth-gate" class="trinity-auth-gate" hidden aria-hidden="true">
                 <canvas id="trinity-auth-canvas" class="trinity-auth-canvas" aria-hidden="true"></canvas>
@@ -132,7 +148,7 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260805-trend-switch"></script>
+              <script src="/js/operator.js?v=20260807-statement-nav"></script>
             </body>
             </html>
             """;
@@ -296,14 +312,49 @@ public class AnalysisHtmlRenderer {
                   %s
                   %s
                   %s
+                  %s
                 </div>
                 """.formatted(
                 trialBanner(),
+                productEditionPanel(),
                 opsPanel(),
                 trendPlaybookPanel(),
                 brokerConsolePanel()
         );
         return page("TRINITY — настройки", body, nav("settings"), OpsMode.NONE);
+    }
+
+    private String productEditionPanel() {
+        ProductEdition cur = productEdition.current();
+        String configured = productEdition.configured().name();
+        return """
+                <section class="dash-section strategy-doc" id="product-edition-settings">
+                  <h2>Версия продукта (демо)</h2>
+                  <p class="meta">
+                    Симуляция купленного тарифа без биллинга. YAML default:
+                    <code>imoex.product.edition=%s</code>. Переключатель ниже — runtime override в памяти.
+                  </p>
+                  <div class="callout">
+                    <label for="product-edition-select"><strong>Активная версия</strong></label>
+                    <select id="product-edition-select" class="input-select">
+                      <option value="PAIRS"%s>Коинтеграция (light)</option>
+                      <option value="PAIRS_TREND"%s>Коинтеграция + тренд</option>
+                      <option value="FULL"%s>Full Core</option>
+                    </select>
+                    <div class="ops-row" style="margin-top:0.75rem">
+                      <button type="button" class="btn btn-primary" id="product-edition-save">Применить</button>
+                      <button type="button" class="btn btn-ghost" id="product-edition-reset">Сбросить к YAML</button>
+                      <span class="meta" id="product-edition-status">текущая: %s</span>
+                    </div>
+                  </div>
+                </section>
+                """.formatted(
+                escape(configured),
+                cur == ProductEdition.PAIRS ? " selected" : "",
+                cur == ProductEdition.PAIRS_TREND ? " selected" : "",
+                cur == ProductEdition.FULL ? " selected" : "",
+                escape(cur.labelRu())
+        );
     }
 
     private String trendPlaybookPanel() {
@@ -372,7 +423,6 @@ public class AnalysisHtmlRenderer {
         var capital = capitalProperties;
         double equity = capital.equityRub() != null ? capital.equityRub() : 100_000.0;
         int dailyPct = (int) Math.round((capital.dailyGrossShare() != null ? capital.dailyGrossShare() : 1.0) * 100);
-        int intraPct = (int) Math.round((capital.intradayGrossShare() != null ? capital.intradayGrossShare() : 0.0) * 100);
         String equityLabel = String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' ');
         String leverage = capital.leverageAllowed() ? "доступно" : "выкл <1M";
 
@@ -401,7 +451,7 @@ public class AnalysisHtmlRenderer {
                 """.formatted(
                 flipCard(
                         "widget-paper",
-                        "Paper",
+                        "Statement",
                         """
                         <div class="donut" id="widget-paper-donut" style="--p:0;--c:var(--accent)">
                           <div class="donut-center">
@@ -415,9 +465,9 @@ public class AnalysisHtmlRenderer {
                         </div>
                         """,
                         """
-                        <p class="widget-back-lead" id="widget-paper-back-lead">Загрузка journal…</p>
+                        <p class="widget-back-lead" id="widget-paper-back-lead">Загрузка statement…</p>
                         <div class="widget-back-stats" id="widget-paper-back-stats"></div>
-                        <a class="widget-back-link" href="/view/paper">Открыть paper journal →</a>
+                        <a class="widget-back-link" href="/view/statement">Открыть Statement →</a>
                         """
                 ),
                 flipCard(
@@ -507,20 +557,18 @@ public class AnalysisHtmlRenderer {
                         </div>
                         <div class="widget-meta">
                           <div class="widget-stat"><span class="k"><i class="swatch gold"></i>DAILY</span><span class="v">%d%%</span></div>
-                          <div class="widget-stat"><span class="k"><i class="swatch info"></i>INTRADAY</span><span class="v">%d%%</span></div>
                           <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
                         </div>
-                        """.formatted(dailyPct, escape(equityLabel), dailyPct, intraPct, escape(leverage)),
+                        """.formatted(dailyPct, escape(equityLabel), dailyPct, escape(leverage)),
                         """
-                        <p class="widget-back-lead">Операторский профиль капитала для paper / research.</p>
+                        <p class="widget-back-lead">Капитал paper для коинтеграции — книга DAILY.</p>
                         <div class="widget-back-stats">
                           <div class="widget-stat"><span class="k">Equity</span><span class="v">%s</span></div>
                           <div class="widget-stat"><span class="k">Книга DAILY</span><span class="v">%d%% капитала</span></div>
-                          <div class="widget-stat"><span class="k">INTRADAY</span><span class="v">%d%% · research-only</span></div>
                           <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
                         </div>
                         <a class="widget-back-link" href="/view/settings">Конфиг в Настройках →</a>
-                        """.formatted(escape(equityLabel), dailyPct, intraPct, escape(leverage))
+                        """.formatted(escape(equityLabel), dailyPct, escape(leverage))
                 ),
                 flipCard(
                         "widget-signals",
@@ -1038,7 +1086,7 @@ public class AnalysisHtmlRenderer {
                   <p class="lead">
                     TRINITY сейчас в live paper ведёт <strong>DAILY</strong> pairs mean-reversion в боковике
                     (фокус — металлы / mining; нефть в equities-парах отложена на фьючерсы/опционы).
-                    <strong>INTRADAY</strong> — только research (1H EG/Z/метрики), без paper-торговли.
+                    <strong>INTRADAY pairs</strong> выведены из операторского цикла (код research остаётся, без автозапуска и UI).
                     Мы не угадываем направление рынка: ищем временный разрыв связанной пары и ставим на сжатие.
                     Календарный арбитраж %s и опционы — следующие стратегии бренда, пока в дорожной карте.
                   </p>
@@ -1152,7 +1200,7 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#exits">Как выходим</a></li>
                       <li><a href="#paper">Paper и проверка на истории</a></li>
                       <li><a href="#validation">Валидация: replay и издержки</a></li>
-                      <li><a href="#intraday-events">INTRADAY: календарь событий</a></li>
+                      <li><a href="#intraday-events">Research: INTRADAY / календарь (не в ops)</a></li>
                       <li><a href="#limits">Честные ограничения</a></li>
                     </ol>
                   </nav>
@@ -1182,18 +1230,16 @@ public class AnalysisHtmlRenderer {
                     <span>MOEX daily</span><i>→</i>
                     <span>Capital → DAILY</span><i>→</i>
                     <span>EG/FDR + cluster</span><i>→</i>
-                    <span>FA → paper</span><i>→</i>
-                    <span>INTRADAY research</span>
+                    <span>FA → paper</span>
                   </div>
                   <ol class="pipeline">
-                    <li><strong>Капитал.</strong> Equity → слоты DAILY (INTRADAY share = 0 при research-only). Без плеча до 1M.</li>
+                    <li><strong>Капитал.</strong> Equity → слоты DAILY (100%% gross). Без плеча до 1M.</li>
                     <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → monthly cluster gate → фундамент (MOEX+RSS) → paper-journal.json.</li>
-                    <li><strong>INTRADAY.</strong> 1H свечи ISS → EG/Z/метрики (и ATAS-gate в коде) → <strong>без paper-открытий</strong>. Cron выключен.</li>
                     <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы DAILY при TREND.</li>
                   </ol>
                   <div class="callout">
-                    Торговый фокус — DAILY metals. INTRADAY остаётся в пайплайне как research-слой
-                    (`imoex.paper.intraday-research-only`), не как вторая торговая книга.
+                    Операторский цикл («Анализ + paper», вечерний cron) — только DAILY metals.
+                    INTRADAY pairs-код остаётся для research (`runIntradayOnly`), без автозапуска и без UI.
                     Источник свечей — только MOEX ISS.
                   </div>
                 """.formatted(arbBadge, roadmapBlock, trendBadge);
@@ -1216,9 +1262,6 @@ public class AnalysisHtmlRenderer {
                     <li>мало дней с нулевым объёмом;</li>
                     <li>привилегированные акции (<code>*P</code>) обычно исключены;</li>
                     <li>тикер должен быть в секторном каталоге, если включён секторный режим.</li>
-                    <li><strong>только INTRADAY:</strong> дополнительно whitelist <strong>1-го эшелона</strong>
-                      (~30 голубых фишек) — <code>imoex.universe.intraday-tier-one-only</code>.
-                      DAILY может оставаться шире при том же ADV-фильтре.</li>
                   </ul>
                   <p>
                     Смысл: не тестировать illiquid «мусор», где спред нельзя нормально набрать и закрыть.
@@ -1307,8 +1350,6 @@ public class AnalysisHtmlRenderer {
                     <li><strong>LONG / SHORT</strong> — есть подтверждённый вход.</li>
                     <li><strong>WATCH</strong> — спред экстремальный, но разворота ещё нет (или зона внимания).</li>
                     <li><strong>HOLD / NO_SIGNAL</strong> — сейчас не входим.</li>
-                    <li><strong>WATCH (microstructure)</strong> — Z и разворот ок, но INTRADAY gate ATAS заблокировал вход
-                      (тонкий объём, широкий spread proxy, несогласованность ног).</li>
                   </ul>
                   <p>
                     Смотреть картинку удобнее на странице пары: стрелки входа, зона «ждём разворот»,
@@ -1320,7 +1361,6 @@ public class AnalysisHtmlRenderer {
                     Порядок жёсткий: <strong>сначала техника</strong>, затем фундамент,
                     и только потом итоговая рекомендация и paper.
                     Фильтр работает в режиме <strong>DAILY / multi-day</strong> (удержание несколько дней).
-                    В <strong>INTRADAY</strong> фундамент намеренно пропускается — новости запаздывают.
                   </p>
                   <p>
                     Источники: MOEX sitenews и RSS (<code>imoex.news.rss-feeds</code> — Interfax / RBC / Vedomosti и др.).
@@ -1342,7 +1382,7 @@ public class AnalysisHtmlRenderer {
                     развёрнутый explain (пайплайн, причины пустой таблицы, словарь ENTER/REDUCE/WATCH/BLOCK),
                     сводка «почему такие», expandable-разбор по строкам и RSS-контекст.
                     В JSON и UI у каждой строки поле <strong><code>rationale</code></strong> — краткое «почему»:
-                    Z, фундамент (или «пропущен INTRADAY»), режим ADX, решение и слоты.</p>
+                    Z, фундамент, режим ADX, решение и слоты.</p>
 
                   <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
                   <p>
@@ -1354,11 +1394,10 @@ public class AnalysisHtmlRenderer {
                     Плечо в модели не используется, пока equity ниже порога (~1 млн ₽).
                   </p>
                   <ul>
-                    <li>dual-book: слоты от equity (~100k → 1 daily + 2 intraday); gross 40/60 <strong>независимо</strong> по книгам;</li>
-                    <li>если DAILY без сигналов — его gross остаётся неиспользованным, INTRADAY не «добирает» остаток;</li>
+                    <li>капитал 100% на DAILY; слоты от equity (~100k → 1–2 пары);</li>
                     <li>без плеча при equity &lt; 1M;</li>
-                    <li>не больше 1 открытой пары на сектор внутри книги;</li>
-                    <li>DAILY: удержание несколько дней + FA; INTRADAY: flatten к close, без FA;</li>
+                    <li>не больше 1 открытой пары на сектор;</li>
+                    <li>DAILY: удержание несколько дней + FA;</li>
                     <li>качество пары для входа: R², half-life в разумных границах, минимум сделок в бэктесте;</li>
                     <li>не открываем, если |Z| уже слишком близко к стоп-уровню.</li>
                   </ul>
@@ -1367,7 +1406,7 @@ public class AnalysisHtmlRenderer {
                   <p>Выход — не только «дождались Z≈0». В paper работают несколько правил:</p>
                   <ul>
                     <li><strong>Mean-reversion</strong> — спред вернулся к цели около нуля;</li>
-                    <li><strong>Partial take-profit</strong> — на полпути к нулю по Z <em>или</em> у POC ноги (INTRADAY, ±15 bps);</li>
+                    <li><strong>Partial take-profit</strong> — на полпути к нулю по Z;</li>
                     <li><strong>Trailing по Z</strong> — отдали от лучшей точки — закрываем;</li>
                     <li><strong>Stop по |Z|</strong> (в т.ч. адаптивный) — спред ушёл ещё дальше против нас;</li>
                     <li><strong>Time-stop</strong> — слишком долго в позиции без результата;</li>
@@ -1377,11 +1416,11 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="paper">10. Paper trading и walk-forward</h3>
                   <p>
-                    <a href="/view/paper">Paper journal</a> — учебный журнал без брокера.
+                    <a href="/view/statement">Statement</a> — paper / research PnL по стратегиям.
                     На каждом анализе система сама открывает ENTER/REDUCE, ведёт mark-to-market
                     и закрывает по правилам выше. PnL считается по количествам и ценам ног
                     (с учётом slippage и borrow), а не как «1 Z = 1%».
-                    Slippage задаётся <strong>отдельно по книгам</strong>: DAILY ~20 bps, INTRADAY ~40 bps (stress).
+                    Slippage DAILY ~20 bps.
                     На закрытых сделках — колонка <strong>«Комментарий к закрытию»</strong>:
                     <code>mean-reversion</code>, <code>stop</code>, <code>time-stop</code>, <code>flatten</code>, <code>partial-tp</code>
                     (полный текст причины остаётся в Notes).
@@ -1407,25 +1446,20 @@ public class AnalysisHtmlRenderer {
                     Долгий локальный candle-архив и deep research replay — профиль Full Core (roadmap).
                   </p>
 
-                  <h3 id="intraday-events">12. INTRADAY: календарь событий</h3>
+                  <h3 id="intraday-events">12. Research: INTRADAY / календарь (не в ops)</h3>
                   <p>
-                    Фундаментальный фильтр для INTRADAY намеренно отключён (новости запаздывают),
-                    но добавлен <strong>event overlay</strong>: файл <code>data/event-calendar.json</code>
-                    (шаблон — <code>event-calendar.example.json</code> в корне репозитория).
+                    Код INTRADAY pairs и event-overlay сохранён для research
+                    (<code>runIntradayOnly</code>, <code>data/event-calendar.json</code>),
+                    но <strong>не входит</strong> в операторский UX и автозапуски.
+                    При будущем включении: блок входов за ~45 мин до события, flatten затронутых тикеров.
                   </p>
-                  <ul>
-                    <li>за <strong>45 минут</strong> до события (отчётность, макро, дивиденды) — блок новых входов INTRADAY;</li>
-                    <li>открытые INTRADAY-позиции по затронутым тикерам — принудительный flatten;</li>
-                    <li>тикер <code>*</code> — событие для всего рынка.</li>
-                  </ul>
-                  <p>Конфиг: <code>imoex.session.event-calendar-enabled</code>, <code>event-flatten-minutes-before</code>.</p>
 
                   <h3 id="limits">13. Честные ограничения</h3>
                   <ul>
                     <li>Стратегия классическая (textbook pairs) — только боковик, без трендового модуля.</li>
                     <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
                     <li>Новости по ISS — эвристика, не полный fundamental research.</li>
-                    <li>Slippage в paper — модельный (bps), не стакан MOEX; INTRADAY может быть хуже 40 bps.</li>
+                    <li>Slippage в paper — модельный (bps), не стакан MOEX.</li>
                     <li>ATAS-слой в TRINITY — прокси по OHLCV ISS, не полная лента сделок; с T-Invest sandbox точность исполнения вырастет.</li>
                     <li>Historical replay не заменяет брокерский demo (T-Invest sandbox) — следующий шаг к live.</li>
                     <li>Нужны месяцы чистого paper track-record, прежде чем судить об alpha.</li>
@@ -1461,7 +1495,7 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#daily">Ежедневный цикл</a></li>
                       <li><a href="#auto">Автопрогоны (cron)</a></li>
                       <li><a href="#alerts">Алерты и звук</a></li>
-                      <li><a href="#dual">Две книги: DAILY и INTRADAY</a></li>
+                      <li><a href="#book">Книга DAILY</a></li>
                       <li><a href="#empty">Пустой journal — это нормально?</a></li>
                       <li><a href="#checklist">Чеклист</a></li>
                     </ol>
@@ -1492,8 +1526,8 @@ public class AnalysisHtmlRenderer {
                   <table class="params">
                     <thead><tr><th>Кнопка</th><th>Что делает</th></tr></thead>
                     <tbody>
-                      <tr><td><strong>Анализ + paper</strong></td><td>Полный цикл обеих книг (DAILY → INTRADAY) без скачивания свечей. Типичный будний пересчёт.</td></tr>
-                      <tr><td><strong>Анализ + скачать свечи</strong></td><td>То же, но с <code>refresh=true</code> — обновляет дневные и часовые свечи с биржи.</td></tr>
+                      <tr><td><strong>Анализ + paper</strong></td><td>Цикл DAILY: техника → FA → paper, без скачивания свечей. Типичный будний пересчёт.</td></tr>
+                      <tr><td><strong>Анализ + скачать свечи</strong></td><td>То же с <code>refresh=true</code> — обновляет дневные свечи с биржи.</td></tr>
                       <tr><td><strong>Только новости / paper</strong></td><td>Быстро: новости MOEX/RSS + синхронизация paper без полного Engle–Granger.</td></tr>
                       <tr><td><strong>Walk-forward</strong></td><td>Пересчёт OOS-отчёта по топ-парам (daily).</td></tr>
                       <tr><td><strong>Скачать свечи</strong></td><td>Только загрузка данных, без анализа.</td></tr>
@@ -1509,10 +1543,10 @@ public class AnalysisHtmlRenderer {
                     <tbody>
                       <tr><td><a href="/view">Дашборд</a></td><td>Спокойный обзор: KPI (Paper / Брокер / Final / Режим), сигналы и топ-пары.</td></tr>
                       <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера (токен, песочница, сверка).</td></tr>
-                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY), развёрнутый explain-panel (почему 0 или N строк), словарь действий и RSS-контекст для FA (не сигнал). INTRADAY FA/RSS пропускает.</td></tr>
+                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY), развёрнутый explain-panel, словарь действий и RSS-контекст для FA (не сигнал).</td></tr>
                       <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
                       <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>
-                      <tr><td><a href="/view/paper">Paper</a></td><td>Журнал бумажных сделок: OPEN / CLOSED, PnL ₽, колонка «Книга» (DAILY / INTRADAY).</td></tr>
+                      <tr><td><a href="/view/statement">Statement</a></td><td>Депозит + стейтменты стратегий (pairs / trend / arb).</td></tr>
                       <tr><td><a href="/view/walk-forward">Walk-forward</a></td><td>Out-of-sample проверка на истории (не гарантия будущего).</td></tr>
                       <tr><td><a href="/view/strategy">Описание стратегии</a></td><td>Теория: коинтеграция, Z-score, режим боковика, выходы.</td></tr>
                     </tbody>
@@ -1527,30 +1561,27 @@ public class AnalysisHtmlRenderer {
                     <li>Убедиться, что приложение запущено (<code>mvn -pl trinity-app -am spring-boot:run</code>).</li>
                     <li>Нажать «Анализ + paper» (или дождаться вечернего cron — см. ниже).</li>
                     <li>Открыть <a href="/view/final">Итог + новости</a> — что разрешено по DAILY после FA.</li>
-                    <li>Открыть <a href="/view/paper">Paper</a> — что реально открылось в обеих книгах.</li>
+                    <li>Открыть <a href="/view/statement">Statement</a> — что реально открылось в DAILY / Trend.</li>
                     <li>При сомнениях — график пары и виджет «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
                   </ol>
 
                   <h3 id="auto">5. Автопрогоны (cron)</h3>
                   <p>
-                    Пока сервер работает, планировщик сам гоняет анализ — ручная кнопка не обязательна каждый раз.
-                    Статус последних прогонов пишется в лог пульта (строки <code>INTRADAY cron: …</code>).
+                    Пока сервер работает, планировщик сам гоняет DAILY — ручная кнопка не обязательна каждый раз.
+                    Статус пишется в лог пульта (строки <code>DAILY cron: …</code>).
                   </p>
                   <table class="params">
                     <thead><tr><th>Книга</th><th>Расписание (по умолчанию)</th><th>Что внутри</th></tr></thead>
                     <tbody>
                       <tr><td><strong>DAILY</strong></td><td>Пн–Пт <strong>19:05</strong></td><td>Дневные свечи → техника → FA → paper (<code>paper-journal.json</code>)</td></tr>
-                      <tr><td><strong>INTRADAY</strong></td><td>Пн–Пт <strong>:05</strong> с 10:00 до 18:00</td><td>1H свечи ISS → техника → paper без FA (<code>paper-journal-intraday.json</code>), flatten ~18:30</td></tr>
                     </tbody>
                   </table>
                   <p>
-                    Включение/выключение и cron — в <code>application.yml</code>:
-                    <code>imoex.paper.auto-run-daily</code>, <code>auto-run-intraday</code>,
-                    <code>daily-cron</code>, <code>intraday-cron</code>.
+                    Включение/выключение: <code>imoex.paper.auto-run-daily</code>, <code>daily-cron</code>.
+                    INTRADAY pairs cron выключен и не показывается в пульте.
                   </p>
                   <div class="callout">
                     На выходных новых дневных свечей нет — вечерний DAILY почти ничего не меняет.
-                    INTRADAY в нерабочие дни не запускается.
                   </div>
 
                   <h3 id="alerts">6. Алерты при новой paper-сделке</h3>
@@ -1578,27 +1609,24 @@ public class AnalysisHtmlRenderer {
                     Первый визит: уже существующие сделки в journal не спамят алертами — их id запоминаются автоматически.
                   </div>
 
-                  <h3 id="dual">7. Две книги: DAILY и INTRADAY</h3>
+                  <h3 id="book">7. Книга DAILY</h3>
                   <p>
-                    Один цикл «Анализ + paper» всегда гоняет <strong>обе</strong> книги подряд. Ручного переключателя «сегодня daily / intraday» нет.
+                    Операторский цикл («Анализ + paper», вечерний cron) ведёт <strong>только DAILY</strong>:
+                    удержание несколько дней, фундамент (новости), 100% gross капитала.
+                    INTRADAY pairs выведены из UX и автозапусков (research-код остаётся в репозитории).
                   </p>
-                  <ul>
-                    <li><strong>DAILY</strong> — удержание несколько дней, проходит фундамент (новости), ~40% gross капитала.</li>
-                    <li><strong>INTRADAY</strong> — 1H бары, без FA, закрытие к концу сессии, ~60% gross.</li>
-                    <li>Лимиты <strong>независимы</strong>: если DAILY пустой, его доля <em>не перетекает</em> в INTRADAY.</li>
-                  </ul>
 
                   <h3 id="empty">8. Пустой journal — это нормально?</h3>
                   <p>Да, если сейчас нет подходящих сигналов. Paper открывается только при:</p>
                   <ul>
                     <li>LONG / SHORT с подтверждённым разворотом Z (не WATCH);</li>
-                    <li>для DAILY — итог ENTER или REDUCE после FA;</li>
+                    <li>итог ENTER или REDUCE после FA;</li>
                     <li>режим не TREND (ADX);</li>
                     <li>пара проходит фильтры качества (half-life, R², |Z| не у стопа);</li>
-                    <li>есть свободный слот в книге.</li>
+                    <li>есть свободный слот.</li>
                   </ul>
                   <p>
-                    На странице <a href="/view/paper">Paper</a> в пустом журнале показывается диагностика по каждой книге
+                    На странице <a href="/view/statement">Statement</a> в пустом журнале показывается диагностика
                     (сколько пар, max |Z|, лидер).
                   </p>
 
@@ -1891,7 +1919,38 @@ public class AnalysisHtmlRenderer {
 
     /** Лёгкий экран сигнала trend: M5 + DOM + entry/SL/TP. */
     public String renderTrendSignalPage() {
+        if (!productEdition.hasTrend()) {
+            return renderStrategyLockedPage("TREND", "trend-signal");
+        }
         return page("TRINITY — сигнал Trend", loadClasspathUtf8("trend-signal-desk.html"), nav("trend-signal"), OpsMode.NONE);
+    }
+
+    private String renderStrategyLockedPage(String strategy, String activeNav) {
+        String title = productEdition.lockTitle(strategy);
+        String bodyText = productEdition.lockBody(strategy);
+        String href = productEdition.lockCtaHref(strategy);
+        String cta = productEdition.lockCtaLabel(strategy);
+        String body = """
+                <section class="strategy-lock-page" data-strategy-lock="%s">
+                  <div class="strategy-lock-card">
+                    <span class="strategy-lock-badge">Заблокировано</span>
+                    <h2>%s</h2>
+                    <p>%s</p>
+                    <div class="ops-row">
+                      <a class="btn btn-primary" href="%s">%s</a>
+                      <a class="btn btn-ghost" href="/view/settings#product-edition-settings">Сменить версию (демо)</a>
+                      <a class="btn btn-ghost" href="/view">На дашборд</a>
+                    </div>
+                  </div>
+                </section>
+                """.formatted(
+                escape(strategy),
+                escape(title),
+                escape(bodyText),
+                escape(href),
+                escape(cta)
+        );
+        return page("TRINITY — " + title, body, nav(activeNav), OpsMode.NONE);
     }
 
     /**
@@ -1932,7 +1991,6 @@ public class AnalysisHtmlRenderer {
                 <div class="hint">
                   <strong>Итог после фундамента (multi-day / DAILY).</strong>
                   Порядок: техника → cluster gate → фундамент (MOEX + RSS) → рекомендация → paper.
-                  В INTRADAY фундамент и RSS-контекст намеренно пропускаются — новости запаздывают.
                   Это research / decision-support, не инвестиционная рекомендация и не обещание прибыли.
                 </div>
                 """);
@@ -2016,8 +2074,7 @@ public class AnalysisHtmlRenderer {
         sb.append("<ol class=\"final-pipeline\">");
         sb.append("<li><strong>Техника</strong> — EG/FDR, Z-score, качество пары, разворот входа.</li>");
         sb.append("<li><strong>Cluster gate</strong> — месячная eligibility секторов (net&gt;0, PF≥1.1); OIL_GAS вне pairs.</li>");
-        sb.append("<li><strong>FA (только DAILY)</strong> — новости MOEX + RSS; CONFLICT с техникой снижает или блокирует вход. ")
-                .append("INTRADAY FA пропускает.</li>");
+        sb.append("<li><strong>FA</strong> — новости MOEX + RSS; CONFLICT с техникой снижает или блокирует вход.</li>");
         sb.append("<li><strong>Рекомендация</strong> — ENTER / REDUCE / WATCH / BLOCK.</li>");
         sb.append("<li><strong>Paper</strong> — журнал открывает только ENTER/REDUCE при свободном слоте и не-TREND.</li>");
         sb.append("</ol>");
@@ -2085,12 +2142,12 @@ public class AnalysisHtmlRenderer {
             sb.append("<li>Проверить виджет <strong>режима рынка</strong> на <a href=\"/view\">дашборде</a>: TREND (высокий ADX) блокирует новые входы.</li>");
             sb.append("<li>Открыть <a href=\"/view/signals\">Сигналы</a> и <a href=\"/view/recommendations\">Все рекомендации</a> — есть ли сырой LONG/SHORT до FA.</li>");
             sb.append("<li>Если техника есть, а итог пуст — пересчитать «Только новости / paper» или полный цикл (FA мог не сохраниться).</li>");
-            sb.append("<li>Смотреть <a href=\"/view/paper\">Paper</a>: пустой journal при пустом итоге — нормальная дисциплина, не «баг».</li>");
+            sb.append("<li>Смотреть <a href=\"/view/statement\">Statement</a>: пустой journal при пустом итоге — нормальная дисциплина, не «баг».</li>");
         } else {
             sb.append("<li>Сверить ENTER/REDUCE с графиком пары и размером слота (капитал без плеча до 1M).</li>");
             sb.append("<li>При CONFLICT / BLOCK — прочитать новости по ноге; не «продавливать» вход ради активности.</li>");
             sb.append("<li>Проверить режим ADX на дашборде — даже ENTER не откроется в paper при TREND.</li>");
-            sb.append("<li>Сверить, что реально легло в <a href=\"/view/paper\">Paper</a>.</li>");
+            sb.append("<li>Сверить, что реально легло в <a href=\"/view/statement\">Statement</a>.</li>");
             sb.append("<li>RSS ниже — только контекст FA, не отдельный сигнал на вход.</li>");
         }
         sb.append("</ol>");
@@ -2337,8 +2394,7 @@ public class AnalysisHtmlRenderer {
         sb.append("<h2>Новости (RSS) — контекст FA</h2>");
         sb.append("<p class=\"final-news-lead\">Лента для слоя фундамента на <strong>DAILY</strong>: помогает понять фон, ")
                 .append("в котором FA мог выставить CONFLICT / BLOCK. ")
-                .append("<em>Это не торговый сигнал и не замена разбору пары.</em> ")
-                .append("Для книги INTRADAY FA и RSS-контекст намеренно пропускаются (новости запаздывают к 1H-ритму).</p>");
+                .append("<em>Это не торговый сигнал и не замена разбору пары.</em></p>");
 
         if (!rss.enabled()) {
             sb.append("<div class=\"final-news-placeholder\">");
@@ -2440,96 +2496,256 @@ public class AnalysisHtmlRenderer {
     }
 
     /**
-     * Paper track-record таблица.
+     * Statement hub: deposit rollup + per-strategy books (pairs / trend / arb).
      */
     public String renderPaperJournal(PaperJournal journal) {
-        return renderPaperJournal(journal, List.of(), List.of());
+        return renderStatementHub(journal, List.of());
     }
 
     public String renderPaperJournal(
             PaperJournal journal,
-            List<TradingRecommendation> dailyRecs,
-            List<TradingRecommendation> intradayRecs
+            List<TradingRecommendation> dailyRecs
     ) {
+        return renderStatementHub(journal, dailyRecs);
+    }
+
+    public String renderStatementHub(
+            PaperJournal journal,
+            List<TradingRecommendation> dailyRecs
+    ) {
+        if (journal == null) {
+            journal = new PaperJournal(null, List.of());
+        }
+        if (dailyRecs == null) {
+            dailyRecs = List.of();
+        }
+
+        List<PaperTradeEntry> allEntries = journal.entries() == null ? List.of() : journal.entries();
+        List<PaperTradeEntry> pairsEntries = allEntries.stream()
+                .filter(e -> e.book() == null || e.book().isBlank() || "DAILY".equalsIgnoreCase(e.book()))
+                .toList();
+        long pairsOpen = pairsEntries.stream().filter(e -> "OPEN".equals(e.status())).count();
+        double pairsRealized = pairsEntries.stream()
+                .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
+                .mapToDouble(PaperTradeEntry::pnlRub)
+                .sum();
+        double pairsUnrealized = pairsEntries.stream()
+                .filter(e -> "OPEN".equals(e.status()) && e.unrealizedPnlRub() != null)
+                .mapToDouble(PaperTradeEntry::unrealizedPnlRub)
+                .sum();
+
+        Map<String, Object> trendSt = Map.of();
+        List<Map<String, Object>> trendTrades = List.of();
+        if (productEdition.hasTrend() && trendPaperJournal.isPresent()) {
+            TrendPaperJournalService svc = trendPaperJournal.get();
+            trendSt = svc.statement();
+            trendTrades = svc.allTradeDtos();
+        }
+        double trendRealized = num(trendSt.get("realizedPnlRub"));
+        double trendToday = num(trendSt.get("todayPnlRub"));
+        int trendClosed = (int) num(trendSt.get("closedCount"));
+
+        double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
+        double depositNet = pairsRealized + pairsUnrealized
+                + (productEdition.hasTrend() ? trendRealized : 0);
+
         StringBuilder body = new StringBuilder();
         body.append("""
-                <div class="hint">
-                  <strong>Paper journal — dual-book.</strong> DAILY и INTRADAY в одном автоматическом цикле; cash PnL по qty×price,
-                  slippage/borrow из конфига. Капитал без плеча при equity &lt; 1M; слоты/gross из CapitalAllocator
-                  (40/60 фиксированно, без перетока между книгами). INTRADAY flatten к ~18:30.
-                  Отдельные файлы journal; на этой странице — объединённый взгляд.
-                </div>
+                <article class="statement-hub">
+                  <header class="statement-hub-head">
+                    <p class="settings-eyebrow">Statement</p>
+                    <h2>Депозит и стратегии</h2>
+                    <p class="meta">Общий срез paper / research PnL по купленным стратегиям.
+                      На Trend desk над графиком — только сделки за сегодня.</p>
+                  </header>
                 """);
-        List<PaperTradeEntry> entries = journal.entries() == null ? List.of() : journal.entries();
-        long open = journal.openCount() != null ? journal.openCount()
-                : entries.stream().filter(e -> "OPEN".equals(e.status())).count();
-        long closed = journal.closedCount() != null ? journal.closedCount()
-                : entries.stream().filter(e -> "CLOSED".equals(e.status())).count();
+
+        body.append("<section class=\"statement-section\" id=\"deposit\">");
+        body.append("<h3>Депозит (общий)</h3>");
+        body.append("<div class=\"cards\">");
+        body.append(card("Equity", String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' '), false));
+        body.append(card("Pairs net", String.format("%.0f", pairsRealized + pairsUnrealized),
+                pairsRealized + pairsUnrealized >= 0));
+        if (productEdition.hasTrend()) {
+            body.append(card("Trend realized", String.format("%.0f", trendRealized), trendRealized >= 0));
+            body.append(card("Trend сегодня", String.format("%.0f", trendToday), trendToday >= 0));
+        } else {
+            body.append(card("Trend", "locked", false));
+        }
+        body.append(card("Arb", productEdition.hasArb() ? "скоро" : "locked", false));
+        body.append(card("Net* (доступное)", String.format("%.0f", depositNet), depositNet >= 0));
+        body.append("</div></section>");
+
+        // Pairs
+        body.append("<section class=\"statement-section\" id=\"pairs\">");
+        body.append("<h3>① Коинтеграция · DAILY</h3>");
+        body.append(renderPairsStatementInner(pairsEntries, pairsOpen, pairsRealized, pairsUnrealized,
+                journal.updatedAt() == null ? null : journal.updatedAt().toString(), dailyRecs));
+        body.append("</section>");
+
+        // Trend
+        body.append("<section class=\"statement-section\" id=\"trend\">");
+        body.append("<h3>② Тренд · BR</h3>");
+        if (!productEdition.hasTrend()) {
+            body.append(statementLockedBlock("TREND"));
+        } else {
+            body.append("<div class=\"cards\">");
+            body.append(card("Closed", String.valueOf(trendClosed), false));
+            body.append(card("Wins/Losses",
+                    (int) num(trendSt.get("wins")) + "/" + (int) num(trendSt.get("losses")), false));
+            body.append(card("Realized ₽*", String.format("%.0f", trendRealized), trendRealized >= 0));
+            body.append(card("Сегодня ₽*", String.format("%.0f", trendToday), trendToday >= 0));
+            body.append(card("Instrument", String.valueOf(trendSt.getOrDefault("instrument", "BR")), false));
+            Object note = trendSt.get("note");
+            body.append("</div>");
+            if (note != null && !String.valueOf(note).isBlank()) {
+                body.append("<p class=\"meta\">").append(escape(String.valueOf(note))).append("</p>");
+            }
+            body.append("<p class=\"meta\"><a href=\"/view/trend-signal\">Открыть desk →</a> ")
+                    .append("(над графиком только сделки за сегодня)</p>");
+            if (trendTrades.isEmpty()) {
+                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — закрытых paper-сделок BR ещё нет.</p></div>");
+            } else {
+                body.append("<div class=\"table-wrap\"><table><thead><tr>");
+                body.append("<th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th>");
+                body.append("</tr></thead><tbody>");
+                for (Map<String, Object> t : trendTrades) {
+                    double pnl = num(t.get("pnlRub"));
+                    String cls = pnl > 0 ? "is-buy" : (pnl < 0 ? "is-sell" : "");
+                    body.append("<tr>");
+                    body.append("<td>").append(escape(shortIso(t.get("openedAt")))).append("</td>");
+                    body.append("<td>").append(escape(shortIso(t.get("closedAt")))).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("side", "—")))).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("qty", "—")))).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("exitReason", "—")))).append("</td>");
+                    body.append("<td class=\"").append(cls).append("\">")
+                            .append(String.format("%+.0f ₽", pnl)).append("</td>");
+                    body.append("<td>").append(escape(String.valueOf(t.getOrDefault("tag", "—")))).append("</td>");
+                    body.append("</tr>");
+                }
+                body.append("</tbody></table></div>");
+            }
+        }
+        body.append("</section>");
+
+        // Arb
+        body.append("<section class=\"statement-section\" id=\"arb\">");
+        body.append("<h3>③ Календарный арбитраж</h3>");
+        if (!productEdition.hasArb()) {
+            body.append(statementLockedBlock("ARB"));
+        } else {
+            body.append("""
+                    <div class="callout">
+                      <p><strong>Скоро.</strong> Statement календарного арбитража появится вместе с модулем
+                        <code>trinity-calendar-arb</code>. Пока — roadmap на
+                        <a href="/view/full-core?feature=calendar-arb">Full Core</a>.</p>
+                    </div>
+                    """);
+        }
+        body.append("</section>");
+        body.append("</article>");
+        return page("TRINITY — Statement", body.toString(), nav("statement"));
+    }
+
+    private String renderPairsStatementInner(
+            List<PaperTradeEntry> entries,
+            long open,
+            double realized,
+            double unrealized,
+            String updatedAt,
+            List<TradingRecommendation> dailyRecs
+    ) {
+        StringBuilder body = new StringBuilder();
+        long closed = entries.stream().filter(e -> "CLOSED".equals(e.status())).count();
+        double net = realized + unrealized;
         body.append("<div class=\"cards\">");
         body.append(card("Всего", String.valueOf(entries.size()), false));
         body.append(card("OPEN", String.valueOf(open), false));
         body.append(card("CLOSED", String.valueOf(closed), false));
-        body.append(card("Realized ₽*",
-                journal.realizedPnlRub() == null ? "—" : String.format("%.0f", journal.realizedPnlRub()),
-                journal.realizedPnlRub() != null && journal.realizedPnlRub() >= 0));
-        body.append(card("Unrealized ₽*",
-                journal.unrealizedPnlRub() == null ? "—" : String.format("%.0f", journal.unrealizedPnlRub()),
-                journal.unrealizedPnlRub() != null && journal.unrealizedPnlRub() >= 0));
-        double net = (journal.realizedPnlRub() == null ? 0 : journal.realizedPnlRub())
-                + (journal.unrealizedPnlRub() == null ? 0 : journal.unrealizedPnlRub());
-        body.append(card("Net ₽* (R+U)", String.format("%.0f", net), net >= 0));
-        body.append(card("Обновлено", journal.updatedAt() == null ? "—" : journal.updatedAt().toString(), false));
+        body.append(card("Realized ₽*", String.format("%.0f", realized), realized >= 0));
+        body.append(card("Unrealized ₽*", String.format("%.0f", unrealized), unrealized >= 0));
+        body.append(card("Net ₽*", String.format("%.0f", net), net >= 0));
+        body.append(card("Обновлено", updatedAt == null ? "—" : updatedAt, false));
         body.append("</div>");
-
         if (entries.isEmpty()) {
             body.append("<div class=\"callout\">");
-            body.append("<p><strong>Журнал пуст</strong> — сегодня нет paper-входов (вариантов сделок нет).</p>");
-            body.append("<p>Сделки появляются только при <strong>ENTER</strong> / <strong>REDUCE_SIZE</strong> ");
-            body.append("после техники и FA (DAILY). Сейчас сигналы ниже порога |Z|≥2 — это нормально.</p>");
-            body.append("<ul>");
-            body.append("<li>").append(bookDiag("DAILY", dailyRecs)).append("</li>");
-            body.append("<li>").append(bookDiag("INTRADAY", intradayRecs)).append("</li>");
-            body.append("</ul>");
-            body.append("<p class=\"meta\">Типичные причины: |Z| &lt; 2, half-life вне порога, режим TREND (ADX), ");
-            body.append("нет коинтегрированных пар после FDR. Нажмите «Анализ + paper», когда Z вырастет.</p>");
+            body.append("<p><strong>Журнал пуст</strong> — нет paper-входов DAILY.</p>");
+            body.append("<ul><li>").append(bookDiag("DAILY", dailyRecs)).append("</li></ul>");
             body.append("</div>");
         } else {
             body.append("<div class=\"table-wrap\"><table><thead><tr>");
-            body.append("<th>Статус</th><th>Книга</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
+            body.append("<th>Статус</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
             body.append("<th class=\"num\">Entry Z</th><th class=\"num\">Mark/Exit Z</th>");
-            body.append("<th class=\"num\">Notional Y</th>");
-            body.append("<th class=\"num\">PnL %*</th><th class=\"num\">PnL ₽*</th>");
-            body.append("<th>Opened</th><th>Closed</th><th>Комментарий к закрытию</th><th>Notes</th><th></th>");
+            body.append("<th class=\"num\">PnL ₽*</th><th>Opened</th><th>Closed</th><th></th>");
             body.append("</tr></thead><tbody>");
             for (PaperTradeEntry e : entries) {
                 Double markOrExit = e.exitZ() != null ? e.exitZ() : e.markZ();
-                Double pct = e.pnlPct() != null ? e.pnlPct() : e.unrealizedPnlPct();
                 Double rub = e.pnlRub() != null ? e.pnlRub() : e.unrealizedPnlRub();
                 body.append("<tr>");
                 body.append("<td>").append(escape(e.status())).append("</td>");
-                body.append("<td>").append(escape(e.book() == null ? "DAILY" : e.book())).append("</td>");
                 body.append("<td>").append(escape(e.tickerY())).append(" / ").append(escape(e.tickerX())).append("</td>");
                 body.append("<td>").append(signalBadge(e.signal())).append("</td>");
                 body.append("<td>").append(decisionBadge(e.decision())).append("</td>");
                 body.append("<td class=\"num\">").append(formatZ(e.entryZ())).append("</td>");
                 body.append("<td class=\"num\">")
                         .append(markOrExit == null ? "—" : formatZ(markOrExit)).append("</td>");
-                body.append("<td class=\"num\">").append(String.format("%.0f", e.notionalY())).append("</td>");
-                body.append("<td class=\"num\">")
-                        .append(pct == null ? "—" : formatPct(pct)).append("</td>");
                 body.append("<td class=\"num\">")
                         .append(rub == null ? "—" : String.format("%.0f", rub)).append("</td>");
                 body.append("<td>").append(e.openedAt() == null ? "—" : escape(e.openedAt().toString())).append("</td>");
                 body.append("<td>").append(e.closedAt() == null ? "—" : escape(e.closedAt().toString())).append("</td>");
-                body.append("<td>").append(escape(e.closeComment() == null ? "" : e.closeComment())).append("</td>");
-                body.append("<td>").append(escape(e.notes() == null ? "" : e.notes())).append("</td>");
                 body.append("<td class=\"links\">").append(chartPageLink(e.tickerY(), e.tickerX())).append("</td>");
                 body.append("</tr>");
             }
             body.append("</tbody></table></div>");
-            body.append("<p class=\"meta\">* Псевдо-PnL: 1 единица Z ≈ 1% notional Y. Не брокерский результат.</p>");
         }
-        return page("Paper journal", body.toString(), nav("paper"));
+        return body.toString();
+    }
+
+    private String statementLockedBlock(String strategy) {
+        return """
+                <div class="statement-locked" data-strategy-lock="%s">
+                  <span class="strategy-lock-badge">Заблокировано</span>
+                  <p><strong>%s</strong></p>
+                  <p class="meta">%s</p>
+                  <div class="ops-row">
+                    <a class="btn btn-primary" href="%s">%s</a>
+                    <button type="button" class="btn btn-ghost" data-strategy-lock-open="%s">Подробнее</button>
+                  </div>
+                </div>
+                """.formatted(
+                escape(strategy),
+                escape(productEdition.lockTitle(strategy)),
+                escape(productEdition.lockBody(strategy)),
+                escape(productEdition.lockCtaHref(strategy)),
+                escape(productEdition.lockCtaLabel(strategy)),
+                escape(strategy)
+        );
+    }
+
+    private static double num(Object v) {
+        if (v instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (v == null) {
+            return 0;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(v));
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private static String shortIso(Object iso) {
+        if (iso == null) {
+            return "—";
+        }
+        String s = String.valueOf(iso);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("T(\\d{2}:\\d{2})").matcher(s);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return s.length() > 16 ? s.substring(0, 16) : s;
     }
 
     /**
@@ -2584,33 +2800,94 @@ public class AnalysisHtmlRenderer {
     }
 
     private String nav(String active) {
+        String a = active == null ? "" : active;
+        boolean hasTrend = productEdition.hasTrend();
+        boolean hasArb = productEdition.hasArb();
+        String pageStrategy = navStrategyHint(a);
+        String pairsActive = "pairs".equals(pageStrategy) ? "active" : "";
+        String trendActive = "trend".equals(pageStrategy) ? "active" : "";
+        String arbActive = "arb".equals(pageStrategy) ? "active" : "";
+        String trendLock = hasTrend ? "" : " is-locked";
+        String arbLock = hasArb ? "" : " is-locked";
         return """
-                <nav class="topnav">
-                  <a href="/view" class="%s">Дашборд</a>
-                  <a href="/view/settings" class="%s">Настройки</a>
-                  <a href="/view/trend-signal" class="%s">Сигнал Trend</a>
-                  <a href="/view/guide" class="%s">Как пользоваться системой</a>
+                <nav class="topnav topnav-hub" aria-label="Основное меню" data-page-strategy="%s">
+                  <div class="topnav-shared">
+                    <a href="/view" class="%s">Дашборд</a>
+                    <a href="/view/statement" class="%s">Statement</a>
+                    <a href="/view/settings" class="%s">Настройки</a>
+                    <a href="/view/guide" class="%s">Справка</a>
+                  </div>
+                  <div class="strategy-switch" role="tablist" aria-label="Стратегия">
+                    <button type="button" class="strategy-switch-btn %s" data-strategy="pairs"
+                            role="tab" aria-selected="%s">Коинтеграция</button>
+                    <button type="button" class="strategy-switch-btn %s%s" data-strategy="trend"
+                            data-locked="%s" role="tab" aria-selected="%s">Тренд</button>
+                    <button type="button" class="strategy-switch-btn %s%s" data-strategy="arb"
+                            data-locked="%s" role="tab" aria-selected="%s">Арбитраж</button>
+                  </div>
+                </nav>
+                <nav class="topnav-secondary" data-for="pairs" hidden>
                   <a href="/view/final" class="%s">Итог + новости</a>
                   <a href="/view/signals" class="%s">Сигналы</a>
-                  <a href="/view/recommendations" class="%s">Все рекомендации</a>
-                  <a href="/view/paper" class="%s">Paper</a>
+                  <a href="/view/recommendations" class="%s">Рекомендации</a>
                   <a href="/view/walk-forward" class="%s">Walk-forward</a>
-                  <a href="/view/strategy" class="%s">Описание торговой стратегии</a>
+                  <a href="/view/strategy" class="%s">Описание</a>
+                </nav>
+                <nav class="topnav-secondary" data-for="trend" hidden>
+                  <a href="/view/trend-signal" class="%s" data-requires="trend">Сигнал BR</a>
+                </nav>
+                <nav class="topnav-secondary" data-for="arb" hidden>
+                  <a href="/view/full-core?feature=calendar-arb" class="%s" data-requires="arb">Календарный arb</a>
                   <a href="/view/full-core" class="%s">Full Core</a>
                 </nav>
                 """.formatted(
-                active.equals("dashboard") ? "active" : "",
-                active.equals("settings") ? "active" : "",
-                active.equals("trend-signal") ? "active" : "",
-                active.equals("guide") ? "active" : "",
-                active.equals("final") ? "active" : "",
-                active.equals("signals") ? "active" : "",
-                active.equals("recommendations") ? "active" : "",
-                active.equals("paper") ? "active" : "",
-                active.equals("walkforward") ? "active" : "",
-                active.equals("strategy") ? "active" : "",
-                active.equals("fullcore") ? "active" : ""
+                escape(pageStrategy),
+                a.equals("dashboard") ? "active" : "",
+                a.equals("statement") || a.equals("paper") ? "active" : "",
+                a.equals("settings") ? "active" : "",
+                a.equals("guide") ? "active" : "",
+                pairsActive,
+                pairsActive.isEmpty() ? "false" : "true",
+                trendActive, trendLock, hasTrend ? "false" : "true",
+                trendActive.isEmpty() ? "false" : "true",
+                arbActive, arbLock, hasArb ? "false" : "true",
+                arbActive.isEmpty() ? "false" : "true",
+                a.equals("final") ? "active" : "",
+                a.equals("signals") ? "active" : "",
+                a.equals("recommendations") ? "active" : "",
+                a.equals("walkforward") ? "active" : "",
+                a.equals("strategy") ? "active" : "",
+                a.equals("trend-signal") ? "active" : "",
+                a.equals("fullcore") ? "active" : "",
+                a.equals("fullcore") ? "active" : ""
         );
+    }
+
+    private static boolean isPairsNav(String a) {
+        return a.equals("final") || a.equals("signals") || a.equals("recommendations")
+                || a.equals("walkforward") || a.equals("strategy");
+    }
+
+    private static boolean isTrendNav(String a) {
+        return a.equals("trend-signal");
+    }
+
+    private static boolean isArbNav(String a) {
+        return a.equals("fullcore");
+    }
+
+    private String navStrategyHint(String active) {
+        String a = active == null ? "" : active;
+        if (isPairsNav(a)) {
+            return "pairs";
+        }
+        if (isTrendNav(a)) {
+            return "trend";
+        }
+        if (isArbNav(a)) {
+            return "arb";
+        }
+        return "";
     }
 
 
@@ -2634,10 +2911,26 @@ public class AnalysisHtmlRenderer {
         UpsellAccess access = upsellService != null ? upsellService.access() : null;
         String upsellAttr = (access != null && access.enabled()) ? "on" : "off";
         String phase = access != null ? access.phase() : "OFF";
+        ProductEdition edition = productEdition.current();
+        String navStrategy = "";
+        if (nav != null) {
+            int idx = nav.indexOf("data-page-strategy=\"");
+            if (idx >= 0) {
+                int start = idx + "data-page-strategy=\"".length();
+                int end = nav.indexOf('"', start);
+                if (end > start) {
+                    navStrategy = nav.substring(start, end);
+                }
+            }
+        }
         return PAGE_TEMPLATE
                 .replace("{{TITLE}}", escape(title))
                 .replace("{{UPSELL}}", upsellAttr)
                 .replace("{{UPSELL_PHASE}}", escape(phase))
+                .replace("{{EDITION}}", edition.name())
+                .replace("{{HAS_TREND}}", productEdition.hasTrend() ? "1" : "0")
+                .replace("{{HAS_ARB}}", productEdition.hasArb() ? "1" : "0")
+                .replace("{{NAV_STRATEGY}}", navStrategy)
                 .replace("{{NAV}}", nav)
                 .replace("{{OPS}}", opsHtml(opsMode))
                 .replace("{{BODY}}", body);

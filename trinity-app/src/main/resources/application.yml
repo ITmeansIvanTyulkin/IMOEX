@@ -85,7 +85,7 @@ imoex:
     daily-gross-share: 1.0
     intraday-gross-share: 0.0
   session:
-    # DUAL = оба горизонта в одном analysis cycle (не exclusive switch)
+    # DUAL keeps dual-book code paths; operator cycle runs DAILY only (INTRADAY via runIntradayOnly).
     mode: DUAL
     candle-interval: 60
     hours-per-session: 7
@@ -116,7 +116,8 @@ imoex:
     journal-file: paper-journal.json
     auto-run-daily: true
     daily-cron: "0 5 19 * * MON-FRI"
-    # INTRADAY: research-only (без paper-торговли); cron выключен
+    # INTRADAY pairs: detached from operator UX / «Анализ + paper» / DAILY cron.
+    # Research entrypoint remains runIntradayOnly + this cron (kept off).
     auto-run-intraday: false
     intraday-research-only: true
     intraday-cron: "0 5 10-18 * * MON-FRI"
@@ -149,6 +150,10 @@ imoex:
     min-profit-factor: 1.10
     min-closed-trades: 4
     exclude-oil-gas: true
+  # Simulated SKU for operator UX locks (no billing). Override in Settings at runtime.
+  # PAIRS | PAIRS_TREND | FULL
+  product:
+    edition: FULL
   # Soft upsell Full Core / calendar arbitrage (scaffolding, no billing)
   upsell:
     enabled: true
@@ -254,10 +259,10 @@ imoex:
       max-day-loss-rub: 1500           # block new setups when realized day PnL ≤ −limit (0=off)
       initial-size-fraction: 0.4     # ~⅓–½ size until BE
       prefer-marketdata-zones: true  # tape VAP when broker feed streaming
-      trade-session-open: "09:00"
-      trade-session-close: "23:50"
-      no-trade-after-open-minutes: 40
-      no-trade-before-close-minutes: 30
+      trade-session-open: "10:00"      # основная сессия FORTS (не утренняя доп.)
+      trade-session-close: "19:00"     # конец основной; вечер 19–23:50 не торгуем (тонкий рынок)
+      no-trade-after-open-minutes: 20
+      no-trade-before-close-minutes: 30  # новые сетапы до 18:30
       htf-min-move-points: 40          # calibrated: slightly earlier H1/M5 wind (was 50)
       htf-slope-bars: 24
       htf-require-agreement: true    # M5 proxy fallback only

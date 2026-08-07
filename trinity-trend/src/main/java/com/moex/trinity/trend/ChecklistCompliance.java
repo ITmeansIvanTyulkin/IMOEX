@@ -31,7 +31,7 @@ public enum ChecklistCompliance {
     NOTE_NEW_DAY_WIPE(Status.IMPLEMENTED, "clear levels on new calendar day"),
     EXT_DAY_LOCK(Status.EXTENSION, "lock 2–4 levels for the MSK day"),
     EXT_PRIOR_DAY(Status.EXTENSION, "seed shelves from prior session volume"),
-    EXT_SESSION_EDGE(Status.EXTENSION, "no new setups open+N / close−M"),
+    EXT_SESSION_EDGE(Status.EXTENSION, "main session only 10:00–19:00; no evening thin tape"),
     EXT_EVENT_CALENDAR(Status.EXTENSION, "EIA/API block window"),
     EXT_HTF_SOFT(Status.EXTENSION, "H1/M15 from M5 (hourly); soft against=bounce/size; must not kill §8"),
     EXT_ONE_SETUP(Status.EXTENSION, "one setup per zone until unlock"),

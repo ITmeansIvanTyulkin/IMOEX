@@ -24,7 +24,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Оркестрация dual-book анализа: DAILY (FA + paper) + INTRADAY research (без paper при research-only).
+ * Оркестрация pairs-анализа. Операторский цикл — только DAILY (FA + paper).
+ * INTRADAY research остаётся в {@link #runIntradayOnly} / отдельном cron (по умолчанию выкл).
  */
 @Service
 public class CointegrationAnalysisService {
@@ -82,7 +83,9 @@ public class CointegrationAnalysisService {
     }
 
     /**
-     * Dual-book pipeline: daily tech→FA→paper, затем 1H research (paper только если не research-only).
+     * Operator / DAILY cycle: daily tech→FA→paper only.
+     * INTRADAY book is research-only and is not launched from this path
+     * (use {@link #runIntradayOnly} if needed).
      */
     public AnalysisReport runFullAnalysis(boolean refreshData) throws IOException {
         if (refreshData) {
@@ -91,20 +94,12 @@ public class CointegrationAnalysisService {
         marketRegimeService.refresh();
 
         CapitalAllocator.Allocation alloc = capitalProperties.allocation();
-        log.info("Capital allocation: equity={} dailyMax={} intraMax={} dailyGross≈{} intraGross≈{}",
+        log.info("Capital allocation: equity={} dailyMax={} dailyGross≈{} (INTRADAY detached from operator cycle)",
                 String.format("%.0f", alloc.equityRub()),
                 alloc.dailyMaxPairs(),
-                alloc.intradayMaxPairs(),
-                String.format("%.0f", alloc.dailyGrossCap()),
-                String.format("%.0f", alloc.intradayGrossCap()));
+                String.format("%.0f", alloc.dailyGrossCap()));
 
         AnalysisReport dailyReport = runDailyBook(alloc);
-
-        try {
-            runIntradayBook(refreshData, alloc);
-        } catch (Exception ex) {
-            log.warn("INTRADAY book failed (DAILY report kept): {}", ex.getMessage(), ex);
-        }
 
         if (properties.walkForward().enabled()) {
             try {

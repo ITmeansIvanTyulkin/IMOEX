@@ -6,7 +6,8 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 
 /**
- * BR FORTS session edge: no new setups for N minutes after open and M minutes before close.
+ * BR FORTS session edge: new setups only in the main session window
+ * (default 10:00–19:00 MSK), not evening thin tape.
  */
 public final class TrendSessionEdge {
 
