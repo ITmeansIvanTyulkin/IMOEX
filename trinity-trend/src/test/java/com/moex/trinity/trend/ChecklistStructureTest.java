@@ -36,6 +36,9 @@ class ChecklistStructureTest {
         assertFalse(TrendPlaybookSettings.brDefaults().aSetupBounceOnly());
         assertTrue(TrendPlaybookSettings.brDefaults().preferStructuralEntries());
         assertTrue(TrendPlaybookSettings.brDefaults().macroBiasEnabled());
+        assertEquals(4, TrendPlaybookSettings.brDefaults().maxSetupsPerDay());
+        assertEquals(30, TrendPlaybookSettings.brDefaults().minShelfVolume(), 1e-9);
+        assertEquals(1500, TrendPlaybookSettings.brDefaults().maxDayLossRub(), 1e-9);
     }
 
     @Test

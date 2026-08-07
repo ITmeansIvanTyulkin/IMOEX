@@ -9,12 +9,17 @@ import com.moex.trinity.trend.TapeToM5Aggregator;
 import com.moex.trinity.trend.TrendAccountContext;
 import com.moex.trinity.trend.TrendBar;
 import com.moex.trinity.trend.TrendBarSeries;
+import com.moex.trinity.trend.TrendEventCalendar;
 import com.moex.trinity.trend.TrendPlaybook;
+import com.moex.trinity.trend.TrendPlaybookSettings;
 import com.moex.trinity.trend.TrendResearchService;
 import com.moex.trinity.trend.TrendRobotEngine;
 import com.moex.trinity.trend.TrendRobotPlan;
+import com.moex.trinity.trend.TrendRobotState;
 import com.moex.trinity.trend.TrendSignal;
 import com.moex.trinity.trend.TrendStructureSnapshot;
+import com.moex.trinity.trend.BrMacroBias;
+import com.moex.trinity.trend.TrendSessionEdge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -22,6 +27,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -49,6 +55,8 @@ public class TrendDeskService {
     private final OperatorTradeToastService tradeToasts;
     private final TrendResearchService researchService;
     private final TrendPaperJournalService paperJournal;
+    private final TrendEventCalendar eventCalendar;
+    private final TrendPlaybookSettings settings;
     private final ObjectProvider<MarketDataResearchService> marketData;
     private final String configuredInstrument;
     private final double equityRub;
@@ -61,6 +69,8 @@ public class TrendDeskService {
             OperatorTradeToastService tradeToasts,
             TrendResearchService researchService,
             TrendPaperJournalService paperJournal,
+            TrendEventCalendar eventCalendar,
+            TrendPlaybookSettings settings,
             ObjectProvider<MarketDataResearchService> marketData,
             @Value("${imoex.marketdata.auto-resolve-instrument:BRU6}") String instrument,
             @Value("${imoex.capital.equity-rub:100000}") double equityRub,
@@ -72,6 +82,8 @@ public class TrendDeskService {
         this.tradeToasts = tradeToasts;
         this.researchService = researchService;
         this.paperJournal = paperJournal;
+        this.eventCalendar = eventCalendar == null ? TrendEventCalendar.empty() : eventCalendar;
+        this.settings = settings == null ? TrendPlaybookSettings.brDefaults() : settings;
         this.marketData = marketData;
         this.configuredInstrument = instrument == null || instrument.isBlank() ? "BRU6" : instrument.trim();
         this.equityRub = equityRub > 0 ? equityRub : 100_000;
@@ -102,14 +114,25 @@ public class TrendDeskService {
         body.put("profile", buildProfileDto(bars));
         body.put("footprint", buildFootprintDto(instrument, md));
         body.put("paper", paperJournal.deskDto());
+        body.put("checklistCompliance", com.moex.trinity.trend.ChecklistCompliance.deskDto());
+        body.put("blockReason", null);
 
         if (bars.size() < 10) {
             body.put("signal", TrendSignal.from(null));
             body.put("actionable", false);
             body.put("summary", "Недостаточно баров для evaluate (нужен warmup / лента)");
+            body.put("blockReason", "Недостаточно баров для evaluate (нужен warmup / лента)");
             body.put("plan", Map.of());
             body.put("structure", structureDto(TrendStructureSnapshot.empty("need more bars")));
             body.put("potentialPnlRub", null);
+            body.put("situation", Map.of(
+                    "posture", "SCANNING",
+                    "inTrade", false,
+                    "why", "Недостаточно баров для evaluate (нужен warmup / лента)",
+                    "newsDisclaimer", "Живой RSS/EIA surprise в trend desk нет — только календарь событий."
+            ));
+            body.put("events", List.of());
+            body.put("liveExecution", bridge.liveExecution());
             return body;
         }
 
@@ -123,10 +146,25 @@ public class TrendDeskService {
         TrendStructureSnapshot structure = resolveStructure(series);
         body.put("signal", TrendSignal.from(p));
         body.put("actionable", p != null && p.actionable());
-        body.put("summary", p == null ? "no plan" : (p.rationale() == null ? p.state() : p.rationale()));
+        String summary = p == null
+                ? "no plan"
+                : (p.rationale() != null && !p.rationale().isBlank()
+                ? p.rationale()
+                : (p.state() == null ? "no plan" : p.state().name()));
+        body.put("summary", summary);
+        if (p != null && !p.actionable()) {
+            body.put("blockReason", summary);
+        } else if (p == null) {
+            body.put("blockReason", "no plan");
+        } else {
+            body.put("blockReason", null);
+        }
         body.put("plan", p == null ? Map.of() : summarizePlan(p));
         body.put("structure", structureDto(structure));
         body.put("potentialPnlRub", p == null || tradeToasts == null ? null : tradeToasts.estimateTp1Potential(p));
+        body.put("dayLossBlocks", engine.dayLossBlockCount());
+        body.put("realizedDayPnlRub", engine.realizedDayPnlRub());
+        body.put("setupsToday", engine.setupsTodayCount());
         Map<String, Object> manage = new LinkedHashMap<>();
         engine.lastManageAdvice().ifPresentOrElse(a -> {
             manage.put("stop", finiteOrNull(a.stop()));
@@ -160,7 +198,156 @@ public class TrendDeskService {
             }
         });
         body.put("manage", manage);
+        try {
+            body.put("situation", buildSituation(instrument, bars, book.orElse(null), p, structure, summary));
+            body.put("events", eventCalendar.deskEvents(
+                    bars.isEmpty() ? java.time.LocalDateTime.now(MSK) : bars.get(bars.size() - 1).time(),
+                    instrument, 36, 7 * 24));
+        } catch (Exception ex) {
+            log.warn("desk situation/events failed: {}", ex.toString());
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("posture", "SCANNING");
+            fallback.put("inTrade", false);
+            fallback.put("why", summary);
+            fallback.put("error", ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            fallback.put("newsDisclaimer",
+                    "Живой RSS/EIA surprise в trend desk нет — только календарь событий + реакция цены (прокси).");
+            body.put("situation", fallback);
+            body.put("events", List.of());
+        }
+        body.put("liveExecution", bridge.liveExecution());
         return body;
+    }
+
+    private Map<String, Object> buildSituation(
+            String instrument,
+            List<TrendBar> bars,
+            DomBook book,
+            TrendRobotPlan p,
+            TrendStructureSnapshot structure,
+            String summary
+    ) {
+        Map<String, Object> s = new LinkedHashMap<>();
+        TrendRobotState eng = engine.state();
+        String engName = eng == null ? "SCAN" : eng.name();
+        String planState = p == null || p.state() == null ? engName : p.state().name();
+        boolean inPosition = eng == TrendRobotState.IN_POSITION || eng == TrendRobotState.MANAGE;
+        boolean workingOrders = eng == TrendRobotState.WORKING_ORDERS
+                || "WORKING_ORDERS".equals(planState);
+        boolean armed = p != null && p.actionable()
+                && (planState.startsWith("ARMED") || workingOrders);
+        boolean blocked = "NO_TRADE".equals(planState) || eng == TrendRobotState.NO_TRADE;
+
+        String posture;
+        if (inPosition) {
+            posture = "IN_TRADE";
+        } else if (workingOrders || armed) {
+            posture = "WAITING_FILL";
+        } else if ("ZONE_READY".equals(planState)) {
+            posture = "WATCHING_ZONE";
+        } else if (blocked) {
+            posture = "NOT_IN_TRADE";
+        } else {
+            posture = "SCANNING";
+        }
+
+        s.put("posture", posture);
+        s.put("inTrade", inPosition);
+        s.put("waitingFill", "WAITING_FILL".equals(posture));
+        s.put("engineState", engName);
+        s.put("planState", planState);
+        s.put("delivery", bridge.autoExecution() ? "AUTO_JOURNAL" : "SIGNAL_ONLY");
+        s.put("liveExecution", bridge.liveExecution());
+        s.put("autoExecution", bridge.autoExecution());
+        s.put("setupsToday", engine.setupsTodayCount());
+        s.put("kickCountToday", engine.kickCountToday());
+        s.put("dayLossBlocks", engine.dayLossBlockCount());
+        s.put("realizedDayPnlRub", engine.realizedDayPnlRub());
+        s.put("maxSetupsPerDay", settings.maxSetupsPerDay());
+        s.put("maxDayLossRub", settings.maxDayLossRub());
+
+        String why;
+        if (inPosition) {
+            why = "Робот в позиции (manage §12). Следите за BE/trail и TP1.";
+            if (p != null && p.rationale() != null) {
+                why = "В сделке по сетапу: " + p.rationale();
+            }
+        } else if ("WAITING_FILL".equals(posture)) {
+            why = summary == null || summary.isBlank()
+                    ? "Лимитки выставлены / сетап в работе — ждём касание сетки."
+                    : summary;
+        } else if (blocked) {
+            why = summary == null || summary.isBlank() ? "Новых входов нет." : summary;
+        } else if ("WATCHING_ZONE".equals(posture)) {
+            why = summary == null || summary.isBlank()
+                    ? "Зона готова — ждём bounce/retest подтверждение."
+                    : summary;
+        } else {
+            why = summary == null || summary.isBlank() ? "Сканирование структуры." : summary;
+        }
+        s.put("why", why);
+        s.put("blockReason", blocked ? why : null);
+
+        java.time.LocalDateTime now = bars.isEmpty()
+                ? java.time.LocalDateTime.now(MSK)
+                : bars.get(bars.size() - 1).time();
+        String sessionBlock = TrendSessionEdge.blockReason(now, settings);
+        s.put("sessionOpen", settings.tradeSessionOpen());
+        s.put("sessionClose", settings.tradeSessionClose());
+        s.put("sessionTradable", sessionBlock == null);
+        s.put("sessionBlock", sessionBlock);
+
+        String eventBlock = eventCalendar.blockReason(now, instrument);
+        s.put("eventBlackout", eventBlock != null);
+        s.put("eventBlock", eventBlock);
+
+        double dayMove = BrMacroBias.dayMovePoints(
+                bars, now, settings.tradeSessionOpen(), settings.instrument().pointSize());
+        s.put("dayMovePoints", Double.isFinite(dayMove) ? Math.round(dayMove) : null);
+        s.put("htf", structure == null ? "FLAT" : structure.htf());
+        s.put("bias", structure == null ? null : structure.bias());
+        s.put("structureNote", structure == null ? null : structure.note());
+        s.put("marketState", structure == null ? null : structure.marketState());
+
+        if (book != null) {
+            List<DomBook.DomLevel> bids = book.bids() == null ? List.of() : book.bids();
+            List<DomBook.DomLevel> asks = book.asks() == null ? List.of() : book.asks();
+            if (!bids.isEmpty() && !asks.isEmpty()) {
+                double bidQ = bids.stream().limit(5).mapToDouble(l -> l.quantityLots()).sum();
+                double askQ = asks.stream().limit(5).mapToDouble(l -> l.quantityLots()).sum();
+                s.put("domBidLots5", bidQ);
+                s.put("domAskLots5", askQ);
+                s.put("domSkew", bidQ - askQ);
+                s.put("domAsOf", book.asOf() == null ? null : book.asOf().toString());
+            }
+        }
+
+        engine.activeLock().ifPresent(lock -> {
+            Map<String, Object> lk = new LinkedHashMap<>();
+            lk.put("low", lock.zoneLow());
+            lk.put("high", lock.zoneHigh());
+            lk.put("buy", lock.buy());
+            lk.put("mode", lock.mode() == null ? null : lock.mode().name());
+            lk.put("mid", lock.mid());
+            s.put("activeLock", lk);
+        });
+
+        if (p != null && p.grid() != null) {
+            Map<String, Object> levels = new LinkedHashMap<>();
+            levels.put("entry", finiteOrNull(p.grid().averagePrice()));
+            levels.put("stop", finiteOrNull(p.stopLossPrice()));
+            levels.put("tp1", finiteOrNull(p.tp1Price()));
+            levels.put("tp2", finiteOrNull(p.tp2Price()));
+            levels.put("qty", p.grid().totalQty());
+            levels.put("side", p.buy() ? "BUY" : "SELL");
+            levels.put("mode", p.mode() == null ? null : p.mode().name());
+            s.put("setupLevels", levels);
+        }
+
+        s.put("asOf", now.toString());
+        s.put("newsDisclaimer",
+                "Живой RSS/EIA surprise в trend desk нет — только календарь событий + реакция цены (прокси).");
+        return s;
     }
 
     private TrendStructureSnapshot resolveStructure(TrendBarSeries series) {
@@ -347,9 +534,90 @@ public class TrendDeskService {
         m.put("depth", book.depth());
         m.put("asOf", book.asOf() == null ? null : book.asOf().toString());
         m.put("consistent", book.consistent());
-        m.put("bids", book.bids().stream().limit(15).map(l -> Map.of("p", l.price(), "q", l.quantityLots())).toList());
-        m.put("asks", book.asks().stream().limit(15).map(l -> Map.of("p", l.price(), "q", l.quantityLots())).toList());
+        m.put("bids", book.bids() == null ? List.of() : book.bids().stream().limit(50)
+                .map(l -> Map.of("p", l.price(), "q", l.quantityLots())).toList());
+        m.put("asks", book.asks() == null ? List.of() : book.asks().stream().limit(50)
+                .map(l -> Map.of("p", l.price(), "q", l.quantityLots())).toList());
+        m.put("tapeByPrice", tapeByPrice(instrumentFromBook(book), mdFromContext()));
         return m;
+    }
+
+    private String instrumentFromBook(DomBook book) {
+        return book == null || book.instrumentId() == null || book.instrumentId().isBlank()
+                ? configuredInstrument
+                : book.instrumentId();
+    }
+
+    /** Best-effort marketdata handle for tape aggregation (may be null). */
+    private MarketDataResearchService mdFromContext() {
+        return marketData.getIfAvailable();
+    }
+
+    /**
+     * Session / recent tape rolled up by price — buy/sell aggressor lots for DOM footprint column.
+     */
+    static Map<String, Map<String, Long>> aggregateTapeByPrice(List<com.moex.trinity.marketdata.TradePrint> prints, double pointSize) {
+        Map<String, long[]> raw = new LinkedHashMap<>();
+        if (prints == null || prints.isEmpty()) {
+            return Map.of();
+        }
+        double ps = pointSize > 0 ? pointSize : 0.01;
+        for (com.moex.trinity.marketdata.TradePrint p : prints) {
+            if (p == null || !(p.price() > 0) || p.quantityLots() <= 0) {
+                continue;
+            }
+            long bucket = Math.round(p.price() / ps);
+            String key = String.format(java.util.Locale.ROOT, "%.2f", bucket * ps);
+            long[] bs = raw.computeIfAbsent(key, k -> new long[2]);
+            if (p.side() == com.moex.trinity.marketdata.TradePrint.TradeSide.SELL) {
+                bs[1] += p.quantityLots();
+            } else {
+                bs[0] += p.quantityLots();
+            }
+        }
+        Map<String, Map<String, Long>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, long[]> e : raw.entrySet()) {
+            long buy = e.getValue()[0];
+            long sell = e.getValue()[1];
+            Map<String, Long> row = new LinkedHashMap<>();
+            row.put("buy", buy);
+            row.put("sell", sell);
+            row.put("total", buy + sell);
+            row.put("delta", buy - sell);
+            out.put(e.getKey(), row);
+        }
+        return out;
+    }
+
+    private Map<String, Map<String, Long>> tapeByPrice(String instrument, MarketDataResearchService md) {
+        try {
+            List<com.moex.trinity.marketdata.TradePrint> prints = List.of();
+            if (md != null && md.feed() != null) {
+                var live = md.feed().recentTrades(instrument);
+                if (live != null && !live.isEmpty()) {
+                    prints = live;
+                }
+            }
+            if (prints.isEmpty()) {
+                TapeToM5Aggregator agg = new TapeToM5Aggregator(md == null ? null : md.archive());
+                prints = agg.loadRecentPrints(instrument, LocalDate.now(MSK));
+            }
+            // Prefer last ~90 minutes for DOM reactivity
+            Instant cutoff = Instant.now().minusSeconds(90 * 60L);
+            List<com.moex.trinity.marketdata.TradePrint> recent = new ArrayList<>();
+            for (com.moex.trinity.marketdata.TradePrint p : prints) {
+                if (p != null && p.time() != null && !p.time().isBefore(cutoff)) {
+                    recent.add(p);
+                }
+            }
+            if (recent.isEmpty()) {
+                recent = prints;
+            }
+            return aggregateTapeByPrice(recent, 0.01);
+        } catch (Exception ex) {
+            log.debug("tapeByPrice failed: {}", ex.getMessage());
+            return Map.of();
+        }
     }
 
     private static Map<String, Object> summarizePlan(TrendRobotPlan p) {

@@ -243,13 +243,15 @@ imoex:
       session-bias-min-points: 40
       require-bounce-confirm: true
       min-reward-risk: 1.5
-      max-setups-per-day: 0          # 0 = unlimited; take every valid checklist bounce
+      max-setups-per-day: 4          # risk cap; 0 = unlimited
       cooldown-bars-after-sl: 12
       retest-arm-max-distance-points: 10
       a-setup-bounce-only: false     # full checklist: BOUNCE + RETEST after break+hold
       prefer-structural-entries: true  # operator: skip ACCUM/ZERO RETEST noise — TOP/BOT shelves
       macro-bias-enabled: true         # FA/macro proxy: no knife BUY on dump / SELL on melt-up
       macro-min-day-move-points: 80
+      min-shelf-volume: 30             # anti-thin: bar vol / tape lots floor for entry shelves
+      max-day-loss-rub: 1500           # block new setups when realized day PnL ≤ −limit (0=off)
       initial-size-fraction: 0.4     # ~⅓–½ size until BE
       prefer-marketdata-zones: true  # tape VAP when broker feed streaming
       trade-session-open: "09:00"

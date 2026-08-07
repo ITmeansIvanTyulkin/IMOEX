@@ -14,6 +14,10 @@
     <name>trinity-trend</name>
     <description>Strategy 2 — trend trading robot playbooks (sandbox-first)</description>
 
+    <properties>
+        <trend.replay.mainClass>com.moex.trinity.trend.replay.BrM5DayReplay</trend.replay.mainClass>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.moex</groupId>
@@ -49,7 +53,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.5.0</version>
                 <configuration>
-                    <mainClass>com.moex.trinity.trend.replay.BrM5DayReplay</mainClass>
+                    <mainClass>${trend.replay.mainClass}</mainClass>
                 </configuration>
             </plugin>
         </plugins>

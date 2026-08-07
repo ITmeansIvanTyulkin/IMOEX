@@ -69,7 +69,7 @@ public enum BrMacroBias {
         return NEUTRAL;
     }
 
-    static double dayMovePoints(List<TrendBar> bars, LocalDateTime now, String sessionOpenRaw, double pointSize) {
+    public static double dayMovePoints(List<TrendBar> bars, LocalDateTime now, String sessionOpenRaw, double pointSize) {
         LocalTime open = TrendSessionEdge.parse(sessionOpenRaw, LocalTime.of(9, 0));
         LocalDate day = now.toLocalDate();
         TrendBar openBar = null;

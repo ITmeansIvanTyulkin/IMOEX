@@ -61,6 +61,17 @@ class LevelsProfileBrPlaybookTest {
     }
 
     @Test
+    void softSourceNotLockableAndNotEntryValid() {
+        MergedVolumeRange soft = new MergedVolumeRange(84.50, 84.65, 1, List.of(), false, "SOFT§6 desk only");
+        assertTrue(LevelsProfileBrPlaybook.isSoftSource("BARS+SOFT"));
+        assertTrue(LevelsProfileBrPlaybook.isSoftSource("SOFT§6+TA"));
+        assertFalse(LevelsProfileBrPlaybook.isSoftSource("PRIOR_DAY_TOP"));
+        assertEquals(null, LevelsProfileBrPlaybook.lockableShelf(soft, "BARS+SOFT"));
+        MergedVolumeRange valid = new MergedVolumeRange(84.50, 84.65, 5000, List.of(), true, null);
+        assertEquals(valid, LevelsProfileBrPlaybook.lockableShelf(valid, "TAPE"));
+    }
+
+    @Test
     void researchServiceSelectsPlaybookInTrend() {
         TrendPlaybook pb = new LevelsProfileBrPlaybook();
         TrendResearchService svc = new TrendResearchService(List.of(pb), new DefaultTrendRegimeSelector());

@@ -45,7 +45,8 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
         this.vap = new VolumeAtPriceBuilder(
                 this.settings.instrument(),
                 this.settings.allowZonePad(),
-                this.settings.minHvnBands()
+                this.settings.minHvnBands(),
+                this.settings.minShelfVolume()
         );
         this.marketData = marketData;
         this.dayZones = new DayZoneLock(dayZoneFile);
@@ -294,7 +295,12 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                     checklistDayLock.dropRoles("TREND_LO");
                 }
             }
-            return dayZones.absorb(day, trendHigh, trendLow, topCand, topSrc, bottomCand, bottomSrc);
+            // Anti-thin: never day-lock soft / invalid shelves (desk may still draw them)
+            MergedVolumeRange topLock = lockableShelf(topCand, topSrc);
+            String topLockSrc = topLock == null ? null : topSrc;
+            MergedVolumeRange botLock = lockableShelf(bottomCand, bottomSrc);
+            String botLockSrc = botLock == null ? null : bottomSrc;
+            return dayZones.absorb(day, trendHigh, trendLow, topLock, topLockSrc, botLock, botLockSrc);
         }
         if (cur != null && day.equals(cur.day())) {
             return cur;
@@ -1093,14 +1099,19 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
                         settings.touchLookback(), settings.candlesPerTouch(), 2);
                 src = "BARS-FALLBACK";
             }
-            // Structural HI/LO must always get a shelf — new extremes have no 2–3 bounces yet
+            // Structural HI/LO desk shelf — geometry only; not tradable without real §6–7 volume
             if (!range.validForEntry()
                     && ("TREND_HI".equals(l.role()) || "TREND_LO".equals(l.role()))) {
                 double width = settings.instrument().zoneMinPoints() * settings.instrument().pointSize();
                 double low = "TREND_HI".equals(l.role()) ? l.price() - width : l.price();
                 double high = "TREND_HI".equals(l.role()) ? l.price() : l.price() + width;
-                range = new MergedVolumeRange(low, high, 1, List.of(), true, null);
+                range = new MergedVolumeRange(low, high, range.totalVolume(), List.of(), false,
+                        range.invalidReason() != null ? range.invalidReason() : "SOFT§6 desk only");
                 src = "SOFT§6";
+                // Keep for overlay context but do not mark as entry-valid
+                out.add(new ChecklistLevel(l.price(), l.role(), src + "+" + l.source(),
+                        l.preferBuy(), range, false));
+                continue;
             }
             if (range.validForEntry()) {
                 boolean brokenUp = breakHoldSatisfied(window, range, true, Math.max(1, settings.confirmBarsAfterBreak()));
@@ -1665,17 +1676,31 @@ public class LevelsProfileBrPlaybook implements TrendPlaybook {
     }
 
     /**
-     * Day-locked range is tradable for the session even if originally soft —
-     * checklist freezes the shelf and trades it.
+     * Day-locked range keeps geometry for desk; never promotes soft/invalid to tradable entry.
      */
     private ZoneCandidate asDayZone(double level, MergedVolumeRange range, String source) {
         MergedVolumeRange r = range;
-        if (r != null && !r.validForEntry() && r.low() < r.high()) {
-            r = new MergedVolumeRange(
-                    r.low(), r.high(), r.totalVolume(), r.sourceBands(), true, null);
-        }
         String src = source == null ? "DAY" : source + "+DAY";
         return new ZoneCandidate(level, r, src);
+    }
+
+    /** Soft / thin shelves may appear on desk but must not freeze as the day's tradable lock. */
+    static boolean isSoftSource(String source) {
+        if (source == null || source.isBlank()) {
+            return false;
+        }
+        String u = source.toUpperCase(Locale.ROOT);
+        return u.contains("SOFT");
+    }
+
+    static MergedVolumeRange lockableShelf(MergedVolumeRange cand, String source) {
+        if (cand == null || !(cand.low() < cand.high())) {
+            return null;
+        }
+        if (isSoftSource(source) || !cand.validForEntry()) {
+            return null;
+        }
+        return cand;
     }
 
     private record ZoneCandidate(double level, MergedVolumeRange range, String source) {

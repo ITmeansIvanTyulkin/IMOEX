@@ -52,17 +52,23 @@ public final class BrM5DayReplay {
 
     public static void main(String[] args) throws Exception {
         boolean withRetest = false;
+        boolean barsOnly = false;
         String barFile = null;
         LocalDate dayArg = null;
         String secidArg = null;
         for (String a : args) {
             if ("--with-retest".equals(a)) {
                 withRetest = true;
+            } else if ("--bars-only".equals(a)) {
+                barsOnly = true;
             } else if (a.endsWith(".json")) {
                 barFile = a;
-            } else if (dayArg == null && a.matches("\\d{4}-\\d{2}-\\d{2}")) {
-                dayArg = LocalDate.parse(a);
-            } else if (secidArg == null && !a.startsWith("--")) {
+            } else if (a.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                if (dayArg == null) {
+                    dayArg = LocalDate.parse(a);
+                }
+                // never treat a date as secid
+            } else if (secidArg == null && !a.startsWith("--") && a.matches("[A-Za-z][A-Za-z0-9]*")) {
                 secidArg = a;
             }
         }
@@ -95,17 +101,37 @@ public final class BrM5DayReplay {
             System.out.printf(Locale.ROOT, "=== BR M5 day replay %s secid=%s ===%n", day, secid);
             LocalDate from = day.minusDays(1);
             m1 = fetchM1(secid, from, day);
+            cacheM1(secid, day, from, m1);
         }
 
-        System.out.printf(Locale.ROOT, "Loaded %d × 1m bars%n", m1.size());
-        if (m1.size() < 50) {
-            System.err.println("Too few bars — abort");
-            System.exit(2);
+        TrendPlaybookSettings settings = TrendPlaybookSettings.brDefaults().withASetupBounceOnly(false);
+        Map<String, Object> report = runOneDay(day, secid, m1, settings, barsOnly, true);
+        if (withRetest) {
+            report.put("modeNote", "FULL checklist (bounce + RETEST)");
         }
+        Path out = Path.of("data", "trend-day-replay-" + day + "-" + secid + "-retest.json");
+        Files.createDirectories(out.getParent());
+        MAPPER.writerWithDefaultPrettyPrinter().writeValue(out.toFile(), report);
+        System.out.println("Wrote " + out.toAbsolutePath());
+    }
 
+    /**
+     * Fair-paper one session. Does not write paper journal.
+     *
+     * @param barsOnly if true, skip broker tape (quality=BAR_PROXY)
+     */
+    public static Map<String, Object> runOneDay(
+            LocalDate day,
+            String secid,
+            List<TrendBar> m1,
+            TrendPlaybookSettings settings,
+            boolean barsOnly,
+            boolean verbose
+    ) throws Exception {
+        if (m1 == null || m1.size() < 50) {
+            throw new IllegalStateException("Too few M1 bars for " + day);
+        }
         List<TrendBar> m5 = aggregateM5(m1);
-        System.out.printf(Locale.ROOT, "Aggregated %d × M5 bars%n", m5.size());
-
         List<TrendBar> warmup = new ArrayList<>();
         List<TrendBar> today = new ArrayList<>();
         for (TrendBar b : m5) {
@@ -115,40 +141,45 @@ public final class BrM5DayReplay {
                 warmup.add(b);
             }
         }
-        System.out.printf(Locale.ROOT, "Warm-up M5=%d | today M5=%d%n", warmup.size(), today.size());
+        if (verbose) {
+            System.out.printf(Locale.ROOT, "Loaded %d × 1m → %d M5 | warm-up=%d today=%d%n",
+                    m1.size(), m5.size(), warmup.size(), today.size());
+        }
         if (today.isEmpty()) {
-            System.err.println("No M5 bars for " + day + " (weekend / holiday / empty session?)");
-            System.exit(3);
+            throw new IllegalStateException("No M5 bars for " + day);
         }
 
-        // Broker-only tape + hist DOM archive (T-Invest). No ISS / M1 synthetic.
-        TapeBundle tapeBundle = loadBrokerTape(secid, day);
-        com.moex.trinity.marketdata.HistoricalTapeFeed tapeFeed =
-                new com.moex.trinity.marketdata.HistoricalTapeFeed(secid, tapeBundle.prints(), 400_000)
-                        .withBooks(tapeBundle.domHistory());
-        if (tapeBundle.domHistory().isEmpty() && tapeBundle.book() != null) {
-            tapeFeed.withBook(tapeBundle.book());
-        }
-        System.out.printf(Locale.ROOT, "Tape prints for VAP: %d (%s)%n",
-                tapeFeed.tapeSize(), tapeBundle.source());
-        System.out.printf(Locale.ROOT, "Hist DOM snapshots: %d (depth max=%d)%n",
-                tapeFeed.domSnapshots(),
-                com.moex.trinity.marketdata.TInvestBrokerMarketData.MAX_ORDERBOOK_DEPTH);
-        if (tapeBundle.book() != null && tapeFeed.domSnapshots() == 0) {
-            System.out.printf(Locale.ROOT, "DOM seed depth=%d bids=%d asks=%d%n",
-                    tapeBundle.book().depth(),
-                    tapeBundle.book().bids().size(),
-                    tapeBundle.book().asks().size());
-        }
-
-        TrendPlaybookSettings settings = TrendPlaybookSettings.brDefaults().withASetupBounceOnly(false);
-        if (withRetest) {
-            System.out.println("Mode: FULL checklist (bounce + RETEST after break+hold) + hardenings");
+        String quality;
+        com.moex.trinity.marketdata.HistoricalTapeFeed tapeFeed;
+        String tapeSource;
+        int tapePrints;
+        int domSnaps;
+        if (barsOnly) {
+            quality = "BAR_PROXY";
+            tapeFeed = new com.moex.trinity.marketdata.HistoricalTapeFeed(secid, List.of(), 1);
+            tapeSource = "NONE";
+            tapePrints = 0;
+            domSnaps = 0;
+            if (verbose) {
+                System.out.println("Mode: --bars-only (no tape VAP)");
+            }
         } else {
-            // Default is full checklist; --bounce-only would be the only way to restrict (flag unused → full)
-            System.out.println("Mode: FULL checklist (aSetupBounceOnly=false)");
-            withRetest = true; // report filename + note reflect full strategy
+            quality = "TAPE";
+            TapeBundle tapeBundle = loadBrokerTape(secid, day);
+            tapeFeed = new com.moex.trinity.marketdata.HistoricalTapeFeed(secid, tapeBundle.prints(), 400_000)
+                    .withBooks(tapeBundle.domHistory());
+            if (tapeBundle.domHistory().isEmpty() && tapeBundle.book() != null) {
+                tapeFeed.withBook(tapeBundle.book());
+            }
+            tapeSource = tapeBundle.source();
+            tapePrints = tapeFeed.tapeSize();
+            domSnaps = tapeFeed.domSnapshots();
+            if (verbose) {
+                System.out.printf(Locale.ROOT, "Tape prints=%d (%s) DOM=%d%n",
+                        tapePrints, tapeSource, domSnaps);
+            }
         }
+
         LevelsProfileBrPlaybook playbook = new LevelsProfileBrPlaybook(settings, tapeFeed);
         TrendRobotEngine engine = new TrendRobotEngine(playbook, settings);
         TrendAccountContext account = TrendAccountContext.of(100_000, 15_000, 16_000, 1.0);
@@ -163,11 +194,9 @@ public final class BrM5DayReplay {
         int zoneReadyBars = 0;
         int noTradeBars = 0;
         Map<String, Integer> reasonHist = new TreeMap<>();
-        String lastReasonPrinted = null;
 
-        // Fair paper: limits from next bar; no SL on fill bar; SL vs TP same bar → SL first
         OpenPaper open = null;
-        TrendRobotPlan pending = null; // armed, activates next bar
+        TrendRobotPlan pending = null;
 
         List<TrendBar> seriesBars = new ArrayList<>(warmup);
         for (int bi = 0; bi < today.size(); bi++) {
@@ -175,7 +204,6 @@ public final class BrM5DayReplay {
             seriesBars.add(bar);
             tapeFeed.setAsOf(bar.time());
 
-            // 1) Manage open position first
             if (open != null) {
                 ExitResult er = manageFair(open, bar, rubPerPoint, point);
                 if (er != null) {
@@ -187,8 +215,11 @@ public final class BrM5DayReplay {
                     t.put("pnl", er.pnl);
                     t.put("reason", er.reason);
                     trades.add(t);
-                    System.out.printf(Locale.ROOT, "TRADE %s %s → %s  PnL=%+.0f ₽ (%s)%n",
-                            open.entryTime, open.buy ? "BUY" : "SELL", er.reason, er.pnl, bar.time());
+                    engine.registerRealizedPnl(er.pnl);
+                    if (verbose) {
+                        System.out.printf(Locale.ROOT, "TRADE %s %s → %s  PnL=%+.0f ₽ (%s)%n",
+                                open.entryTime, open.buy ? "BUY" : "SELL", er.reason, er.pnl, bar.time());
+                    }
                     if ("SL".equals(er.reason)) {
                         engine.registerStopLoss(bar.time());
                     } else {
@@ -198,15 +229,16 @@ public final class BrM5DayReplay {
                 }
             }
 
-            // 2) Try fill pending limits (armed prior bar; keep working until fill or unlock)
             if (open == null && pending != null && pending.grid() != null) {
                 if (pending.range() != null) {
                     double unlockPts = settings.unlockDistancePoints() > 0
                             ? settings.unlockDistancePoints() : 40;
                     double dist = Math.abs(bar.close() - pending.range().mid()) / point;
                     if (dist >= unlockPts) {
-                        System.out.printf(Locale.ROOT, "%s  CANCEL pending (unlock %.0f pts)%n",
-                                bar.time(), dist);
+                        if (verbose) {
+                            System.out.printf(Locale.ROOT, "%s  CANCEL pending (unlock %.0f pts)%n",
+                                    bar.time(), dist);
+                        }
                         pending = null;
                         engine.clearSetupLock();
                     }
@@ -217,13 +249,14 @@ public final class BrM5DayReplay {
                         open = filled;
                         pending = null;
                         engine.registerFill(bar.time());
-                        System.out.printf(Locale.ROOT, "%s  FILL %s avg=%.2f qty=%d SL=%.2f TP1=%.2f%n",
-                                bar.time(), open.buy ? "BUY" : "SELL", open.avg, open.qty, open.sl, open.tp1);
+                        if (verbose) {
+                            System.out.printf(Locale.ROOT, "%s  FILL %s avg=%.2f qty=%d SL=%.2f TP1=%.2f%n",
+                                    bar.time(), open.buy ? "BUY" : "SELL", open.avg, open.qty, open.sl, open.tp1);
+                        }
                     }
                 }
             }
 
-            // 3) Evaluate robot (no new arm while in position)
             TrendBarSeries series = new TrendBarSeries(secid, "M5", seriesBars);
             Optional<TrendRobotPlan> opt = engine.evaluate(series, account);
             if (opt.isEmpty()) {
@@ -243,7 +276,9 @@ public final class BrM5DayReplay {
                 if (open == null && pending != null && plan.rationale() != null
                         && (plan.rationale().contains("cooldown")
                         || plan.rationale().contains("session edge")
-                        || plan.rationale().contains("event edge"))) {
+                        || plan.rationale().contains("event edge")
+                        || plan.rationale().contains("max day loss")
+                        || plan.rationale().contains("max fills/day"))) {
                     pending = null;
                 }
             } else if (st == TrendRobotState.ZONE_READY) {
@@ -271,20 +306,20 @@ public final class BrM5DayReplay {
                             plan.range().widthPoints(point)));
                 }
                 events.add(ev);
-                System.out.printf(Locale.ROOT, "%s  NEW_SETUP %s %s  C=%.2f  %s%n",
-                        bar.time(), plan.buy() ? "BUY" : "SELL",
-                        plan.mode(), bar.close(), plan.rationale());
-            } else if (st != prev && (st == TrendRobotState.ZONE_READY || st == TrendRobotState.NO_TRADE
+                if (verbose) {
+                    System.out.printf(Locale.ROOT, "%s  NEW_SETUP %s %s  C=%.2f  %s%n",
+                            bar.time(), plan.buy() ? "BUY" : "SELL",
+                            plan.mode(), bar.close(), plan.rationale());
+                }
+            } else if (verbose && st != prev && (st == TrendRobotState.ZONE_READY || st == TrendRobotState.NO_TRADE
                     || st == TrendRobotState.WORKING_ORDERS)) {
                 System.out.printf(Locale.ROOT, "%s  %-14s C=%.2f  %s%n",
                         bar.time(), st, bar.close(),
                         why.length() > 100 ? why.substring(0, 100) + "…" : why);
-                lastReasonPrinted = why;
             }
             prev = st;
         }
 
-        // EOD flatten
         if (open != null) {
             TrendBar last = today.get(today.size() - 1);
             double pnl = open.realized + cashPnl(open, last.close(), open.qty, point, rubPerPoint);
@@ -296,36 +331,31 @@ public final class BrM5DayReplay {
             t.put("pnl", pnl);
             t.put("reason", "EOD");
             trades.add(t);
+            engine.registerRealizedPnl(pnl);
             engine.registerFlatWin(last.time());
-            System.out.printf(Locale.ROOT, "TRADE EOD flatten PnL=%+.0f ₽%n", pnl);
+            if (verbose) {
+                System.out.printf(Locale.ROOT, "TRADE EOD flatten PnL=%+.0f ₽%n", pnl);
+            }
         }
 
         double dayPnl = trades.stream().mapToDouble(t -> ((Number) t.get("pnl")).doubleValue()).sum();
         long wins = trades.stream().filter(t -> ((Number) t.get("pnl")).doubleValue() > 0).count();
         long losses = trades.stream().filter(t -> ((Number) t.get("pnl")).doubleValue() < 0).count();
 
-        System.out.println();
-        System.out.println("--- Summary ---");
-        System.out.printf(Locale.ROOT,
-                "Day bars: %d | NEW setups: %d | trades: %d | W/L %d/%d | day PnL: %+.0f ₽%n",
-                today.size(), newSetups, trades.size(), wins, losses, dayPnl);
-        System.out.printf(Locale.ROOT, "ZONE_READY bars≈%d | locked≈%d | NO_TRADE≈%d%n",
-                zoneReadyBars, lockedBars, noTradeBars);
-        System.out.println("Top rationales:");
-        reasonHist.entrySet().stream()
-                .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
-                .limit(12)
-                .forEach(e -> System.out.printf(Locale.ROOT, "  %4d × %s%n", e.getValue(), e.getKey()));
-        if (lastReasonPrinted != null) {
-            System.out.println("(last state change reason kept for debug)");
+        if (verbose) {
+            System.out.println();
+            System.out.println("--- Summary ---");
+            System.out.printf(Locale.ROOT,
+                    "Day bars: %d | NEW setups: %d | trades: %d | W/L %d/%d | day PnL: %+.0f ₽%n",
+                    today.size(), newSetups, trades.size(), wins, losses, dayPnl);
+            System.out.printf(Locale.ROOT, "ZONE_READY bars≈%d | locked≈%d | NO_TRADE≈%d | dayLossBlocks=%d%n",
+                    zoneReadyBars, lockedBars, noTradeBars, engine.dayLossBlockCount());
         }
 
-        Path out = Path.of("data", "trend-day-replay-" + day + "-" + secid
-                + (withRetest ? "-retest" : "-asetup") + ".json");
-        Files.createDirectories(out.getParent());
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("day", day.toString());
         report.put("secid", secid);
+        report.put("quality", quality);
         report.put("todayM5", today.size());
         report.put("newSetups", newSetups);
         report.put("trades", trades);
@@ -333,39 +363,71 @@ public final class BrM5DayReplay {
         report.put("wins", wins);
         report.put("losses", losses);
         report.put("events", events);
-        Map<String, Object> settingsMap = new LinkedHashMap<>();
-        settingsMap.put("oneSetupPerZone", settings.oneSetupPerZone());
-        settingsMap.put("allowZonePad", settings.allowZonePad());
-        settingsMap.put("minRewardRisk", settings.minRewardRisk());
-        settingsMap.put("maxSetupsPerDay", settings.maxSetupsPerDay());
-        settingsMap.put("cooldownBarsAfterSl", settings.cooldownBarsAfterSl());
-        settingsMap.put("retestArmMaxDistancePoints", settings.retestArmMaxDistancePoints());
-        settingsMap.put("tradeSessionOpen", settings.tradeSessionOpen());
-        settingsMap.put("tradeSessionClose", settings.tradeSessionClose());
-        settingsMap.put("noTradeAfterOpenMinutes", settings.noTradeAfterOpenMinutes());
-        settingsMap.put("noTradeBeforeCloseMinutes", settings.noTradeBeforeCloseMinutes());
-        settingsMap.put("htfMinMovePoints", settings.htfMinMovePoints());
-        settingsMap.put("counterTrendSizeFraction", settings.counterTrendSizeFraction());
-        settingsMap.put("counterTrendBounceOnly", settings.counterTrendBounceOnly());
-        settingsMap.put("eventCalendarEnabled", settings.eventCalendarEnabled());
-        settingsMap.put("eventBlockMinutesBefore", settings.eventBlockMinutesBefore());
-        settingsMap.put("eventBlockMinutesAfter", settings.eventBlockMinutesAfter());
-        settingsMap.put("aSetupBounceOnly", settings.aSetupBounceOnly());
-        settingsMap.put("initialSizeFraction", settings.initialSizeFraction());
-        settingsMap.put("minTouchCount", settings.minTouchCount());
-        settingsMap.put("preferMarketDataZones", settings.preferMarketDataZones());
-        settingsMap.put("stopPoints", settings.instrument().stopPoints());
-        settingsMap.put("tp1Points", settings.instrument().tp1Points());
         report.put("reasonHist", reasonHist);
-        report.put("settings", settingsMap);
-        report.put("tapePrints", tapeFeed.tapeSize());
-        report.put("tapeSource", tapeBundle.source());
-        report.put("domSnapshots", tapeFeed.domSnapshots());
-        report.put("domDepth", com.moex.trinity.marketdata.TInvestBrokerMarketData.MAX_ORDERBOOK_DEPTH);
-        report.put("note", "Broker-only tape+hist DOM archive (depth 50 max). "
-                + "FULL checklist bounce+retest + day-lock/prior/session/HTF.");
-        MAPPER.writerWithDefaultPrettyPrinter().writeValue(out.toFile(), report);
-        System.out.println("Wrote " + out.toAbsolutePath());
+        report.put("tapePrints", tapePrints);
+        report.put("tapeSource", tapeSource);
+        report.put("domSnapshots", domSnaps);
+        report.put("dayLossBlocks", engine.dayLossBlockCount());
+        report.put("maxSetupsPerDay", settings.maxSetupsPerDay());
+        report.put("maxDayLossRub", settings.maxDayLossRub());
+        report.put("minShelfVolume", settings.minShelfVolume());
+        report.put("note", "Fair paper replay — does not write trend-paper-journal. "
+                + "FULL checklist bounce+retest + day-lock/prior/session/HTF/anti-thin.");
+        return report;
+    }
+
+    /** Persist ISS M1 for offline replay / campaign. */
+    static void cacheM1(String secid, LocalDate day, LocalDate from, List<TrendBar> m1) {
+        try {
+            Path out = Path.of("data", "br-m1-" + day + ".json");
+            Files.createDirectories(out.getParent());
+            Map<String, Object> root = new LinkedHashMap<>();
+            root.put("day", day.toString());
+            root.put("secid", secid);
+            root.put("from", from.toString());
+            root.put("till", day.toString());
+            List<Map<String, Object>> bars = new ArrayList<>();
+            for (TrendBar b : m1) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("time", b.time().format(MOEX_DT));
+                row.put("open", b.open());
+                row.put("high", b.high());
+                row.put("low", b.low());
+                row.put("close", b.close());
+                row.put("volume", b.volume());
+                bars.add(row);
+            }
+            root.put("bars", bars);
+            MAPPER.writerWithDefaultPrettyPrinter().writeValue(out.toFile(), root);
+            System.out.println("Cached M1 → " + out.toAbsolutePath());
+        } catch (Exception ex) {
+            System.out.println("M1 cache skip: " + ex.getMessage());
+        }
+    }
+
+    /** Load offline M1 cache if present. */
+    public static List<TrendBar> loadCachedM1(Path file) throws Exception {
+        JsonNode root = MAPPER.readTree(file.toFile());
+        List<TrendBar> m1 = new ArrayList<>();
+        for (JsonNode row : root.path("bars")) {
+            m1.add(new TrendBar(
+                    LocalDateTime.parse(row.path("time").asText(), MOEX_DT),
+                    row.path("open").asDouble(),
+                    row.path("high").asDouble(),
+                    row.path("low").asDouble(),
+                    row.path("close").asDouble(),
+                    row.path("volume").asDouble()
+            ));
+        }
+        return m1;
+    }
+
+    public static LocalDate cachedDay(Path file) throws Exception {
+        return LocalDate.parse(MAPPER.readTree(file.toFile()).path("day").asText());
+    }
+
+    public static String cachedSecid(Path file) throws Exception {
+        return MAPPER.readTree(file.toFile()).path("secid").asText("BRU6");
     }
 
     private record TapeBundle(

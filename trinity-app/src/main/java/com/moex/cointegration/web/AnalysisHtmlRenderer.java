@@ -62,7 +62,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260806-vap-fp">
+              <link rel="stylesheet" href="/css/operator.css?v=20260807-dom-light-pad">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}">
               <header class="site-header">
@@ -1916,6 +1916,9 @@ public class AnalysisHtmlRenderer {
                         <input type="checkbox" id="signal-desk-volume">
                         Объём M5
                       </label>
+                      <button type="button" class="btn btn-ghost is-active" id="signal-desk-pad"
+                              title="Отступ справа: текущая свеча не лепится к профилю объёмов"
+                              aria-pressed="true">Автоотступ</button>
                       <button type="button" class="btn btn-ghost" id="signal-desk-fit">Весь график</button>
                       <button type="button" class="btn btn-ghost" id="signal-desk-refresh">Обновить</button>
                       <a class="btn btn-ghost" href="/view/settings#trend-playbook-settings">Режим</a>
@@ -1941,6 +1944,9 @@ public class AnalysisHtmlRenderer {
                   </div>
                   <div class="signal-desk-grid">
                     <div class="signal-chart-wrap">
+                      <button type="button" class="signal-chart-pad-btn is-on" id="signal-chart-pad"
+                              title="Автоотступ справа (белое пространство у текущей свечи)"
+                              aria-pressed="true" aria-label="Автоотступ">⇆</button>
                       <div id="signal-chart" class="chart signal-chart"></div>
                       <div id="signal-volume-wrap" class="signal-volume-wrap" hidden>
                         <div id="signal-volume" class="chart signal-volume"></div>
@@ -1961,17 +1967,36 @@ public class AnalysisHtmlRenderer {
                           </button>
                         </p>
                         <div class="signal-brief-body" id="signal-desk-brief-body">Загрузка среза…</div>
+                        <div class="signal-compliance" id="signal-desk-compliance" aria-label="Чек-лист">
+                          <p class="meta" id="signal-compliance-meta">Чек-лист…</p>
+                        </div>
                       </div>
                     </div>
                     <aside class="signal-dom" aria-label="Стакан">
-                      <h3>Стакан</h3>
-                      <p class="meta" id="signal-dom-meta">—</p>
-                      <div class="signal-dom-table-wrap">
-                        <table class="signal-dom-table">
-                          <thead><tr><th>Bid</th><th>Qty</th><th>Ask</th><th>Qty</th></tr></thead>
-                          <tbody id="signal-dom-body"><tr><td colspan="4">…</td></tr></tbody>
-                        </table>
+                      <div class="signal-dom-head">
+                        <h3>Стакан · DOM</h3>
+                        <p class="meta" id="signal-dom-meta">—</p>
                       </div>
+                      <div class="signal-dom-imbalance" id="signal-dom-imbalance" hidden>
+                        <div class="signal-dom-imb-bid" id="signal-dom-imb-bid"></div>
+                        <div class="signal-dom-imb-ask" id="signal-dom-imb-ask"></div>
+                      </div>
+                      <div class="signal-dom-ladder-wrap">
+                        <div class="signal-dom-ladder-head">
+                          <span title="Лимиты на покупку">Bid</span>
+                          <span title="Объём в стакане">Qty</span>
+                          <span>Цена</span>
+                          <span title="Объём в стакане">Qty</span>
+                          <span title="Лимиты на продажу">Ask</span>
+                          <span title="Проторговано: buy × sell">Tape</span>
+                        </div>
+                        <div class="signal-dom-ladder" id="signal-dom-body" role="table" aria-label="Биржевой стакан">
+                          <div class="signal-dom-empty">Загрузка DOM…</div>
+                        </div>
+                      </div>
+                      <p class="meta signal-dom-legend">
+                        Зелёная зона — bids · красная — asks · Tape = агрессор buy×sell (~90м)
+                      </p>
                     </aside>
                   </div>
                 </section>
@@ -1989,6 +2014,7 @@ public class AnalysisHtmlRenderer {
                   let lastBarsRaw = [];
                   let userPinned = false;
                   let followLive = true;
+                  let rightPadOn = true;
                   let showVolume = false;
                   let showProfile = true;
                   let showFootprint = false;
@@ -1996,6 +2022,8 @@ public class AnalysisHtmlRenderer {
                   let lastFootprint = [];
                   const DESK_MS = 8000;
                   const BOOK_MS = 2000;
+                  const RIGHT_PAD_ON = 22;
+                  const RIGHT_PAD_OFF = 4;
                   const HI_LO_COLOR = "#b91c1c";
                   const ZONE_EDGE = "#6d28d9";
 
@@ -2067,17 +2095,27 @@ public class AnalysisHtmlRenderer {
                     const bars = data.bars || [];
                     const last = bars.length ? bars[bars.length - 1] : null;
                     const close = last && typeof last.close === "number" ? last.close : null;
-                    const look = bars.slice(Math.max(0, bars.length - 12));
-                    let peak = null;
-                    let trough = null;
-                    look.forEach(function (b) {
+                    const look1h = bars.slice(Math.max(0, bars.length - 12));
+                    const lookSession = bars.slice(Math.max(0, bars.length - 80));
+                    let peak1h = null, trough1h = null;
+                    look1h.forEach(function (b) {
                       if (!b) return;
-                      if (typeof b.high === "number") peak = peak == null ? b.high : Math.max(peak, b.high);
-                      if (typeof b.low === "number") trough = trough == null ? b.low : Math.min(trough, b.low);
+                      if (typeof b.high === "number") peak1h = peak1h == null ? b.high : Math.max(peak1h, b.high);
+                      if (typeof b.low === "number") trough1h = trough1h == null ? b.low : Math.min(trough1h, b.low);
+                    });
+                    let peakS = null, troughS = null;
+                    lookSession.forEach(function (b) {
+                      if (!b) return;
+                      if (typeof b.high === "number") peakS = peakS == null ? b.high : Math.max(peakS, b.high);
+                      if (typeof b.low === "number") troughS = troughS == null ? b.low : Math.min(troughS, b.low);
                     });
                     const pts = function (a, b) {
                       if (a == null || b == null || !isFinite(a) || !isFinite(b)) return null;
                       return Math.round(Math.abs(a - b) / 0.01);
+                    };
+                    const signedPts = function (from, to) {
+                      if (from == null || to == null || !isFinite(from) || !isFinite(to)) return null;
+                      return Math.round((to - from) / 0.01);
                     };
                     const nearZone = function (z, px) {
                       if (!z || px == null) return false;
@@ -2090,130 +2128,278 @@ public class AnalysisHtmlRenderer {
                       if (px < z.low - 0.05) return "ниже " + name + " (−" + pts(z.low, px) + "п)";
                       return "в полосе " + name + " (" + fmtPx(z.low) + "–" + fmtPx(z.high) + ")";
                     };
+                    const esc = function (t) {
+                      return String(t == null ? "" : t)
+                        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    };
+                    const minsLabel = function (m) {
+                      if (m == null || !isFinite(m)) return "";
+                      const abs = Math.abs(Math.round(m));
+                      if (abs < 60) return (m >= 0 ? "через " : "") + abs + " мин" + (m < 0 ? " назад" : "");
+                      const h = Math.floor(abs / 60);
+                      const mm = abs % 60;
+                      const core = h + "ч" + (mm ? " " + mm + "м" : "");
+                      return m >= 0 ? "через " + core : core + " назад";
+                    };
 
+                    const sit = data.situation || {};
                     const sig = data.signal || {};
                     const plan = data.plan || {};
                     const st = data.structure || {};
                     const paperSt = (data.paper && data.paper.statement) || {};
-                    const actionable = !!data.actionable || !!plan.actionable;
-                    const state = plan.state || sig.state || data.engineState || "—";
-                    const reason = data.summary || plan.rationale || sig.summary || "";
-                    const side = sig.side || plan.side || "NONE";
-                    const htf = st.htf || "?";
-                    const bias = st.bias || "?";
+                    const events = data.events || [];
+                    const manage = data.manage || {};
+                    const posture = sit.posture || "SCANNING";
+                    const state = plan.state || sig.state || data.engineState || sit.engineState || "—";
+                    const reason = sit.why || data.summary || plan.rationale || sig.summary || "";
+                    const side = (sit.setupLevels && sit.setupLevels.side)
+                      || sig.side || plan.side || "NONE";
+                    const mode = (sit.setupLevels && sit.setupLevels.mode) || plan.mode || sig.mode || "";
+                    const htf = sit.htf || st.htf || "?";
+                    const bias = sit.bias || st.bias || "?";
+                    const mkt = sit.marketState || st.marketState || "?";
                     const tapeLive = (data.barsSource === "tape")
                       || String(data.barsSource || "").indexOf("tape") >= 0;
+                    const liveBroker = !!sit.liveExecution || !!data.liveExecution;
+                    const autoJ = !!sit.autoExecution || !!data.autoExecution;
 
-                    // 1) What is happening on the tape right now
-                    let nowLine = "Цена <strong>" + (close != null ? fmtPx(close) : "—") + "</strong>";
+                    // ——— 1. Рынок сейчас ———
+                    let marketHtml = "<p class='signal-brief-kicker'>Рынок сейчас</p><p>";
+                    marketHtml += "BR <strong>" + (close != null ? fmtPx(close) : "—") + "</strong>";
                     const topRel = relZone(st.zoneTop, close, "TOP");
                     const botRel = relZone(st.zoneBottom, close, "BOT");
-                    if (topRel && nearZone(st.zoneTop, close)) {
-                      nowLine += " — " + topRel;
-                    } else if (botRel && nearZone(st.zoneBottom, close)) {
-                      nowLine += " — " + botRel;
-                    } else if (topRel && botRel) {
-                      nowLine += " — между зонами: " + topRel + ", " + botRel;
-                    } else if (topRel || botRel) {
-                      nowLine += " — " + (topRel || botRel);
-                    }
-                    const dropPts = (peak != null && close != null && peak > close + 0.08) ? pts(peak, close) : null;
-                    const rallyPts = (trough != null && close != null && close > trough + 0.08) ? pts(close, trough) : null;
-                    if (dropPts != null && (rallyPts == null || dropPts >= rallyPts)) {
-                      nowLine += ". За ~1ч срыв с " + fmtPx(peak) + " (−" + dropPts + "п)";
-                    } else if (rallyPts != null) {
-                      nowLine += ". За ~1ч отскок от " + fmtPx(trough) + " (+" + rallyPts + "п)";
-                    }
-                    nowLine += ". Лента " + (tapeLive ? "живая" : "архив/ISS")
-                      + ", на графике ~" + (data.barCount || 0) + " M5.";
+                    if (topRel && nearZone(st.zoneTop, close)) marketHtml += " — " + topRel;
+                    else if (botRel && nearZone(st.zoneBottom, close)) marketHtml += " — " + botRel;
+                    else if (topRel && botRel) marketHtml += " — между зонами: " + topRel + ", " + botRel;
+                    else if (topRel || botRel) marketHtml += " — " + (topRel || botRel);
 
-                    // 2) Robot decision in plain language
-                    let robotLine;
-                    let nextLine;
-                    if (actionable && side !== "NONE") {
-                      robotLine = "Робот: сигнал <strong>" + side + "</strong>"
-                        + (plan.mode ? (" · " + plan.mode) : "")
-                        + " · <code>" + state + "</code>"
-                        + " — уровни ENTRY/SL/TP на графике.";
-                      nextLine = reason
-                        ? ("Почему: " + reason)
-                        : "Разбирайте вход по сетке лимитов и стопу на графике.";
-                    } else {
-                      robotLine = "Робот <strong>не входит</strong> · <code>" + state + "</code>"
-                        + (reason ? (" — " + reason) : "") + ".";
-                      const r = String(reason).toUpperCase();
-                      if (r.indexOf("HTF FLAT") >= 0 || htf === "FLAT") {
-                        nextLine = "HTF плоский: bounce у day-locked TOP/BOT; после break+hold — RETEST той же полки (§7–8). "
-                          + "Следите за касанием фиолетовой полосы.";
-                      } else if (state === "ZONE_READY" || r.indexOf("BOUNCE") >= 0 || r.indexOf("RETEST") >= 0) {
-                        nextLine = "Зоны готовы, ждём подтверждение (bounce/retest) на следующей M5 у фиолетовой полосы.";
-                      } else if (r.indexOf("SESSION") >= 0 || r.indexOf("EDGE") >= 0) {
-                        nextLine = "Вне торгового окна playbook — новых входов не будет.";
-                      } else if (r.indexOf("EVENT") >= 0) {
-                        nextLine = "Календарный блок: рядом событие, входы закрыты.";
-                      } else if (state === "WORKING_ORDERS") {
-                        nextLine = "Лимитки/позиция в работе — следите за fill и §12 (BE→trail после TP1).";
-                      } else {
-                        nextLine = "Наблюдение. При выполнении условий появится BUY/SELL + стрелка.";
+                    if (sit.dayMovePoints != null) {
+                      const dm = sit.dayMovePoints;
+                      marketHtml += ". День " + (dm >= 0 ? "+" : "") + dm + "п от открытия сессии";
+                      if (dm <= -80) marketHtml += " (dump — macro BEARISH proxy)";
+                      else if (dm >= 80) marketHtml += " (rally — macro BULLISH proxy)";
+                    }
+                    const drop1 = (peak1h != null && close != null && peak1h > close + 0.08) ? pts(peak1h, close) : null;
+                    const rally1 = (trough1h != null && close != null && close > trough1h + 0.08) ? pts(close, trough1h) : null;
+                    if (drop1 != null && (rally1 == null || drop1 >= rally1)) {
+                      marketHtml += ". За ~1ч срыв с " + fmtPx(peak1h) + " (−" + drop1 + "п)";
+                    } else if (rally1 != null) {
+                      marketHtml += ". За ~1ч отскок от " + fmtPx(trough1h) + " (+" + rally1 + "п)";
+                    }
+                    if (peakS != null && troughS != null && close != null) {
+                      const span = pts(peakS, troughS);
+                      if (span != null && span >= 40) {
+                        marketHtml += ". В сессии диапазон ~" + span + "п ("
+                          + fmtPx(troughS) + "–" + fmtPx(peakS) + ")";
                       }
                     }
+                    marketHtml += ". Режим <code>" + esc(mkt) + "</code>, HTF=" + esc(htf)
+                      + ", bias=" + esc(bias) + ".";
+                    if (sit.structureNote) {
+                      marketHtml += " " + esc(String(sit.structureNote).slice(0, 180));
+                    }
+                    marketHtml += " Лента " + (tapeLive ? "живая" : "архив/ISS")
+                      + ", ~" + (data.barCount || 0) + " M5.</p>";
 
-                    // 3) Day zones + what is allowed (short)
-                    let zoneLine = "Зоны дня";
-                    if (st.zoneTop) {
-                      zoneLine += ": <span class='lg-zone'>TOP</span> "
-                        + fmtPx(st.zoneTop.low) + "–" + fmtPx(st.zoneTop.high);
-                    }
-                    if (st.zoneBottom) {
-                      zoneLine += (st.zoneTop ? "," : ":")
-                        + " <span class='lg-zone-bot'>BOT</span> "
-                        + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high);
-                    }
-                    if (!st.zoneTop && !st.zoneBottom) {
-                      zoneLine += " пока не размечены";
-                    }
-                    zoneLine += ". HI/LO тренда " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow)
-                      + "; HTF=" + htf + ", bias=" + bias + ".";
-                    if (bias === "UP") {
-                      zoneLine += st.topBrokenHeld
-                        ? " После пробоя TOP допустим RETEST верха."
-                        : " Без пробоя TOP — только bounce от BOT.";
-                    } else if (bias === "DOWN") {
-                      zoneLine += st.bottomBrokenHeld
-                        ? " После пробоя BOT допустим RETEST низа."
-                        : " Без пробоя BOT — только bounce от TOP.";
-                    }
-                    if (st.previousZeroPoint != null) {
-                      zoneLine += " Zero §4 " + fmtPx(st.previousZeroPoint)
-                        + (st.zeroPointBroken ? " (пробита)." : " (держится).");
+                    if (st.zoneTop || st.zoneBottom) {
+                      marketHtml += "<p class='signal-brief-note'>Зоны дня: ";
+                      if (st.zoneTop) {
+                        marketHtml += "<span class='lg-zone'>TOP</span> "
+                          + fmtPx(st.zoneTop.low) + "–" + fmtPx(st.zoneTop.high);
+                      }
+                      if (st.zoneBottom) {
+                        marketHtml += (st.zoneTop ? ", " : "")
+                          + "<span class='lg-zone-bot'>BOT</span> "
+                          + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high);
+                      }
+                      marketHtml += ". HI/LO " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow) + ".";
+                      if (st.previousZeroPoint != null) {
+                        marketHtml += " Zero §4 " + fmtPx(st.previousZeroPoint)
+                          + (st.zeroPointBroken ? " (пробита)." : " (держится).");
+                      }
+                      marketHtml += "</p>";
                     }
 
-                    // 4) Paper statement pulse
-                    let paperLine = "";
+                    if (sit.domBidLots5 != null) {
+                      const skew = sit.domSkew || 0;
+                      marketHtml += "<p class='signal-brief-note'>Стакан (топ-5): bid "
+                        + Math.round(sit.domBidLots5) + " / ask " + Math.round(sit.domAskLots5)
+                        + " лотов — "
+                        + (skew > 40 ? "давление покупателей" : (skew < -40 ? "давление продавцов" : "баланс"))
+                        + ".</p>";
+                    }
+
+                    // ——— 2. Робот ———
+                    let robotHtml = "<p class='signal-brief-kicker'>Робот</p>";
+                    const postureRu = ({
+                      IN_TRADE: "В СДЕЛКЕ",
+                      WAITING_FILL: "ЖДЁТ ИСПОЛНЕНИЯ",
+                      WATCHING_ZONE: "СМОТРИТ ЗОНУ",
+                      NOT_IN_TRADE: "НЕ В СДЕЛКЕ",
+                      SCANNING: "СКАНИРУЕТ"
+                    })[posture] || posture;
+
+                    robotHtml += "<p><strong>" + postureRu + "</strong> · <code>" + esc(state) + "</code>";
+                    if (side && side !== "NONE") robotHtml += " · " + esc(side) + (mode ? (" " + esc(mode)) : "");
+                    robotHtml += " · канал: "
+                      + (liveBroker ? "LIVE (осторожно)" : (autoJ ? "paper AUTO_JOURNAL" : "SIGNAL_ONLY"))
+                      + ".</p>";
+
+                    if (posture === "IN_TRADE") {
+                      robotHtml += "<p><strong>Почему в сделке:</strong> " + esc(reason) + "</p>";
+                      if (sit.setupLevels) {
+                        const lv = sit.setupLevels;
+                        robotHtml += "<p class='signal-brief-note'>Уровни: entry "
+                          + fmtPx(lv.entry) + " · SL " + fmtPx(lv.stop)
+                          + " · TP1 " + fmtPx(lv.tp1) + " · TP2 " + fmtPx(lv.tp2)
+                          + (lv.qty != null ? (" · qty " + lv.qty) : "") + ".</p>";
+                      }
+                      if (manage.note) {
+                        robotHtml += "<p class='signal-brief-note'>Manage §12: " + esc(manage.note)
+                          + (manage.movedToBe ? " · уже BE" : "")
+                          + (manage.trailing ? " · trail" : "") + ".</p>";
+                      }
+                    } else if (posture === "WAITING_FILL") {
+                      robotHtml += "<p><strong>Почему ждёт fill:</strong> " + esc(reason) + "</p>";
+                      if (sit.activeLock) {
+                        const lk = sit.activeLock;
+                        robotHtml += "<p class='signal-brief-note'>Lock зоны "
+                          + fmtPx(lk.low) + "–" + fmtPx(lk.high)
+                          + " · mid " + fmtPx(lk.mid)
+                          + " — unlock ≥40п от mid или новый день.</p>";
+                      }
+                      if (sit.setupLevels) {
+                        const lv = sit.setupLevels;
+                        robotHtml += "<p class='signal-brief-note'>Сетка: avg "
+                          + fmtPx(lv.entry) + " · SL " + fmtPx(lv.stop)
+                          + " · TP1 " + fmtPx(lv.tp1) + ".</p>";
+                      }
+                      robotHtml += "<p class='signal-brief-note'>Следующий шаг: дождаться касания лимитов на M5; "
+                        + "при уходе цены далеко — unlock и новый поиск.</p>";
+                    } else {
+                      robotHtml += "<p><strong>Почему не в сделке:</strong> " + esc(reason) + "</p>";
+                      const r = String(reason).toUpperCase();
+                      let next = "Наблюдение: при выполнении §6–8 появится BUY/SELL.";
+                      if (r.indexOf("MAX FILLS") >= 0 || r.indexOf("MAX SETUPS") >= 0) {
+                        next = "Дневной лимит сетапов исчерпан — новых входов сегодня не будет.";
+                      } else if (r.indexOf("MAX DAY LOSS") >= 0) {
+                        next = "Сработал дневной лимит убытка — робот в паузе до завтра.";
+                      } else if (r.indexOf("EVENT") >= 0) {
+                        next = "Календарный blackout вокруг события — ждите окончания окна.";
+                      } else if (r.indexOf("SESSION") >= 0) {
+                        next = "Вне торгового окна playbook — входы откроются в сессии.";
+                      } else if (r.indexOf("§6") >= 0 || r.indexOf("PROFILE") >= 0) {
+                        next = "Нет валидного профиля на активном уровне — ждите касание TOP/BOT с объёмом или пинок.";
+                      } else if (r.indexOf("MACRO") >= 0 || r.indexOf("KNIFE") >= 0 || r.indexOf("FA/") >= 0) {
+                        next = "Macro-proxy режет нож против дня — не ловим дно/потолок против импульса.";
+                      } else if (r.indexOf("HTF") >= 0 || htf === "FLAT") {
+                        next = "HTF плоский: приоритет bounce у day-locked TOP/BOT; RETEST после break+hold.";
+                      } else if (posture === "WATCHING_ZONE") {
+                        next = "Зона размечена — ждите bounce/retest confirm на следующей M5 у фиолетовой полосы.";
+                      } else if (r.indexOf("COOLDOWN") >= 0) {
+                        next = "Cooldown после стопа — пауза до конца таймера.";
+                      }
+                      robotHtml += "<p class='signal-brief-note'>Что делать: " + next + "</p>";
+                    }
+
+                    if (sit.setupsToday != null) {
+                      robotHtml += "<p class='signal-brief-note'>Квота: fills сегодня "
+                        + sit.setupsToday
+                        + (sit.maxSetupsPerDay > 0 ? (" / " + sit.maxSetupsPerDay) : " (без лимита)")
+                        + (sit.realizedDayPnlRub != null
+                          ? (" · day PnL engine " + (sit.realizedDayPnlRub >= 0 ? "+" : "")
+                            + Math.round(sit.realizedDayPnlRub) + " ₽")
+                          : "")
+                        + (sit.maxDayLossRub > 0 ? (" · day-loss cap −" + sit.maxDayLossRub + " ₽") : "")
+                        + ".</p>";
+                    }
+
+                    // ——— 3. Новости / календарь ———
+                    let newsHtml = "<p class='signal-brief-kicker'>Новости и события</p>";
+                    const upcoming = events.filter(function (e) { return e.status === "UPCOMING"; }).slice(0, 3);
+                    const recent = events.filter(function (e) { return e.status === "PAST"; }).slice(0, 2);
+
+                    if (!events.length) {
+                      newsHtml += "<p class='signal-brief-note'>В календаре BR рядом нет EIA/API окон. "
+                        + "Живой RSS сюда не подмешивается (только event-calendar).</p>";
+                    } else {
+                      if (sit.eventBlackout) {
+                        newsHtml += "<p><strong>Blackout сейчас:</strong> " + esc(sit.eventBlock) + "</p>";
+                      }
+                      if (upcoming.length) {
+                        newsHtml += "<p>Скоро: ";
+                        newsHtml += upcoming.map(function (e) {
+                          return "<strong>" + esc(e.title) + "</strong> (" + esc(e.type) + ") "
+                            + esc(e.date) + " " + esc(e.time) + " MSK — " + minsLabel(e.minutesTo)
+                            + (e.inBlackout ? " · уже в блоке" : "");
+                        }).join("; ") + ".</p>";
+                      }
+                      if (recent.length) {
+                        newsHtml += "<p class='signal-brief-note'>Недавно: ";
+                        newsHtml += recent.map(function (e) {
+                          return esc(e.title) + " " + minsLabel(e.minutesTo);
+                        }).join("; ") + ".";
+                        // price reaction proxy
+                        if (sit.dayMovePoints != null && Math.abs(sit.dayMovePoints) >= 40) {
+                          newsHtml += " В цене дня уже виден импульс "
+                            + (sit.dayMovePoints >= 0 ? "+" : "") + sit.dayMovePoints
+                            + "п — возможная реакция на фон/событие (прокси, не факт surprise).";
+                        } else {
+                          newsHtml += " Явной «реакции дня» по импульсу не видно (день спокойный).";
+                        }
+                        newsHtml += "</p>";
+                      }
+                      if (!upcoming.length && !recent.length && !sit.eventBlackout) {
+                        const next = events[0];
+                        newsHtml += "<p>Ближайшее в горизонте: <strong>" + esc(next.title) + "</strong> "
+                          + esc(next.date) + " " + esc(next.time) + " — " + minsLabel(next.minutesTo) + ".</p>";
+                      }
+                      newsHtml += "<p class='signal-brief-note'>" + esc(sit.newsDisclaimer
+                        || "FA = календарь + macro-proxy по цене, не лента новостей.") + "</p>";
+                    }
+
+                    if (sit.sessionBlock) {
+                      newsHtml += "<p class='signal-brief-note'>Сессия: " + esc(sit.sessionBlock) + "</p>";
+                    } else if (sit.sessionTradable === false) {
+                      newsHtml += "<p class='signal-brief-note'>Сессия: вне окна входов.</p>";
+                    } else {
+                      newsHtml += "<p class='signal-brief-note'>Сессия tradable "
+                        + esc(sit.sessionOpen || "09:00") + "–" + esc(sit.sessionClose || "23:50")
+                        + " (с буферами open/close).</p>";
+                    }
+
+                    // ——— 4. Paper ———
+                    let paperHtml = "";
                     if (paperSt && typeof paperSt.todayPnlRub === "number") {
                       const tag = (paperSt.todayPnlRub >= 0 ? "+" : "")
                         + Math.round(paperSt.todayPnlRub).toLocaleString("ru-RU") + " ₽";
-                      paperLine = "Paper сегодня: <strong>" + tag + "</strong>"
-                        + " · W/L " + (paperSt.wins || 0) + "/" + (paperSt.losses || 0)
+                      paperHtml = "<p class='signal-brief-kicker'>Paper</p><p>Сегодня <strong>"
+                        + tag + "</strong> · W/L " + (paperSt.wins || 0) + "/" + (paperSt.losses || 0)
                         + " · statement "
                         + ((paperSt.realizedPnlRub >= 0 ? "+" : "")
                           + Math.round(paperSt.realizedPnlRub || 0).toLocaleString("ru-RU") + " ₽")
-                        + ".";
-                      if (paperSt.note && String(paperSt.note).indexOf("MISSED") >= 0
-                          || paperSt.note && String(paperSt.note).indexOf("HTF") >= 0) {
-                        paperLine += " В журнале есть backfill упущенных bounce (HTF FLAT).";
-                      }
+                        + ".</p>";
                     }
 
-                    let html = "<p>" + nowLine + "</p>"
-                      + "<p>" + robotLine + "</p>"
-                      + "<p class='signal-brief-note'>" + nextLine + "</p>"
-                      + "<p>" + zoneLine + "</p>";
-                    if (paperLine) html += "<p class='signal-brief-note'>" + paperLine + "</p>";
-                    if (data.manage && data.manage.note) {
-                      html += "<p class='signal-brief-note'>Manage: " + data.manage.note + "</p>";
+                    return marketHtml + robotHtml + newsHtml + paperHtml;
+                  }
+                  function renderCompliance(data) {
+                    const el = $("signal-compliance-meta");
+                    if (!el) return;
+                    const rows = data.checklistCompliance || [];
+                    let core = 0, ext = 0;
+                    rows.forEach(function (r) {
+                      if (r.status === "IMPLEMENTED") core++;
+                      else if (r.status === "EXTENSION") ext++;
+                    });
+                    let t = "Чек-лист §1–18: " + core + " IMPLEMENTED · hardenings: " + ext + " EXTENSION";
+                    if (data.blockReason) {
+                      t += " · блок: " + String(data.blockReason).slice(0, 90);
                     }
-                    return html;
+                    if (data.setupsToday != null) {
+                      t += " · fillsToday=" + data.setupsToday;
+                    }
+                    el.textContent = t;
                   }
                   function clearLines() {
                     if (!candleSeries) return;
@@ -2510,6 +2696,37 @@ public class AnalysisHtmlRenderer {
                       return true;
                     }
                   }
+                  function currentRightOffset() {
+                    return rightPadOn ? RIGHT_PAD_ON : RIGHT_PAD_OFF;
+                  }
+                  function syncPadButtons() {
+                    const deskBtn = $("signal-desk-pad");
+                    const chartBtn = $("signal-chart-pad");
+                    [deskBtn, chartBtn].forEach(function (btn) {
+                      if (!btn) return;
+                      btn.setAttribute("aria-pressed", rightPadOn ? "true" : "false");
+                      btn.classList.toggle("is-on", rightPadOn);
+                      btn.classList.toggle("is-active", rightPadOn);
+                    });
+                    if (deskBtn) {
+                      deskBtn.textContent = rightPadOn ? "Автоотступ · вкл" : "Автоотступ";
+                    }
+                  }
+                  function applyRightPad(scrollLive) {
+                    if (!chart) return;
+                    try {
+                      chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
+                    } catch (_) {}
+                    if (scrollLive !== false) {
+                      try { chart.timeScale().scrollToRealTime(); } catch (_) {}
+                      userPinned = false;
+                    }
+                    syncPadButtons();
+                  }
+                  function toggleRightPad() {
+                    rightPadOn = !rightPadOn;
+                    applyRightPad(true);
+                  }
                   function ensureChart() {
                     const el = $("signal-chart");
                     if (!el || chart) return;
@@ -2534,12 +2751,13 @@ public class AnalysisHtmlRenderer {
                         borderColor: "#d5dde2",
                         timeVisible: true,
                         secondsVisible: false,
-                        rightOffset: 6,
+                        rightOffset: currentRightOffset(),
                         barSpacing: 8
                       },
                       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
                       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
                     });
+                    syncPadButtons();
                     candleSeries = chart.addCandlestickSeries({
                       upColor: "#16a34a", downColor: "#dc2626",
                       borderUpColor: "#16a34a", borderDownColor: "#dc2626",
@@ -2588,7 +2806,10 @@ public class AnalysisHtmlRenderer {
                     if (forceFit) {
                       chart.timeScale().fitContent();
                       userPinned = false;
+                      try { chart.timeScale().applyOptions({ rightOffset: currentRightOffset() }); } catch (_) {}
+                      try { chart.timeScale().scrollToRealTime(); } catch (_) {}
                     } else if (stickRight) {
+                      try { chart.timeScale().applyOptions({ rightOffset: currentRightOffset() }); } catch (_) {}
                       chart.timeScale().scrollToRealTime();
                     } else if (prevRange) {
                       try { chart.timeScale().setVisibleLogicalRange(prevRange); } catch (_) {}
@@ -2598,31 +2819,116 @@ public class AnalysisHtmlRenderer {
                   function renderDom(book) {
                     const body = $("signal-dom-body");
                     const meta = $("signal-dom-meta");
+                    const imb = $("signal-dom-imbalance");
+                    const imbBid = $("signal-dom-imb-bid");
+                    const imbAsk = $("signal-dom-imb-ask");
                     if (!body) return;
-                    if (!book || (!book.bids && !book.asks)) {
-                      body.innerHTML = "<tr><td colspan=\\"4\\">Нет DOM</td></tr>";
-                      if (meta) meta.textContent = "—";
+                    if (!book || ((!book.bids || !book.bids.length) && (!book.asks || !book.asks.length))) {
+                      body.innerHTML = "<div class=\\"signal-dom-empty\\">Нет DOM</div>";
+                      if (meta) meta.textContent = book && book.summary ? book.summary : "—";
+                      if (imb) imb.hidden = true;
                       return;
+                    }
+                    const bids = (book.bids || []).slice(0, 50);
+                    const asks = (book.asks || []).slice(0, 50);
+                    const tape = book.tapeByPrice || {};
+                    const bestBid = bids.length ? Number(bids[0].p) : null;
+                    const bestAsk = asks.length ? Number(asks[0].p) : null;
+                    let bidLots = 0, askLots = 0;
+                    bids.forEach(function (b) { bidLots += Number(b.q) || 0; });
+                    asks.forEach(function (a) { askLots += Number(a.q) || 0; });
+                    const totLots = bidLots + askLots;
+                    if (imb && imbBid && imbAsk && totLots > 0) {
+                      imb.hidden = false;
+                      const bp = Math.round(100 * bidLots / totLots);
+                      imbBid.style.width = bp + "%";
+                      imbAsk.style.width = (100 - bp) + "%";
+                      imbBid.title = "Bid " + Math.round(bidLots) + " лотов (" + bp + "%)";
+                      imbAsk.title = "Ask " + Math.round(askLots) + " лотов (" + (100 - bp) + "%)";
+                    } else if (imb) {
+                      imb.hidden = true;
                     }
                     if (meta) {
                       const age = book.asOf ? (" · " + new Date(book.asOf).toLocaleTimeString("ru-RU")) : "";
-                      meta.textContent = (book.instrumentId || "") + age + " · live";
+                      const spr = (bestBid != null && bestAsk != null)
+                        ? (" · spr " + (bestAsk - bestBid).toFixed(2))
+                        : "";
+                      meta.textContent = (book.instrumentId || "BR")
+                        + " · depth " + Math.max(bids.length, asks.length)
+                        + spr + age;
                     }
-                    const bids = book.bids || [];
-                    const asks = book.asks || [];
-                    const n = Math.max(bids.length, asks.length, 1);
+                    let maxQ = 1;
+                    bids.forEach(function (b) { maxQ = Math.max(maxQ, Number(b.q) || 0); });
+                    asks.forEach(function (a) { maxQ = Math.max(maxQ, Number(a.q) || 0); });
+                    Object.keys(tape).forEach(function (k) {
+                      const t = tape[k];
+                      if (t && t.total) maxQ = Math.max(maxQ, Number(t.total) || 0);
+                    });
+                    const pxKey = function (p) {
+                      return (Math.round(Number(p) * 100) / 100).toFixed(2);
+                    };
+                    const barW = function (q) {
+                      return Math.max(4, Math.round(100 * (Number(q) || 0) / maxQ));
+                    };
                     let html = "";
-                    for (let i = 0; i < Math.min(n, 15); i++) {
-                      const b = bids[i];
+                    // Asks: reverse so highest at top, best ask at bottom of ask zone
+                    for (let i = asks.length - 1; i >= 0; i--) {
                       const a = asks[i];
-                      html += "<tr>"
-                        + "<td class=\\"bid\\">" + (b ? b.p : "") + "</td>"
-                        + "<td>" + (b ? b.q : "") + "</td>"
-                        + "<td class=\\"ask\\">" + (a ? a.p : "") + "</td>"
-                        + "<td>" + (a ? a.q : "") + "</td>"
-                        + "</tr>";
+                      const p = Number(a.p);
+                      const q = Number(a.q) || 0;
+                      const key = pxKey(p);
+                      const t = tape[key] || {};
+                      const buy = Number(t.buy) || 0;
+                      const sell = Number(t.sell) || 0;
+                      const isBest = bestAsk != null && Math.abs(p - bestAsk) < 1e-9;
+                      html += "<div class=\\"dom-row dom-ask" + (isBest ? " is-best" : "") + "\\">"
+                        + "<span class=\\"dom-bid-px\\"></span>"
+                        + "<span class=\\"dom-bid-q\\"></span>"
+                        + "<span class=\\"dom-px\\">" + p.toFixed(2) + "</span>"
+                        + "<span class=\\"dom-ask-q\\"><i style=\\"width:" + barW(q) + "%\\"></i><em>" + q + "</em></span>"
+                        + "<span class=\\"dom-ask-px\\">" + p.toFixed(2) + "</span>"
+                        + "<span class=\\"dom-tape\\">"
+                        + (buy || sell
+                          ? ("<b class=\\"b\\">" + buy + "</b><i>×</i><b class=\\"s\\">" + sell + "</b>")
+                          : "")
+                        + "</span>"
+                        + "</div>";
+                    }
+                    if (bestBid != null && bestAsk != null) {
+                      const mid = ((bestBid + bestAsk) / 2).toFixed(2);
+                      const spr = (bestAsk - bestBid).toFixed(2);
+                      html += "<div class=\\"dom-row dom-spread\\">"
+                        + "<span class=\\"dom-spread-label\\">SPREAD " + spr + " · mid " + mid + "</span>"
+                        + "</div>";
+                    }
+                    for (let i = 0; i < bids.length; i++) {
+                      const b = bids[i];
+                      const p = Number(b.p);
+                      const q = Number(b.q) || 0;
+                      const key = pxKey(p);
+                      const t = tape[key] || {};
+                      const buy = Number(t.buy) || 0;
+                      const sell = Number(t.sell) || 0;
+                      const isBest = bestBid != null && Math.abs(p - bestBid) < 1e-9;
+                      html += "<div class=\\"dom-row dom-bid" + (isBest ? " is-best" : "") + "\\">"
+                        + "<span class=\\"dom-bid-px\\">" + p.toFixed(2) + "</span>"
+                        + "<span class=\\"dom-bid-q\\"><i style=\\"width:" + barW(q) + "%\\"></i><em>" + q + "</em></span>"
+                        + "<span class=\\"dom-px\\">" + p.toFixed(2) + "</span>"
+                        + "<span class=\\"dom-ask-q\\"></span>"
+                        + "<span class=\\"dom-ask-px\\"></span>"
+                        + "<span class=\\"dom-tape\\">"
+                        + (buy || sell
+                          ? ("<b class=\\"b\\">" + buy + "</b><i>×</i><b class=\\"s\\">" + sell + "</b>")
+                          : "")
+                        + "</span>"
+                        + "</div>";
                     }
                     body.innerHTML = html;
+                    // keep best ask/bid near center of scroll
+                    const bestEl = body.querySelector(".dom-spread") || body.querySelector(".is-best");
+                    if (bestEl && typeof bestEl.scrollIntoView === "function") {
+                      try { bestEl.scrollIntoView({ block: "center" }); } catch (_) {}
+                    }
                   }
                   async function kickRobot() {
                     const btn = $("sig-kick-btn");
@@ -2681,6 +2987,7 @@ public class AnalysisHtmlRenderer {
                       renderPaper(data.paper);
                       const briefBody = $("signal-desk-brief-body");
                       if (briefBody) briefBody.innerHTML = buildOperatorBrief(data);
+                      renderCompliance(data);
 
                       ensureChart();
                       const candles = (data.bars || []).map(function (b) {
@@ -2712,9 +3019,17 @@ public class AnalysisHtmlRenderer {
                     followLive = true;
                     const follow = $("signal-desk-follow");
                     if (follow) follow.checked = true;
-                    if (chart) chart.timeScale().fitContent();
+                    if (chart) {
+                      chart.timeScale().fitContent();
+                      applyRightPad(true);
+                    }
                     loadDesk(true);
                   });
+                  const padBtn = $("signal-desk-pad");
+                  if (padBtn) padBtn.addEventListener("click", toggleRightPad);
+                  const chartPadBtn = $("signal-chart-pad");
+                  if (chartPadBtn) chartPadBtn.addEventListener("click", toggleRightPad);
+                  syncPadButtons();
                   const follow = $("signal-desk-follow");
                   if (follow) {
                     follow.checked = true;
@@ -2722,7 +3037,9 @@ public class AnalysisHtmlRenderer {
                       followLive = !!follow.checked;
                       if (followLive) {
                         userPinned = false;
-                        if (chart) chart.timeScale().scrollToRealTime();
+                        if (chart) {
+                          applyRightPad(true);
+                        }
                       }
                     });
                   }

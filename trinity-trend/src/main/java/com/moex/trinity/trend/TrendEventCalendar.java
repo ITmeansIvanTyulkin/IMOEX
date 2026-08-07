@@ -9,7 +9,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Oil/macro event blackout for new BR setups (before and after release).
@@ -104,5 +107,54 @@ public final class TrendEventCalendar {
             }
         }
         return null;
+    }
+
+    /**
+     * Desk context: today's events + next upcoming + recent past (for «реакция на новости»).
+     */
+    public List<Map<String, Object>> deskEvents(LocalDateTime at, String instrument, int lookbackHours, int lookaheadHours) {
+        if (at == null || events.isEmpty()) {
+            return List.of();
+        }
+        int back = Math.max(1, lookbackHours);
+        int ahead = Math.max(1, lookaheadHours);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (TrendEventEntry e : events) {
+            if (!e.matchesInstrument(instrument)) {
+                continue;
+            }
+            LocalDateTime eventAt = e.date().atTime(e.eventTime());
+            long minutesTo = ChronoUnit.MINUTES.between(at, eventAt);
+            if (minutesTo < -(back * 60L) || minutesTo > ahead * 60L) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", e.date().toString());
+            row.put("time", e.time());
+            row.put("type", e.type());
+            row.put("title", e.title());
+            row.put("eventAt", eventAt.toString());
+            row.put("minutesTo", minutesTo);
+            boolean inBlackout = false;
+            if (minutesTo > 0 && minutesTo <= minutesBefore) {
+                inBlackout = true;
+            }
+            if (minutesTo <= 0 && -minutesTo <= minutesAfter) {
+                inBlackout = true;
+            }
+            row.put("inBlackout", inBlackout);
+            row.put("status", minutesTo > 0 ? "UPCOMING" : (minutesTo == 0 ? "NOW" : "PAST"));
+            out.add(row);
+        }
+        out.sort(Comparator.comparingLong(m -> Math.abs(((Number) m.get("minutesTo")).longValue())));
+        return out;
+    }
+
+    public int minutesBefore() {
+        return minutesBefore;
+    }
+
+    public int minutesAfter() {
+        return minutesAfter;
     }
 }

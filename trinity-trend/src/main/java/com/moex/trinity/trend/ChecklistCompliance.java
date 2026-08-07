@@ -1,5 +1,10 @@
 package com.moex.trinity.trend;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Exclusive checklist §1–18 + day-wipe note. Core must be {@link Status#IMPLEMENTED}.
  * Hardenings are {@link Status#EXTENSION} and must never disable core entry/exit rules.
@@ -34,7 +39,9 @@ public enum ChecklistCompliance {
     EXT_RISK_PCT(Status.EXTENSION, "risk % equity + GO long≠short"),
     EXT_STRUCTURAL_ONLY(Status.EXTENSION, "operator: skip ACCUM/ZERO RETEST — TOP/BOT shelves"),
     EXT_MACRO_BIAS(Status.EXTENSION, "FA/macro proxy: no knife BUY on dump / SELL on melt-up"),
-    EXT_STOP_PAD(Status.EXTENSION, "operator stop/TP1 pad beyond checklist 20 (default 22)");
+    EXT_STOP_PAD(Status.EXTENSION, "operator stop/TP1 pad beyond checklist 20 (default 22)"),
+    EXT_ANTI_THIN(Status.EXTENSION, "min shelf volume + SOFT non-tradable / no soft day-lock"),
+    EXT_DAY_LOSS_CAP(Status.EXTENSION, "max day loss ₽ + max setups/day risk caps");
 
     public enum Status { IMPLEMENTED, EXTENSION }
 
@@ -52,6 +59,19 @@ public enum ChecklistCompliance {
 
     public String note() {
         return note;
+    }
+
+    /** Runtime desk / API snapshot of §1–18 + extensions. */
+    public static List<Map<String, String>> deskDto() {
+        List<Map<String, String>> out = new ArrayList<>();
+        for (ChecklistCompliance c : values()) {
+            Map<String, String> row = new LinkedHashMap<>();
+            row.put("id", c.name());
+            row.put("status", c.status.name());
+            row.put("note", c.note);
+            out.add(row);
+        }
+        return out;
     }
 
     public static boolean coreComplete() {

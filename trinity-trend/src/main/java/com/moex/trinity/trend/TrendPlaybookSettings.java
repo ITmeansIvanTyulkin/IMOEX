@@ -57,7 +57,11 @@ public record TrendPlaybookSettings(
          */
         boolean macroBiasEnabled,
         /** Day open→now move (points) that marks directional macro bias. */
-        double macroMinDayMovePoints
+        double macroMinDayMovePoints,
+        /** Min shelf volume (bar vol or tape lots) — reject thin zones. */
+        double minShelfVolume,
+        /** Block new setups when realized day PnL ≤ −limit (0 = off). */
+        double maxDayLossRub
 ) {
     public static TrendPlaybookSettings brDefaults() {
         TrendInstrumentSpec br = TrendInstrumentSpec.brDefaults();
@@ -80,7 +84,7 @@ public record TrendPlaybookSettings(
                 40,
                 true,
                 1.5,
-                0,
+                4,
                 12,
                 10,
                 "09:00",
@@ -104,13 +108,15 @@ public record TrendPlaybookSettings(
                 true,
                 true,
                 true,
-                80
+                80,
+                30,
+                1500
         );
     }
 
     /** Research / replay override. */
     public TrendPlaybookSettings withASetupBounceOnly(boolean bounceOnly) {
-        return new TrendPlaybookSettings(
+        return copy(
                 playbookId, gridStyle, maxRiskPctEquity, instrument, tp1Fraction,
                 touchLookback, candlesPerTouch, confirmBarsAfterBreak, levelLookbackBars,
                 oneSetupPerZone, unlockDistancePoints, allowZonePad, minTouchCount, minHvnBands,
@@ -122,7 +128,108 @@ public record TrendPlaybookSettings(
                 counterTrendMaxDistancePoints, counterTrendRequireConfirm,
                 eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
                 bounceOnly, initialSizeFraction, preferMarketDataZones,
-                preferStructuralEntries, macroBiasEnabled, macroMinDayMovePoints
+                preferStructuralEntries, macroBiasEnabled, macroMinDayMovePoints,
+                minShelfVolume, maxDayLossRub
+        );
+    }
+
+    public TrendPlaybookSettings withMaxSetupsPerDay(int max) {
+        return copy(
+                playbookId, gridStyle, maxRiskPctEquity, instrument, tp1Fraction,
+                touchLookback, candlesPerTouch, confirmBarsAfterBreak, levelLookbackBars,
+                oneSetupPerZone, unlockDistancePoints, allowZonePad, minTouchCount, minHvnBands,
+                sessionBiasBars, sessionBiasMinPoints, requireBounceConfirm, minRewardRisk,
+                max, cooldownBarsAfterSl, retestArmMaxDistancePoints,
+                tradeSessionOpen, tradeSessionClose, noTradeAfterOpenMinutes, noTradeBeforeCloseMinutes,
+                htfMinMovePoints, htfSlopeBars, htfRequireAgreement,
+                counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
+                counterTrendMaxDistancePoints, counterTrendRequireConfirm,
+                eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
+                aSetupBounceOnly, initialSizeFraction, preferMarketDataZones,
+                preferStructuralEntries, macroBiasEnabled, macroMinDayMovePoints,
+                minShelfVolume, maxDayLossRub
+        );
+    }
+
+    public TrendPlaybookSettings withMaxDayLossRub(double loss) {
+        return copy(
+                playbookId, gridStyle, maxRiskPctEquity, instrument, tp1Fraction,
+                touchLookback, candlesPerTouch, confirmBarsAfterBreak, levelLookbackBars,
+                oneSetupPerZone, unlockDistancePoints, allowZonePad, minTouchCount, minHvnBands,
+                sessionBiasBars, sessionBiasMinPoints, requireBounceConfirm, minRewardRisk,
+                maxSetupsPerDay, cooldownBarsAfterSl, retestArmMaxDistancePoints,
+                tradeSessionOpen, tradeSessionClose, noTradeAfterOpenMinutes, noTradeBeforeCloseMinutes,
+                htfMinMovePoints, htfSlopeBars, htfRequireAgreement,
+                counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
+                counterTrendMaxDistancePoints, counterTrendRequireConfirm,
+                eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
+                aSetupBounceOnly, initialSizeFraction, preferMarketDataZones,
+                preferStructuralEntries, macroBiasEnabled, macroMinDayMovePoints,
+                minShelfVolume, loss
+        );
+    }
+
+    private static TrendPlaybookSettings copy(
+            String playbookId,
+            LimitGridStyle gridStyle,
+            double maxRiskPctEquity,
+            TrendInstrumentSpec instrument,
+            double tp1Fraction,
+            int touchLookback,
+            int candlesPerTouch,
+            int confirmBarsAfterBreak,
+            int levelLookbackBars,
+            boolean oneSetupPerZone,
+            double unlockDistancePoints,
+            boolean allowZonePad,
+            int minTouchCount,
+            int minHvnBands,
+            int sessionBiasBars,
+            double sessionBiasMinPoints,
+            boolean requireBounceConfirm,
+            double minRewardRisk,
+            int maxSetupsPerDay,
+            int cooldownBarsAfterSl,
+            double retestArmMaxDistancePoints,
+            String tradeSessionOpen,
+            String tradeSessionClose,
+            int noTradeAfterOpenMinutes,
+            int noTradeBeforeCloseMinutes,
+            double htfMinMovePoints,
+            int htfSlopeBars,
+            boolean htfRequireAgreement,
+            double counterTrendSizeFraction,
+            double counterTrendMinRewardRisk,
+            boolean counterTrendBounceOnly,
+            double counterTrendMaxDistancePoints,
+            boolean counterTrendRequireConfirm,
+            boolean eventCalendarEnabled,
+            String eventCalendarFile,
+            int eventBlockMinutesBefore,
+            int eventBlockMinutesAfter,
+            boolean aSetupBounceOnly,
+            double initialSizeFraction,
+            boolean preferMarketDataZones,
+            boolean preferStructuralEntries,
+            boolean macroBiasEnabled,
+            double macroMinDayMovePoints,
+            double minShelfVolume,
+            double maxDayLossRub
+    ) {
+        return new TrendPlaybookSettings(
+                playbookId, gridStyle, maxRiskPctEquity, instrument, tp1Fraction,
+                touchLookback, candlesPerTouch, confirmBarsAfterBreak, levelLookbackBars,
+                oneSetupPerZone, unlockDistancePoints, allowZonePad, minTouchCount, minHvnBands,
+                sessionBiasBars, sessionBiasMinPoints, requireBounceConfirm, minRewardRisk,
+                maxSetupsPerDay, cooldownBarsAfterSl, retestArmMaxDistancePoints,
+                tradeSessionOpen, tradeSessionClose, noTradeAfterOpenMinutes, noTradeBeforeCloseMinutes,
+                htfMinMovePoints, htfSlopeBars, htfRequireAgreement,
+                counterTrendSizeFraction, counterTrendMinRewardRisk, counterTrendBounceOnly,
+                counterTrendMaxDistancePoints, counterTrendRequireConfirm,
+                eventCalendarEnabled, eventCalendarFile, eventBlockMinutesBefore, eventBlockMinutesAfter,
+                aSetupBounceOnly, initialSizeFraction, preferMarketDataZones,
+                preferStructuralEntries, macroBiasEnabled, macroMinDayMovePoints,
+                minShelfVolume, maxDayLossRub
         );
     }
 }
