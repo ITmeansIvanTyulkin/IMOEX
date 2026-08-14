@@ -3,7 +3,7 @@
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
       <h2>Календарный арбитраж</h2>
-      <p class="meta" id="arb-desk-meta">Котировки T-Invest · calendar + fly · DV01 · EIA blackout · paper H1</p>
+      <p class="meta" id="arb-desk-meta">Котировки T-Invest · calendar + fly · DV01 · event blackout · live two-leg (armed) / paper</p>
     </div>
     <div class="signal-desk-actions">
       <button type="button" class="btn btn-ghost" id="arb-desk-refresh">Обновить</button>
@@ -23,9 +23,11 @@
     <div class="signal-chip"><span class="k">Пара</span><strong id="arb-pair">—</strong></div>
     <div class="signal-chip"><span class="k">DV01</span><strong id="arb-hedge">—</strong></div>
     <div class="signal-chip"><span class="k">ГО спред</span><strong id="arb-go">—</strong></div>
+    <div class="signal-chip"><span class="k">DOM архив</span><strong id="arb-dom-arch">—</strong></div>
     <div class="signal-chip"><span class="k">Стакан</span><strong id="arb-book">—</strong></div>
     <div class="signal-chip"><span class="k">EIA</span><strong id="arb-eia-chip">—</strong></div>
-    <div class="signal-chip"><span class="k">OOS</span><strong id="arb-oos">—</strong></div>
+    <div class="signal-chip"><span class="k">Journal</span><strong id="arb-journal">—</strong></div>
+    <div class="signal-chip"><span class="k">Replay</span><strong id="arb-oos">—</strong></div>
     <div class="signal-chip"><span class="k">Спред</span><strong id="arb-spread">—</strong></div>
     <div class="signal-chip"><span class="k">Z</span><strong id="arb-z">—</strong></div>
     <div class="signal-chip"><span class="k">Сигнал</span><strong id="arb-action">—</strong></div>
@@ -34,6 +36,10 @@
     </div>
   </div>
   <p class="meta" id="arb-reason">—</p>
+  <p class="meta" id="arb-fill-quality">Качество fill: ждём стакан T-Invest.</p>
+  <p class="meta" id="arb-near-locked" hidden>Near-locked: скрещённый стакан — research flag.</p>
+  <p class="meta" id="arb-session-skips">—</p>
+  <p class="meta" id="arb-oos-note">Journal sandbox со стаканом — главный счёт. Replay — сноска. Research, не обещание доходности.</p>
   <p class="meta" id="arb-warning" hidden></p>
   <div class="arb-cards" id="arb-cards"></div>
   <div class="signal-paper-panel" id="arb-paper-panel" hidden>
@@ -43,27 +49,75 @@
       <tbody id="arb-paper-body"></tbody>
     </table>
   </div>
-  <div class="signal-desk-grid">
-    <div class="signal-chart-wrap">
-      <p class="signal-chart-bar-label" id="arb-chart-label">Спред far − near (H1 брокера)</p>
-      <div id="arb-chart" class="signal-chart" style="height:420px"></div>
+  <div class="arb-workspace">
+    <div class="arb-charts">
+      <div class="signal-chart-wrap">
+        <p class="signal-chart-bar-label" id="arb-chart-label">Спред far − near (H1 брокера)</p>
+        <div id="arb-chart" class="signal-chart arb-chart-spread"></div>
+      </div>
+      <div class="signal-chart-wrap">
+        <p class="signal-chart-bar-label" id="arb-legs-chart-label">Ноги H1 · near / next</p>
+        <div id="arb-legs-chart" class="signal-chart arb-chart-legs"></div>
+      </div>
     </div>
-    <aside class="signal-side">
+    <div class="arb-books" id="arb-books">
+      <div class="arb-books-head">
+        <h3>Ликвидность ног</h3>
+        <p class="meta" id="arb-book-detail">ждём T-Invest DOM на near и next</p>
+      </div>
+      <p class="meta arb-books-legend">
+        LONG = продать near / купить next · SHORT = купить near / продать next.
+        Не прогноз цены.
+      </p>
+      <div class="arb-book-pair">
+        <div class="arb-book" data-leg="near">
+          <div class="arb-book-title">
+            <strong id="arb-book-near-name">Near</strong>
+            <span class="meta" id="arb-book-near-meta">—</span>
+          </div>
+          <div class="arb-ladder-head">
+            <span title="Лимиты на покупку">Bid</span>
+            <span>Цена</span>
+            <span title="Лимиты на продажу">Ask</span>
+          </div>
+          <div class="arb-ladder" id="arb-book-near-body" role="table" aria-label="Стакан near">
+            <div class="signal-dom-empty">Загрузка…</div>
+          </div>
+        </div>
+        <div class="arb-book" data-leg="next">
+          <div class="arb-book-title">
+            <strong id="arb-book-next-name">Next</strong>
+            <span class="meta" id="arb-book-next-meta">—</span>
+          </div>
+          <div class="arb-ladder-head">
+            <span title="Лимиты на покупку">Bid</span>
+            <span>Цена</span>
+            <span title="Лимиты на продажу">Ask</span>
+          </div>
+          <div class="arb-ladder" id="arb-book-next-body" role="table" aria-label="Стакан next">
+            <div class="signal-dom-empty">Загрузка…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <aside class="arb-context">
       <h3>Ноги</h3>
       <p class="meta" id="arb-legs">—</p>
-      <h3>Два стакана</h3>
-      <p class="meta" id="arb-book-detail">ждём T-Invest DOM на ноги</p>
       <h3>EIA / CFTC / crack</h3>
       <p class="meta" id="arb-eia">FRED + street consensus (файл), не Bloomberg Terminal</p>
       <p class="meta" id="arb-cot">CFTC COT…</p>
       <p class="meta" id="arb-crack">Crack 3-2-1…</p>
       <h3>Fair-paper / live</h3>
       <p class="meta" id="arb-fair">—</p>
-      <p class="meta">Котировки и стаканы — T-Invest. Live две ноги: market PostOrder near+far
-        при <code>live-execution=true</code> + брокер armed. Fly live пока paper.
+      <p class="meta">Котировки и стаканы — T-Invest. Paper fill live-тика — исполняемый спред стакана.
+        Главный счёт — sandbox journal со стаканом. Replay OOS — сноска: hist DOM из
+        <code>data/broker-tape</code> где архив есть, датированные EIA/COT (print ≤ bar),
+        без сегодняшнего crack. Live две ноги: market PostOrder near+far
+        при <code>live-execution=true</code> + брокер armed (по умолчанию выкл). Fly live пока paper.
+        Research / decision-support, не обещание доходности.
         CFTC + crack — публичные источники. Street consensus — <code>data/eia-consensus.json</code>.</p>
     </aside>
   </div>
 </section>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/calendar-arb-desk.js?v=20260813-arb6"></script>
+<script src="/js/calendar-arb-desk.js?v=20260814-arb-live"></script>

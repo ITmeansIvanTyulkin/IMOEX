@@ -303,27 +303,28 @@ imoex:
     calendar-arb:
       enabled: true
       auto-execution: true          # fair-paper fills on T-Invest H1 close
-      live-execution: false         # true = две ноги FORTS market у T-Invest (нужен broker armed)
+      live-execution: true          # две ноги FORTS market у T-Invest (нужен broker armed + без kill-switch)
       families: BR,SI,RI,GD,NG
       default-family: BR
       fly-enabled: true              # 1:-2:1 near/mid/far рядом с calendar
       ng-seasonality: true           # NG: не фадить зимнюю премию / летний дисконт
       dv01-hedge: true               # лоты по basicAssetSize брокера (обычно 1:1)
-      event-blackout: true           # EIA/inventory/OPEC из того же JSON, что trend
+      event-blackout: true           # EIA / CBR / див / FOMC из того же JSON, что trend
       event-calendar-file: data/trend-event-calendar.json
       event-block-minutes-before: 45
       event-block-minutes-after: 30
-      event-session-blackout: true   # весь день EIA/OPEC — не открываем
+      event-session-blackout: true   # весь день inventory/CBR/див/gold — не открываем
       flatten-on-event: true         # открытое — закрыть в окно события
       fnd-lead-days: 0               # 0 = BR/NG 2д, остальные 1д до LTD
       squeeze-dte: 10                # не шортить near в окно поставки
       max-go-rub: 25000              # сумма ГО ног с брокера; 0 = выкл
       slippage-ticks-per-leg: 2      # paper fill против нас
-      oos-days: 10                   # хвост H1 = OOS штамп на desk
+      oos-days: 40                   # хвост H1 = OOS штамп replay (hist DOM из broker-tape если есть)
       spread-go-factor: 0.55         # оценка скидки ГО спреда vs сумма ног (не НКЦ)
       min-book-lots: 3               # топ двух стаканов
       book-filter: true
-      partial-fills: true            # paper: сначала near, на следующем H1 far
+      partial-fills: true            # paper: сначала near; FAR только при стакане, иначе orphan EXIT
+      max-partial-bars: 2            # NEAR_ONLY дольше N H1 → EXIT_PARTIAL
       eia-surprise-kbbl: 3000        # FRED WCESTUS1 vs street/ср.4н
       eia-consensus-url: ""          # optional JSON {kbbl,source}; else data/eia-consensus.json
       cftc-net-abs-block: 250000     # CFTC noncomm net |x| → SKIP_MACRO на BR; 0=off

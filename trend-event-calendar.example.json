@@ -4,14 +4,14 @@
     "time": "17:30",
     "type": "OIL_INVENTORY",
     "title": "EIA Weekly Petroleum Status Report (example)",
-    "tickers": ["BR", "*"]
+    "tickers": ["BR"]
   },
   {
     "date": "2026-09-01",
     "time": "15:00",
     "type": "OPEC",
     "title": "OPEC+ meeting / decision window (example)",
-    "tickers": ["BR", "*"]
+    "tickers": ["BR"]
   },
   {
     "date": "2026-08-20",
@@ -19,5 +19,26 @@
     "type": "GAS_INVENTORY",
     "title": "EIA Weekly Natural Gas Storage (example)",
     "tickers": ["NG"]
+  },
+  {
+    "date": "2026-09-12",
+    "time": "13:30",
+    "type": "CBR_KEY_RATE",
+    "title": "ЦБ РФ ключевая ставка (example)",
+    "tickers": ["SI"]
+  },
+  {
+    "date": "2026-08-18",
+    "time": "10:00",
+    "type": "DIVIDEND",
+    "title": "Див. гэп / индексный состав (example)",
+    "tickers": ["RI", "MX"]
+  },
+  {
+    "date": "2026-09-16",
+    "time": "21:00",
+    "type": "FOMC",
+    "title": "FOMC decision (example, GOLD)",
+    "tickers": ["GD"]
   }
 ]

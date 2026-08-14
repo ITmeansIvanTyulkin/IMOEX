@@ -61,6 +61,11 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         return orderbookDepth;
     }
 
+    /** Append-only DOM/tape archive used for hist replay (may be empty until stream runs). */
+    public BrokerTapeArchive archive() {
+        return archive;
+    }
+
     /**
      * Open MarketDataStream for the given FIGIs (keys = operator instrument ids e.g. BRU6).
      */

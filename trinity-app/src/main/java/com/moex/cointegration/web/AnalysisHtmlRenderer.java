@@ -80,7 +80,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260814-desk-thaw2">
+              <link rel="stylesheet" href="/css/operator.css?v=20260814-arb-live">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -414,9 +414,10 @@ public class AnalysisHtmlRenderer {
                   <h2>Календарный арбитраж · исполнение</h2>
                   <p class="meta">
                     Near/next и бабочка 1:-2:1. Котировки, H1 и стаканы — <strong>только T-Invest</strong>.
-                    Два стакана, скидка ГО, EIA (FRED + street consensus файл), CFTC COT, crack 3-2-1.
-                    Авто = fair-paper. Live две ноги: <code>live-execution=true</code> + брокер armed
-                    (по умолчанию выкл).
+                    Семьи BR/NG/SI/RI/GD — разные шаблоны, не общий z. Два стакана, скидка ГО,
+                    EIA/COT/crack только на BR. Replay OOS без hist DOM; journal sandbox — со стаканом.
+                    Research, не обещание доходности. Авто = fair-paper.
+                    Live две ноги: <code>live-execution=true</code> + брокер armed (по умолчанию выкл).
                   </p>
                   <div class="callout trend-delivery-card">
                     <div class="trend-delivery-row">
