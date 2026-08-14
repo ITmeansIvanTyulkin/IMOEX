@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.moex</groupId>
+    <artifactId>trinity</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>TRINITY</name>
+    <description>TRINITY Bones — public shell (SPI, UI, docs). Trading kernel lives in sibling IMOEX-core.</description>
+
+    <modules>
+        <module>trinity-shared</module>
+        <module>trinity-marketdata</module>
+        <module>trinity-shell</module>
+    </modules>
+
+    <!-- Operator machine: ../IMOEX-core present → full robot. Public clone → bones shell only. -->
+    <profiles>
+        <profile>
+            <id>operator</id>
+            <activation>
+                <file>
+                    <exists>../IMOEX-core/pom.xml</exists>
+                </file>
+            </activation>
+            <modules>
+                <module>../IMOEX-core/trinity-pairs</module>
+                <module>../IMOEX-core/trinity-trend</module>
+                <module>../IMOEX-core/trinity-calendar-arb</module>
+                <module>../IMOEX-core/trinity-runtime</module>
+                <module>trinity-app</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>bones</id>
+            <activation>
+                <file>
+                    <missing>../IMOEX-core/pom.xml</missing>
+                </file>
+            </activation>
+        </profile>
+    </profiles>
+
+    <properties>
+        <java.version>17</java.version>
+        <jacoco.version>0.8.12</jacoco.version>
+        <jacoco.line.minimum>0.50</jacoco.line.minimum>
+        <trinity.version>1.0.0-SNAPSHOT</trinity.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-shared</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-pairs</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-trend</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-calendar-arb</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-runtime</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-marketdata</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-math3</artifactId>
+                <version>3.6.1</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jfree</groupId>
+                <artifactId>jfreechart</artifactId>
+                <version>1.5.4</version>
+            </dependency>
+            <dependency>
+                <groupId>ru.tinkoff.piapi</groupId>
+                <artifactId>java-sdk-core</artifactId>
+                <version>1.5</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>3.3.5</version>
+                    <!-- Parent + library modules are not runnable; trinity-app sets skip=false. -->
+                    <configuration>
+                        <skip>true</skip>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

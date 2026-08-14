@@ -1,0 +1,19 @@
+---
+description: Exclusive checklist must be transferred 100% before hardenings; never ship truncated playbook rules
+alwaysApply: true
+---
+
+# Checklist fidelity (Exclusive «Уровни + Объемы»)
+
+When the user asks to take the checklist / ready strategy and put it in code **fully**:
+
+1. Implement every numbered checklist item (§1–18 + day-wipe note) at **100%** first.
+2. Only then add our improvements — **additive only** (filters, risk, UX).
+3. Never ship bounce-only / truncated modes as the default when full transfer was requested.
+4. If a hardening conflicts with the checklist (e.g. blocks §8 RETEST after break+hold), the **checklist wins**.
+5. `a-setup-bounce-only` default must stay `false` unless the user explicitly asks for an A/B research cut.
+6. **Side law playbook #1 (never optional):** BOT = BUY bounce, TOP = SELL bounce. §8 BUY only while close ≥ TOP high; §8 SELL only while close ≤ BOT low. Close inside the box is bounce, not retest. HTF, CL, operator style, macro, and one-setup lock must **never** flip side or license BUY inside TOP / SELL inside BOT. Gate: `ExclusiveSide`.
+7. **Side law playbook #2 TrendUp (never optional):** H1 UP → LONG only, H1 DOWN → SHORT only, entry = intermediate HVN of last three volume ranges, grid 1:1:2:4, SL in nearest volume, §12 averaging across bars, §13 BE on swing break. Exclusive M5 session/gap/TOP-BOT must **never** flip or cancel a valid positional pyramid. Gate: `PositionalSide`.
+
+Playbook #1: Exclusive 2024 PDF «Уровни + Объемы» → `LevelsProfileBrPlaybook` + `ChecklistCompliance` + `ExclusiveSide`.
+Playbook #2: TrendUp «Позиционная» + «Метод усреднения» → `PositionalVolumeH1Playbook` + `PositionalChecklistCompliance` + `PositionalSide`.

@@ -1,0 +1,3489 @@
+package com.moex.cointegration.web;
+
+import com.moex.cointegration.config.CapitalProperties;
+import com.moex.cointegration.config.ProductProperties;
+import com.moex.cointegration.product.ProductEdition;
+import com.moex.cointegration.product.ProductEditionService;
+import com.moex.cointegration.service.CalendarArbPaperJournalService;
+import com.moex.cointegration.service.TrendPaperJournalService;
+import com.moex.cointegration.upsell.UpsellAccess;
+import com.moex.cointegration.upsell.UpsellService;
+import com.moex.cointegration.model.AnalysisReport;
+import com.moex.cointegration.model.FinalTradeDecision;
+import com.moex.cointegration.model.FinalTradeRecommendation;
+import com.moex.cointegration.model.MarketRegimeSnapshot;
+import com.moex.cointegration.model.NewsTriggerHit;
+import com.moex.cointegration.model.PairAnalysisResult;
+import com.moex.cointegration.model.PaperJournal;
+import com.moex.cointegration.model.PaperTradeEntry;
+import com.moex.cointegration.model.RssHeadline;
+import com.moex.cointegration.model.TradingRecommendation;
+import com.moex.cointegration.model.TradingSignal;
+import com.moex.cointegration.model.WalkForwardReport;
+import com.moex.cointegration.service.RssHeadlineService;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+
+/**
+ * Формирует HTML-страницы с таблицами для просмотра в браузере.
+ */
+@Component
+public class AnalysisHtmlRenderer {
+
+    private final UpsellService upsellService;
+    private final CapitalProperties capitalProperties;
+    private final ProductEditionService productEdition;
+    private final Optional<TrendPaperJournalService> trendPaperJournal;
+    private final Optional<CalendarArbPaperJournalService> calendarArbJournal;
+    private final boolean strategyPairsEnabled;
+    private final boolean strategyTrendEnabled;
+    private final boolean strategyCalendarArbEnabled;
+
+    public AnalysisHtmlRenderer(
+            UpsellService upsellService,
+            CapitalProperties capitalProperties,
+            ProductEditionService productEdition,
+            Optional<TrendPaperJournalService> trendPaperJournal,
+            Optional<CalendarArbPaperJournalService> calendarArbJournal,
+            @Value("${imoex.strategies.pairs.enabled:true}") boolean strategyPairsEnabled,
+            @Value("${imoex.strategies.trend.enabled:false}") boolean strategyTrendEnabled,
+            @Value("${imoex.strategies.calendar-arb.enabled:false}") boolean strategyCalendarArbEnabled
+    ) {
+        this.upsellService = upsellService;
+        this.capitalProperties = capitalProperties;
+        this.productEdition = productEdition != null
+                ? productEdition
+                : new ProductEditionService(ProductProperties.defaults());
+        this.trendPaperJournal = trendPaperJournal != null ? trendPaperJournal : Optional.empty();
+        this.calendarArbJournal = calendarArbJournal != null ? calendarArbJournal : Optional.empty();
+        this.strategyPairsEnabled = strategyPairsEnabled;
+        this.strategyTrendEnabled = strategyTrendEnabled;
+        this.strategyCalendarArbEnabled = strategyCalendarArbEnabled;
+    }
+
+    private static final String PAGE_TEMPLATE = """
+            <!DOCTYPE html>
+            <html lang="ru">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>{{TITLE}}</title>
+              <link rel="preconnect" href="https://fonts.googleapis.com">
+              <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+              <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="/css/operator.css?v=20260814-desk-thaw2">
+            </head>
+            <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
+                  data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
+                  data-nav-strategy="{{NAV_STRATEGY}}">
+              <header class="site-header">
+                <div class="brand-row">
+                  <div class="trinity-logo" aria-hidden="true">
+                    <span class="ring ring-a"></span>
+                    <span class="ring ring-b"></span>
+                    <span class="ring ring-c"></span>
+                  </div>
+                  <div class="brand-text">
+                    <h1 class="brand">TRINITY</h1>
+                    <p class="brand-sub">Multi-Strategy Arbitrage</p>
+                  </div>
+                </div>
+                <p class="tagline">Three Strategies. One Mission.</p>
+              </header>
+              {{NAV}}
+              <div id="auth-session-bar" class="auth-session-bar" hidden></div>
+              <main>
+                {{OPS}}
+                {{BODY}}
+                <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
+                <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
+                <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
+                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
+              </main>
+              <div id="trinity-auth-gate" class="trinity-auth-gate" hidden aria-hidden="true">
+                <canvas id="trinity-auth-canvas" class="trinity-auth-canvas" aria-hidden="true"></canvas>
+                <div class="trinity-auth-veil"></div>
+                <div class="trinity-auth-stage">
+                  <div class="trinity-auth-modal" id="trinity-auth-modal" role="dialog" aria-modal="true" aria-labelledby="trinity-auth-title">
+                    <div class="trinity-auth-brand">
+                      <div class="trinity-logo trinity-logo-lg" aria-hidden="true">
+                        <span class="ring ring-a"></span>
+                        <span class="ring ring-b"></span>
+                        <span class="ring ring-c"></span>
+                      </div>
+                      <p class="trinity-auth-eyebrow">Operator desk</p>
+                      <h2 id="trinity-auth-title" class="trinity-auth-title">TRINITY</h2>
+                      <p class="trinity-auth-lead">Три стратегии. Один пульт. Войдите аккаунтом кабинета.</p>
+                    </div>
+                    <form id="trinity-auth-form" class="trinity-auth-form" autocomplete="on">
+                      <div class="field">
+                        <label for="gate-user">Email</label>
+                        <input id="gate-user" name="email" type="email" autocomplete="username" spellcheck="false" placeholder="you@example.com" required>
+                      </div>
+                      <div class="field">
+                        <label for="gate-pass">Пароль</label>
+                        <input id="gate-pass" name="password" type="password" autocomplete="current-password" required>
+                      </div>
+                      <p id="trinity-auth-error" class="trinity-auth-error" hidden></p>
+                      <button type="submit" class="btn btn-primary trinity-auth-submit" id="gate-login-btn">Войти в платформу</button>
+                    </form>
+                    <p class="trinity-auth-foot">Тот же email и пароль, что в кабинете TRINITY.</p>
+                  </div>
+                  <div class="trinity-welcome" id="trinity-welcome" hidden aria-live="polite">
+                    <div class="trinity-logo trinity-logo-xl" aria-hidden="true">
+                      <span class="ring ring-a"></span>
+                      <span class="ring ring-b"></span>
+                      <span class="ring ring-c"></span>
+                    </div>
+                    <p class="trinity-welcome-kicker">Сессия открыта</p>
+                    <h2 class="trinity-welcome-title">Добро пожаловать в TRINITY!</h2>
+                    <p class="trinity-welcome-copy">
+                      Три стратегии + самообучаемый искусственный интеллект в одной платформе —
+                      ваш билет в мир автоматической торговли
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <script src="/js/operator.js?v=20260813-arb1"></script>
+              <script src="/js/trinity-status-plaques.js?v=20260813-perf"></script>
+            </body>
+            </html>
+            """;
+
+    private enum OpsMode {
+        /** Полный пульт — только на /view/settings. */
+        SETTINGS,
+        COMPACT,
+        NONE
+    }
+
+    private String opsPanel() {
+        return """
+                <section class="ops-panel" id="ops-panel">
+                  <h2>Пульт оператора</h2>
+                  <p class="ops-lead">
+                    Вход один раз здесь (email/пароль кабинета TRINITY). На остальных страницах
+                    сессия уже из браузера — поля логина не дублируются.
+                  </p>
+                  <div class="alert-prefs">
+                    <label class="check-label"><input type="checkbox" id="ops-alerts-enabled" checked> Алерты при новой paper-сделке</label>
+                    <label class="check-label"><input type="checkbox" id="ops-alerts-sound" checked> Звук</label>
+                    <button type="button" class="btn btn-ghost" id="ops-notify-permission">Уведомления macOS / Windows</button>
+                  </div>
+                  <p class="meta alert-hint">Баннер справа сверху в браузере + системное уведомление (если разрешено).</p>
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <div class="ops-grid">
+                    <div>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="ops-user">Email (как в кабинете TRINITY)</label>
+                          <input id="ops-user" type="email" autocomplete="username" spellcheck="false" placeholder="you@example.com">
+                        </div>
+                        <div class="field">
+                          <label for="ops-pass">Пароль кабинета</label>
+                          <input id="ops-pass" type="password" autocomplete="current-password">
+                        </div>
+                        <button type="button" class="btn btn-ghost" id="ops-save-creds">Войти</button>
+                      </div>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                        <button type="button" class="btn btn-secondary" data-ops-action="run-full">Анализ + скачать свечи</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="news-refresh">Только новости / paper</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="walk-forward">Walk-forward</button>
+                        <button type="button" class="btn btn-warn" data-ops-action="data-refresh">Скачать свечи</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="status-box" id="ops-log" aria-live="polite"></div>
+                    </div>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String compactOpsPanel() {
+        return """
+                <section class="ops-compact" id="ops-panel">
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <p class="ops-compact-lead">
+                    Быстрый запуск. Логин и консоль брокера — один раз в
+                    <a href="/view/settings">Настройках</a>.
+                  </p>
+                  <div class="ops-compact-actions">
+                    <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                    <a class="btn btn-ghost" href="/view/settings">Настройки</a>
+                  </div>
+                </section>
+                """;
+    }
+
+    /** Дискретная CTA на дашборде: без пульта и без консоли брокера. */
+    private String dashboardQuietCta() {
+        return """
+                <section class="dash-cta" id="dash-cta">
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <div class="dash-cta-copy">
+                    <p class="dash-cta-label">Действие</p>
+                    <p class="dash-cta-text">Обновить сигналы и paper-журнал. Брокер и алерты — в Настройках.</p>
+                  </div>
+                  <div class="dash-cta-actions">
+                    <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                    <a class="btn btn-ghost" href="/view/settings">Настройки</a>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String opsHtml(OpsMode mode) {
+        return switch (mode) {
+            case SETTINGS -> opsPanel();
+            case COMPACT -> compactOpsPanel();
+            case NONE -> "";
+        };
+    }
+
+    /**
+     * Главная страница: сводка, сигналы входа, топ-пары.
+     */
+    public String renderDashboard(
+            AnalysisReport report,
+            List<TradingRecommendation> recommendations,
+            com.moex.cointegration.model.MarketRegimeSnapshot regime
+    ) {
+        List<TradingRecommendation> actionableSignals = recommendations.stream()
+                .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
+                .sorted((a, b) -> Double.compare(
+                        Math.abs(b.currentZScore()),
+                        Math.abs(a.currentZScore())))
+                .toList();
+
+        long actionable = actionableSignals.size();
+
+        StringBuilder body = new StringBuilder();
+        body.append("<div class=\"dash-shell\">");
+        body.append(dashboardWidgetGrid(regime, report, actionable));
+        body.append("""
+                <aside class="next-steps" id="dash-next-steps">
+                  <p class="next-steps-label">Что сделать сейчас</p>
+                  <ol>
+                    <li>Три карточки стратегий: боковик / тренд / арбитраж.</li>
+                    <li>Смотрите «Режим рынка» — TREND блокирует новые pairs-входы.</li>
+                    <li>Нажмите <em>Анализ + paper</em> — обновит сигналы и журнал.
+                      Trend и брокер — в <a href="/view/settings">Настройках</a>.</li>
+                    <li>
+                      <button type="button" class="btn btn-ghost btn-xs" id="trinity-tour-start"
+                              data-tour-start>
+                        Пройти обучение
+                      </button>
+                      — куда жать и зачем (можно повторить позже).
+                      Полная инструкция: <a href="/view/guide">Справка</a>.
+                    </li>
+                  </ol>
+                </aside>
+                """);
+        body.append(trialBanner());
+        body.append(dashboardFullCoreTeasers());
+        body.append(dashboardQuietCta());
+        body.append(summaryBlock(report, recommendations.size(), actionable));
+        body.append("<section class=\"dash-section\"><h2>Сигналы входа (LONG / SHORT)</h2>");
+        body.append(dashboardActionableSignalsTable(
+                actionableSignals,
+                "Нет активных сигналов LONG/SHORT сейчас. См. полный список рекомендаций."
+        ));
+        body.append("</section>");
+        body.append("<section class=\"dash-section\"><h2>Топ-пары по Sharpe</h2>");
+        body.append(topPairsTableCompact(report.topPairs()));
+        body.append("</section>");
+        body.append("</div>");
+
+        return page("TRINITY — дашборд", body.toString(), nav("dashboard"), OpsMode.NONE);
+    }
+
+    /**
+     * Настройки: полный пульт оператора + консоль брокера (один раз настроить, не жить здесь).
+     */
+    public String renderSettings() {
+        String body = """
+                <div class="settings-shell">
+                  <header class="settings-intro">
+                    <p class="settings-eyebrow">Конфигурация</p>
+                    <h2>Настройки оператора</h2>
+                    <p class="meta">
+                      Пульт и консоль брокера собраны здесь. Дашборд остаётся обзором портфеля и сигналов —
+                      без форм токенов и логов.
+                    </p>
+                  </header>
+                  %s
+                  %s
+                  %s
+                  %s
+                  %s
+                  %s
+                </div>
+                """.formatted(
+                trialBanner(),
+                productEditionPanel(),
+                opsPanel(),
+                trendPlaybookPanel(),
+                calendarArbPanel(),
+                brokerConsolePanel()
+        );
+        return page("TRINITY — настройки", body, nav("settings"), OpsMode.NONE);
+    }
+
+    private String productEditionPanel() {
+        ProductEdition cur = productEdition.current();
+        String configured = productEdition.configured().name();
+        return """
+                <section class="dash-section strategy-doc" id="product-edition-settings">
+                  <h2>Версия продукта (демо)</h2>
+                  <p class="meta">
+                    Симуляция купленного тарифа без биллинга. YAML default:
+                    <code>imoex.product.edition=%s</code>. Переключатель ниже — runtime override в памяти.
+                  </p>
+                  <div class="callout">
+                    <label for="product-edition-select"><strong>Активная версия</strong></label>
+                    <select id="product-edition-select" class="input-select">
+                      <option value="PAIRS"%s>Коинтеграция (light)</option>
+                      <option value="PAIRS_TREND"%s>Коинтеграция + тренд</option>
+                      <option value="FULL"%s>Full Core</option>
+                    </select>
+                    <div class="ops-row" style="margin-top:0.75rem">
+                      <button type="button" class="btn btn-primary" id="product-edition-save">Применить</button>
+                      <button type="button" class="btn btn-ghost" id="product-edition-reset">Сбросить к YAML</button>
+                      <span class="meta" id="product-edition-status">текущая: %s</span>
+                    </div>
+                  </div>
+                </section>
+                """.formatted(
+                escape(configured),
+                cur == ProductEdition.PAIRS ? " selected" : "",
+                cur == ProductEdition.PAIRS_TREND ? " selected" : "",
+                cur == ProductEdition.FULL ? " selected" : "",
+                escape(cur.labelRu())
+        );
+    }
+
+    private String trendPlaybookPanel() {
+        if (!strategyTrendEnabled) {
+            return "";
+        }
+        return """
+                <section class="dash-section strategy-doc" id="trend-playbook-settings">
+                  <h2>Trend playbook · исполнение</h2>
+                  <p class="meta">
+                    Робот «Уровни + профиль» (BR M5) — один из playbook’ов: сигнал или авто
+                    (sandbox journal / live по флагам). Выбор режима — переключателем ниже.
+                  </p>
+                  <div class="callout trend-delivery-card">
+                    <div class="trend-delivery-row">
+                      <div class="trend-delivery-copy">
+                        <strong id="trend-delivery-title">Только сигнал</strong>
+                        <p class="meta" id="trend-delivery-hint">
+                          Тикер + BUY/SELL без заявок. Переключите для автоторговли.
+                        </p>
+                      </div>
+                      <label class="mode-switch" title="Сигнал ↔ Автоторговля">
+                        <span class="mode-switch-label" id="trend-mode-left">Сигнал</span>
+                        <input type="checkbox" id="trend-auto-execution" role="switch" aria-checked="false">
+                        <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+                        <span class="mode-switch-label" id="trend-mode-right">Авто</span>
+                      </label>
+                    </div>
+                    <p class="meta" id="trend-delivery-status">Загрузка режима…</p>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String calendarArbPanel() {
+        if (!strategyCalendarArbEnabled) {
+            return "";
+        }
+        return """
+                <section class="dash-section strategy-doc" id="calendar-arb-settings">
+                  <h2>Календарный арбитраж · исполнение</h2>
+                  <p class="meta">
+                    Near/next и бабочка 1:-2:1. Котировки, H1 и стаканы — <strong>только T-Invest</strong>.
+                    Два стакана, скидка ГО, EIA (FRED + street consensus файл), CFTC COT, crack 3-2-1.
+                    Авто = fair-paper. Live две ноги: <code>live-execution=true</code> + брокер armed
+                    (по умолчанию выкл).
+                  </p>
+                  <div class="callout trend-delivery-card">
+                    <div class="trend-delivery-row">
+                      <div class="trend-delivery-copy">
+                        <strong id="arb-delivery-title">Только сигнал</strong>
+                        <p class="meta" id="arb-delivery-hint">
+                          Z-спред без paper-филлов. Включите авто для sandbox journal.
+                        </p>
+                      </div>
+                      <label class="mode-switch" title="Сигнал ↔ Автоторговля">
+                        <span class="mode-switch-label">Сигнал</span>
+                        <input type="checkbox" id="arb-auto-execution" role="switch" aria-checked="false">
+                        <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+                        <span class="mode-switch-label">Авто</span>
+                      </label>
+                    </div>
+                    <p class="meta" id="arb-delivery-status">Загрузка режима…</p>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String dashboardWidgetGrid(
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            long actionableSignals
+    ) {
+        if (regime == null) {
+            regime = MarketRegimeSnapshot.unknown();
+        }
+        String label = regime.label() == null ? "—" : regime.label();
+        String shortLabel = label.length() > 8 ? label.substring(0, 7) + "…" : label;
+        String color = switch (label) {
+            case "SIDEWAYS" -> "var(--ok)";
+            case "NEUTRAL" -> "var(--warn)";
+            case "TREND" -> "var(--danger)";
+            default -> "var(--slate)";
+        };
+        String swatch = switch (label) {
+            case "SIDEWAYS" -> "ok";
+            case "NEUTRAL" -> "warn";
+            case "TREND" -> "danger";
+            default -> "";
+        };
+        String hint = switch (label) {
+            case "SIDEWAYS" -> "входы ок";
+            case "NEUTRAL" -> "осторожно";
+            case "TREND" -> "блок входов";
+            default -> "нет данных";
+        };
+        String adx = Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.0f", regime.adx());
+        String regimeBack = regimeBackCopy(label);
+
+        var capital = capitalProperties;
+        double equity = capital.equityRub() != null ? capital.equityRub() : 100_000.0;
+        int dailyPct = (int) Math.round((capital.dailyGrossShare() != null ? capital.dailyGrossShare() : 1.0) * 100);
+        String equityLabel = String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' ');
+        String leverage = capital.leverageAllowed() ? "доступно" : "выкл <1M";
+
+        boolean pairsOn = strategyPairsEnabled;
+        boolean trendOn = strategyTrendEnabled;
+        boolean arbOn = strategyCalendarArbEnabled;
+
+        String strategiesFrontHint = strategyActiveHint(label, pairsOn, trendOn, arbOn);
+        String strategiesBack = strategyBackCopy(label, pairsOn, trendOn, arbOn);
+
+        int tickers = report != null ? report.tickersAnalyzed() : 0;
+        int pairs = report != null ? report.pairsTested() : 0;
+        int coint = report != null ? report.cointegratedPairs() : 0;
+        int topN = report != null && report.topPairs() != null ? report.topPairs().size() : 0;
+        String analysisDate = report != null && report.analysisDate() != null
+                ? report.analysisDate().toString()
+                : "—";
+
+        String row1 = """
+                <section class="widget-grid" aria-label="Сводка дашборда">
+                  %s
+                  %s
+                  %s
+                  %s
+                </section>
+                """.formatted(
+                flipCard(
+                        "widget-paper",
+                        "Statement",
+                        """
+                        <div class="donut" id="widget-paper-donut" style="--p:0;--c:var(--accent)">
+                          <div class="donut-center">
+                            <strong id="dash-paper-open">—</strong>
+                            <span>open</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Открыто</span><span class="v" id="widget-paper-open-label">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch ok"></i>PnL ₽</span><span class="v" id="dash-paper-pnl">—</span></div>
+                        </div>
+                        """,
+                        """
+                        <p class="widget-back-lead" id="widget-paper-back-lead">Загрузка statement…</p>
+                        <div class="widget-back-stats" id="widget-paper-back-stats"></div>
+                        <a class="widget-back-link" href="/view/statement">Открыть Statement →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-broker",
+                        "Брокер",
+                        """
+                        <div class="donut" id="widget-broker-donut" style="--p:0;--c:var(--info)">
+                          <div class="donut-center">
+                            <strong id="widget-broker-center">—</strong>
+                            <span>статус</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch info"></i>Сводка</span><span class="v" id="dash-broker-status">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch gold"></i>Контур</span><span class="v" id="widget-broker-mode">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Лента</span><span class="v" id="widget-broker-tape">—</span></div>
+                        </div>
+                        """,
+                        """
+                        <p class="widget-back-lead" id="widget-broker-back-lead">Загрузка статуса…</p>
+                        <div class="widget-back-stats" id="widget-broker-back-stats"></div>
+                        <a class="widget-back-link" href="/view/settings">Настройки брокера →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-final",
+                        "Final",
+                        """
+                        <div class="donut" id="widget-final-donut" style="--p:0;--c:var(--ok)">
+                          <div class="donut-center">
+                            <strong id="dash-final-actionable">—</strong>
+                            <span>вход</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch ok"></i>ENTER/REDUCE</span><span class="v" id="widget-final-enter">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch warn"></i>WATCH</span><span class="v" id="dash-final-watch">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch danger"></i>BLOCK</span><span class="v" id="dash-final-block">—</span></div>
+                        </div>
+                        """,
+                        """
+                        <p class="widget-back-lead" id="widget-final-back-lead">Загрузка итога…</p>
+                        <div class="widget-back-stats" id="widget-final-back-stats"></div>
+                        <a class="widget-back-link" href="/view/final">Итог + новости →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-regime",
+                        "Режим рынка",
+                        """
+                        <div class="donut" id="widget-regime-donut" data-target-p="100" style="--p:0;--c:%s">
+                          <div class="donut-center">
+                            <strong id="widget-regime-center">%s</strong>
+                            <span>ADX %s</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s" id="widget-regime-swatch"></i>Режим</span><span class="v" id="widget-regime-label">%s</span></div>
+                          <div class="widget-stat"><span class="k">Подсказка</span><span class="v" id="widget-regime-hint">%s</span></div>
+                        </div>
+                        """.formatted(color, escape(shortLabel), escape(adx), swatch, escape(label), escape(hint)),
+                        """
+                        <p class="widget-back-lead" id="widget-regime-back-lead">%s</p>
+                        <div class="widget-back-stats" id="widget-regime-back-stats"></div>
+                        <a class="widget-back-link" href="/view/strategy">О стратегии →</a>
+                        """.formatted(escape(regimeBack))
+                )
+        );
+
+        String row2 = """
+                <section class="widget-grid widget-grid-secondary" aria-label="Сводка счёта и стратегий">
+                  %s
+                  %s
+                  %s
+                  %s
+                </section>
+                """.formatted(
+                flipCard(
+                        "widget-capital",
+                        "Капитал",
+                        """
+                        <div class="donut" id="widget-capital-donut" style="--p:%d;--c:var(--gold)">
+                          <div class="donut-center">
+                            <strong id="widget-capital-center">%s</strong>
+                            <span>equity</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch gold"></i>DAILY</span><span class="v">%d%%</span></div>
+                          <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
+                        </div>
+                        """.formatted(dailyPct, escape(equityLabel), dailyPct, escape(leverage)),
+                        """
+                        <p class="widget-back-lead">Капитал paper для коинтеграции — книга DAILY.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Equity</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Книга DAILY</span><span class="v">%d%% капитала</span></div>
+                          <div class="widget-stat"><span class="k">Плечо</span><span class="v">%s</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/settings">Конфиг в Настройках →</a>
+                        """.formatted(escape(equityLabel), dailyPct, escape(leverage))
+                ),
+                flipCard(
+                        "widget-signals",
+                        "Сигналы",
+                        """
+                        <div class="donut" id="widget-signals-donut" style="--p:0;--c:var(--accent)">
+                          <div class="donut-center">
+                            <strong id="widget-signals-center">%d</strong>
+                            <span>active</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch ok"></i>LONG</span><span class="v" id="widget-signals-long">—</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch danger"></i>SHORT</span><span class="v" id="widget-signals-short">—</span></div>
+                        </div>
+                        """.formatted(actionableSignals),
+                        """
+                        <p class="widget-back-lead" id="widget-signals-back-lead">Технические LONG/SHORT до FA-гейта.</p>
+                        <div class="widget-back-stats" id="widget-signals-back-stats"></div>
+                        <a class="widget-back-link" href="/view/signals">Все сигналы →</a>
+                        """
+                ),
+                flipCard(
+                        "widget-strategies",
+                        "Стратегии",
+                        """
+                        <div class="donut" id="widget-strategies-donut" style="--p:%d;--c:var(--navy)">
+                          <div class="donut-center">
+                            <strong id="widget-strategies-center">3</strong>
+                            <span>модуля</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch accent"></i>Сейчас</span><span class="v" id="widget-strategies-hint">%s</span></div>
+                          <div class="widget-stat"><span class="k">Pairs</span><span class="v">%s</span></div>
+                        </div>
+                        """.formatted(
+                                pairsOn ? 100 : 35,
+                                escape(strategiesFrontHint),
+                                pairsOn ? "live paper" : "off"
+                        ),
+                        """
+                        <p class="widget-back-lead" id="widget-strategies-back-lead">%s</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">#1 Pairs</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">#2 Trend</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">#3 Calendar arb</span><span class="v">%s</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/full-core">Full Core roadmap →</a>
+                        """.formatted(
+                                escape(strategiesBack),
+                                pairsOn ? "активна (paper)" : "выкл",
+                                trendOn ? "вкл" : "research / off",
+                                arbOn ? "вкл" : "roadmap / off"
+                        )
+                ),
+                flipCard(
+                        "widget-universe",
+                        "Вселенная",
+                        """
+                        <div class="donut" id="widget-universe-donut" style="--p:%d;--c:var(--info)">
+                          <div class="donut-center">
+                            <strong id="widget-universe-center">%d</strong>
+                            <span>coint</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch info"></i>Тикеры</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k"><i class="swatch gold"></i>Пары</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">Топ</span><span class="v">%d</span></div>
+                        </div>
+                        """.formatted(
+                                pairs > 0 ? Math.min(100, (int) Math.round(100.0 * coint / Math.max(1, pairs))) : 0,
+                                coint,
+                                tickers,
+                                pairs,
+                                topN
+                        ),
+                        """
+                        <p class="widget-back-lead">Последний прогон анализа: <strong>%s</strong>.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Тикеров</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">Пар протестировано</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">Коинтегрированы</span><span class="v">%d</span></div>
+                          <div class="widget-stat"><span class="k">В топе UI</span><span class="v">%d</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/recommendations">Рекомендации →</a>
+                        """.formatted(escape(analysisDate), tickers, pairs, coint, topN)
+                )
+        );
+
+        String pillars = dashboardStrategyPillars(label, pairsOn, trendOn, arbOn);
+        return row1 + row2 + pillars;
+    }
+
+    /**
+     * Три столпа TRINITY на дашборде: боковик (pairs), тренд (все playbooks), календарный арбитраж.
+     */
+    private String dashboardStrategyPillars(
+            String regime,
+            boolean pairsOn,
+            boolean trendOn,
+            boolean arbOn
+    ) {
+        boolean sideways = "SIDEWAYS".equals(regime);
+        boolean trending = "TREND".equals(regime);
+
+        String pairsStatus = !pairsOn ? "выкл"
+                : trending ? "пауза · ADX"
+                : sideways ? "paper live" : "осторожно";
+        String pairsSwatch = !pairsOn ? "slate" : trending ? "warn" : "ok";
+        String pairsCenter = !pairsOn ? "OFF" : trending ? "HOLD" : "ON";
+        int pairsPct = !pairsOn ? 0 : trending ? 35 : 100;
+
+        String trendStatus = !trendOn ? "выкл" : "1 playbook";
+        String trendSwatch = trendOn ? "accent" : "slate";
+        String trendCenter = trendOn ? "BR" : "—";
+        int trendPct = trendOn ? 70 : 20;
+
+        String arbStatus = arbOn ? "paper · T-Invest" : "выкл";
+        String arbSwatch = arbOn ? "gold" : "slate";
+        String arbCenter = arbOn ? "ON" : "—";
+        int arbPct = arbOn ? 70 : 15;
+
+        return """
+                <section class="widget-grid widget-grid-pillars" aria-label="Три стратегии TRINITY">
+                  %s
+                  %s
+                  %s
+                </section>
+                """.formatted(
+                flipCard(
+                        "pillar-pairs",
+                        "① Боковик · Pairs",
+                        """
+                        <div class="donut" style="--p:%d;--c:var(--ok)">
+                          <div class="donut-center">
+                            <strong>%s</strong>
+                            <span>pairs</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Книга</span><span class="v">DAILY paper</span></div>
+                          <div class="widget-stat"><span class="k">Gate</span><span class="v">ADX · FA</span></div>
+                        </div>
+                        """.formatted(pairsPct, escape(pairsCenter), pairsSwatch, escape(pairsStatus)),
+                        """
+                        <p class="widget-back-lead">Стратегия #1 — mean-reversion на коинтегрированных парах IMOEX.
+                          Новые входы в SIDEWAYS; при TREND (ADX) — блок.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Модуль</span><span class="v">trinity-pairs</span></div>
+                          <div class="widget-stat"><span class="k">Флаг</span><span class="v">imoex.strategies.pairs</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/strategy">О pairs →</a>
+                        """
+                ),
+                flipCard(
+                        "pillar-trend",
+                        "② Тренд · Playbooks",
+                        """
+                        <div class="donut" style="--p:%d;--c:var(--accent)">
+                          <div class="donut-center">
+                            <strong>%s</strong>
+                            <span>trend</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Активный</span><span class="v">Уровни+профиль</span></div>
+                          <div class="widget-stat"><span class="k">Лента</span><span class="v" id="pillar-trend-tape">…</span></div>
+                        </div>
+                        """.formatted(trendPct, escape(trendCenter), trendSwatch, escape(trendStatus)),
+                        """
+                        <p class="widget-back-lead">Стратегия #2 — робот по playbook’ам. Сейчас один:
+                          «Уровни + профиль рынка» (BR). Одновременно на инструменте — не больше одного
+                          playbook’а; переключение — через селектор режима (см. ниже / настройки).</p>
+                        <div class="widget-back-stats" id="pillar-trend-back-stats">
+                          <div class="widget-stat"><span class="k">Playbook</span><span class="v">levels-profile-br-m5</span></div>
+                          <div class="widget-stat"><span class="k">Режим</span><span class="v">сигнал / авто</span></div>
+                          <div class="widget-stat"><span class="k">Данные</span><span class="v">T-Invest tape+DOM</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/trend-signal">Экран сигнала →</a>
+                        """
+                ),
+                flipCard(
+                        "pillar-arb",
+                        "③ Арбитраж · Calendar",
+                        """
+                        <div class="donut" style="--p:%d;--c:var(--gold)">
+                          <div class="donut-center">
+                            <strong>%s</strong>
+                            <span>arb</span>
+                          </div>
+                        </div>
+                        <div class="widget-meta">
+                          <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
+                          <div class="widget-stat"><span class="k">Тип</span><span class="v">futures calendar</span></div>
+                          <div class="widget-stat"><span class="k">Доступ</span><span class="v">Full Core</span></div>
+                        </div>
+                        """.formatted(arbPct, escape(arbCenter), arbSwatch, escape(arbStatus)),
+                        """
+                        <p class="widget-back-lead">Стратегия #3 — calendar + fly. Котировки только T-Invest;
+                          paper fills по H1, без живых многоногих заявок.</p>
+                        <div class="widget-back-stats">
+                          <div class="widget-stat"><span class="k">Модуль</span><span class="v">trinity-calendar-arb</span></div>
+                          <div class="widget-stat"><span class="k">Данные</span><span class="v">T-Invest H1</span></div>
+                        </div>
+                        <a class="widget-back-link" href="/view/calendar-arb">Доска арбитража →</a>
+                        """
+                )
+        );
+    }
+
+    private String flipCard(String id, String title, String frontInner, String backInner) {
+        return """
+                <article class="widget-card is-flippable" id="%s" data-flip="1" tabindex="0" role="button" aria-pressed="false" aria-label="%s — нажмите, чтобы перевернуть">
+                  <div class="widget-flip">
+                    <div class="widget-face widget-front">
+                      <div class="widget-title">%s <span class="widget-flip-cue" aria-hidden="true">⇄</span></div>
+                      <div class="widget-body">%s</div>
+                    </div>
+                    <div class="widget-face widget-back">
+                      <div class="widget-title">%s · детали <span class="widget-flip-cue" aria-hidden="true">↩</span></div>
+                      <div class="widget-back-body">%s</div>
+                    </div>
+                  </div>
+                </article>
+                """.formatted(id, escape(title), escape(title), frontInner, escape(title), backInner);
+    }
+
+    private static String regimeBackCopy(String label) {
+        return switch (label) {
+            case "TREND" -> "Сейчас выявлен трендовый рынок: mean-reversion (коинтеграция) на таком рынке неэффективна. "
+                    + "Новые входы pairs заблокированы. В фокусе — research TREND и calendar-arbitrage (поиск идей, не live paper).";
+            case "NEUTRAL" -> "Переходный режим: pairs ещё допустимы, но размер снижен. "
+                    + "Параллельно идёт мониторинг — при усилении тренда активируется контур TREND / ARBITRAGE research.";
+            case "SIDEWAYS" -> "Боковик: стратегия коинтеграции (pairs) в приоритете — paper-входы разрешены при прохождении FA. "
+                    + "TREND и ARBITRAGE остаются на research-контуре.";
+            default -> "Режим рынка не определён (нет ADX). Pairs работают осторожно; TREND/ARBITRAGE — research.";
+        };
+    }
+
+    private static String strategyActiveHint(String regime, boolean pairsOn, boolean trendOn, boolean arbOn) {
+        if ("TREND".equals(regime)) {
+            if (trendOn) {
+                return "Trend playbook";
+            }
+            if (arbOn) {
+                return "ARB research";
+            }
+            return "pairs блок · research";
+        }
+        if (pairsOn) {
+            return "Pairs paper";
+        }
+        if (trendOn) {
+            return "Pairs + Trend";
+        }
+        return "модули off";
+    }
+
+    private static String strategyBackCopy(String regime, boolean pairsOn, boolean trendOn, boolean arbOn) {
+        StringBuilder sb = new StringBuilder();
+        if ("TREND".equals(regime)) {
+            sb.append("Тренд: коинтеграция неэффективна для новых входов. ");
+            if (trendOn && arbOn) {
+                sb.append("Активны research-контуры TREND и ARBITRAGE — идёт анализ и поиск бумаг/срочных.");
+            } else if (trendOn) {
+                sb.append("Активен research TREND — поиск идей по плейбукам режима.");
+            } else if (arbOn) {
+                sb.append("Активен research calendar-arbitrage.");
+            } else {
+                sb.append("TREND/ARBITRAGE пока выключены флагами — на Full Core roadmap; pairs paper на паузе по режиму.");
+            }
+        } else if ("SIDEWAYS".equals(regime)) {
+            sb.append(pairsOn
+                    ? "Боковик: активна стратегия #1 Pairs (paper). TREND и ARBITRAGE — research/roadmap."
+                    : "Боковик, но pairs выключены конфигом.");
+        } else {
+            sb.append("Сводка модулей TRINITY под текущий режим рынка.");
+        }
+        return sb.toString();
+    }
+
+    private String brokerConsolePanel() {
+        return """
+                <section class="dash-section strategy-doc" id="broker-console">
+                  <h2>Консоль брокера</h2>
+                  <p class="meta">
+                    Токены и параметры исполнения без правки
+                    <code>application-local.yml</code>. Сейчас — <strong>T-Invest</strong>.
+                  </p>
+                  <div class="ops-grid">
+                    <div class="callout" id="broker-widget">
+                      <strong>Статус брокера</strong>
+                      <div id="broker-status-line">Статус брокера загружается…</div>
+                      <div id="broker-test-line">Подключение ещё не проверялось.</div>
+                      <div id="broker-reconcile-line">Сверка ещё не запрашивалась.</div>
+                      <div id="broker-journal-line">Журнал брокера загружается…</div>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" data-ops-action="broker-test">Проверить подключение</button>
+                        <button type="button" class="btn btn-ghost" data-ops-action="broker-reconcile">Сверить с брокером</button>
+                        <button type="button" class="btn btn-warn" data-ops-action="broker-flatten">Закрыть все позиции брокера</button>
+                      </div>
+                    </div>
+                    <div class="callout">
+                      <strong>Подключение брокера</strong>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-provider">Брокер</label>
+                          <select id="broker-provider">
+                            <option value="T_INVEST">T-Invest</option>
+                            <option value="ALOR">Alor</option>
+                            <option value="FINAM">Finam</option>
+                            <option value="BKS">BKS</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label for="broker-mode">Режим</label>
+                          <select id="broker-mode">
+                            <option value="AUTO">AUTO — автоматически</option>
+                            <option value="MANUAL_CONFIRM">MANUAL — с подтверждением</option>
+                            <option value="PAPER">PAPER — только paper</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label for="broker-account-id">ID счёта</label>
+                          <input id="broker-account-id" type="text" autocomplete="off" spellcheck="false">
+                        </div>
+                      </div>
+                      <p class="meta" id="broker-sandbox-account-line">
+                        Для песочницы: токен → «Подтянуть / создать счёт» → «Пополнить песочницу».
+                      </p>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-token">Токен</label>
+                          <input id="broker-token" type="password" autocomplete="off" placeholder="Вставьте новый токен только при обновлении">
+                        </div>
+                        <div class="field">
+                          <label for="broker-sandbox-payin-amount">Пополнение песочницы, ₽</label>
+                          <input id="broker-sandbox-payin-amount" type="number" step="1000" min="1000" value="200000">
+                        </div>
+                        <div class="field">
+                          <label for="broker-passive-bps">Смещение лимита, bps</label>
+                          <input id="broker-passive-bps" type="number" step="0.1" min="0">
+                        </div>
+                      </div>
+                      <div class="auth-row">
+                        <div class="field">
+                          <label for="broker-timeout-seconds">Таймаут второй ноги, сек</label>
+                          <input id="broker-timeout-seconds" type="number" step="1" min="1">
+                        </div>
+                      </div>
+                      <div class="alert-prefs">
+                        <label class="check-label"><input type="checkbox" id="broker-enabled"> Брокер включён</label>
+                        <label class="check-label"><input type="checkbox" id="broker-sandbox"> Песочница</label>
+                        <label class="check-label"><input type="checkbox" id="broker-auto-execute"> Автоисполнение после анализа</label>
+                        <label class="check-label"><input type="checkbox" id="broker-prefer-limit"> Предпочитать лимитные заявки</label>
+                        <label class="check-label"><input type="checkbox" id="broker-allow-market"> Разрешить рыночный fallback</label>
+                        <label class="check-label"><input type="checkbox" id="broker-emergency-exit"> Аварийный market-exit при асимметрии</label>
+                        <label class="check-label"><input type="checkbox" id="broker-kill-switch"> Аварийный стоп (kill-switch)</label>
+                      </div>
+                      <p class="meta" id="broker-token-hint">Токен пока не сохранён.</p>
+                      <div class="ops-actions">
+                        <button type="button" class="btn btn-primary" id="broker-save-settings">Сохранить настройки брокера</button>
+                        <button type="button" class="btn btn-ghost" id="broker-sandbox-account">Подтянуть / создать счёт песочницы</button>
+                        <button type="button" class="btn btn-ghost" id="broker-sandbox-payin">Пополнить песочницу</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String dashboardActionableSignalsTable(List<TradingRecommendation> rows, String emptyMessage) {
+        if (rows == null || rows.isEmpty()) {
+            return "<p class=\"empty-msg\">" + escape(emptyMessage) + "</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Пара Y / X</th>
+                      <th>Сигнал</th>
+                      <th>Z-score</th>
+                      <th>Дата</th>
+                      <th>Комментарий</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        for (TradingRecommendation r : rows) {
+            table.append("<tr>");
+            table.append("<td><strong>")
+                    .append(escape(r.tickerY()))
+                    .append("</strong> / ")
+                    .append(escape(r.tickerX()))
+                    .append("</td>");
+            table.append("<td>").append(signalBadge(r.signal())).append("</td>");
+            table.append("<td class=\"num\">").append(formatZ(r.currentZScore())).append("</td>");
+            table.append("<td>").append(r.asOfDate()).append("</td>");
+            table.append("<td class=\"details\">")
+                    .append("<div class=\"summary\">").append(escape(r.summary())).append("</div>")
+                    .append("</td>");
+            table.append("<td class=\"links\">").append(chartPageLink(r.tickerY(), r.tickerX())).append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
+    }
+
+    private String topPairsTableCompact(List<PairAnalysisResult> pairs) {
+        if (pairs == null || pairs.isEmpty()) {
+            return "<p class=\"empty-msg\">Топ-пар нет.</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Пара</th>
+                      <th>Sharpe</th>
+                      <th>Half-life</th>
+                      <th>Coverage</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        int rank = 1;
+        for (PairAnalysisResult p : pairs) {
+            table.append("<tr>");
+            table.append("<td>").append(rank++).append("</td>");
+            table.append("<td><strong>").append(escape(p.tickerY())).append("</strong> / ")
+                    .append(escape(p.tickerX())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.sharpeRatio())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.halfLifeDays())).append(" д</td>");
+
+            String cov = p.coveragePercent() == null ? "—"
+                    : String.format(Locale.ROOT, "%.1f%%", p.coveragePercent());
+            table.append("<td class=\"num\" title=\"")
+                    .append(escape(p.coverageWarning() == null ? "" : p.coverageWarning()))
+                    .append("\">")
+                    .append(cov)
+                    .append("</td>");
+
+            table.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
+    }
+
+    /** Страница всех торговых рекомендаций. */
+    public String renderAllRecommendations(List<TradingRecommendation> recommendations) {
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Режим рынка.</strong> Стратегия — mean-reversion <em>только в боковике</em>.
+                  Если на дашборде режим TREND (высокий ADX индекса), входы блокируются:
+                  в кратком описании будет «Не торговать! Выявлен тренд — стратегия только боковик».
+                </div>
+                """);
+        body.append("<p class=\"meta\">Всего рекомендаций: ").append(recommendations.size()).append("</p>");
+        body.append(recommendationsTable(recommendations, "Рекомендаций пока нет. Нажмите «Анализ + paper» на дашборде, в полоске сверху или в Настройках."));
+        return page("TRINITY — рекомендации", body.toString(), nav("recommendations"));
+    }
+
+    /** Страница только actionable-сигналов. */
+    public String renderSignals(List<TradingRecommendation> signals) {
+        StringBuilder body = new StringBuilder();
+        body.append("<p class=\"meta\">Сигналов входа: ").append(signals.size()).append("</p>");
+        body.append(recommendationsTable(signals, "Нет пар с |Z| ≥ порога входа."));
+        return page("TRINITY — сигналы", body.toString(), nav("signals"));
+    }
+
+    /** Страница «анализ не выполнен». */
+    public String renderEmpty() {
+        String body = """
+                <div class="empty">
+                  <h2>Анализ ещё не выполнен</h2>
+                  <p>Нажмите <strong>«Анализ + paper»</strong> на дашборде, в полоске сверху или в
+                    <a href="/view/settings">Настройках</a>.
+                  Логин/пароль API — из вашего локального <code>application-local.yml</code>
+                  (в репозитории секретов нет). После завершения страница обновится сама.</p>
+                  <p class="meta">Если свечей ещё нет — сначала «Скачать свечи» в Настройках, либо «Анализ + скачать свечи».</p>
+                </div>
+                """;
+        return page("TRINITY — нет данных", body, nav("none"));
+    }
+
+    /**
+     * Описание торговой стратегии простым языком.
+     */
+    public String renderStrategy() {
+        String arbBadge = fullCoreBadge("calendar-arb");
+        String trendBadge = fullCoreBadge("trend");
+        String researchBadge = ""; // working local replay — no fake lock
+        String roadmapBlock = coreRoadmapBlock();
+        String body = """
+                <article class="strategy-doc">
+                  <h2>Описание торговой стратегии</h2>
+                  <p class="lead">
+                    TRINITY сейчас в live paper ведёт <strong>DAILY</strong> pairs mean-reversion в боковике
+                    (фокус — металлы / mining; нефть в equities-парах отложена на фьючерсы/опционы).
+                    <strong>INTRADAY pairs</strong> выведены из операторского цикла (код research остаётся, без автозапуска и UI).
+                    Мы не угадываем направление рынка: ищем временный разрыв связанной пары и ставим на сжатие.
+                    Календарный арбитраж %s и опционы — следующие стратегии бренда, пока в дорожной карте.
+                  </p>
+
+                  %s
+
+                  <aside class="atas-plaque" id="atas" aria-labelledby="atas-title">
+                    <span class="atas-badge">Встроено в TRINITY</span>
+                    <h3 id="atas-title">Функционал ATAS внутри TRINITY</h3>
+                    <p>
+                      Отдельный терминал ATAS не нужен: ключевые идеи order-flow и volume profile
+                      встроены в пайплайн как <strong>execution-слой</strong> поверх Z-score.
+                      Это не «ещё один индикатор», а проверка: можно ли <em>реально</em> набрать обе ноги
+                      пары на 1H без ложного входа на тонком рынке.
+                    </p>
+                    <ul>
+                      <li><strong>Relative volume</strong> — бар не «мёртвый», объём сопоставим с медианой.</li>
+                      <li><strong>Spread proxy</strong> — ширина H–L относительно цены (bps): отсев illiquid часов.</li>
+                      <li><strong>Delta proxy ног</strong> — направление закрытия бара; согласованность с LONG/SHORT spread.</li>
+                      <li><strong>Volume profile (POC / value area)</strong> — цена ноги в зоне справедливого объёма; <strong>partial TP у POC</strong> на INTRADAY.</li>
+                      <li><strong>Footprint proxy</strong> — buy/sell imbalance внутри бара (volume-weighted).</li>
+                      <li><strong>Volume clusters</strong> — аномальный объём на краю VA → WATCH, риск ложного входа.</li>
+                      <li><strong>DOM</strong> — snapshot стакана MOEX ISS: глубина bid/ask, spread bps, imbalance ноги.</li>
+                      <li><strong>Iceberg proxy</strong> — скрытая ликвидность: высокий объём при узком диапазоне.</li>
+                      <li><strong>Session edges</strong> — блок первых/последних минут сессии (тонкий рынок MOEX).</li>
+                      <li><strong>INTRADAY tier-1</strong> — только ~30 ликвиднейших голубых фишек (SBER, LKOH, GAZP…).</li>
+                    </ul>
+                    <p class="atas-why">
+                      <strong>Зачем это добавлено.</strong>
+                      Классический pairs-backtest часто красив на бумаге, но ломается в live из‑за проскальзывания
+                      и асимметрии ног. TRINITY отсекает сигналы, где Z «есть», а исполнение на MOEX — сомнительное.
+                      Для оператора — меньше ложных входов; для продукта — честнее paper и ближе к live.
+                      Задел под трендовую стратегию (breakout VA, delta momentum, absorption) уже в коде
+                      (<code>quant/trend</code>, <code>imoex.microstructure.trend</code>), включается на roadmap #2 %s.
+                    </p>
+                  </aside>
+
+                  <aside class="atas-plaque" id="tiger" aria-labelledby="tiger-title">
+                    <span class="atas-badge">Встроено в TRINITY</span>
+                    <h3 id="tiger-title">Функционал Tiger.trade внутри TRINITY</h3>
+                    <p>
+                      Отдельный терминал Tiger.trade не нужен: live DOM, лента сделок и depth-профиль
+                      входят в продукт как <strong>market-data контур</strong> маркетплейса —
+                      рядом с ATAS-слоем, но отдельно от исполнения ордеров у брокера.
+                      Это не «ещё один график», а поток рынка: что реально стоит в стакане
+                      и как идут сделки в момент сигнала.
+                    </p>
+                    <ul>
+                      <li><strong>Live DOM</strong> — глубина bid/ask с провайдера (не только snapshot ISS).</li>
+                      <li><strong>Trades tape</strong> — поток сделок для delta / footprint на desk.</li>
+                      <li><strong>Depth / candle profile</strong> — профиль объёма внутри бара для ручного входа.</li>
+                      <li><strong>Session liquidity map</strong> — где рынок тонкий, где набор ног реалистичен.</li>
+                      <li><strong>Модуль <code>trinity-marketdata</code></strong> — SPI feed (<code>MarketDataFeed</code>,
+                        провайдер <code>T_INVEST</code> → MarketDataStream).</li>
+                      <li><strong>Флаг <code>imoex.marketdata.*</code></strong> — контур включается отдельно от pairs/paper.</li>
+                    </ul>
+                    <p class="atas-why">
+                      <strong>Зачем это добавлено.</strong>
+                      ATAS-слой отвечает на вопрос «можно ли входить по объёму/профилю»;
+                      Tiger-слой — «что видит рынок прямо сейчас» (стакан + лента).
+                      Вместе это замена внешней связки ATAS + Tiger.trade в одной подписке TRINITY:
+                      сигнал → объяснение → ручной ордер у брокера.
+                      Сейчас контур в коде как foundation (SPI + stub); live-stream подключается по мере валидации paper/OOS.
+                      Roadmap #4 — volume desk поверх этого feed.
+                    </p>
+                  </aside>
+
+                  <aside class="atas-plaque" id="trend-robot" aria-labelledby="trend-robot-title">
+                    <span class="atas-badge">Робот · sandbox</span>
+                    <h3 id="trend-robot-title">Playbook #1 — Уровни + профиль (BR M5)</h3>
+                    <p>
+                      Торговый робот стратегии #2: чек-лист «Уровни + Объемы» + усиления риска.
+                      На М5 нефтяного фьючерса строит <strong>market profile</strong> на отбоях,
+                      сливает HVN в диапазон <strong>15–20 пунктов</strong>, выбирает bounce или break+retest,
+                      ставит сетку из 3 лимиток (2-2-2 / 3-1-1), SL от средней позиции, TP1 → Б/У → runner.
+                    </p>
+                    <ul>
+                      <li><strong>Модуль</strong> <code>trinity-trend</code> · id <code>levels-profile-br-m5</code></li>
+                      <li><strong>Профиль обязателен</strong> — VAP-прокси по H–L бара; tick VAP — через marketdata позже</li>
+                      <li><strong>Риск</strong> — <code>min(ГО, maxRiskPct equity)</code>, не «весь депозит / ГО»</li>
+                      <li><strong>Одна зона / один сетап</strong> — после ARMED не прыгаем на новый уровень,
+                        пока цена не уйдёт ≥ <code>unlock-distance-points</code> (default 40) от mid зоны или новый день</li>
+                      <li><strong>Исполнение</strong> — сигнал (<code>auto-execution=false</code>)
+                        или авто/journal (<code>auto-execution=true</code>); live FORTS — ещё
+                        <code>live-execution=true</code> когда single-leg брокер готов</li>
+                      <li><strong>API</strong> — <code>GET/POST /api/trend/*</code> (status, signal, evaluate, submit, journal)</li>
+                    </ul>
+                    <p class="atas-why">
+                      <strong>Зачем.</strong>
+                      Нефть уходит из equities-пар в фьючерсный trend-контур. Sandbox-first —
+                      тот же мозг робота, без обещания live до OOS.
+                    </p>
+                  </aside>
+
+                  <nav class="strategy-toc" aria-label="Содержание">
+                    <strong>Содержание</strong>
+                    <ol>
+                      <li><a href="#core-roadmap">Roadmap TRINITY / Full Core</a></li>
+                      <li><a href="#atas">Функционал ATAS внутри TRINITY</a></li>
+                      <li><a href="#tiger">Функционал Tiger.trade внутри TRINITY</a></li>
+                      <li><a href="#trend-robot">Playbook #1 — Уровни + профиль (BR M5)</a></li>
+                      <li><a href="#idea">Идея простыми словами</a></li>
+                      <li><a href="#pipeline">Что за чем происходит</a></li>
+                      <li><a href="#universe">Как отбираются акции</a></li>
+                      <li><a href="#pairs">Как пары попадают в анализ</a></li>
+                      <li><a href="#clusters">Ежемесячный пересмотр кластеров</a></li>
+                      <li><a href="#regime">Режим рынка: только боковик</a></li>
+                      <li><a href="#signals">Как появляется сигнал</a></li>
+                      <li><a href="#news">Новостной фильтр</a></li>
+                      <li><a href="#size">Размер позиции и лимиты</a></li>
+                      <li><a href="#exits">Как выходим</a></li>
+                      <li><a href="#paper">Paper и проверка на истории</a></li>
+                      <li><a href="#validation">Валидация: replay и издержки</a></li>
+                      <li><a href="#intraday-events">Research: INTRADAY / календарь (не в ops)</a></li>
+                      <li><a href="#limits">Честные ограничения</a></li>
+                    </ol>
+                  </nav>
+
+                  <h3 id="idea">1. Идея простыми словами</h3>
+                  <p>
+                    Берём пару акций, например банк A и банк B. Если исторически их цены связаны,
+                    можно собрать <em>спред</em> — разницу с учётом «коэффициента хеджа» β:
+                    сколько бумаги X нужно против одной единицы Y.
+                  </p>
+                  <p>
+                    Дальше смотрим на <strong>Z-score</strong>: насколько спред сейчас ушёл от своей нормы.
+                    Если Z очень высокий — спред «раздут», ждём сжатия вниз.
+                    Если очень низкий — ждём отскока вверх.
+                  </p>
+                  <ul>
+                    <li><strong>LONG спред</strong> (Z слишком низкий): купить Y и одновременно продать X.</li>
+                    <li><strong>SHORT спред</strong> (Z слишком высокий): продать Y и купить X.</li>
+                  </ul>
+                  <div class="callout">
+                    Прибыль (или убыток) идёт от <strong>схождения ног</strong>, а не от того,
+                    что весь рынок вырос. Поэтому важны обе ноги сразу.
+                  </div>
+
+                  <h3 id="pipeline">2. Что за чем происходит в одном прогоне</h3>
+                  <div class="flow" aria-hidden="true">
+                    <span>MOEX daily</span><i>→</i>
+                    <span>Capital → DAILY</span><i>→</i>
+                    <span>EG/FDR + cluster</span><i>→</i>
+                    <span>FA → paper</span>
+                  </div>
+                  <ol class="pipeline">
+                    <li><strong>Капитал.</strong> Equity → слоты DAILY (100%% gross). Без плеча до 1M.</li>
+                    <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → monthly cluster gate → фундамент (MOEX+RSS) → paper-journal.json.</li>
+                    <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы DAILY при TREND.</li>
+                  </ol>
+                  <div class="callout">
+                    Операторский цикл («Анализ + paper», вечерний cron) — только DAILY metals.
+                    INTRADAY pairs-код остаётся для research (`runIntradayOnly`), без автозапуска и без UI.
+                    Источник свечей — только MOEX ISS.
+                  </div>
+                """.formatted(arbBadge, roadmapBlock, trendBadge);
+        // Continue with rest of strategy page — read original and splice carefully.
+        // The original method had one big string; we split: first part formatted above,
+        // then append the remainder that starts at universe section.
+        body = body + strategyDocRemainder(researchBadge);
+        return page("TRINITY — описание стратегии", body, nav("strategy"));
+    }
+
+    /** Remainder of strategy doc after the pipeline callout. */
+    private String strategyDocRemainder(String researchBadge) {
+        return """
+                  <h3 id="universe">3. Как отбираются акции в анализ</h3>
+                  <p>До любых статистических тестов тикер должен пройти простой «рыночный» фильтр:</p>
+                  <ul>
+                    <li>состав индекса <strong>IMOEX</strong>, режим TQBR;</li>
+                    <li>медианный дневной оборот за ~60 дней не ниже порога (по умолчанию ~50 млн ₽);</li>
+                    <li>цена закрытия не ниже минимума (по умолчанию 5 ₽);</li>
+                    <li>мало дней с нулевым объёмом;</li>
+                    <li>привилегированные акции (<code>*P</code>) обычно исключены;</li>
+                    <li>тикер должен быть в секторном каталоге, если включён секторный режим.</li>
+                  </ul>
+                  <p>
+                    Смысл: не тестировать illiquid «мусор», где спред нельзя нормально набрать и закрыть.
+                  </p>
+
+                  <h3 id="pairs">4. Как пары попадают в анализ и проходят фильтры</h3>
+                  <ol class="pipeline">
+                    <li>
+                      <strong>Кандидаты.</strong> Из отфильтрованного списка строим пары.
+                      По умолчанию — только один сектор или «родственная» группа
+                      (например нефть ↔ электроэнергетика, ритейл ↔ телеком).
+                    </li>
+                    <li>
+                      <strong>Ликвидность пары.</strong> Обе ноги должны иметь достаточный ADV,
+                      и обороты не должны различаться в десятки раз (иначе хедж на бумаге, а в жизни — нет).
+                    </li>
+                    <li>
+                      <strong>Общая история.</strong> Нужно достаточно общих торговых дней (порядка 100+).
+                    </li>
+                    <li>
+                      <strong>Коинтеграция Engle–Granger.</strong>
+                      Проверяем, что остатки регрессии log-цен стационарны — то есть «связь» не случайная на коротком куске.
+                    </li>
+                    <li>
+                      <strong>FDR (q ≈ 0.20).</strong>
+                      Когда пар тысячи, часть «значимых» p-value — ложные. FDR оставляет только те,
+                      кто проходит контроль множественных сравнений.
+                    </li>
+                    <li>
+                      <strong>Data coverage.</strong> Для каждой пары считаем долю общих баров
+                      (<code>coveragePercent</code> в <code>analysis-report.json</code>).
+                      Ниже порога (<code>imoex.risk.min-coverage-percent</code>, по умолчанию 85%) — пара отсекается:
+                      слишком много пропусков истории (делистинг, дырявые котировки).
+                    </li>
+                    <li>
+                      <strong>Качество серии.</strong>
+                      Считаем спред, Z, half-life, Sharpe симуляции. Слишком медленный возврат к среднему
+                      или слабые метрики не дают входной сигнал.
+                    </li>
+                  </ol>
+                  <div class="callout">
+                    На дашборде «Топ-пары по Sharpe» — это уже прошедшие статистику и отобранные для обзора.
+                    Сырой сигнал LONG/SHORT ещё не равен разрешению торговать: дальше режим рынка, новости и лимиты книги.
+                  </div>
+
+                  <h3 id="clusters">4a. Ежемесячный пересмотр кластеров</h3>
+                  <p>
+                    Раз в месяц (на стыке месяца в replay / при live-прогоне) поверх EG/FDR/quality
+                    считается <strong>секторный rolling cash PnL и profit factor</strong> по закрытым paper-сделкам
+                    за lookback (<code>imoex.cluster-review.lookback-months</code>, по умолчанию 6).
+                  </p>
+                  <ul>
+                    <li>в слоты — только сектора с <strong>net &gt; 0</strong> и <strong>PF ≥ 1.1</strong> (при ≥ N закрытий);</li>
+                    <li>мало истории — сектор допускается временно (cold start), кроме нефти;</li>
+                    <li><strong>OIL_GAS</strong> всегда вне DAILY pairs (нефть → roadmap фьючерсы/опционы);</li>
+                    <li>пары с достаточной собственной историей дополнительно режутся тем же net/PF-порогом.</li>
+                  </ul>
+
+                  <h3 id="regime">5. Режим рынка: стратегия только боковик</h3>
+                  <p>
+                    Mean-reversion плохо работает в сильном тренде: спред может «уехать» вместе с рынком
+                    и не вернуться к среднему. Поэтому перед входами смотрим <strong>ADX индекса IMOEX</strong>
+                    (виджет «Режим рынка» на дашборде):
+                  </p>
+                  <ul>
+                    <li><strong>SIDEWAYS</strong> (ADX низкий) — боковик, mean-reversion активна;</li>
+                    <li><strong>NEUTRAL</strong> — переходная зона: входы разрешены, размер уменьшен;</li>
+                    <li><strong>TREND</strong> (ADX высокий) — <em>не торговать</em>: новые входы блокируются,
+                      в рекомендациях будет явная формулировка про тренд и боковик.</li>
+                  </ul>
+                  <p>
+                    Трендовой стратегии в модуле cointegration нет — только ставка на сжатие спреда в боковике.
+                  </p>
+
+                  <h3 id="signals">6. Как появляется торговый сигнал</h3>
+                  <p>
+                    Пороги по умолчанию: вход при |Z| ≥ <strong>2.0</strong>, цель возврата около <strong>Z ≈ 0</strong>.
+                    Z считается в скользящем окне (~60 дней), хедж может подстраиваться фильтром Калмана.
+                  </p>
+                  <p>
+                    Важная деталь: <strong>вход не на первом касании</strong> порога ±2.
+                    Ждём, пока Z уже был за порогом и развернулся к нулю — меньше ложных входов
+                    «в расширяющийся» дисбаланс.
+                  </p>
+                  <ul>
+                    <li><strong>LONG / SHORT</strong> — есть подтверждённый вход.</li>
+                    <li><strong>WATCH</strong> — спред экстремальный, но разворота ещё нет (или зона внимания).</li>
+                    <li><strong>HOLD / NO_SIGNAL</strong> — сейчас не входим.</li>
+                  </ul>
+                  <p>
+                    Смотреть картинку удобнее на странице пары: стрелки входа, зона «ждём разворот»,
+                    линия KAMA / спреда.
+                  </p>
+
+                  <h3 id="news">7. Новостной / фундаментальный фильтр (после техники)</h3>
+                  <p>
+                    Порядок жёсткий: <strong>сначала техника</strong>, затем фундамент,
+                    и только потом итоговая рекомендация и paper.
+                    Фильтр работает в режиме <strong>DAILY / multi-day</strong> (удержание несколько дней).
+                  </p>
+                  <p>
+                    Источники: MOEX sitenews и RSS (<code>imoex.news.rss-feeds</code> — Interfax / RBC / Vedomosti и др.).
+                    Те же правила-триггеры (earnings miss, guidance down, SPO, M&amp;A, санкции…).
+                    При расхождении с LONG/SHORT в «Итоге» будет явный
+                    <strong>CONFLICT: техника vs фундамент</strong>.
+                    На <a href="/view/final">Итог + новости</a> лента RSS показана как <em>контекст FA</em>, не как сигнал.
+                  </p>
+                  <table class="params">
+                    <thead><tr><th>Итог</th><th>Что это значит</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>ENTER</strong></td><td>Техника ок, фундаментальных блокеров нет — можно открывать paper.</td></tr>
+                      <tr><td><strong>REDUCE</strong></td><td>CONFLICT средней силы — размер меньше.</td></tr>
+                      <tr><td><strong>WATCH</strong></td><td>Следим, но не открываем как полноценный вход.</td></tr>
+                      <tr><td><strong>BLOCK</strong></td><td>CONFLICT / жёсткий стоп: halt, делистинг, earnings miss, SPO, санкции…</td></tr>
+                    </tbody>
+                  </table>
+                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет» после FA:
+                    развёрнутый explain (пайплайн, причины пустой таблицы, словарь ENTER/REDUCE/WATCH/BLOCK),
+                    сводка «почему такие», expandable-разбор по строкам и RSS-контекст.
+                    В JSON и UI у каждой строки поле <strong><code>rationale</code></strong> — краткое «почему»:
+                    Z, фундамент, режим ADX, решение и слоты.</p>
+
+                  <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
+                  <p>
+                    Профиль оператора: счёт <strong>от ~100 000 ₽</strong>, узкая книга
+                    <strong>1–2 пары</strong> (не широкий портфель). Базовый notional на ногу Y
+                    считается как <strong>доля equity</strong> (<code>notional-per-leg-pct</code>, по умолчанию 30%):
+                    при 100k ≈ 30k на ногу, при 200k ≈ 60k. Дальше размер уменьшается или увеличивается
+                    через dynamic sizing: волатильность спреда, расстояние до стопа по Z, REDUCE и режим NEUTRAL.
+                    Плечо в модели не используется, пока equity ниже порога (~1 млн ₽).
+                  </p>
+                  <ul>
+                    <li>капитал 100% на DAILY; слоты от equity (~100k → 1–2 пары);</li>
+                    <li>без плеча при equity &lt; 1M;</li>
+                    <li>не больше 1 открытой пары на сектор;</li>
+                    <li>DAILY: удержание несколько дней + FA;</li>
+                    <li>качество пары для входа: R², half-life в разумных границах, минимум сделок в бэктесте;</li>
+                    <li>не открываем, если |Z| уже слишком близко к стоп-уровню.</li>
+                  </ul>
+
+                  <h3 id="exits">9. Как выходим из позиции</h3>
+                  <p>Выход — не только «дождались Z≈0». В paper работают несколько правил:</p>
+                  <ul>
+                    <li><strong>Mean-reversion</strong> — спред вернулся к цели около нуля;</li>
+                    <li><strong>Partial take-profit</strong> — на полпути к нулю по Z;</li>
+                    <li><strong>Trailing по Z</strong> — отдали от лучшей точки — закрываем;</li>
+                    <li><strong>Stop по |Z|</strong> (в т.ч. адаптивный) — спред ушёл ещё дальше против нас;</li>
+                    <li><strong>Time-stop</strong> — слишком долго в позиции без результата;</li>
+                    <li><strong>CUSUM / слом связи</strong> — структурный сдвиг спреда, сильный сдвиг β или коинтеграция «развалилась»;</li>
+                    <li><strong>Смена сигнала</strong> — логика пары перевернулась.</li>
+                  </ul>
+
+                  <h3 id="paper">10. Paper trading и walk-forward</h3>
+                  <p>
+                    <a href="/view/statement">Statement</a> — paper / research PnL по стратегиям.
+                    На каждом анализе система сама открывает ENTER/REDUCE, ведёт mark-to-market
+                    и закрывает по правилам выше. PnL считается по количествам и ценам ног
+                    (с учётом slippage и borrow), а не как «1 Z = 1%».
+                    Slippage DAILY ~20 bps.
+                    На закрытых сделках — колонка <strong>«Комментарий к закрытию»</strong>:
+                    <code>mean-reversion</code>, <code>stop</code>, <code>time-stop</code>, <code>flatten</code>, <code>partial-tp</code>
+                    (полный текст причины остаётся в Notes).
+                  </p>
+                  <p>
+                    <a href="/view/walk-forward">Walk-forward</a> режет историю на train/test окна:
+                    на обучении проверяем коинтеграцию, на тесте гоняем правила без подглядывания вперёд.
+                    Это проверка «не подогнали ли мы всё под прошлый год», а не гарантия прибыли.
+                  </p>
+
+                  <h3 id="validation">11. Валидация на истории (historical replay)</h3>
+                  <p>
+                    Дополнительно к walk-forward есть <strong>bar-by-bar replay</strong> всего paper-пайплайна
+                    на сохранённых свечах: на каждом баре система «видит» только историю ≤ as-of,
+                    строит Z/сигнал и синхронизирует paper — как если бы вы торговали день за днём.
+                    {{RESEARCH_BADGE}}
+                  </p>
+                  <p>Запуск через API (нужны локальные свечи в <code>data/candles/</code>):</p>
+                  <pre class="code-block">POST /api/analysis/historical-replay?tickerY=SBER&amp;tickerX=LKOH&amp;from=2023-01-01&amp;to=2025-12-31&amp;book=DAILY</pre>
+                  <p>
+                    Ответ: сделки, net/realized PnL ₽, win rate, max drawdown.
+                    Подробнее в <a href="/view/guide">Как пользоваться системой</a>.
+                    Долгий локальный candle-архив и deep research replay — профиль Full Core (roadmap).
+                  </p>
+
+                  <h3 id="intraday-events">12. Research: INTRADAY / календарь (не в ops)</h3>
+                  <p>
+                    Код INTRADAY pairs и event-overlay сохранён для research
+                    (<code>runIntradayOnly</code>, <code>data/event-calendar.json</code>),
+                    но <strong>не входит</strong> в операторский UX и автозапуски.
+                    При будущем включении: блок входов за ~45 мин до события, flatten затронутых тикеров.
+                  </p>
+
+                  <h3 id="limits">13. Честные ограничения</h3>
+                  <ul>
+                    <li>Стратегия классическая (textbook pairs) — только боковик, без трендового модуля.</li>
+                    <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
+                    <li>Новости по ISS — эвристика, не полный fundamental research.</li>
+                    <li>Slippage в paper — модельный (bps), не стакан MOEX.</li>
+                    <li>ATAS-слой в TRINITY — прокси по OHLCV ISS, не полная лента сделок; с T-Invest sandbox точность исполнения вырастет.</li>
+                    <li>Historical replay не заменяет брокерский demo (T-Invest sandbox) — следующий шаг к live.</li>
+                    <li>Нужны месяцы чистого paper track-record, прежде чем судить об alpha.</li>
+                  </ul>
+                  <div class="callout">
+                    Это research / decision-support, не индивидуальная инвестиционная рекомендация.
+                    Параметры порогов живут в <code>application.yml</code> (<code>imoex.cointegration</code>,
+                    <code>universe</code>, <code>microstructure</code>, <code>risk</code>, <code>regime</code>, <code>news</code>, <code>paper</code>).
+                  </div>
+                </article>
+                """.replace("{{RESEARCH_BADGE}}", researchBadge);
+    }
+
+    /**
+     * Инструкция для оператора: запуск, пульт, разделы UI, автопрогоны и алерты.
+     */
+    public String renderGuide() {
+        String body = """
+                <article class="strategy-doc">
+                  <h2>Как пользоваться системой</h2>
+                  <p class="lead">
+                    Краткая инструкция для оператора TRINITY: от первого запуска до ежедневного мониторинга paper,
+                    автопрогонов и уведомлений о новых сделках. Подробная теория стратегии — на странице
+                    <a href="/view/strategy">Описание торговой стратегии</a>.
+                  </p>
+
+                  <nav class="strategy-toc" aria-label="Содержание">
+                    <strong>Содержание</strong>
+                    <ol>
+                      <li><a href="#why">Почему TRINITY устроена так</a></li>
+                      <li><a href="#start">Первый запуск</a></li>
+                      <li><a href="#ops">Пульт оператора</a></li>
+                      <li><a href="#pages">Разделы меню</a></li>
+                      <li><a href="#capital">Капитал и focus-слоты</a></li>
+                      <li><a href="#fa">Pairs: техника → FA → paper</a></li>
+                      <li><a href="#trend">Trend: два playbook</a></li>
+                      <li><a href="#daily">Ежедневный цикл</a></li>
+                      <li><a href="#auto">Автопрогоны (cron)</a></li>
+                      <li><a href="#alerts">Алерты и звук</a></li>
+                      <li><a href="#book">Книга DAILY</a></li>
+                      <li><a href="#empty">Пустой journal — это нормально?</a></li>
+                      <li><a href="#checklist">Чеклист</a></li>
+                      <li><a href="#tour">Интерактивное обучение</a></li>
+                    </ol>
+                  </nav>
+
+                  <h3 id="why">0. Почему TRINITY устроена так</h3>
+                  <p>
+                    TRINITY — <strong>research / decision-support</strong>, не «чёрный ящик автоторговли».
+                    Один счёт, несколько стратегий с разной физикой рынка:
+                  </p>
+                  <ul>
+                    <li><strong>Pairs (DAILY)</strong> — mean-reversion коинтегрированных пар в боковике (ADX режет TREND).</li>
+                    <li><strong>Trend #1</strong> — «Уровни + профиль» BR M5 (интрадей, чек-лист Exclusive).</li>
+                    <li><strong>Trend #2</strong> — позиционная H1 (<code>positional-volume-h1</code>): промежуточный объёмный диапазон, сетка 1:1:2:4, RTS/нефть/газ.</li>
+                    <li><strong>Arbitrage</strong> — calendar + fly FORTS, котировки T-Invest, fair-paper.</li>
+                  </ul>
+                  <p>
+                    Live-брокер для trend по умолчанию выключен (<code>live-execution=false</code>): сначала sandbox/fair-paper и OOS.
+                    Данные графика/ленты — у брокера (T-Invest), не «синтетика ради красоты».
+                  </p>
+
+                  <h3 id="start">1. Первый запуск</h3>
+                  <ol class="pipeline">
+                    <li><strong>Java 17+</strong> и <strong>Maven 3.9+</strong> установлены; вы в корне репозитория (там, где <code>pom.xml</code>).</li>
+                    <li>Создайте <code>application-local.yml</code> в корне репо с паролем API и ключом <code>imoex.run.unlock</code> (без них приложение не стартует).</li>
+                    <li>Запустите: <code>mvn -pl trinity-app -am spring-boot:run</code> и дождитесь <code>Started TrinityApplication</code>.</li>
+                    <li>Откройте <a href="/view">http://localhost:8080/view</a> — спокойный дашборд (KPI и сигналы).</li>
+                    <li>В <a href="/view/settings">Настройках</a> сохраните логин API; первый раз нажмите
+                      <strong>«Анализ + скачать свечи»</strong> — скачает историю с MOEX ISS (может занять много минут).</li>
+                    <li>Дальше обычно достаточно <strong>«Анализ + paper»</strong> — с дашборда или из настроек.</li>
+                  </ol>
+                  <div class="callout">
+                    GET-страницы <code>/view/*</code> открываются без пароля. Кнопки пульта шлют POST на API —
+                    нужны логин и пароль из <code>application-local.yml</code> (по умолчанию user <code>imoex</code>).
+                  </div>
+
+                  <h3 id="ops">2. Пульт и брокер (Настройки)</h3>
+                  <p>
+                    Полный <strong>пульт оператора</strong> и <strong>консоль брокера</strong> — только в
+                    <a href="/view/settings">Настройках</a>. Дашборд — обзор: виджеты, «что сделать сейчас», сигналы.
+                    На остальных страницах сверху компактная полоска: быстрый <strong>Анализ + paper</strong>
+                    и ссылка в настройки.
+                  </p>
+                  <table class="params">
+                    <thead><tr><th>Кнопка</th><th>Что делает</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>Анализ + paper</strong></td><td>Цикл DAILY: техника → FA → paper, без скачивания свечей. Типичный будний пересчёт.</td></tr>
+                      <tr><td><strong>Анализ + скачать свечи</strong></td><td>То же с <code>refresh=true</code> — обновляет дневные свечи с биржи.</td></tr>
+                      <tr><td><strong>Только новости / paper</strong></td><td>Быстро: новости MOEX/RSS + синхронизация paper без полного Engle–Granger.</td></tr>
+                      <tr><td><strong>Walk-forward</strong></td><td>Пересчёт OOS-отчёта по топ-парам (daily).</td></tr>
+                      <tr><td><strong>Скачать свечи</strong></td><td>Только загрузка данных, без анализа.</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    Логин и пароль сохраняются в <em>этом браузере</em> (localStorage). Журнал действий пульта — в блоке «Лог» в Настройках.
+                  </p>
+
+                  <h3 id="pages">3. Разделы верхнего меню</h3>
+                  <table class="params">
+                    <thead><tr><th>Раздел</th><th>Зачем открывать</th></tr></thead>
+                    <tbody>
+                      <tr><td><a href="/view">Дашборд</a></td><td>Спокойный обзор: KPI (Paper / Брокер / Final / Режим), сигналы и топ-пары.</td></tr>
+                      <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера (токен, песочница, сверка).</td></tr>
+                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY), развёрнутый explain-panel, словарь действий и RSS-контекст для FA (не сигнал).</td></tr>
+                      <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
+                      <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>
+                      <tr><td><a href="/view/statement">Statement</a></td><td>Депозит + стейтменты стратегий (pairs / trend / arb).</td></tr>
+                      <tr><td><a href="/view/walk-forward">Walk-forward</a></td><td>Out-of-sample проверка на истории (не гарантия будущего).</td></tr>
+                      <tr><td><a href="/view/strategy">Описание стратегии</a></td><td>Теория: коинтеграция, Z-score, режим боковика, выходы.</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    График пары: <code>/view/charts/ТИКЕР_Y/ТИКЕР_X</code> (ссылки есть из таблиц и paper).
+                  </p>
+
+                  <h3 id="capital">Капитал и focus-слоты</h3>
+                  <p>
+                    Один счёт. При депозите ~300 000 ₽ focus <code>BALANCED</code>: pairs ~40% + trend M5 ~30% +
+                    positional H1 ~30% (ниже 300 000 BALANCED схлопывается в pairs).
+                    Плейбук <code>both</code> — оба trend-робота в fair-paper параллельно; pairs DAILY как раньше.
+                  </p>
+
+                  <h3 id="fa">Pairs: техника → FA → paper</h3>
+                  <p>
+                    DAILY pairs — единственная live paper-книга коинтеграции. Цепочка жёсткая и намеренная:
+                  </p>
+                  <ol class="pipeline">
+                    <li><strong>Техника</strong> — Engle–Granger / Z / half-life / Sharpe / coverage → сырой LONG/SHORT/WATCH на
+                      <a href="/view/signals">Сигналах</a> и в «Всех рекомендациях».</li>
+                    <li><strong>Режим</strong> — ADX: TREND блокирует новые mean-reversion входы (боковик — зона pairs).</li>
+                    <li><strong>Кластер</strong> — месячная eligibility сектора (net&gt;0, PF≥1.1); OIL_GAS вне pairs.</li>
+                    <li><strong>FA (фундамент)</strong> — новости MOEX + RSS на горизонте ~10 дней. Итог:
+                      <strong>ENTER</strong> / <strong>REDUCE</strong> / <strong>WATCH</strong> / <strong>BLOCK</strong>.
+                      CONFLICT с техникой снижает размер или блокирует. RSS на
+                      <a href="/view/final">Итог + новости</a> — <em>контекст FA</em>, не отдельный сигнал.</li>
+                    <li><strong>Paper</strong> — только после FA. Пустой journal при пустом итоге — нормальная дисциплина.</li>
+                  </ol>
+                  <p>
+                    Почему так: техника без новостей часто ловит «красивый Z» перед отчётом/санкцией/дивидендом.
+                    FA не обещает прибыль — она режет очевидный риск. Walk-forward на
+                    <a href="/view/walk-forward">Walk-forward</a> проверяет, что in-sample лидеры держатся OOS.
+                  </p>
+                  <div class="callout">
+                    INTRADAY pairs сейчас <strong>research-only</strong> (доля капитала 0). Не путать с Trend M5 / H1.
+                  </div>
+
+                  <h3 id="trend">Trend: два playbook</h3>
+                  <p>
+                    На <a href="/view/trend-signal">Сигнал · Trend</a> два селекта: <strong>Плейбук</strong> и <strong>Инструмент</strong>.
+                  </p>
+                  <ul>
+                    <li><code>levels-profile-br-m5</code> — BR M5, bounce/retest по TOP/BOT (playbook #1).</li>
+                    <li><code>positional-volume-h1</code> — H1 позиционка: 3 HVN → промежуточный → сетка 1:1:2:4;
+                      инструменты RTS / нефть / газ. H1 берём у брокера (T-Invest hour candles), ISS M5→H1 — только fallback.
+                      SECID front-month роллится по брокеру (BR/Ri/NG).</li>
+                  </ul>
+                  <p>
+                    Переключение пишется в <code>data/trend-ui-settings.json</code> и в config
+                    <code>imoex.strategies.trend.playbook</code>. Общие фильтры engine (session / events / gap+HTF / day loss)
+                    применяются к обоим. Research OOS #2:
+                    <code>PositionalH1CampaignReplay</code>.
+                  </p>
+
+                  <h3 id="daily">4. Ежедневный цикл оператора</h3>
+                  <p>Рекомендуемый порядок после закрытия сессии или утром перед решением:</p>
+                  <ol class="pipeline">
+                    <li>Убедиться, что приложение запущено (<code>mvn -pl trinity-app -am spring-boot:run</code>).</li>
+                    <li>Нажать «Анализ + paper» (или дождаться вечернего cron — см. ниже).</li>
+                    <li>Открыть <a href="/view/final">Итог + новости</a> — что разрешено по DAILY после FA.</li>
+                    <li>Открыть <a href="/view/statement">Statement</a> — что реально открылось в DAILY / Trend.</li>
+                    <li>При сомнениях — график пары и виджет «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
+                  </ol>
+
+                  <h3 id="auto">5. Автопрогоны (cron)</h3>
+                  <p>
+                    Пока сервер работает, планировщик сам гоняет DAILY — ручная кнопка не обязательна каждый раз.
+                    Статус пишется в лог пульта (строки <code>DAILY cron: …</code>).
+                  </p>
+                  <table class="params">
+                    <thead><tr><th>Книга</th><th>Расписание (по умолчанию)</th><th>Что внутри</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>DAILY</strong></td><td>Пн–Пт <strong>19:05</strong></td><td>Дневные свечи → техника → FA → paper (<code>paper-journal.json</code>)</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    Включение/выключение: <code>imoex.paper.auto-run-daily</code>, <code>daily-cron</code>.
+                    INTRADAY pairs cron выключен и не показывается в пульте.
+                  </p>
+                  <div class="callout">
+                    На выходных новых дневных свечей нет — вечерний DAILY почти ничего не меняет.
+                  </div>
+
+                  <h3 id="alerts">6. Алерты при новой paper-сделке</h3>
+                  <p>
+                    Если открыта <em>любая</em> страница <code>/view/*</code>, браузер раз в минуту опрашивает сервер.
+                    При новом OPEN в paper вы получите:
+                  </p>
+                  <ul>
+                    <li><strong>Баннер справа сверху</strong> в окне браузера (на macOS, Windows и Linux одинаково) + короткий звук (два тона);</li>
+                    <li><strong>Системное уведомление ОС</strong> — если нажали «Уведомления macOS / Windows» и разрешили в браузере.</li>
+                  </ul>
+                  <table class="params">
+                    <thead><tr><th>Платформа</th><th>Баннер в браузере</th><th>Уведомление ОС</th></tr></thead>
+                    <tbody>
+                      <tr><td><strong>macOS</strong></td><td>Правый верхний угол страницы</td><td>Notification Center — справа сверху (как у почты / Slack)</td></tr>
+                      <tr><td><strong>Windows</strong></td><td>Правый верхний угол страницы</td><td>Центр уведомлений — обычно <strong>правый нижний</strong> угол (позицию задаёт Windows, не TRINITY)</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    В <a href="/view/settings">Настройках</a>: чекбоксы «Алерты при новой paper-сделке» и «Звук».
+                    После ручного «Анализ + paper» опрос срабатывает сразу.
+                    Вкладка может быть в фоне, но <strong>браузер должен быть запущен</strong> — это не push с сервера без открытой страницы.
+                  </p>
+                  <div class="callout">
+                    Первый визит: уже существующие сделки в journal не спамят алертами — их id запоминаются автоматически.
+                  </div>
+
+                  <h3 id="book">7. Книга DAILY</h3>
+                  <p>
+                    Операторский цикл («Анализ + paper», вечерний cron) ведёт <strong>только DAILY</strong>:
+                    удержание несколько дней, фундамент (новости), 100% gross капитала.
+                    INTRADAY pairs выведены из UX и автозапусков (research-код остаётся в репозитории).
+                  </p>
+
+                  <h3 id="empty">8. Пустой journal — это нормально?</h3>
+                  <p>Да, если сейчас нет подходящих сигналов. Paper открывается только при:</p>
+                  <ul>
+                    <li>LONG / SHORT с подтверждённым разворотом Z (не WATCH);</li>
+                    <li>итог ENTER или REDUCE после FA;</li>
+                    <li>режим не TREND (ADX);</li>
+                    <li>пара проходит фильтры качества (half-life, R², |Z| не у стопа);</li>
+                    <li>есть свободный слот.</li>
+                  </ul>
+                  <p>
+                    На странице <a href="/view/statement">Statement</a> в пустом журнале показывается диагностика
+                    (сколько пар, max |Z|, лидер).
+                  </p>
+
+                  <h3 id="checklist">9. Чеклист «всё работает»</h3>
+                  <ul>
+                    <li>В логе терминала: <code>Started TrinityApplication</code></li>
+                    <li>Кнопка «Анализ + paper» завершается без 401 (логин/пароль верные)</li>
+                    <li>В <code>data/candles/</code> есть JSON тикеров (после первого refresh)</li>
+                    <li><a href="/view/final">Итог + новости</a> — таблица и explain-panel (пустая таблица нормальна: нет LONG/SHORT/WATCH после техники или всё отфильтровано до FA; читайте блоки «почему 0 строк»)</li>
+                    <li>На дашборде видны виджеты режима рынка (SIDEWAYS / NEUTRAL / TREND)</li>
+                    <li>При тестовом OPEN — баннер и звук в браузере (алерты включены)</li>
+                  </ul>
+                  <div class="callout">
+                    TRINITY — research / decision-support, не автоисполнение у брокера и не гарантия прибыли.
+                    Перед реальными деньгами — свой paper track-record и учёт издержек шорта.
+                  </div>
+
+                  <h3 id="tour">Интерактивное обучение</h3>
+                  <p>
+                    На дашборде кнопка <strong>«Пройти обучение»</strong> запускает пошаговый тур
+                    (куда жать и зачем). Повтор — в любой момент с дашборда; прогресс в
+                    <code>localStorage</code> ключе <code>trinity.tour.v1</code>.
+                    Tour покрывает: дашборд → Итог → Statement → Сигнал Trend (плейбук + инструмент) → Справка.
+                  </p>
+                </article>
+                """;
+        return page("TRINITY — как пользоваться", body, nav("guide"));
+    }
+
+    private String regimeBanner(com.moex.cointegration.model.MarketRegimeSnapshot regime) {
+        if (regime == null) {
+            regime = com.moex.cointegration.model.MarketRegimeSnapshot.unknown();
+        }
+        String css = switch (regime.label()) {
+            case "SIDEWAYS" -> "regime-ok";
+            case "NEUTRAL" -> "regime-warn";
+            case "TREND" -> "regime-bad";
+            default -> "regime-muted";
+        };
+        String adx = Double.isNaN(regime.adx()) ? "—" : String.format("%.1f", regime.adx());
+        return """
+                <div class="regime-banner %s">
+                  <strong>Режим рынка:</strong> %s (ADX=%s) — %s
+                </div>
+                """.formatted(css, escape(regime.label()), escape(adx), escape(regime.detail()));
+    }
+
+    private String summaryBlock(AnalysisReport report, int recCount, long actionable) {
+        return """
+                <section class="cards">
+                  <div class="card"><span class="label">Дата анализа</span><span class="value">%s</span></div>
+                  <div class="card"><span class="label">Акций</span><span class="value">%d</span></div>
+                  <div class="card"><span class="label">Пар протестировано</span><span class="value">%d</span></div>
+                  <div class="card"><span class="label">Коинтегрировано</span><span class="value">%d</span></div>
+                  <div class="card"><span class="label">Сигналов входа</span><span class="value accent">%d</span></div>
+                  <div class="card"><span class="label">Рекомендаций</span><span class="value">%d</span></div>
+                </section>
+                """.formatted(
+                report.analysisDate(),
+                report.tickersAnalyzed(),
+                report.pairsTested(),
+                report.cointegratedPairs(),
+                actionable,
+                recCount
+        );
+    }
+
+    private String recommendationsTable(List<TradingRecommendation> rows, String emptyMessage) {
+        if (rows.isEmpty()) {
+            return "<p class=\"empty-msg\">" + escape(emptyMessage) + "</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Пара Y / X</th>
+                      <th>Сигнал</th>
+                      <th>Z-score</th>
+                      <th>Дата</th>
+                      <th>Beta</th>
+                      <th>Half-life</th>
+                      <th>Sharpe</th>
+                      <th>Рекомендация</th>
+                      <th>Графики</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        for (TradingRecommendation r : rows) {
+            table.append("<tr>");
+            table.append("<td><strong>").append(escape(r.tickerY())).append("</strong> / ")
+                    .append(escape(r.tickerX())).append("</td>");
+            table.append("<td>").append(signalBadge(r.signal())).append("</td>");
+            table.append("<td class=\"num\">").append(formatZ(r.currentZScore())).append("</td>");
+            table.append("<td>").append(r.asOfDate()).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(r.hedgeRatio())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(r.halfLifeDays())).append(" д</td>");
+            table.append("<td class=\"num\">").append(formatNum(r.sharpeRatio())).append("</td>");
+            table.append("<td class=\"details\">")
+                    .append("<div class=\"summary\">").append(escape(r.summary())).append("</div>")
+                    .append("<div class=\"explain\">").append(nl2br(escape(r.details()))).append("</div></td>");
+            table.append("<td class=\"links\">")
+                    .append(chartPageLink(r.tickerY(), r.tickerX()))
+                    .append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
+    }
+
+    private String topPairsTable(List<PairAnalysisResult> pairs) {
+        if (pairs.isEmpty()) {
+            return "<p class=\"empty-msg\">Топ-пар нет.</p>";
+        }
+
+        StringBuilder table = new StringBuilder();
+        table.append("""
+                <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Пара</th>
+                      <th>Sharpe</th>
+                      <th>p-value</th>
+                      <th>Half-life</th>
+                      <th>Coverage</th>
+                      <th>Max DD</th>
+                      <th>Beta</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+
+        int rank = 1;
+        for (PairAnalysisResult p : pairs) {
+            table.append("<tr>");
+            table.append("<td>").append(rank++).append("</td>");
+            table.append("<td><strong>").append(escape(p.tickerY())).append("</strong> / ")
+                    .append(escape(p.tickerX())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.sharpeRatio())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.pValue())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.halfLifeDays())).append(" д</td>");
+            String cov = p.coveragePercent() == null ? "—"
+                    : String.format(Locale.ROOT, "%.1f%%", p.coveragePercent());
+            table.append("<td class=\"num\" title=\"")
+                    .append(escape(p.coverageWarning() == null ? "" : p.coverageWarning()))
+                    .append("\">").append(cov).append("</td>");
+            table.append("<td class=\"num\">").append(formatPct(p.maxDrawdown())).append("</td>");
+            table.append("<td class=\"num\">").append(formatNum(p.hedgeRatio())).append("</td>");
+            table.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
+            table.append("</tr>");
+        }
+
+        table.append("</tbody></table></div>");
+        return table.toString();
+    }
+
+    /** Страница интерактивного графика пары. */
+    public String renderChartPage(String tickerY, String tickerX) {
+        String body = """
+                <div class="chart-head">
+                  <a class="back" href="/view/signals">← к сигналам</a>
+                  <h2>График пары {{Y}} / {{X}}</h2>
+                  <p class="meta" id="chart-meta">Загрузка данных…</p>
+                  <div class="legend">
+                    <span class="lg buy">▲ зелёная стрелка — купить спред (после разворота к 0)</span>
+                    <span class="lg sell">▼ красная стрелка — продать спред (после разворота к 0)</span>
+                    <span class="lg exit">● серый — выход к равновесию</span>
+                    <span class="lg kama">линия KAMA — адаптивная средняя спреда</span>
+                  </div>
+                  <div class="explain" id="chart-explain"></div>
+                </div>
+                <div class="chart-block">
+                  <h3>1. Свечи {{Y}}</h3>
+                  <div id="chart-price" class="chart"></div>
+                </div>
+                <div class="chart-block">
+                  <h3>1b. Свечи {{X}}</h3>
+                  <div id="chart-price-x" class="chart"></div>
+                </div>
+                <div class="chart-block">
+                  <h3>3. Дивергенция: нормализованные цены (старт = 100)</h3>
+                  <div id="chart-divergence" class="chart"></div>
+                </div>
+                <div class="chart-block">
+                  <h3>4. Спред + KAMA (Kaufman Adaptive MA)</h3>
+                  <div id="chart-spread" class="chart"></div>
+                </div>
+                <div class="chart-block">
+                  <h3>5. Z-score и сигналы входа/выхода</h3>
+                  <div id="chart-z" class="chart tall"></div>
+                </div>
+                <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+                <script>
+                (async function () {
+                  const y = "{{Y}}";
+                  const x = "{{X}}";
+                  const resp = await fetch("/api/charts/" + y + "/" + x + "/data");
+                  if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+                    document.getElementById("chart-meta").textContent = "Ошибка: " + (err.error || resp.status);
+                    return;
+                  }
+                  const data = await resp.json();
+                  document.getElementById("chart-meta").textContent =
+                    "Сигнал: " + data.signal + " | Z=" + data.currentZScore.toFixed(2)
+                    + " | beta=" + data.hedgeRatio.toFixed(3)
+                    + " | half-life≈" + data.halfLifeDays.toFixed(0) + "д"
+                    + " | Sharpe=" + data.sharpeRatio.toFixed(2);
+                  document.getElementById("chart-explain").innerHTML =
+                    '<div class="summary">' + escapeHtml(data.summary || "") + "</div>"
+                    + "<div>" + escapeHtml(data.details || "").replace(/\\n/g, "<br>") + "</div>";
+
+                  const common = { layout: { background: { color: "#ffffff" }, textColor: "#1a1a2e" },
+                    grid: { vertLines: { color: "#eee" }, horzLines: { color: "#eee" } },
+                    rightPriceScale: { borderColor: "#ddd" },
+                    timeScale: { borderColor: "#ddd" } };
+
+                  // Price candles Y
+                  const priceEl = document.getElementById("chart-price");
+                  const priceChart = LightweightCharts.createChart(priceEl, { ...common, height: 320 });
+                  const candles = priceChart.addCandlestickSeries({
+                    upColor: "#16a34a", downColor: "#dc2626", borderVisible: false,
+                    wickUpColor: "#16a34a", wickDownColor: "#dc2626"
+                  });
+                  candles.setData(data.candlesY.map(b => ({
+                    time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
+                  })));
+
+                  const priceXEl = document.getElementById("chart-price-x");
+                  const priceXChart = LightweightCharts.createChart(priceXEl, { ...common, height: 280 });
+                  const candlesX = priceXChart.addCandlestickSeries({
+                    upColor: "#16a34a", downColor: "#dc2626", borderVisible: false,
+                    wickUpColor: "#16a34a", wickDownColor: "#dc2626"
+                  });
+                  candlesX.setData(data.candlesX.map(b => ({
+                    time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
+                  })));
+
+                  // Divergence normalized
+                  const divEl = document.getElementById("chart-divergence");
+                  const divChart = LightweightCharts.createChart(divEl, { ...common, height: 260 });
+                  const ny = divChart.addLineSeries({ color: "#0f3460", lineWidth: 2, title: y });
+                  const nx = divChart.addLineSeries({ color: "#e94560", lineWidth: 2, title: x });
+                  ny.setData(data.normalizedY.map(p => ({ time: p.time, value: p.value })));
+                  nx.setData(data.normalizedX.map(p => ({ time: p.time, value: p.value })));
+
+                  // Spread + KAMA
+                  const spEl = document.getElementById("chart-spread");
+                  const spChart = LightweightCharts.createChart(spEl, { ...common, height: 260 });
+                  const spread = spChart.addLineSeries({ color: "#0f3460", lineWidth: 2, title: "Spread" });
+                  const kama = spChart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "KAMA" });
+                  spread.setData(data.spread.map(p => ({ time: p.time, value: p.value })));
+                  kama.setData(data.kama.map(p => ({ time: p.time, value: p.value })));
+
+                  // Z-score
+                  const zEl = document.getElementById("chart-z");
+                  const zChart = LightweightCharts.createChart(zEl, { ...common, height: 360 });
+                  const zSeries = zChart.addLineSeries({ color: "#7c3aed", lineWidth: 2, title: "Z" });
+                  zSeries.setData(data.zScore.map(p => ({ time: p.time, value: p.value })));
+                  zSeries.createPriceLine({ price: 0, color: "#94a3b8", lineWidth: 1, lineStyle: 2, title: "0" });
+                  zSeries.createPriceLine({ price: data.zEntry, color: "#dc2626", lineWidth: 1, lineStyle: 2, title: "+" + data.zEntry });
+                  zSeries.createPriceLine({ price: -data.zEntry, color: "#16a34a", lineWidth: 1, lineStyle: 2, title: "-" + data.zEntry });
+
+                  const markers = (data.markers || [])
+                    .filter(m => m.series === "zscore")
+                    .map(m => ({
+                      time: m.time,
+                      position: m.position,
+                      color: m.color,
+                      shape: m.shape,
+                      text: m.text
+                    }));
+                  // lightweight-charts keeps one marker per time — keep last (current signal wins)
+                  const byTime = {};
+                  markers.forEach(m => { byTime[m.time] = m; });
+                  zSeries.setMarkers(Object.values(byTime).sort((a, b) => a.time.localeCompare(b.time)));
+
+                  [priceChart, priceXChart, divChart, spChart, zChart].forEach(c => c.timeScale().fitContent());
+
+                  function escapeHtml(s) {
+                    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+                  }
+                })();
+                </script>
+                """
+                .replace("{{Y}}", escape(tickerY))
+                .replace("{{X}}", escape(tickerX));
+        return page("График " + tickerY + "/" + tickerX, body, nav("none"));
+    }
+
+    /** Лёгкий экран сигнала trend: M5 + DOM + entry/SL/TP. */
+    public String renderTrendSignalPage() {
+        if (!productEdition.hasTrend()) {
+            return renderStrategyLockedPage("TREND", "trend-signal");
+        }
+        return page("TRINITY — сигнал Trend", loadClasspathUtf8("trend-signal-desk.html"), nav("trend-signal"), OpsMode.NONE);
+    }
+
+    /** Multi-instrument chart terminal (ATAS-like study desk). */
+    public String renderTrendChartsPage() {
+        if (!productEdition.hasTrend()) {
+            return renderStrategyLockedPage("TREND", "trend-charts");
+        }
+        return page("TRINITY — терминал графиков", loadClasspathUtf8("trend-charts-terminal.html"), nav("trend-charts"), OpsMode.NONE);
+    }
+
+    public String renderCalendarArbPage() {
+        if (!productEdition.hasArb()) {
+            return renderStrategyLockedPage("ARB", "calendar-arb");
+        }
+        if (!strategyCalendarArbEnabled) {
+            return renderStrategyLockedPage("ARB", "calendar-arb");
+        }
+        return page("TRINITY — календарный арбитраж", loadClasspathUtf8("calendar-arb-desk.html"), nav("calendar-arb"), OpsMode.NONE);
+    }
+
+    private String renderStrategyLockedPage(String strategy, String activeNav) {
+        String title = productEdition.lockTitle(strategy);
+        String bodyText = productEdition.lockBody(strategy);
+        String href = productEdition.lockCtaHref(strategy);
+        String cta = productEdition.lockCtaLabel(strategy);
+        String body = """
+                <section class="strategy-lock-page" data-strategy-lock="%s">
+                  <div class="strategy-lock-card">
+                    <span class="strategy-lock-badge">Заблокировано</span>
+                    <h2>%s</h2>
+                    <p>%s</p>
+                    <div class="ops-row">
+                      <a class="btn btn-primary" href="%s">%s</a>
+                      <a class="btn btn-ghost" href="/view/settings#product-edition-settings">Сменить версию (демо)</a>
+                      <a class="btn btn-ghost" href="/view">На дашборд</a>
+                    </div>
+                  </div>
+                </section>
+                """.formatted(
+                escape(strategy),
+                escape(title),
+                escape(bodyText),
+                escape(href),
+                escape(cta)
+        );
+        return page("TRINITY — " + title, body, nav(activeNav), OpsMode.NONE);
+    }
+
+    /**
+     * Итоговая таблица: техника + новости + решение ENTER/REDUCE/WATCH/BLOCK.
+     */
+    public String renderFinalTable(List<FinalTradeRecommendation> rows) {
+        return renderFinalTable(
+                rows,
+                List.of(),
+                MarketRegimeSnapshot.unknown(),
+                null,
+                RssHeadlineService.Snapshot.disabled()
+        );
+    }
+
+    public String renderFinalTable(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            RssHeadlineService.Snapshot rss
+    ) {
+        if (rows == null) {
+            rows = List.of();
+        }
+        if (technical == null) {
+            technical = List.of();
+        }
+        if (regime == null) {
+            regime = MarketRegimeSnapshot.unknown();
+        }
+        if (rss == null) {
+            rss = RssHeadlineService.Snapshot.disabled();
+        }
+
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Итог после фундамента (multi-day / DAILY).</strong>
+                  Порядок: техника → cluster gate → фундамент (MOEX + RSS) → рекомендация → paper.
+                  Это research / decision-support, не инвестиционная рекомендация и не обещание прибыли.
+                </div>
+                """);
+
+        body.append(renderFinalExplainPanel(rows, technical, regime, report));
+
+        if (!rows.isEmpty()) {
+            body.append(renderFinalSummaryStrip(rows));
+            body.append("""
+                    <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Итог</th>
+                          <th>Пара</th>
+                          <th>Техсигнал</th>
+                          <th>Z</th>
+                          <th>Нов. риск</th>
+                          <th>Асимм.</th>
+                          <th>Почему</th>
+                          <th>График</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                    """);
+
+            for (FinalTradeRecommendation f : rows) {
+                body.append("<tr>");
+                body.append("<td>").append(decisionBadge(f.decision())).append("</td>");
+                body.append("<td><strong>").append(escape(f.tickerY())).append("</strong> / ")
+                        .append(escape(f.tickerX())).append("</td>");
+                body.append("<td>").append(signalBadge(f.technical().signal())).append("</td>");
+                body.append("<td class=\"num\">").append(formatZ(f.technical().currentZScore())).append("</td>");
+                body.append("<td>").append(newsBadge(f.news().riskLevel().name())).append("</td>");
+                body.append("<td>").append(f.news().asymmetric() ? "да" : "нет").append("</td>");
+                body.append("<td class=\"details\">");
+                body.append("<div class=\"summary\">").append(escape(f.decisionSummary())).append("</div>");
+                body.append(renderFinalRowProse(f));
+                body.append("</td>");
+                body.append("<td class=\"links\">").append(chartPageLink(f.tickerY(), f.tickerX())).append("</td>");
+                body.append("</tr>");
+            }
+
+            body.append("</tbody></table></div>");
+        }
+
+        body.append(renderFinalNewsSection(rss));
+        return page("TRINITY — итог", body.toString(), nav("final"));
+    }
+
+    private String renderFinalExplainPanel(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report
+    ) {
+        boolean empty = rows.isEmpty();
+        StringBuilder sb = new StringBuilder();
+        sb.append("<section class=\"final-explain\" id=\"final-explain\">");
+        sb.append("<p class=\"final-explain-lead\">");
+        if (empty) {
+            sb.append("Сейчас в таблице <strong>нет строк</strong> — это не «поломка», а честный итог пайплайна: ")
+                    .append("до paper доходят только пары, прошедшие технику и (для DAILY) фундаментальный слой.");
+        } else {
+            long actionable = rows.stream()
+                    .filter(f -> f.decision() == FinalTradeDecision.ENTER
+                            || f.decision() == FinalTradeDecision.REDUCE_SIZE)
+                    .count();
+            sb.append("Ниже — <strong>").append(rows.size()).append("</strong> итоговых строк после FA. ")
+                    .append("Actionable (ENTER/REDUCE): <strong>").append(actionable).append("</strong>. ")
+                    .append("Читайте «почему именно такие», затем детали по строкам.");
+        }
+        sb.append("</p>");
+
+        sb.append("<div class=\"final-explain-grid\">");
+
+        sb.append("<article class=\"final-explain-block\">");
+        sb.append("<h3>Что значит «Итог» в пайплайне</h3>");
+        sb.append("<p>TRINITY — mean-reversion по коинтегрированным парам IMOEX <em>только в боковике</em>. ")
+                .append("Страница «Итог» — операторский вердикт после цепочки, а не сырой LONG/SHORT.</p>");
+        sb.append("<ol class=\"final-pipeline\">");
+        sb.append("<li><strong>Техника</strong> — EG/FDR, Z-score, качество пары, разворот входа.</li>");
+        sb.append("<li><strong>Cluster gate</strong> — месячная eligibility секторов (net&gt;0, PF≥1.1); OIL_GAS вне pairs.</li>");
+        sb.append("<li><strong>FA</strong> — новости MOEX + RSS; CONFLICT с техникой снижает или блокирует вход.</li>");
+        sb.append("<li><strong>Рекомендация</strong> — ENTER / REDUCE / WATCH / BLOCK.</li>");
+        sb.append("<li><strong>Paper</strong> — журнал открывает только ENTER/REDUCE при свободном слоте и не-TREND.</li>");
+        sb.append("</ol>");
+        sb.append("<p class=\"meta\">Research / decision-support: система помогает думать, не исполняет у брокера и не гарантирует результат.</p>");
+        sb.append("</article>");
+
+        sb.append("<article class=\"final-explain-block\">");
+        if (empty) {
+            sb.append("<h3>Почему сейчас 0 строк</h3>");
+            sb.append("<p>Ниже — реальные причины по текущим данным (если что-то не сработало в этом прогоне, пункт отмечен).</p>");
+            sb.append("<ul class=\"final-reasons\">");
+            for (String reason : diagnoseEmptyFinalReasons(rows, technical, regime, report)) {
+                sb.append("<li>").append(reason).append("</li>");
+            }
+            sb.append("</ul>");
+            sb.append("<div class=\"final-conflict-note\">");
+            sb.append("<h4>Что такое CONFLICT (техника vs фундамент)</h4>");
+            sb.append("<p><strong>Коротко:</strong> техника говорит «спред перетянут, mean-reversion», ")
+                    .append("а новости/фундамент по одной ноге пары — «здесь шок или структурный риск».</p>");
+            sb.append("<p>Для новичка: представьте, что стрелки на графике красивые, но по одной акции вышла ")
+                    .append("плохая отчётность, SPO или санкционный заголовок. Спред может «уехать» не к среднему, ")
+                    .append("а ещё дальше. Поэтому CONFLICT → REDUCE (осторожный размер) или BLOCK (не открывать).</p>");
+            sb.append("<p class=\"meta\">Когда CONFLICT уже есть в таблице — в колонке «Почему» будет явная фраза ")
+                    .append("«CONFLICT: техника vs фундамент» плюс тип триггера. Сейчас строк нет, поэтому живых CONFLICT-примеров в таблице нет.</p>");
+            sb.append("</div>");
+        } else {
+            sb.append("<h3>Почему именно такие решения</h3>");
+            sb.append(renderFinalWhyProse(rows, regime));
+            List<FinalTradeRecommendation> conflicts = rows.stream()
+                    .filter(f -> f.decisionSummary() != null && f.decisionSummary().contains("CONFLICT"))
+                    .toList();
+            if (!conflicts.isEmpty()) {
+                sb.append("<div class=\"final-conflict-note\">");
+                sb.append("<h4>CONFLICT в текущей таблице (").append(conflicts.size()).append(")</h4>");
+                sb.append("<p><strong>Педагогика:</strong> техника и фундамент расходятся. ")
+                        .append("Это не «ошибка модели», а честный стоп/снижение размера, пока шок не переварится.</p>");
+                sb.append("<ul>");
+                int shown = 0;
+                for (FinalTradeRecommendation c : conflicts) {
+                    if (shown++ >= 5) {
+                        sb.append("<li>… и ещё ").append(conflicts.size() - 5).append("</li>");
+                        break;
+                    }
+                    sb.append("<li><strong>").append(escape(c.tickerY())).append("/")
+                            .append(escape(c.tickerX())).append("</strong> — ")
+                            .append(escape(c.decisionSummary()));
+                    if (c.news() != null && !c.news().hits().isEmpty()) {
+                        NewsTriggerHit top = c.news().hits().get(0);
+                        sb.append("<br><span class=\"meta\">")
+                                .append(escape(top.type().name())).append(": ")
+                                .append(escape(top.explanation())).append("</span>");
+                    }
+                    sb.append("</li>");
+                }
+                sb.append("</ul></div>");
+            }
+        }
+        sb.append("</article>");
+
+        sb.append("<article class=\"final-explain-block\">");
+        sb.append("<h3>Что делать оператору дальше</h3>");
+        sb.append("<ol>");
+        if (empty) {
+            sb.append("<li>Если анализ давно не гоняли — на <a href=\"/view/settings\">Настройках</a> «Анализ + paper».</li>");
+            sb.append("<li>Проверить виджет <strong>режима рынка</strong> на <a href=\"/view\">дашборде</a>: TREND (высокий ADX) блокирует новые входы.</li>");
+            sb.append("<li>Открыть <a href=\"/view/signals\">Сигналы</a> и <a href=\"/view/recommendations\">Все рекомендации</a> — есть ли сырой LONG/SHORT до FA.</li>");
+            sb.append("<li>Если техника есть, а итог пуст — пересчитать «Только новости / paper» или полный цикл (FA мог не сохраниться).</li>");
+            sb.append("<li>Смотреть <a href=\"/view/statement\">Statement</a>: пустой journal при пустом итоге — нормальная дисциплина, не «баг».</li>");
+        } else {
+            sb.append("<li>Сверить ENTER/REDUCE с графиком пары и размером слота (капитал без плеча до 1M).</li>");
+            sb.append("<li>При CONFLICT / BLOCK — прочитать новости по ноге; не «продавливать» вход ради активности.</li>");
+            sb.append("<li>Проверить режим ADX на дашборде — даже ENTER не откроется в paper при TREND.</li>");
+            sb.append("<li>Сверить, что реально легло в <a href=\"/view/statement\">Statement</a>.</li>");
+            sb.append("<li>RSS ниже — только контекст FA, не отдельный сигнал на вход.</li>");
+        }
+        sb.append("</ol>");
+        sb.append("</article>");
+
+        sb.append("<article class=\"final-explain-block final-glossary\">");
+        sb.append("<h3>Словарь: ENTER / REDUCE / WATCH / BLOCK</h3>");
+        sb.append("<dl>");
+        sb.append("<dt>ENTER</dt><dd><strong>Новичку:</strong> техника и фундамент согласны — пару можно разбирать к открытию. ")
+                .append("<em>Профи:</em> полный слот книги в рамках CapitalAllocator; всё равно считайте borrow, slippage и стоп по Z — ")
+                .append("это не гарантия mean-reversion.</dd>");
+        sb.append("<dt>REDUCE</dt><dd><strong>Новичку:</strong> вход возможен, но уменьшенным размером (часто CONFLICT средней силы или caution). ")
+                .append("<em>Профи:</em> типично × reduce-factor / risk policy; сохраняйте асимметрию ног и room-to-stop.</dd>");
+        sb.append("<dt>WATCH</dt><dd><strong>Новичку:</strong> наблюдать, не открывать новую сделку (ждём разворот Z, режим, или мягкий FA). ")
+                .append("<em>Профи:</em> не путать с HOLD у нуля — WATCH часто = «порог есть, подтверждения нет» или TREND-gate.</dd>");
+        sb.append("<dt>BLOCK</dt><dd><strong>Новичку:</strong> вход запрещён — структурный/новостной блокер или жёсткий CONFLICT. ")
+                .append("<em>Профи:</em> halt, delisting, earnings miss, SPO, санкции и т.п.; paper не откроет.</dd>");
+        sb.append("</dl>");
+        sb.append("<p class=\"meta\">Ни один статус не обещает доходность. TRINITY — desk research для оператора pairs.</p>");
+        sb.append("</article>");
+
+        sb.append("</div></section>");
+        return sb.toString();
+    }
+
+    private List<String> diagnoseEmptyFinalReasons(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report
+    ) {
+        List<String> reasons = new ArrayList<>();
+        long techActionable = technical.stream()
+                .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
+                .count();
+        long techWatch = technical.stream().filter(r -> r.signal() == TradingSignal.WATCH).count();
+        long regimeWatch = technical.stream()
+                .filter(r -> r.signal() == TradingSignal.WATCH)
+                .filter(r -> r.summary() != null && (r.summary().contains("тренд") || r.summary().toUpperCase(Locale.ROOT).contains("TREND")))
+                .count();
+
+        if (technical.isEmpty()) {
+            reasons.add("<strong>Нет технических рекомендаций</strong> — анализ не прогонялся, не загрузился с диска, "
+                    + "или после FDR/качества не осталось пар. "
+                    + (report == null
+                    ? "Отчёт анализа в памяти пуст."
+                    : "В отчёте: тикеров " + report.tickersAnalyzed()
+                    + ", протестировано пар " + report.pairsTested()
+                    + ", коинтегрировано " + report.cointegratedPairs() + "."));
+        } else if (techActionable == 0 && techWatch == 0) {
+            reasons.add("<strong>Нет LONG/SHORT/WATCH</strong> — все пары в HOLD/NO_SIGNAL "
+                    + "(|Z| ниже порога, half-life/R²/coverage, нет разворота). Итоговая таблица строится только по LONG/SHORT/WATCH.");
+        } else if (techActionable == 0) {
+            reasons.add("<strong>Есть WATCH, нет LONG/SHORT</strong> — техника видит напряжение спреда, но подтверждённого входа нет. "
+                    + "Итог мог бы содержать WATCH-строки после FA; если таблица пуста, перезапустите цикл «Анализ + paper» / «Только новости».");
+        }
+
+        if (regime.blockEntries() || "TREND".equalsIgnoreCase(regime.label()) || regimeWatch > 0) {
+            reasons.add("<strong>Режим TREND / ADX</strong> — сейчас "
+                    + escape(regime.label()) + " (ADX="
+                    + (Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.1f", regime.adx()))
+                    + "). " + escape(regime.detail())
+                    + (regimeWatch > 0 ? " Техника пометила WATCH по тренду у " + regimeWatch + " пар(ы)." : ""));
+        } else {
+            reasons.add("<strong>Режим рынка:</strong> " + escape(regime.label())
+                    + " — блокера TREND сейчас нет (ADX="
+                    + (Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.1f", regime.adx()))
+                    + ").");
+        }
+
+        reasons.add("<strong>Cluster gate</strong> — ежемесячный пересмотр секторов (net&gt;0, PF≥1.1) и hard-ban OIL_GAS "
+                + "режут пары <em>до</em> техники. Если в отчёте мало коинтегрированных пар при живом индексе — смотрите cluster-review / сектора.");
+
+        reasons.add("<strong>FA CONFLICT</strong> — при расхождении техники и новостей строка обычно <em>остаётся</em> "
+                + "как REDUCE/BLOCK с текстом «CONFLICT: техника vs фундамент», а не исчезает. "
+                + "Пустая таблица чаще значит «нечего было прогонять через FA», а не «всё CONFLICT-нули».");
+
+        reasons.add("<strong>WATCH/BLOCK vs actionable view</strong> — paper и виджет дашборда смотрят на ENTER/REDUCE. "
+                + "Даже при непустой таблице actionable может быть 0, если все строки WATCH/BLOCK.");
+
+        reasons.add("<strong>FA blocked entries</strong> — news risk BLOCK/HIGH по ноге пары запрещает новый вход (halt, delisting, miss, SPO…). "
+                + "Такие пары видны как BLOCK в непустой таблице; при пустой — сначала нужна техника LONG/SHORT/WATCH.");
+
+        if (!reasons.isEmpty() && technical.isEmpty() && report != null && report.cointegratedPairs() == 0) {
+            reasons.add(0, "<strong>Нет коинтегрированных пар в последнем отчёте</strong> — FDR/p-value/качество не дали universe для сигналов.");
+        }
+
+        return reasons;
+    }
+
+    private String renderFinalWhyProse(List<FinalTradeRecommendation> rows, MarketRegimeSnapshot regime) {
+        Map<FinalTradeDecision, Long> counts = new EnumMap<>(FinalTradeDecision.class);
+        for (FinalTradeDecision d : FinalTradeDecision.values()) {
+            counts.put(d, 0L);
+        }
+        for (FinalTradeRecommendation f : rows) {
+            counts.merge(f.decision(), 1L, Long::sum);
+        }
+        long conflicts = rows.stream()
+                .filter(f -> f.decisionSummary() != null && f.decisionSummary().contains("CONFLICT"))
+                .count();
+        long faBlocked = rows.stream()
+                .filter(f -> f.decision() == FinalTradeDecision.BLOCK)
+                .count();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<p>Сводка по действиям: ");
+        sb.append("ENTER ").append(counts.get(FinalTradeDecision.ENTER));
+        sb.append(", REDUCE ").append(counts.get(FinalTradeDecision.REDUCE_SIZE));
+        sb.append(", WATCH ").append(counts.get(FinalTradeDecision.WATCH));
+        sb.append(", BLOCK ").append(counts.get(FinalTradeDecision.BLOCK));
+        sb.append(". Режим рынка: <strong>").append(escape(regime.label())).append("</strong>");
+        if (regime.blockEntries()) {
+            sb.append(" — новые paper-входы режет ADX даже при ENTER в таблице");
+        }
+        sb.append(".</p>");
+
+        sb.append("<ul>");
+        if (counts.get(FinalTradeDecision.ENTER) > 0) {
+            sb.append("<li><strong>ENTER</strong> — техника подтверждена, FA без жёстких блокеров; размер по слотам книги.</li>");
+        }
+        if (counts.get(FinalTradeDecision.REDUCE_SIZE) > 0) {
+            sb.append("<li><strong>REDUCE</strong> — caution / CONFLICT средней силы: вход только урезанным размером.</li>");
+        }
+        if (counts.get(FinalTradeDecision.WATCH) > 0) {
+            sb.append("<li><strong>WATCH</strong> — наблюдение: нет подтверждённого входа, режим, или мягкий FA.</li>");
+        }
+        if (faBlocked > 0) {
+            sb.append("<li><strong>BLOCK (").append(faBlocked).append(")</strong> — FA или структурный стоп; не открывать.</li>");
+        }
+        if (conflicts > 0) {
+            sb.append("<li><strong>CONFLICT-маркеры:</strong> ").append(conflicts)
+                    .append(" строк(и) с явным расхождением техники и фундамента — см. блок ниже.</li>");
+        } else {
+            sb.append("<li>Явных CONFLICT-строк в decisionSummary сейчас нет.</li>");
+        }
+        sb.append("</ul>");
+
+        // top blockers from news summaries / rationale
+        List<String> blockers = rows.stream()
+                .filter(f -> f.decision() == FinalTradeDecision.BLOCK
+                        || f.decision() == FinalTradeDecision.WATCH
+                        || f.decision() == FinalTradeDecision.REDUCE_SIZE)
+                .map(f -> {
+                    String tip = f.rationale() != null && !f.rationale().isBlank()
+                            ? f.rationale()
+                            : f.decisionSummary();
+                    return escape(f.tickerY() + "/" + f.tickerX() + " — " + tip);
+                })
+                .limit(5)
+                .toList();
+        if (!blockers.isEmpty()) {
+            sb.append("<p><strong>Топ пояснений (не ENTER):</strong></p><ul>");
+            for (String b : blockers) {
+                sb.append("<li>").append(b).append("</li>");
+            }
+            sb.append("</ul>");
+        }
+        return sb.toString();
+    }
+
+    private String renderFinalSummaryStrip(List<FinalTradeRecommendation> rows) {
+        long enter = rows.stream().filter(f -> f.decision() == FinalTradeDecision.ENTER).count();
+        long reduce = rows.stream().filter(f -> f.decision() == FinalTradeDecision.REDUCE_SIZE).count();
+        long watch = rows.stream().filter(f -> f.decision() == FinalTradeDecision.WATCH).count();
+        long block = rows.stream().filter(f -> f.decision() == FinalTradeDecision.BLOCK).count();
+        long conflicts = rows.stream()
+                .filter(f -> f.decisionSummary() != null && f.decisionSummary().contains("CONFLICT"))
+                .count();
+        return """
+                <div class="final-summary-strip meta">
+                  Строк: <strong>%d</strong>
+                  · ENTER <strong>%d</strong>
+                  · REDUCE <strong>%d</strong>
+                  · WATCH <strong>%d</strong>
+                  · BLOCK <strong>%d</strong>
+                  · CONFLICT-маркеров: <strong>%d</strong>
+                </div>
+                """.formatted(rows.size(), enter, reduce, watch, block, conflicts);
+    }
+
+    private String renderFinalRowProse(FinalTradeRecommendation f) {
+        StringBuilder sb = new StringBuilder();
+        if (f.rationale() != null && !f.rationale().isBlank()) {
+            sb.append("<div class=\"rationale meta\"><strong>Почему (кратко):</strong> ")
+                    .append(escape(f.rationale())).append("</div>");
+        }
+        if (f.beginnerGuide() != null && !f.beginnerGuide().isBlank()) {
+            sb.append("<details class=\"final-row-detail\">");
+            sb.append("<summary>Разбор для оператора</summary>");
+            sb.append("<div class=\"final-row-prose\">");
+            sb.append(nl2br(escape(enrichBeginnerGuideProse(f))));
+            sb.append("</div></details>");
+        } else {
+            sb.append("<div class=\"explain\">").append(nl2br(escape(f.news().summary())));
+            appendNewsHits(sb, f);
+            sb.append("</div>");
+        }
+        // always surface news hits if beginner guide path
+        if (f.beginnerGuide() != null && !f.beginnerGuide().isBlank()
+                && f.news() != null && !f.news().hits().isEmpty()) {
+            sb.append("<div class=\"explain final-news-hits\">");
+            appendNewsHits(sb, f);
+            sb.append("</div>");
+        }
+        return sb.toString();
+    }
+
+    private void appendNewsHits(StringBuilder sb, FinalTradeRecommendation f) {
+        if (f.news() == null || f.news().hits().isEmpty()) {
+            return;
+        }
+        sb.append("<br><br>");
+        int i = 0;
+        for (NewsTriggerHit hit : f.news().hits()) {
+            if (i++ >= 3) {
+                sb.append("…<br>");
+                break;
+            }
+            sb.append("• ").append(escape(hit.ticker())).append(": ")
+                    .append(escape(hit.title())).append("<br>");
+        }
+    }
+
+    /**
+     * Обогащает beginnerGuide спокойной прозой: lead + уже сохранённый разбор.
+     */
+    private String enrichBeginnerGuideProse(FinalTradeRecommendation f) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(switch (f.decision()) {
+            case ENTER -> "Ведущая мысль: вход разрешён после техники и FA — можно разбирать размер слота, не «покупать на эмоциях».";
+            case REDUCE_SIZE -> "Ведущая мысль: вход только уменьшенным размером — часто CONFLICT или caution по новостям.";
+            case WATCH -> "Ведущая мысль: пока наблюдаем — новой сделки нет, даже если Z выглядит «интересным».";
+            case BLOCK -> "Ведущая мысль: вход запрещён. Красивая техника не отменяет новостной/структурный стоп.";
+        });
+        sb.append("\n\n");
+        sb.append(f.beginnerGuide());
+        return sb.toString();
+    }
+
+    private String renderFinalNewsSection(RssHeadlineService.Snapshot rss) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<section class=\"final-news\" id=\"final-news\">");
+        sb.append("<h2>Новости (RSS) — контекст FA</h2>");
+        sb.append("<p class=\"final-news-lead\">Лента для слоя фундамента на <strong>DAILY</strong>: помогает понять фон, ")
+                .append("в котором FA мог выставить CONFLICT / BLOCK. ")
+                .append("<em>Это не торговый сигнал и не замена разбору пары.</em></p>");
+
+        if (!rss.enabled()) {
+            sb.append("<div class=\"final-news-placeholder\">");
+            sb.append("<p><strong>Новости (RSS) — подключается</strong></p>");
+            sb.append("<p class=\"meta\">").append(escape(rss.status())).append("</p>");
+            sb.append("<p class=\"meta\">Хук конфига: <code>imoex.news.rss-enabled</code>, ")
+                    .append("<code>rss-max-items</code>, <code>rss-feeds</code>.</p>");
+            sb.append("</div>");
+        } else if (rss.items().isEmpty()) {
+            sb.append("<div class=\"final-news-placeholder\">");
+            sb.append("<p>").append(escape(rss.status())).append("</p>");
+            sb.append("<p class=\"meta\">Кэш 15 мин · HTTP-таймаут ~5 с — страница не блокируется надолго.</p>");
+            sb.append("</div>");
+        } else {
+            sb.append("<p class=\"meta\">").append(escape(rss.status()));
+            if (rss.fetchedAt() != null) {
+                sb.append(" · обновлено ").append(escape(rss.fetchedAt().toString()));
+            }
+            sb.append("</p>");
+            sb.append("<div class=\"final-news-grid\">");
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM HH:mm");
+            for (RssHeadline h : rss.items()) {
+                sb.append("<article class=\"final-news-card\">");
+                sb.append("<div class=\"final-news-meta\">");
+                sb.append("<span class=\"final-news-source\">").append(escape(h.source())).append("</span>");
+                if (h.publishedAt() != null) {
+                    sb.append("<time>").append(escape(fmt.format(h.publishedAt()))).append("</time>");
+                }
+                sb.append("</div>");
+                if (h.url() != null && !h.url().isBlank()) {
+                    sb.append("<a class=\"final-news-title\" href=\"").append(escape(h.url()))
+                            .append("\" target=\"_blank\" rel=\"noopener noreferrer\">")
+                            .append(escape(h.title())).append("</a>");
+                } else {
+                    sb.append("<div class=\"final-news-title\">").append(escape(h.title())).append("</div>");
+                }
+                if (h.tickerHint() != null && !h.tickerHint().isBlank()) {
+                    sb.append("<div class=\"final-news-tickers\">").append(escape(h.tickerHint())).append("</div>");
+                }
+                sb.append("</article>");
+            }
+            sb.append("</div>");
+        }
+        sb.append("</section>");
+        return sb.toString();
+    }
+
+    private String decisionBadge(FinalTradeDecision decision) {
+        String css = switch (decision) {
+            case ENTER -> "badge enter";
+            case REDUCE_SIZE -> "badge reduce";
+            case WATCH -> "badge watch";
+            case BLOCK -> "badge block";
+        };
+        String label = switch (decision) {
+            case ENTER -> "ENTER";
+            case REDUCE_SIZE -> "REDUCE";
+            case WATCH -> "WATCH";
+            case BLOCK -> "BLOCK";
+        };
+        return "<span class=\"" + css + "\">" + label + "</span>";
+    }
+
+    private String newsBadge(String level) {
+        String css = switch (level) {
+            case "LOW" -> "badge news-low";
+            case "MEDIUM" -> "badge news-med";
+            case "HIGH" -> "badge news-high";
+            default -> "badge news-block";
+        };
+        return "<span class=\"" + css + "\">" + escape(level) + "</span>";
+    }
+
+    private String signalBadge(TradingSignal signal) {
+        String css = switch (signal) {
+            case LONG_SPREAD -> "badge long";
+            case SHORT_SPREAD -> "badge short";
+            case WATCH -> "badge watch";
+            case HOLD -> "badge hold";
+            case NO_SIGNAL -> "badge skip";
+        };
+        String label = switch (signal) {
+            case LONG_SPREAD -> "КУПИТЬ спред";
+            case SHORT_SPREAD -> "ПРОДАТЬ спред";
+            case WATCH -> "НАБЛЮДАТЬ";
+            case HOLD -> "ЖДАТЬ";
+            case NO_SIGNAL -> "ПРОПУСК";
+        };
+        return "<span class=\"" + css + "\">" + escape(label) + "</span>";
+    }
+
+    private String chartPageLink(String y, String x) {
+        String url = "/view/charts/" + escape(y) + "/" + escape(x);
+        return "<a href=\"" + url + "\" target=\"_blank\">График</a>";
+    }
+
+    private String nl2br(String text) {
+        return text.replace("\n", "<br>");
+    }
+
+    /**
+     * Statement hub: deposit rollup + per-strategy books (pairs / trend / arb).
+     */
+    public String renderPaperJournal(PaperJournal journal) {
+        return renderStatementHub(journal, List.of());
+    }
+
+    public String renderPaperJournal(
+            PaperJournal journal,
+            List<TradingRecommendation> dailyRecs
+    ) {
+        return renderStatementHub(journal, dailyRecs);
+    }
+
+    public String renderStatementHub(
+            PaperJournal journal,
+            List<TradingRecommendation> dailyRecs
+    ) {
+        if (journal == null) {
+            journal = new PaperJournal(null, List.of());
+        }
+        if (dailyRecs == null) {
+            dailyRecs = List.of();
+        }
+
+        List<PaperTradeEntry> allEntries = journal.entries() == null ? List.of() : journal.entries();
+        List<PaperTradeEntry> pairsEntries = allEntries.stream()
+                .filter(e -> e.book() == null || e.book().isBlank() || "DAILY".equalsIgnoreCase(e.book()))
+                .toList();
+        long pairsOpen = pairsEntries.stream().filter(e -> "OPEN".equals(e.status())).count();
+        double pairsRealized = pairsEntries.stream()
+                .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
+                .mapToDouble(PaperTradeEntry::pnlRub)
+                .sum();
+        double pairsUnrealized = pairsEntries.stream()
+                .filter(e -> "OPEN".equals(e.status()) && e.unrealizedPnlRub() != null)
+                .mapToDouble(PaperTradeEntry::unrealizedPnlRub)
+                .sum();
+
+        Map<String, Object> trendSt = Map.of();
+        List<Map<String, Object>> trendTrades = List.of();
+        if (productEdition.hasTrend() && trendPaperJournal.isPresent()) {
+            TrendPaperJournalService svc = trendPaperJournal.get();
+            trendSt = svc.statement();
+            trendTrades = svc.allTradeDtos();
+        }
+        double trendRealized = num(trendSt.get("realizedPnlRub"));
+        double trendToday = num(trendSt.get("todayPnlRub"));
+        int trendClosed = (int) num(trendSt.get("closedCount"));
+
+        Map<String, Object> arbSt = Map.of();
+        List<Map<String, Object>> arbTrades = List.of();
+        if (productEdition.hasArb() && calendarArbJournal.isPresent()) {
+            CalendarArbPaperJournalService svc = calendarArbJournal.get();
+            arbSt = svc.statement();
+            arbTrades = svc.allTradeDtos();
+        }
+        double arbRealized = num(arbSt.get("realizedPnlRub"));
+        double arbToday = num(arbSt.get("todayPnlRub"));
+        int arbClosed = (int) num(arbSt.get("closedCount"));
+
+        double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
+        double depositNet = pairsRealized + pairsUnrealized
+                + (productEdition.hasTrend() ? trendRealized : 0)
+                + (productEdition.hasArb() ? arbRealized : 0);
+
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <article class="statement-hub" id="statement-hub">
+                  <header class="statement-hub-head">
+                    <div class="statement-hub-top">
+                      <div>
+                        <p class="settings-eyebrow">Statement</p>
+                        <h2>Депозит и стратегии</h2>
+                        <p class="meta">Общий срез paper / research PnL по купленным стратегиям.
+                          На Trend desk над графиком — только сделки за сегодня.</p>
+                      </div>
+                      <button type="button" class="btn btn-primary" id="statement-export-pdf"
+                              title="Сохранить шапку и statement в PDF-файл">Сохранить PDF</button>
+                    </div>
+                  </header>
+                """);
+
+        body.append("<section class=\"statement-section\" id=\"deposit\">");
+        body.append("<h3>Депозит (общий)</h3>");
+        body.append("<div class=\"cards\">");
+        body.append(card("Equity", String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' '), false));
+        body.append(card("Pairs net", String.format("%.0f", pairsRealized + pairsUnrealized),
+                pairsRealized + pairsUnrealized >= 0));
+        if (productEdition.hasTrend()) {
+            body.append(card("Trend realized", String.format("%.0f", trendRealized), trendRealized >= 0));
+            body.append(card("Trend сегодня", String.format("%.0f", trendToday), trendToday >= 0));
+        } else {
+            body.append(card("Trend", "locked", false));
+        }
+        if (productEdition.hasArb()) {
+            body.append(card("Arb realized", String.format("%.0f", arbRealized), arbRealized >= 0));
+        } else {
+            body.append(card("Arb", "locked", false));
+        }
+        body.append(card("Net* (доступное)", String.format("%.0f", depositNet), depositNet >= 0));
+        body.append("</div></section>");
+
+        // Pairs
+        body.append("<section class=\"statement-section\" id=\"pairs\">");
+        body.append("<h3>① Коинтеграция · DAILY</h3>");
+        body.append(renderPairsStatementInner(pairsEntries, pairsOpen, pairsRealized, pairsUnrealized,
+                journal.updatedAt() == null ? null : journal.updatedAt().toString(), dailyRecs));
+        body.append("</section>");
+
+        // Trend
+        body.append("<section class=\"statement-section\" id=\"trend\">");
+        body.append("<h3>② Тренд · BR</h3>");
+        if (!productEdition.hasTrend()) {
+            body.append(statementLockedBlock("TREND"));
+        } else {
+            body.append("<div class=\"cards\">");
+            body.append(card("Closed", String.valueOf(trendClosed), false));
+            body.append(card("Wins/Losses",
+                    (int) num(trendSt.get("wins")) + "/" + (int) num(trendSt.get("losses")), false));
+            body.append(card("Realized ₽*", String.format("%.0f", trendRealized), trendRealized >= 0));
+            body.append(card("Сегодня ₽*", String.format("%.0f", trendToday), trendToday >= 0));
+            body.append(card("Instrument", String.valueOf(trendSt.getOrDefault("instrument", "BR")), false));
+            Object note = trendSt.get("note");
+            body.append("</div>");
+            if (note != null && !String.valueOf(note).isBlank()) {
+                body.append("<p class=\"meta\">").append(escape(String.valueOf(note))).append("</p>");
+            }
+            body.append("<p class=\"meta\"><a href=\"/view/trend-signal\">Открыть desk →</a> ")
+                    .append("(над графиком только сделки за сегодня)</p>");
+            if (trendTrades.isEmpty()) {
+                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — закрытых paper-сделок BR ещё нет.</p></div>");
+            } else {
+                body.append(renderTrendTradesByYear(trendTrades));
+            }
+        }
+        body.append("</section>");
+
+        // Arb
+        body.append("<section class=\"statement-section\" id=\"arb\">");
+        body.append("<h3>③ Календарный арбитраж</h3>");
+        if (!productEdition.hasArb()) {
+            body.append(statementLockedBlock("ARB"));
+        } else {
+            body.append("<div class=\"cards\">");
+            body.append(card("Closed", String.valueOf(arbClosed), false));
+            body.append(card("Wins/Losses",
+                    (int) num(arbSt.get("wins")) + "/" + (int) num(arbSt.get("losses")), false));
+            body.append(card("Realized ₽*", String.format("%.0f", arbRealized), arbRealized >= 0));
+            body.append(card("Сегодня ₽*", String.format("%.0f", arbToday), arbToday >= 0));
+            body.append("</div>");
+            body.append("<p class=\"meta\"><a href=\"/view/calendar-arb\">Открыть доску →</a> · котировки T-Invest</p>");
+            if (arbTrades.isEmpty()) {
+                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — закрытых calendar-спредов ещё нет.</p></div>");
+            } else {
+                body.append(renderTrendTradesByYear(arbTrades));
+            }
+        }
+        body.append("</section>");
+        body.append("</article>");
+        return page("TRINITY — Statement", body.toString(), nav("statement"));
+    }
+
+    private String renderTrendTradesByYear(List<Map<String, Object>> trendTrades) {
+        Map<String, List<Map<String, Object>>> byYear = new TreeMap<>((a, b) -> b.compareTo(a));
+        for (Map<String, Object> t : trendTrades) {
+            Object daySrc = t.get("closedAt") != null ? t.get("closedAt") : t.get("openedAt");
+            String year = yearOf(daySrc);
+            byYear.computeIfAbsent(year, k -> new ArrayList<>()).add(t);
+        }
+        StringBuilder body = new StringBuilder();
+        body.append("<p class=\"meta\">Сделки сгруппированы по году закрытия (от новых к старым).</p>");
+        for (Map.Entry<String, List<Map<String, Object>>> e : byYear.entrySet()) {
+            String year = e.getKey();
+            List<Map<String, Object>> rows = e.getValue();
+            double yearPnl = 0;
+            int w = 0;
+            int l = 0;
+            for (Map<String, Object> t : rows) {
+                double pnl = num(t.get("pnlRub"));
+                yearPnl += pnl;
+                if (pnl > 0) {
+                    w++;
+                } else if (pnl < 0) {
+                    l++;
+                }
+            }
+            body.append("<div class=\"statement-year\" id=\"trend-year-").append(escape(year)).append("\">");
+            body.append("<h4 class=\"statement-year-title\">").append(escape(year))
+                    .append(" · ").append(rows.size()).append(" сд. · ")
+                    .append(w).append("W/").append(l).append("L · ")
+                    .append(String.format(Locale.ROOT, "%+.0f ₽", yearPnl))
+                    .append("</h4>");
+            body.append("<div class=\"table-wrap statement-table-pager\" data-page-size=\"20\">");
+            body.append("<table><thead><tr>");
+            body.append("<th>Дата</th><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th>");
+            body.append("</tr></thead><tbody>");
+            for (Map<String, Object> t : rows) {
+                double pnl = num(t.get("pnlRub"));
+                String cls = pnl > 0 ? "is-buy" : (pnl < 0 ? "is-sell" : "");
+                Object daySrc = t.get("closedAt") != null ? t.get("closedAt") : t.get("openedAt");
+                body.append("<tr>");
+                body.append("<td>").append(escape(shortDate(daySrc))).append("</td>");
+                body.append("<td>").append(escape(shortIso(t.get("openedAt")))).append("</td>");
+                body.append("<td>").append(escape(shortIso(t.get("closedAt")))).append("</td>");
+                body.append("<td>").append(escape(String.valueOf(t.getOrDefault("side", "—")))).append("</td>");
+                body.append("<td>").append(escape(String.valueOf(t.getOrDefault("qty", "—")))).append("</td>");
+                body.append("<td>").append(escape(String.valueOf(t.getOrDefault("exitReason", "—")))).append("</td>");
+                body.append("<td class=\"").append(cls).append("\">")
+                        .append(String.format(Locale.ROOT, "%+.0f ₽", pnl)).append("</td>");
+                body.append("<td>").append(escape(String.valueOf(t.getOrDefault("tag", "—")))).append("</td>");
+                body.append("</tr>");
+            }
+            body.append("</tbody></table></div></div>");
+        }
+        return body.toString();
+    }
+
+    private static String yearOf(Object iso) {
+        if (iso == null) {
+            return "—";
+        }
+        String s = String.valueOf(iso).trim();
+        if (s.length() >= 4 && Character.isDigit(s.charAt(0))) {
+            return s.substring(0, 4);
+        }
+        return "—";
+    }
+
+    private String renderPairsStatementInner(
+            List<PaperTradeEntry> entries,
+            long open,
+            double realized,
+            double unrealized,
+            String updatedAt,
+            List<TradingRecommendation> dailyRecs
+    ) {
+        StringBuilder body = new StringBuilder();
+        long closed = entries.stream().filter(e -> "CLOSED".equals(e.status())).count();
+        double net = realized + unrealized;
+        body.append("<div class=\"cards\">");
+        body.append(card("Всего", String.valueOf(entries.size()), false));
+        body.append(card("OPEN", String.valueOf(open), false));
+        body.append(card("CLOSED", String.valueOf(closed), false));
+        body.append(card("Realized ₽*", String.format("%.0f", realized), realized >= 0));
+        body.append(card("Unrealized ₽*", String.format("%.0f", unrealized), unrealized >= 0));
+        body.append(card("Net ₽*", String.format("%.0f", net), net >= 0));
+        body.append(card("Обновлено", updatedAt == null ? "—" : updatedAt, false));
+        body.append("</div>");
+        if (entries.isEmpty()) {
+            body.append("<div class=\"callout\">");
+            body.append("<p><strong>Журнал пуст</strong> — нет paper-входов DAILY.</p>");
+            body.append("<ul><li>").append(bookDiag("DAILY", dailyRecs)).append("</li></ul>");
+            body.append("</div>");
+        } else {
+            body.append("<div class=\"table-wrap statement-table-pager\" data-page-size=\"20\">");
+            body.append("<table><thead><tr>");
+            body.append("<th>Статус</th><th>Пара</th><th>Сигнал</th><th>Decision</th>");
+            body.append("<th class=\"num\">Entry Z</th><th class=\"num\">Mark/Exit Z</th>");
+            body.append("<th class=\"num\">PnL ₽*</th><th>Opened</th><th>Closed</th><th></th>");
+            body.append("</tr></thead><tbody>");
+            for (PaperTradeEntry e : entries) {
+                Double markOrExit = e.exitZ() != null ? e.exitZ() : e.markZ();
+                Double rub = e.pnlRub() != null ? e.pnlRub() : e.unrealizedPnlRub();
+                body.append("<tr>");
+                body.append("<td>").append(escape(e.status())).append("</td>");
+                body.append("<td>").append(escape(e.tickerY())).append(" / ").append(escape(e.tickerX())).append("</td>");
+                body.append("<td>").append(signalBadge(e.signal())).append("</td>");
+                body.append("<td>").append(decisionBadge(e.decision())).append("</td>");
+                body.append("<td class=\"num\">").append(formatZ(e.entryZ())).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(markOrExit == null ? "—" : formatZ(markOrExit)).append("</td>");
+                body.append("<td class=\"num\">")
+                        .append(rub == null ? "—" : String.format("%.0f", rub)).append("</td>");
+                body.append("<td>").append(e.openedAt() == null ? "—" : escape(e.openedAt().toString())).append("</td>");
+                body.append("<td>").append(e.closedAt() == null ? "—" : escape(e.closedAt().toString())).append("</td>");
+                body.append("<td class=\"links\">").append(chartPageLink(e.tickerY(), e.tickerX())).append("</td>");
+                body.append("</tr>");
+            }
+            body.append("</tbody></table></div>");
+        }
+        return body.toString();
+    }
+
+    private String statementLockedBlock(String strategy) {
+        return """
+                <div class="statement-locked" data-strategy-lock="%s">
+                  <span class="strategy-lock-badge">Заблокировано</span>
+                  <p><strong>%s</strong></p>
+                  <p class="meta">%s</p>
+                  <div class="ops-row">
+                    <a class="btn btn-primary" href="%s">%s</a>
+                    <button type="button" class="btn btn-ghost" data-strategy-lock-open="%s">Подробнее</button>
+                  </div>
+                </div>
+                """.formatted(
+                escape(strategy),
+                escape(productEdition.lockTitle(strategy)),
+                escape(productEdition.lockBody(strategy)),
+                escape(productEdition.lockCtaHref(strategy)),
+                escape(productEdition.lockCtaLabel(strategy)),
+                escape(strategy)
+        );
+    }
+
+    private static double num(Object v) {
+        if (v instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (v == null) {
+            return 0;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(v));
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private static String shortIso(Object iso) {
+        if (iso == null) {
+            return "—";
+        }
+        String s = String.valueOf(iso);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("T(\\d{2}:\\d{2})").matcher(s);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return s.length() > 16 ? s.substring(0, 16) : s;
+    }
+
+    /** DD.MM.YYYY from ISO / offset datetime (trade day). */
+    private static String shortDate(Object iso) {
+        if (iso == null) {
+            return "—";
+        }
+        String s = String.valueOf(iso).trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(\\d{4})-(\\d{2})-(\\d{2})")
+                .matcher(s);
+        if (m.find()) {
+            return m.group(3) + "." + m.group(2) + "." + m.group(1);
+        }
+        return s.length() > 10 ? s.substring(0, 10) : s;
+    }
+
+    /**
+     * Walk-forward OOS отчёт.
+     */
+    public String renderWalkForward(WalkForwardReport report) {
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="hint">
+                  <strong>Walk-forward.</strong> Train → тест коинтеграции; test → Kalman/rolling-Z симуляция
+                  с commission + borrow. Смотрите median OOS Sharpe: in-sample лидеры часто не держатся.
+                </div>
+                """);
+        if (report == null || report.pairs() == null || report.pairs().isEmpty()) {
+            body.append("<p class=\"empty\">Нет walk-forward отчёта. Нажмите «Walk-forward» в <a href=\"/view/settings\">Настройках</a> или запустите полный анализ.</p>");
+            return page("Walk-forward", body.toString(), nav("walkforward"));
+        }
+
+        body.append("<div class=\"cards\">");
+        body.append(card("Дата", report.analysisDate().toString(), false));
+        body.append(card("Пар", String.valueOf(report.pairsEvaluated()), false));
+        body.append(card("Median OOS > 0", String.valueOf(report.pairsWithPositiveMedianOosSharpe()), true));
+        body.append(card("Mean median OOS", formatNum(report.meanMedianOosSharpe()), false));
+        body.append("</div>");
+
+        body.append("<div class=\"table-wrap\"><table><thead><tr>");
+        body.append("<th>Пара</th><th class=\"num\">Windows</th><th class=\"num\">Coint win</th>");
+        body.append("<th class=\"num\">Median OOS Sharpe</th><th class=\"num\">Mean OOS Sharpe</th>");
+        body.append("<th class=\"num\">Mean OOS DD</th><th class=\"num\">Mean OOS Ret</th><th></th>");
+        body.append("</tr></thead><tbody>");
+        for (WalkForwardReport.PairWalkForward p : report.pairs()) {
+            var s = p.summary();
+            body.append("<tr>");
+            body.append("<td>").append(escape(p.tickerY())).append(" / ").append(escape(p.tickerX())).append("</td>");
+            body.append("<td class=\"num\">").append(s.windows()).append("</td>");
+            body.append("<td class=\"num\">").append(s.cointegratedWindows()).append("</td>");
+            body.append("<td class=\"num\">").append(formatNum(s.medianOosSharpe())).append("</td>");
+            body.append("<td class=\"num\">").append(formatNum(s.meanOosSharpe())).append("</td>");
+            body.append("<td class=\"num\">").append(formatPct(s.meanOosMaxDrawdown())).append("</td>");
+            body.append("<td class=\"num\">").append(formatPct(s.meanOosReturn())).append("</td>");
+            body.append("<td class=\"links\">").append(chartPageLink(p.tickerY(), p.tickerX())).append("</td>");
+            body.append("</tr>");
+        }
+        body.append("</tbody></table></div>");
+        return page("Walk-forward OOS", body.toString(), nav("walkforward"));
+    }
+
+    private String card(String label, String value, boolean accent) {
+        return "<div class=\"card\"><span class=\"label\">" + escape(label)
+                + "</span><span class=\"value" + (accent ? " accent" : "") + "\">"
+                + escape(value) + "</span></div>";
+    }
+
+    private String nav(String active) {
+        String a = active == null ? "" : active;
+        boolean hasTrend = productEdition.hasTrend();
+        boolean hasArb = productEdition.hasArb();
+        String pageStrategy = navStrategyHint(a);
+        String pairsActive = "pairs".equals(pageStrategy) ? "active" : "";
+        String trendActive = "trend".equals(pageStrategy) ? "active" : "";
+        String arbActive = "arb".equals(pageStrategy) ? "active" : "";
+        String trendLock = hasTrend ? "" : " is-locked";
+        String arbLock = hasArb ? "" : " is-locked";
+        return """
+                <nav class="topnav topnav-hub" aria-label="Основное меню" data-page-strategy="%s">
+                  <div class="topnav-shared">
+                    <a href="/view" class="%s">Дашборд</a>
+                    <a href="/view/statement" class="%s">Statement</a>
+                    <a href="/view/settings" class="%s">Настройки</a>
+                    <a href="/view/guide" class="%s">Справка</a>
+                  </div>
+                  <div class="strategy-switch" role="tablist" aria-label="Стратегия">
+                    <button type="button" class="strategy-switch-btn %s" data-strategy="pairs"
+                            role="tab" aria-selected="%s">Коинтеграция</button>
+                    <button type="button" class="strategy-switch-btn %s%s" data-strategy="trend"
+                            data-locked="%s" role="tab" aria-selected="%s">Тренд</button>
+                    <button type="button" class="strategy-switch-btn %s%s" data-strategy="arb"
+                            data-locked="%s" role="tab" aria-selected="%s">Арбитраж</button>
+                  </div>
+                </nav>
+                <nav class="topnav-secondary" data-for="pairs" hidden>
+                  <a href="/view/final" class="%s">Итог + новости</a>
+                  <a href="/view/signals" class="%s">Сигналы</a>
+                  <a href="/view/recommendations" class="%s">Рекомендации</a>
+                  <a href="/view/walk-forward" class="%s">Walk-forward</a>
+                  <a href="/view/strategy" class="%s">Описание</a>
+                </nav>
+                <nav class="topnav-secondary" data-for="trend" hidden>
+                  <a href="/view/trend-signal" class="%s" data-requires="trend">Сигнал</a>
+                  <a href="/view/trend-charts" class="%s" data-requires="trend">Терминал графиков</a>
+                </nav>
+                <nav class="topnav-secondary" data-for="arb" hidden>
+                  <a href="/view/calendar-arb" class="%s" data-requires="arb">Календарный arb</a>
+                  <a href="/view/full-core" class="%s">Full Core</a>
+                </nav>
+                """.formatted(
+                escape(pageStrategy),
+                a.equals("dashboard") ? "active" : "",
+                a.equals("statement") || a.equals("paper") ? "active" : "",
+                a.equals("settings") ? "active" : "",
+                a.equals("guide") ? "active" : "",
+                pairsActive,
+                pairsActive.isEmpty() ? "false" : "true",
+                trendActive, trendLock, hasTrend ? "false" : "true",
+                trendActive.isEmpty() ? "false" : "true",
+                arbActive, arbLock, hasArb ? "false" : "true",
+                arbActive.isEmpty() ? "false" : "true",
+                a.equals("final") ? "active" : "",
+                a.equals("signals") ? "active" : "",
+                a.equals("recommendations") ? "active" : "",
+                a.equals("walkforward") ? "active" : "",
+                a.equals("strategy") ? "active" : "",
+                a.equals("trend-signal") ? "active" : "",
+                a.equals("trend-charts") ? "active" : "",
+                a.equals("calendar-arb") ? "active" : "",
+                a.equals("fullcore") ? "active" : ""
+        );
+    }
+
+    private static boolean isPairsNav(String a) {
+        return a.equals("final") || a.equals("signals") || a.equals("recommendations")
+                || a.equals("walkforward") || a.equals("strategy");
+    }
+
+    private static boolean isTrendNav(String a) {
+        return a.equals("trend-signal") || a.equals("trend-charts");
+    }
+
+    private static boolean isArbNav(String a) {
+        return a.equals("fullcore") || a.equals("calendar-arb");
+    }
+
+    private String navStrategyHint(String active) {
+        String a = active == null ? "" : active;
+        if (isPairsNav(a)) {
+            return "pairs";
+        }
+        if (isTrendNav(a)) {
+            return "trend";
+        }
+        if (isArbNav(a)) {
+            return "arb";
+        }
+        return "";
+    }
+
+
+    private String loadClasspathUtf8(String resource) {
+        try (var in = AnalysisHtmlRenderer.class.getClassLoader().getResourceAsStream(resource)) {
+            if (in == null) {
+                return "<p class=\"meta\">Не найден ресурс " + escape(resource) + "</p>";
+            }
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            return "<p class=\"meta\">Ошибка загрузки " + escape(resource) + ": "
+                    + escape(String.valueOf(ex.getMessage())) + "</p>";
+        }
+    }
+
+    private String page(String title, String body, String nav) {
+        return page(title, body, nav, OpsMode.COMPACT);
+    }
+
+    private String page(String title, String body, String nav, OpsMode opsMode) {
+        UpsellAccess access = upsellService != null ? upsellService.access() : null;
+        String upsellAttr = (access != null && access.enabled()) ? "on" : "off";
+        String phase = access != null ? access.phase() : "OFF";
+        ProductEdition edition = productEdition.current();
+        String navStrategy = "";
+        if (nav != null) {
+            int idx = nav.indexOf("data-page-strategy=\"");
+            if (idx >= 0) {
+                int start = idx + "data-page-strategy=\"".length();
+                int end = nav.indexOf('"', start);
+                if (end > start) {
+                    navStrategy = nav.substring(start, end);
+                }
+            }
+        }
+        return PAGE_TEMPLATE
+                .replace("{{TITLE}}", escape(title))
+                .replace("{{UPSELL}}", upsellAttr)
+                .replace("{{UPSELL_PHASE}}", escape(phase))
+                .replace("{{EDITION}}", edition.name())
+                .replace("{{HAS_TREND}}", productEdition.hasTrend() ? "1" : "0")
+                .replace("{{HAS_ARB}}", productEdition.hasArb() ? "1" : "0")
+                .replace("{{NAV_STRATEGY}}", navStrategy)
+                .replace("{{NAV}}", nav)
+                .replace("{{OPS}}", opsHtml(opsMode))
+                .replace("{{BODY}}", body);
+    }
+
+    private String formatZ(double z) {
+        return z >= 0 ? String.format("+%.2f", z) : String.format("%.2f", z);
+    }
+
+    private String formatNum(double v) {
+        return Double.isNaN(v) ? "—" : String.format("%.2f", v);
+    }
+
+    private String formatPct(double v) {
+        return Double.isNaN(v) ? "—" : String.format("%.1f%%", v * 100);
+    }
+
+    private static String bookDiag(String book, List<TradingRecommendation> recs) {
+        if (recs == null || recs.isEmpty()) {
+            return "<strong>" + book + "</strong>: нет технических рекомендаций (книга не прогонялась или нет коинтеграции)";
+        }
+        long actionable = recs.stream()
+                .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
+                .count();
+        long watch = recs.stream().filter(r -> r.signal() == TradingSignal.WATCH).count();
+        double maxZ = recs.stream().mapToDouble(r -> Math.abs(r.currentZScore())).max().orElse(0);
+        String top = recs.stream()
+                .max(java.util.Comparator.comparingDouble(r -> Math.abs(r.currentZScore())))
+                .map(r -> r.tickerY() + "/" + r.tickerX() + " " + r.signal() + " |Z|=" + String.format("%.2f", Math.abs(r.currentZScore())))
+                .orElse("—");
+        return String.format(
+                "<strong>%s</strong>: пар %d, LONG/SHORT %d, WATCH %d, max |Z|=%.2f; лидер: %s",
+                book, recs.size(), actionable, watch, maxZ, top
+        );
+    }
+
+    /**
+     * Gated Full Core preview page — value copy + soft CTA; no fabricated PnL.
+     * feature: options | calendar-arb | trend | (blank = overview)
+     */
+    public String renderFullCore(String feature) {
+        UpsellAccess access = upsellService.access();
+        String key = feature == null ? "" : feature.trim().toLowerCase(Locale.ROOT);
+        String title;
+        String previewTitle;
+        String previewBody;
+        String earlyNote;
+        switch (key) {
+            case "options" -> {
+                title = "Отчёт по опционам";
+                previewTitle = "Опционный research-слой";
+                previewBody = "Сводка по опционам на акции/фьючерсы: структура экспозиции, события и risk notes. "
+                        + "Модуль в дорожной карте — это preview макета, не live-расчёт и не обещание доходности.";
+                earlyNote = "Опционы — дальше трёх столпов TRINITY; early access для клиентов полного Core.";
+            }
+            case "calendar-arb", "arb" -> {
+                title = "Календарный арбитраж";
+                previewTitle = "Доска calendar spread (фьючерсы)";
+                previewBody = "Near/next FORTS, z-спред, paper fills. Котировки только T-Invest (H1 + last), "
+                        + "без ISS. Живые двухногие заявки пока выкл.";
+                earlyNote = "Desk: /view/calendar-arb · sandbox fair-paper.";
+            }
+            case "trend" -> {
+                title = "Trend desk";
+                previewTitle = "Трендовый стол (strategy 2)";
+                previewBody = "Breakout / regime desk поверх microstructure-задела. Не включён в live paper pairs — "
+                        + "roadmap #2. Preview без fabricated метрик.";
+                earlyNote = "Strategy 2 в разработке — early access / preorder для клиентов полного Core.";
+            }
+            default -> {
+                title = "Full Core";
+                previewTitle = "Полный Core — research-контур";
+                previewBody = "Локальный candle-архив, deep replay, calendar arbitrage и trend desk. "
+                        + "Ниже — честные locked-preview модулей: видно ценность, действие заблокировано "
+                        + "вне trial / подписки. Research / decision-support.";
+                earlyNote = "Инвестиция в следующие стратегии бренда, не в «уже готовый» live-модуль.";
+            }
+        }
+
+        boolean locked = access.locksVisible();
+        String statusLine;
+        if (!access.enabled()) {
+            statusLine = "Upsell выключен в конфиге.";
+        } else if (access.hasFullCoreAccess()) {
+            statusLine = "Full Core trial · осталось "
+                    + (access.daysRemaining() == null ? "—" : access.daysRemaining()) + " дн. "
+                    + "Модули ниже — early access / в разработке.";
+        } else if ("EXPIRED".equals(access.phase())) {
+            statusLine = "Trial закончился. Модули заблокированы — доступны в полном Core.";
+        } else {
+            statusLine = "Доступно в полном Core.";
+        }
+
+        String lockClass = locked ? "full-core-preview is-locked" : "full-core-preview is-trial";
+        String badge = locked
+                ? "<span class=\"full-core-badge\">Доступно в полном Core</span>"
+                : "<span class=\"full-core-badge full-core-badge--trial\">Full Core trial</span>";
+
+        String body = """
+                <article class="strategy-doc full-core-page" id="full-core">
+                  <p class="settings-eyebrow">TRINITY · коммерческий контур</p>
+                  <h2>%s</h2>
+                  <p class="lead">%s</p>
+                  %s
+                  <section class="%s" aria-label="Превью модуля">
+                    %s
+                    <h3>%s</h3>
+                    <p>%s</p>
+                    <div class="full-core-mock" aria-hidden="true">
+                      <div class="full-core-mock-row"><span>Сводка</span><span class="muted">preview</span></div>
+                      <div class="full-core-mock-row"><span>Сигналы / board</span><span class="muted">заблокировано</span></div>
+                      <div class="full-core-mock-row"><span>Действие</span><span class="muted">нет live-исполнения</span></div>
+                    </div>
+                    <p class="meta">%s</p>
+                  </section>
+                  %s
+                  <p class="meta"><a href="/view">← К дашборду</a> · <a href="/view/strategy#core-roadmap">Roadmap</a></p>
+                </article>
+                """.formatted(
+                escape(title),
+                escape(statusLine),
+                tierLadderHtml(access),
+                lockClass,
+                badge,
+                escape(previewTitle),
+                escape(previewBody),
+                escape(earlyNote),
+                softCtaBlock(access)
+        );
+        return page("TRINITY — " + title, body, nav("fullcore"), OpsMode.NONE);
+    }
+
+    private UpsellAccess accessOrOff() {
+        return upsellService != null ? upsellService.access()
+                : new UpsellAccess(false, false, "OFF", null, null, null, 5000, 7500, 15000);
+    }
+
+    private String formatPrice(int rub) {
+        return UpsellService.formatRub(rub);
+    }
+
+    private String trialBanner() {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled()) {
+            return "";
+        }
+        if (access.hasFullCoreAccess()) {
+            int days = access.daysRemaining() == null ? 0 : access.daysRemaining();
+            return """
+                    <aside class="trial-banner" role="status">
+                      <span class="full-core-badge full-core-badge--trial">Full Core trial</span>
+                      <p>Осталось <strong>%d</strong> дн. Locked-preview модули открыты как early access (в разработке).</p>
+                      <a href="/view/full-core">Обзор Full Core</a>
+                    </aside>
+                    """.formatted(days);
+        }
+        if ("EXPIRED".equals(access.phase())) {
+            return """
+                    <aside class="trial-banner trial-banner--expired" role="status">
+                      <span class="full-core-badge">Доступно в полном Core</span>
+                      <p>Trial закончился. Ниже — честные превью модулей без fake PnL.</p>
+                      <a href="/view/full-core">Открыть превью</a>
+                    </aside>
+                    """;
+        }
+        return "";
+    }
+
+    private String dashboardFullCoreTeasers() {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled()) {
+            return "";
+        }
+        boolean locked = access.locksVisible();
+        String badge = locked
+                ? "<span class=\"full-core-badge\">Доступно в полном Core</span>"
+                : "<span class=\"full-core-badge full-core-badge--trial\">trial</span>";
+        return """
+                <section class="dash-section full-core-teasers" id="full-core-teasers" aria-label="Full Core превью">
+                  <div class="full-core-teasers-head">
+                    <h2>Full Core</h2>
+                    %s
+                  </div>
+                  <p class="meta">
+                    Locked-preview: видно ценность модуля, действие заблокировано вне trial.
+                    Research / decision-support — без обещания доходности.
+                  </p>
+                  <div class="locked-teaser-grid">
+                    %s
+                    %s
+                    %s
+                  </div>
+                </section>
+                """.formatted(
+                badge,
+                lockedTeaserLink(
+                        "Посмотреть отчёт по опционам",
+                        "Макет опционного research-слоя",
+                        "/view/full-core?feature=options",
+                        locked
+                ),
+                lockedTeaserLink(
+                        "Доска календарного арбитража",
+                        "Strategy 3 · futures calendar",
+                        "/view/full-core?feature=calendar-arb",
+                        locked
+                ),
+                lockedTeaserLink(
+                        "Trend desk",
+                        "Strategy 2 · roadmap",
+                        "/view/full-core?feature=trend",
+                        locked
+                )
+        );
+    }
+
+    private String lockedTeaserLink(String label, String hint, String href, boolean locked) {
+        String cls = locked ? "locked-teaser is-locked" : "locked-teaser is-trial";
+        String lock = locked ? "<span class=\"locked-teaser-lock\" aria-hidden=\"true\"></span>" : "";
+        return """
+                <a class="%s" href="%s" data-core-upsell="teaser">
+                  %s
+                  <strong>%s</strong>
+                  <span class="locked-teaser-hint">%s</span>
+                </a>
+                """.formatted(cls, escape(href), lock, escape(label), escape(hint));
+    }
+
+    private String fullCoreBadge(String featureKey) {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled() || access.hasFullCoreAccess()) {
+            return "";
+        }
+        String tip = "Full Core · " + formatPrice(access.fullPriceRub())
+                + " ₽/мес. Календарный арбитраж / deep research. Research / decision-support.";
+        return "<a class=\"full-core-badge\" href=\"/view/full-core?feature="
+                + escape(featureKey == null ? "" : featureKey)
+                + "\" title=\"" + escape(tip) + "\" data-core-upsell=\""
+                + escape(featureKey == null ? "full-core" : featureKey)
+                + "\">Доступно в полном Core</a>";
+    }
+
+    private String coreRoadmapBlock() {
+        UpsellAccess access = accessOrOff();
+        if (!access.enabled()) {
+            return "";
+        }
+        return """
+                <aside class="core-teaser" id="core-roadmap" data-core-upsell="full-core">
+                  <span class="full-core-badge">Доступно в полном Core</span>
+                  <div class="core-teaser-copy">
+                    <strong>Roadmap #2 Trend · #3 Calendar arb</strong>
+                    <p>
+                      #2 — робот «Уровни + профиль» (BR M5) в sandbox/journal; live FORTS за флагом.
+                      #3 calendar arb — early access / preorder Full Core.
+                      Research / decision-support до OOS; без обещания доходности.
+                    </p>
+                  </div>
+                  %s
+                  <p class="meta"><a href="/view/full-core">Открыть превью Full Core</a></p>
+                </aside>
+                """.formatted(tierLadderHtml(access));
+    }
+
+    private String tierLadderHtml(UpsellAccess access) {
+        if (access == null || !access.enabled()) {
+            return "";
+        }
+        return """
+                <ul class="tier-ladder" aria-label="Тарифная лестница">
+                  <li><span class="tier-name">Обзор</span><span class="tier-price">%s ₽</span></li>
+                  <li><span class="tier-name">Оператор</span><span class="tier-price">%s ₽</span></li>
+                  <li class="is-anchor"><span class="tier-name">Full Core</span><span class="tier-price">%s ₽</span></li>
+                </ul>
+                """.formatted(
+                formatPrice(access.overviewPriceRub()),
+                formatPrice(access.operatorPriceRub()),
+                formatPrice(access.fullPriceRub())
+        );
+    }
+
+    private String softCtaBlock(UpsellAccess access) {
+        if (access == null || !access.enabled()) {
+            return "";
+        }
+        if (access.hasFullCoreAccess()) {
+            return """
+                    <div class="full-core-cta">
+                      <p>Сейчас у вас reverse trial полного Core. Модули #2/#3 — early access, код live pairs не подменяется.</p>
+                    </div>
+                    """;
+        }
+        return """
+                <div class="full-core-cta">
+                  <p>
+                    Полный Core — <strong>%s ₽/мес</strong>
+                    (якорь относительно Оператора %s ₽). Мягкий CTA, без биллинга в этом scaffold.
+                  </p>
+                  <div class="ops-actions">
+                    <a class="btn btn-primary" href="/view/strategy#core-roadmap">Early access / roadmap</a>
+                    <button type="button" class="btn btn-ghost" data-core-upsell="cta" id="full-core-soft-cta">Подробнее</button>
+                  </div>
+                </div>
+                """.formatted(formatPrice(access.fullPriceRub()), formatPrice(access.operatorPriceRub()));
+    }
+
+    private String escape(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
+    }
+}

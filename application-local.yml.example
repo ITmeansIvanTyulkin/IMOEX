@@ -1,0 +1,12 @@
+# Скопируйте в application-local.yml (он в .gitignore) и заполните своими значениями.
+# Нужно только операторскому trinity-app (рядом должен быть ../IMOEX-core).
+# Публичные Кости: mvn -pl trinity-shell -am spring-boot:run — unlock не нужен.
+# imoex.run.unlock — локальный секрет, не замена закрытого ядра.
+
+imoex:
+  run:
+    unlock: "paste-your-private-unlock-here"
+  auth:
+    enabled: true
+    username: imoex
+    password: "paste-strong-password-here"

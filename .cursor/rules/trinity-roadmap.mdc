@@ -1,0 +1,131 @@
+---
+description: TRINITY product roadmap and development order
+alwaysApply: true
+---
+
+# TRINITY roadmap
+
+Three strategies under one brand. Do not jump ahead without completing the current stage.
+
+## Product shape
+
+1. **Cointegration / pairs** — active now (DAILY live; INTRADAY research-only).
+2. **Trend** — playbook #1 robot «Уровни + профиль» (BR M5) in `trinity-trend`; sandbox/journal first (`live-execution=false`). Full Core early access framing in UI until OOS.
+3. **Arbitrage** — futures calendar (near/next) in `trinity-calendar-arb`; **T-Invest quotes only** (no ISS); sandbox fair-paper (`live-execution=false` = no two-leg broker orders yet). Oil/energy *equities* stay out of pairs.
+4. **Volume intelligence / ATAS-class desk** — roadmap / ideas (not a 4th live strategy): embedded volume profile + candle profile + journal/OOS analogs + entry-probability layer so the operator can **manually** place broker orders without buying ATAS / TensorCharts-class terminals. Decision-support only. Module scaffold: `trinity-marketdata` (live DOM/trades feed contour; default off).
+
+Options — further deferred beyond the pillars; locked preview only in commercial UI.
+
+## Ideas backlog (deferred product bets)
+
+Keep here so we do not lose commercial/research bets. **Do not implement until the gate for that item says so.**
+
+- **#4 Volume desk (ATAS→probability)** — see section below; substitute for buying external volume terminals when user refuses autotrade and wants filtered entries → manual broker. Code: `trinity-marketdata` (feed SPI; stream later).
+- **DOM depth / «стены» в стакане (trend #1 + #2 EXT)** — see «Deferred: DOM depth» below. Additive filter near entry shelves only; never a price predictor; journal+OOS before wiring into arms.
+- Delivery Instance vs Core (лёгкий браузер vs локальный архив) + Core updater — autumn–winter 2026. **Не путать с осью IP** (Кости vs ядро) — она уже начата.
+- Soft commercial upsell / reverse trial — scaffolding OK; no real billing yet.
+- Options module — after pillars; locked preview only.
+- Trend desk drawing-tools polish (SVG trendline / VAP / footprint UX) — deferred polish, not a product pillar.
+
+## IP: публичные Кости vs закрытое ядро (сейчас)
+
+Не delivery Instance/Core и не тариф. Публичный git IMOEX = оболочка (`trinity-shell` + UI/SPI). Торговое ядро — соседний репозиторий `IMOEX-core` (`trinity-trend` / `trinity-pairs` / `trinity-calendar-arb`), не в публичном clone. Unlock = ядро на classpath. `IMOEX_UNLOCK` — только локальный секрет. Чек-листы #1/#2 уезжают в ядро целиком. GitHub IMOEX остаётся публичным.
+
+## Strategy 1 — current scope
+
+Mean-reversion on cointegrated IMOEX pairs, **sideways only** (ADX blocks TREND).
+
+Target operator profile: equity **from ~100 000 ₽**, capital on **DAILY** (no leverage below 1M).
+
+1. **Multi-day / DAILY book** — live paper; FA after tech; monthly cluster review (sector cash PnL/PF); metals focus; **OIL_GAS out of pairs**.
+2. **Intraday / INTRADAY book** — **research only** (1H EG/Z/metrics, no paper opens). Re-enable trading only after OOS validation.
+
+Pipeline DAILY: **tech → cluster gate → FA → final recommendations → paper**. Never open DAILY paper before FA.
+
+Do not treat INTRADAY pairs as a second live book while research-only. Trend #1/#2 and calendar-arb are in sandbox/journal (`live-execution=false`); quotes for trend/arb come from T-Invest, not ISS.
+
+## Config intent (pairs)
+
+- Caps from `CapitalAllocator` (default: DAILY 100%, INTRADAY 0%).
+- `imoex.cluster-review.*` — monthly sector eligibility (net>0, PF≥1.1).
+- Prefer honest cash PnL and regime discipline over optimistic in-sample Sharpe.
+
+## Product truth
+
+- Research / decision-support, not auto-execution.
+
+## Deferred: Delivery Instance vs Core (autumn–winter 2026)
+
+Inspired by TestOps-style split. **Delivery profile only** — not the IP Bones/kernel split (that lives in `IMOEX-core` now). Do not implement the full *delivery* split yet. Two *delivery* profiles later (config flags) inside the operator binary; updater is a Core-profile concern.
+
+- **Instance (delivery)** — light/cheaper browser profile: ephemeral candles (re-download, no long archive), lighter features, cheaper subscription; paper/sandbox oriented; trust/demo for clients.
+- **Core (delivery)** — downloadable/local fuller profile: persistent candle archive, research/replay/walk-forward friendly; operator journals stay local.
+- Useful diffs later: secrets locality; cron/alerts depth; cluster-review export/history; INTRADAY depth; live broker only in Core delivery.
+- Gate: defer **delivery** to **autumn–winter 2026**. IP kernel split is already in progress (`docs/BONES_AND_CORE.md`).
+
+### Pricing draft (autumn–winter 2026)
+
+Draft + soft UI scaffolding in `imoex.upsell.*` (no billing). Delivery (Instance vs Core) ≠ price tier. Full Core tier → Core delivery + strategy 3 (arbitrage) module; strategy 2 (trend) early access on Full Core.
+
+Monthly RUB draft (ladder — **15 000 is the premium anchor** so 7 500 reads as the operator deal):
+
+- **5 000 — Обзор**: Instance; dashboard / signals / paper summary; без глубокого candle-архива; paper/sandbox; без walk-forward; без trend / arbitrage.
+- **7 500 — Оператор**: полный DAILY pairs pipeline + paper / alerts / sandbox; ограниченная история / export; **только pairs** (strategy 1).
+- **15 000 — Research / Full Core** (commercial target): локальный candle-архив, replay / WF, INTRADAY research depth, Core desktop; **открывает strategy 3 — arbitrage** (futures calendar) + early access / preorder for strategy 2 (trend). Options — позже / locked preview only.
+
+Commercial UX scaffolding (implement soft UI now; no real billing):
+
+- **Locked feature previews** — dashboard teasers → `/view/full-core?feature=…` value page («Доступно в полном Core»), no fake PnL.
+- **Reverse trial** — `imoex.upsell.reverse-trial-days` (default 14): trial → hide hard locks; expired → locks + upsell. Local sim: `simulate-trial-*` or `POST /api/upsell/trial?action=expire|start|reset`.
+- **Early access / preorder** copy for strategies #2/#3 on Full Core / strategy roadmap — investment-in-future framing.
+
+Pairs in lower tiers; trend + arb gated (Full Core). Calendar-arb coding is started (sandbox, broker data); live two-leg orders still gated.
+
+### Core updates (desktop installs)
+
+Still deferred to **autumn–winter 2026** — do not implement now. Prefer one codebase; updater is a delivery concern for the Core profile only.
+
+- **Instance** — updates server-side; users always on latest.
+- **Core** (e.g. Windows exe) — data/journals/candles live outside the app dir (e.g. AppData) and must survive upgrades.
+- **Phase 1 (MVP)** — version check + manual download/reinstall.
+- **Phase 2 (later)** — in-app banner / optional auto-updater (WiX/Squirrel/MSIX/jpackage+updater), code signing, stable/beta channels, semver in About.
+
+## Deferred: #4 Volume intelligence / ATAS-class desk (autumn 2026+)
+
+**Commercial why:** if the user does **not** want auto-execution, they still should not need to buy ATAS / «профиль свечи» competitors. TRINITY already filters pairs → regime → FA; add volume/profile + historical analogs + an honest probability layer so they open the broker and place orders themselves. Research / decision-support — not a black-box bot.
+
+Beyond mechanical volume filters (ATAS-like) toward TensorCharts-style pattern finding — combinations of volume, delta, and price that precede successful spread mean-reversion.
+
+### Scope to ship later (in order)
+
+1. **Candle / volume profile on each bar** — scan POC/VA/clusters (and related ATAS-class cues) on the active leg/spread context; surface on dashboard cards / final explain.
+2. **Patterns vs journal / OOS** — compare the current setup to labeled historical analogs from paper journal and OOS replays (tabular features first).
+3. **Entry probability layer** — extra score **on top of** pairs stats (Z, quality, FA, regime), with plain-language why; never silent override of risk gates.
+4. Only later: heavier sequence / pattern ML if (1)–(3) prove OOS lift.
+
+Sequencing: (1) labeled journal / features from paper / OOS → (2) simple tabular models → (3) only later heavy sequence / pattern ML.
+
+Honest constraints: needs data + OOS; Cursor IDE ≠ training compute; research / decision-support — not black-box autotrade claims. Mechanical microstructure already in pairs INTRADAY research; this item is the **deeper** desk + probability product.
+
+- Gate: after DAILY pairs paper validation; **do not start now**.
+- Fits strategy 1 first; later can filter trend (#2) / arb (#3).
+- Full Core / Оператор framing: «отфильтрованный вход в TRINITY → заявки у брокера вручную».
+
+## Deferred: DOM depth / walls near shelves (trend #1 + #2 EXT)
+
+**Why:** operator asked whether deep book (large resting limits) can hint next move for playbooks #1 (BR M5) and #2 (positional H1). Useful as **context near the entry zone**, not as a black-box price forecast.
+
+**Honest constraints**
+- Large walls are often **pulled** before the impulse — «big size in book → price goes there» frequently lies.
+- FORTS books (BR/RI/…) are noisy; evening session worse.
+- Product truth: research / decision-support — UI copy = «давление в стакане», never «цена пойдёт сюда».
+- Checklist fidelity: **EXTENSION only** — must not flip side or veto valid Exclusive / positional core entries without an explicit research kill-switch. Prefer filter size / wait / soft score.
+
+**Scope when gated**
+1. Score only **at the armed shelf** (#1 zone / #2 intermediate HVN), not whole-book direction.
+2. Signals: wall with-us / against-us, wall pull, tape absorb vs rest — soft filter or size tilt.
+3. Journal labels + OOS first: did DOM help cut false arms? No wire into live/paper arms without lift evidence.
+4. Reuse `trinity-marketdata` DOM (`DomBook` / feed); #1 already has soft `domSoftBonus` — deepen carefully; #2 almost unused today.
+5. Fits under #4 Volume desk later; can ship a thin EXT earlier **after** DAILY pairs paper/OOS and after trend #1/#2 OOS journals are honest.
+
+**Gate:** do **not** start now. Current focus: DAILY pairs validation + trend fair-paper/OOS, not new microstructure predictors.

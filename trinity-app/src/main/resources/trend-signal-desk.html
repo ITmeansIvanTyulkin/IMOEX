@@ -1,0 +1,373 @@
+<section class="signal-desk" id="trend-signal-desk">
+  <div class="signal-desk-head">
+    <div>
+      <p class="meta"><a href="/view">← дашборд</a></p>
+      <h2>Сигнал · Trend</h2>
+      <p class="meta" id="signal-desk-meta">Загрузка desk…</p>
+      <div class="us-oil-banner" id="us-oil-banner" role="status">
+        <strong>Американская нефть (CL / WTI)</strong>
+        <p id="us-oil-banner-text">Ночной ход CL часто уже сидит в утреннем гэпе BR.
+          Exclusive: BOT = покупка, TOP = продажа — CL сторону не переворачивает, только контекст открытия.</p>
+      </div>
+    </div>
+    <div class="signal-desk-actions">
+      <label class="check-label signal-follow-label">
+        <input type="checkbox" id="signal-desk-follow" checked>
+        Следить за свечой
+      </label>
+      <label class="check-label signal-follow-label">
+        <input type="checkbox" id="signal-desk-volume">
+        Объём M5
+      </label>
+      <button type="button" class="btn btn-ghost is-active" id="signal-desk-pad"
+              title="Отступ справа: текущая свеча не лепится к краю шкалы"
+              aria-pressed="true">Автоотступ</button>
+      <button type="button" class="btn btn-ghost" id="signal-desk-fit">Весь график</button>
+      <button type="button" class="btn btn-ghost" id="signal-desk-refresh">Обновить</button>
+      <a class="btn btn-ghost" href="/view/settings#trend-playbook-settings">Режим</a>
+    </div>
+  </div>
+  <div class="signal-desk-strip" id="signal-desk-strip">
+    <div class="signal-chip signal-chip-select">
+      <span class="k">Плейбук</span>
+      <label class="signal-select-wrap">
+        <select id="sig-playbook" aria-label="Активный playbook"></select>
+      </label>
+    </div>
+    <div class="signal-chip signal-chip-select">
+      <span class="k">Инструмент</span>
+      <label class="signal-select-wrap">
+        <select id="sig-instrument" aria-label="Инструмент робота"></select>
+      </label>
+    </div>
+    <div class="signal-chip"><span class="k">Delivery</span><strong id="sig-delivery">—</strong></div>
+    <div class="signal-chip"><span class="k">Side</span><strong id="sig-side">—</strong></div>
+    <div class="signal-chip"><span class="k">Mode</span><strong id="sig-mode">—</strong></div>
+    <div class="signal-chip"><span class="k">Потенциал TP1</span><strong id="sig-potential">—</strong></div>
+    <div class="signal-chip"><span class="k">Paper сегодня</span><strong id="sig-paper-today">—</strong></div>
+    <div class="signal-chip"><span class="k">Statement</span>
+      <strong><a id="sig-paper-total" href="/view/statement#trend">—</a></strong>
+    </div>
+  </div>
+  <div class="signal-paper-panel" id="signal-paper-panel" hidden>
+    <p class="signal-brief-title" id="signal-paper-title">Сделки сегодня</p>
+    <p class="meta" id="signal-paper-meta">—</p>
+    <table class="signal-paper-table">
+      <thead><tr><th>Дата</th><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th></tr></thead>
+      <tbody id="signal-paper-body"></tbody>
+    </table>
+  </div>
+  <div class="signal-desk-grid">
+    <div class="signal-chart-wrap">
+      <div class="signal-chart-bar">
+        <p class="signal-chart-bar-label" id="signal-chart-label">График</p>
+        <button type="button" class="btn btn-ghost signal-guide-btn" id="signal-guide-open"
+                aria-haspopup="dialog" aria-controls="signal-guide-modal">
+          Как торгует робот
+        </button>
+      </div>
+      <div class="signal-chart-stage">
+        <aside class="signal-chart-tools" aria-label="Инструменты графика">
+          <button type="button" class="signal-tool" id="tool-footprint" aria-pressed="false"
+                  data-tip="Footprint: клик по свече → тяните диапазон → второй клик. Ручки по краям — правка, Delete/Esc — сброс.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span class="signal-tool-tip">Footprint на свечу</span>
+          </button>
+          <button type="button" class="signal-tool" id="tool-macd" aria-pressed="false"
+                  data-tip="Дивергенция MACD CM_ULT_MACD_MTF 1 · 12/26/9 — гистограмма + маркеры bull/bear div.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17h2v4H3zm4-6h2v10H7zm4-4h2v14h-2zm4 7h2v7h-2zm4-9h2v16h-2z"/></svg>
+            <span class="signal-tool-tip">Дивергенция MACD 12/26/9</span>
+          </button>
+          <button type="button" class="signal-tool is-active" id="tool-profile" aria-pressed="true"
+                  data-tip="Проторгованные объёмы — горизонтальный volume profile (VAP) справа.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H8v2h13V5zm0 6H11v2h10v-2zm0 6H6v2h15v-2zM3 4h2v16H3z"/></svg>
+            <span class="signal-tool-tip">Проторгованные объёмы</span>
+          </button>
+          <button type="button" class="signal-tool" id="tool-vap-stretch" aria-pressed="false"
+                  data-tip="Натянуть профиль: клик по свече → тяните диапазон → второй клик. Фиолетовые ручки — подвинуть края, Delete — снять, Esc — сброс.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zm6 4h4v12h-4zm6-2h4v14h-4z"/></svg>
+            <span class="signal-tool-tip">Натянуть профиль</span>
+          </button>
+          <button type="button" class="signal-tool" id="tool-trendline" aria-pressed="false"
+                  data-tip="Линия тренда: клик — старт, тяните курсор, второй клик — финиш. Ручки для правки, Delete — удалить, Esc — сброс.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l7-7 4 4 7-8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <span class="signal-tool-tip">Линия тренда</span>
+          </button>
+          <button type="button" class="signal-tool" id="tool-ma" aria-pressed="false"
+                  data-tip="Скользящая средняя — SMA/EMA и период (сохраняется в раскладке).">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16c4-8 6-2 9-6s5 2 9 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <span class="signal-tool-tip">Средняя (MA)</span>
+          </button>
+          <a class="signal-tool" id="tool-charts-terminal" href="/view/trend-charts"
+             data-tip="Терминал графиков: все инструменты, полноэкран, раскладки под логином.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z"/></svg>
+            <span class="signal-tool-tip">Терминал графиков</span>
+          </a>
+        </aside>
+        <div class="signal-chart-main">
+          <button type="button" class="signal-chart-pad-btn is-on" id="signal-chart-pad"
+                  title="Автоотступ справа (белое пространство у текущей свечи)"
+                  aria-pressed="true" aria-label="Автоотступ">⇆</button>
+          <div id="signal-chart" class="chart signal-chart"></div>
+          <div id="signal-macd-wrap" class="signal-macd-wrap" hidden>
+            <div id="signal-macd" class="chart signal-macd"></div>
+          </div>
+          <div id="signal-volume-wrap" class="signal-volume-wrap" hidden>
+            <div id="signal-volume" class="chart signal-volume"></div>
+          </div>
+        </div>
+      </div>
+      <p class="meta" id="signal-chart-hint">
+        M5 · Footprint / MACD / VAP / натянуть профиль / тренд / MA ·
+        <a href="/view/trend-charts">терминал графиков</a> ·
+        <span class="lg-hi">HI/LO</span> ·
+        <span class="lg-zone">TOP/BOT</span> · ENTRY/SL/TP
+      </p>
+      <div class="signal-brief" id="signal-desk-brief" aria-live="polite">
+        <p class="signal-brief-title">
+          Сейчас на рынке
+          <button type="button" class="btn btn-ghost btn-xs" id="sig-kick-btn"
+            title="Soft: сброс arm / cooldown / one-setup без сноса day-lock TOP/BOT. Нужна сессия кабинета (Bearer).">
+            Сброс залипания
+          </button>
+        </p>
+        <div class="signal-brief-body" id="signal-desk-brief-body">Загрузка среза…</div>
+        <div class="signal-compliance" id="signal-desk-compliance" aria-label="Чек-лист">
+          <p class="meta" id="signal-compliance-meta">Чек-лист…</p>
+        </div>
+      </div>
+    </div>
+    <aside class="signal-dom" aria-label="Стакан">
+      <div class="signal-dom-head">
+        <h3>Стакан · DOM</h3>
+        <p class="meta" id="signal-dom-meta">—</p>
+      </div>
+      <div class="signal-dom-imbalance" id="signal-dom-imbalance" hidden>
+        <div class="signal-dom-imb-bid" id="signal-dom-imb-bid"></div>
+        <div class="signal-dom-imb-ask" id="signal-dom-imb-ask"></div>
+      </div>
+      <div class="signal-dom-ladder-wrap">
+        <div class="signal-dom-ladder-head">
+          <span title="Лимиты на покупку">Bid</span>
+          <span title="Объём в стакане">Qty</span>
+          <span>Цена</span>
+          <span title="Объём в стакане">Qty</span>
+          <span title="Лимиты на продажу">Ask</span>
+          <span title="Проторговано: buy × sell">Tape</span>
+        </div>
+        <div class="signal-dom-ladder" id="signal-dom-body" role="table" aria-label="Биржевой стакан">
+          <div class="signal-dom-empty">Загрузка DOM…</div>
+        </div>
+      </div>
+      <p class="meta signal-dom-legend">
+        Зелёная зона — bids · красная — asks · Tape = агрессор buy×sell (~90м)
+      </p>
+    </aside>
+  </div>
+  <button type="button" class="signal-pressure-fab" id="signal-pressure-fab" hidden
+          aria-label="К давлению стакана" title="К блоку давления стакана">
+    <span class="signal-pressure-fab-dot" aria-hidden="true"></span>
+    <span class="signal-pressure-fab-text" id="signal-pressure-fab-text">Стакан</span>
+  </button>
+</section>
+
+<div class="signal-guide-gate" id="signal-guide-modal" hidden aria-hidden="true">
+  <div class="signal-guide-backdrop" data-guide-close tabindex="-1" aria-hidden="true"></div>
+  <div class="signal-guide-modal" role="dialog" aria-modal="true"
+       aria-labelledby="signal-guide-title" tabindex="-1">
+    <header class="signal-guide-head">
+      <div>
+        <p class="signal-guide-kicker">TRINITY · Trend</p>
+        <h3 id="signal-guide-title">Как работает стратегия</h3>
+        <p class="signal-guide-lead">Короткая инструкция: почему только BR, что делает робот и как читать сигнал без автоторгов.</p>
+      </div>
+      <button type="button" class="signal-guide-close" id="signal-guide-close"
+              data-guide-close aria-label="Закрыть">×</button>
+    </header>
+    <div class="signal-guide-body">
+      <nav class="signal-guide-toc" aria-label="Разделы">
+        <a href="#guide-idea">Идея</a>
+        <a href="#guide-why-oil">Почему нефть</a>
+        <a href="#guide-map">Карта дня</a>
+        <a href="#guide-wind">Ветер H1</a>
+        <a href="#guide-phase">Фаза дня</a>
+        <a href="#guide-entries">Два входа</a>
+        <a href="#guide-robot">Робот</a>
+        <a href="#guide-manual">Без автоторгов</a>
+        <a href="#guide-skip">Когда молчит</a>
+        <a href="#guide-risk">Риск</a>
+      </nav>
+
+      <article class="signal-guide-section" id="guide-idea">
+        <h4>Идея в одном абзаце</h4>
+        <p>
+          Робот торгует <strong>только нефтяной фьючерс BR на M5</strong> у дневных полок объёма
+          (playbook «Уровни + объёмы»). Сначала смотрит <strong>ветер H1</strong> и
+          <strong>фазу дня</strong> (отскок после дампа/ралли или продолжение тренда),
+          затем ищет вход у полки с качественным касанием.
+          Не ловит середину канала и не гонится за каждым касанием цены.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-why-oil">
+        <h4>Почему робот торгует исключительно нефть</h4>
+        <p>
+          Это <strong>узкая специализация</strong>, а не «универсальный бот на всё».
+          Стратегия выверена и калибруется на BR: ширина полок, пункт/GO, сессия Мосбиржи,
+          календарь EIA/API, поведение объёма и стакана на нефти.
+        </p>
+        <ul class="signal-guide-list">
+          <li><strong>Один инструмент — один край</strong>: параметры (15–20 пт полка, unlock,
+            сессионные окна) не размываются под «средний» рынок.</li>
+          <li><strong>Ликвидность и профиль</strong>: на BR M5 дневные полки объёма читаются
+            стабильнее, чем на тонких или чужих по микроструктуре контрактах.</li>
+          <li><strong>Честный OOS</strong>: paper / replay / журнал копятся по нефти —
+            так проще понять, что работает, без смешения инструментов.</li>
+          <li><strong>Плюшки desk</strong>: footprint, VAP, DOM/tape, gap-fill с HTF,
+            события нефти — заточены под этот контур, а не под абстрактный «любой фьюч».</li>
+        </ul>
+        <p class="signal-guide-note">
+          Другие инструменты в roadmap не запрещены — но только после валидации на BR.
+          Сейчас один фокус: нефть.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-map">
+        <h4>Карта дня на графике</h4>
+        <ul class="signal-guide-list">
+          <li><span class="lg-hi">HI / LO</span> — максимум и минимум текущего дня.</li>
+          <li><span class="lg-zone">TOP</span> — полка под HI (обычно 15–20 пунктов по BR).</li>
+          <li><span class="lg-zone">BOT</span> — полка над LO той же ширины.</li>
+          <li><strong>AVG / SL / TP</strong> — пока робот <em>в сделке</em> (факт. вход).
+            Пока план только armed — линии с подписью <em>план BUY/SELL</em>, это не уровни
+            уже закрытой сделки.</li>
+        </ul>
+        <p class="signal-guide-note">
+          Полки фиксируются на день (day-lock). Пробой снимает полку и даёт перезамок.
+          Если цена 2–3 часа живёт у одной полки, а робот «залип» на дальней —
+          фокус переключается на ближнюю (BOT/TOP).
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-wind">
+        <h4>Зачем старший таймфрейм</h4>
+        <p>
+          Робот собирает <strong>H1 из ваших же M5</strong> и обновляет «ветер» на закрытии часа.
+          Если H1 ещё рано или ход слабый — временно берёт M5-прокси.
+        </p>
+        <ul class="signal-guide-list">
+          <li><strong>С ветром</strong> — полный размер.</li>
+          <li><strong>Против ветра</strong> — чаще только отскок и/или меньший размер.</li>
+          <li><strong>§8 break+hold (RETEST)</strong> чек-листом не режется hardenings.</li>
+          <li>На dump-дне при HTF DOWN bounce у BOT всё же можно, если есть reject и
+            <em>H1 тормозит сброс</em> или цена <em>два раза закрылась над mid BOT</em>.</li>
+          <li><strong>Gap-fill</strong>: пока гэп дня открыт — против заполнения не торгуем;
+            с заполнением — только если HTF согласен (FLAT = пропуск). RETEST §8 не блокируется.</li>
+        </ul>
+      </article>
+
+      <article class="signal-guide-section" id="guide-phase">
+        <h4>Фаза дня и качество касания</h4>
+        <ul class="signal-guide-list">
+          <li><strong>После дампа / ралли</strong> — приоритет отскока у противоположной полки (BOT / TOP).</li>
+          <li><strong>Продолжение тренда</strong> — приоритет ретеста в сторону ветра.</li>
+          <li><strong>Касание</strong> — нужен wick в зону и закрытие обратно (reject).
+            Бычья/медвежья свеча и давление стакана — мягкий бонус.
+            MACD-дивергенция на графике — только подсказка глазу.</li>
+          <li>Ясный reject у BOT/TOP важнее «ожидания ретеста» на этой же полке
+            (не путать восстановление над BOT с §8 ретестом TOP).</li>
+        </ul>
+        <p class="signal-guide-note">
+          Сейчас идёт <strong>обкатка на paper (SANDBOX_FAIR)</strong> по живой ленте T-Invest —
+          смотрите блок «Робот» и statement. Реальные ордера выключены.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-entries">
+        <h4>Два сценария входа</h4>
+        <div class="signal-guide-cards">
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">Отскок (BOUNCE)</p>
+            <p>
+              Цена подходит к TOP или BOT и <em>отскакивает</em> от полки с reject.
+              Учитываются ветер H1, фаза дня, gap-fill и макро-фильтр.
+            </p>
+          </div>
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">Ретест (§8)</p>
+            <p>
+              Полка пробита и закреплена, цена возвращается «проверить» с правильной стороны.
+              Вход в сторону пробоя сеткой у полки — приоритет чек-листа.
+            </p>
+          </div>
+        </div>
+        <p>
+          Три лимита у зоны, стоп за полкой. Касание TP1 (фитиль свечи) — частичный выход (~⅓),
+          стоп в безубыток, остаток ждёт TP2. При 1 лоте закрыть треть нельзя: только стоп в БУ.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-robot">
+        <h4>Если автоторги включены</h4>
+        <ol class="signal-guide-steps">
+          <li>Сверяет ветер H1, фазу дня, полки M5, gap-fill и стакан.</li>
+          <li>При собранном сценарии и прохождении фильтров — лимиты, стоп, цели.</li>
+          <li>Fair-paper исполняет по <strong>закрытым M5</strong> (не по формирующейся свече):
+            меньше шума, ближе к чек-листу.</li>
+          <li>В «Робот · …» пишет статус, ветер, фазу, касание, фокус полки.</li>
+          <li>Paper / sandbox → statement (виртуальная книга).</li>
+        </ol>
+        <p class="signal-guide-note">
+          Один сетап на зону; снятие без fill — когда цена ушла от mid (wick-aware)
+          и бар не торговал сетку. День ограничен числом сделок и лимитом убытка.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-manual">
+        <h4>Если автоторги выключены</h4>
+        <p>Робот — <strong>сигнальный ассистент</strong>:</p>
+        <ol class="signal-guide-steps">
+          <li>Полоска: Side / Mode / потенциал TP1.</li>
+          <li>«Робот · …» — почему ждёт/пропускает, ветер, фаза, касание.</li>
+          <li>График: ENTRY / SL / TP — у открытой позиции или у actionable-плана.</li>
+          <li>Стакан — контекст, не отдельный сигнал.</li>
+          <li>Решение входить и размер — за вами.</li>
+        </ol>
+        <p class="signal-guide-note">
+          Режим: <a href="/view/settings#trend-playbook-settings">Настройки</a>.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-skip">
+        <h4>Когда робот сознательно молчит</h4>
+        <ul class="signal-guide-list">
+          <li>Против ветра без сильного сценария; RETEST long в дамп.</li>
+          <li>Нет reject / слабое касание полки; тонкая / невалидная полка.</li>
+          <li>Gap-fill против открытого гэпа или HTF не согласен на сделку «в заполнение».</li>
+          <li>Окно событий (EIA/API), края сессии и <strong>вечерняя сессия</strong> (после 19:00) —
+            тонкий рынок, новых сетапов нет. Торгуем только основную сессию ~10:20–18:30.</li>
+          <li>Цена в середине между TOP и BOT без сетапа.</li>
+        </ul>
+        <p>Тишина чаще значит «фильтр сработал», а не «робот сломался».</p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-risk">
+        <h4>Риск и цели (BR)</h4>
+        <ul class="signal-guide-list">
+          <li>Ширина торговой полки обычно <strong>15–20 пунктов</strong> — калибровка под нефть.</li>
+          <li>Стоп за зоной; первая цель около стопа по величине. Касание TP1 → часть снять,
+            стоп в БУ, ждать TP2.</li>
+          <li>Размер на старте дробный (сетка); до TP1 стоп не двигаем.</li>
+        </ul>
+        <p class="signal-guide-foot">
+          Это операторская памятка по playbook «Уровни + объёмы» на BR, а не юридический офер
+          и не гарантия прибыли.
+        </p>
+      </article>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/js/trinity-chart-kit.js?v=20260814-vap-tick"></script>
+<script src="/js/trend-signal-desk.js?v=20260814-tp1-be"></script>

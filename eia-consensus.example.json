@@ -1,0 +1,6 @@
+{
+  "kbbl": -1200,
+  "source": "operator-street (не Bloomberg Terminal)",
+  "asOf": "2026-08-13",
+  "note": "WoW consensus kbbl. Подставьте цифру с street/survey. Surprise = FRED WoW − kbbl."
+}
