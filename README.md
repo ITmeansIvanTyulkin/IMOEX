@@ -5,7 +5,7 @@
 > **Публичный GitHub = Кости (оболочка).** Этот репозиторий — оценка продукта: лицензия, документация, UI-каркас, SPI. Торговое ядро (плейбуки Exclusive / positional, EG/Z, calendar-arb) живёт в **закрытом** дереве `../IMOEX-core` и на classpath не попадает у голого клона.  
 > Публичный клон: `mvn -pl trinity-shell -am spring-boot:run` → http://localhost:8080 (сделки / paper / робот **не** стартуют).  
 > Оператор: рядом `IMOEX-core`, затем `mvn -pl trinity-app -am spring-boot:run`.  
-> `IMOEX_UNLOCK` — локальный секрет, не защита исходников. Настоящая защита = ядро не в этом git. История старых коммитов на GitHub всё ещё может содержать прежний монолит — это честный предел без rewrite.
+> `IMOEX_UNLOCK` — локальный секрет, не защита исходников. Настоящая защита = ядро не в этом git. История монолита с GitHub снята (репозиторий пересоздан одним root-коммитом Костей).
 
 **TRINITY** в замысле — три торговых столпа + четвёртый продуктовый слой: (1) cointegration / pairs, (2) **trend robot** playbook «Уровни + профиль» (BR M5, sandbox-first), (3) календарный арбитраж фьючерсов, (4) **volume / ATAS-class desk**. Сейчас в **live paper** — **DAILY** pairs в боковике (металлы / mining). **INTRADAY** pairs — только research. См. `.cursor/rules/trinity-roadmap.mdc` и [docs/BONES_AND_CORE.md](docs/BONES_AND_CORE.md).
 
