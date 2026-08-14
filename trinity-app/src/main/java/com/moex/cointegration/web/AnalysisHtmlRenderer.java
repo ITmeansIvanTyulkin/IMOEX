@@ -5,6 +5,7 @@ import com.moex.cointegration.config.ProductProperties;
 import com.moex.cointegration.product.ProductEdition;
 import com.moex.cointegration.product.ProductEditionService;
 import com.moex.cointegration.service.CalendarArbPaperJournalService;
+import com.moex.cointegration.service.TrendFairPaperLiveService;
 import com.moex.cointegration.service.TrendPaperJournalService;
 import com.moex.cointegration.upsell.UpsellAccess;
 import com.moex.cointegration.upsell.UpsellService;
@@ -44,6 +45,7 @@ public class AnalysisHtmlRenderer {
     private final ProductEditionService productEdition;
     private final Optional<TrendPaperJournalService> trendPaperJournal;
     private final Optional<CalendarArbPaperJournalService> calendarArbJournal;
+    private final Optional<TrendFairPaperLiveService> trendFairPaper;
     private final boolean strategyPairsEnabled;
     private final boolean strategyTrendEnabled;
     private final boolean strategyCalendarArbEnabled;
@@ -54,6 +56,7 @@ public class AnalysisHtmlRenderer {
             ProductEditionService productEdition,
             Optional<TrendPaperJournalService> trendPaperJournal,
             Optional<CalendarArbPaperJournalService> calendarArbJournal,
+            Optional<TrendFairPaperLiveService> trendFairPaper,
             @Value("${imoex.strategies.pairs.enabled:true}") boolean strategyPairsEnabled,
             @Value("${imoex.strategies.trend.enabled:false}") boolean strategyTrendEnabled,
             @Value("${imoex.strategies.calendar-arb.enabled:false}") boolean strategyCalendarArbEnabled
@@ -65,6 +68,7 @@ public class AnalysisHtmlRenderer {
                 : new ProductEditionService(ProductProperties.defaults());
         this.trendPaperJournal = trendPaperJournal != null ? trendPaperJournal : Optional.empty();
         this.calendarArbJournal = calendarArbJournal != null ? calendarArbJournal : Optional.empty();
+        this.trendFairPaper = trendFairPaper != null ? trendFairPaper : Optional.empty();
         this.strategyPairsEnabled = strategyPairsEnabled;
         this.strategyTrendEnabled = strategyTrendEnabled;
         this.strategyCalendarArbEnabled = strategyCalendarArbEnabled;
@@ -154,7 +158,7 @@ public class AnalysisHtmlRenderer {
                 </div>
               </div>
               <script src="/js/operator.js?v=20260813-arb1"></script>
-              <script src="/js/trinity-status-plaques.js?v=20260813-perf"></script>
+              <script src="/js/trinity-status-plaques.js?v=20260814-sync"></script>
             </body>
             </html>
             """;
@@ -2665,6 +2669,13 @@ public class AnalysisHtmlRenderer {
         if (dailyRecs == null) {
             dailyRecs = List.of();
         }
+        trendFairPaper.ifPresent(fp -> {
+            try {
+                fp.flushNow();
+            } catch (Exception ignored) {
+                // statement still renders from last journal write
+            }
+        });
 
         List<PaperTradeEntry> allEntries = journal.entries() == null ? List.of() : journal.entries();
         List<PaperTradeEntry> pairsEntries = allEntries.stream()

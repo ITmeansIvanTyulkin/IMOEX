@@ -96,6 +96,25 @@
     const m = String(iso).match(/T(\d{2}:\d{2})/);
     return m ? m[1] : iso;
   }
+  function clockMeta(sit) {
+    if (!sit) return "";
+    const rb = sit.robotBar ? shortTime(sit.robotBar) : "";
+    const cb = sit.chartBar ? shortTime(sit.chartBar) : "";
+    if (rb && cb && rb !== cb) {
+      return " · робот " + rb + " · график " + cb + " · SL по закрытию бара";
+    }
+    if (rb) return " · робот " + rb + " · SL по закрытию бара";
+    if (sit.fillModeRu) return " · " + sit.fillModeRu;
+    return "";
+  }
+  function lastCloseBit(sit, fp, pbId) {
+    const lane = fp && fp.lanes && pbId ? fp.lanes[pbId] : null;
+    const lc = (sit && sit.lastClose) || (lane && lane.lastClose) || (fp && fp.lastClose) || null;
+    if (!lc || !lc.exitReason) return "";
+    const t = shortTime(lc.closedAt);
+    const pnl = typeof lc.pnlRub === "number" ? (" " + fmtPnl(lc.pnlRub)) : "";
+    return "Последняя: " + lc.exitReason + pnl + (t && t !== "—" ? (" в " + t) : "");
+  }
   function renderPaper(paper, desk) {
     const st = (paper && paper.statement) || {};
     const todayEl = $("sig-paper-today");
@@ -127,6 +146,13 @@
       }
       return true;
     });
+    const latest = paper && paper.latestClose;
+    if (latest && latest.id && isSameMskDay(latest.closedAt, today)) {
+      const has = rows.some(function (t) { return t && t.id === latest.id; });
+      if (!has) {
+        rows.unshift(latest);
+      }
+    }
     if (!panel || !body) return;
     if (!rows.length) {
       panel.hidden = true;
@@ -2116,7 +2142,8 @@
           + " · bars=" + (data.barCount || 0)
           + " · source=" + (data.barsSource || "?")
           + " · " + (data.engineState || "")
-          + (followLive && !userPinned ? " · follow" : " · zoom locked");
+          + (followLive && !userPinned ? " · follow" : " · zoom locked")
+          + clockMeta((data.situation) || {});
       }
       fillDeskSelects(data);
       const oilBan = $("us-oil-banner-text");
@@ -2216,7 +2243,7 @@
       const overlayPb = sit.playbookId
         || (data.parallelPlaybooks ? "levels-profile-br-m5" : data.playbookId)
         || "";
-      const overlayOpen = fairPaperLaneOpen(fp, overlayPb);
+      const overlayOpen = sit.inTrade ? fairPaperLaneOpen(fp, overlayPb) : null;
       if (candles.length) {
         updateCandles(candles, !!forceFit || instrumentChanged || chartNeedsFit);
         applyOverlays(plan, sig, candles, data.structure || {}, overlayOpen);
@@ -2237,6 +2264,9 @@
       // After chart: compliance shape differs for positional (object+items) vs BR (array).
       try { renderCompliance(data); } catch (compErr) {
         if (typeof console !== "undefined") console.warn("renderCompliance", compErr);
+      }
+      if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
+        window.TrinityPlaques.refresh();
       }
     } catch (err) {
       if (meta) meta.textContent = "Ошибка desk: " + (err.message || err);
@@ -2573,6 +2603,10 @@
         if (phase) bits.push("фаза: " + phase);
         detail = bits.length ? bits.join(" · ") : "Ищет сетап на графике";
       }
+    }
+    if (posture !== "IN_TRADE") {
+      const closed = lastCloseBit(sit, fp, pbId);
+      if (closed) detail = closed + " · " + detail;
     }
     if (detail.length > 160) detail = detail.slice(0, 158) + "…";
     return { cls: cls, status: status, detail: detail };
