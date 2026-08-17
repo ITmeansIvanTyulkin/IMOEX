@@ -10,6 +10,7 @@
   let lastGood = null;
   let everReady = false;
   let lastSeriesKey = "";
+  let arbScaleLocked = false;
   let syncingRange = false;
   let resizeBound = false;
 
@@ -432,6 +433,7 @@
         window.__arbStructure = st;
         lastGood = null;
         lastSeriesKey = "";
+        arbScaleLocked = false;
         refresh().catch(function (e) { console.warn(e); });
       });
     });
@@ -475,7 +477,31 @@
     };
   }
 
-  function bindChartSync() {
+  function bindArbChartScale(el, chartInst, seriesInst) {
+    if (!el || !chartInst || !seriesInst) return;
+    if (el._trinityOverlayFollowBound) return;
+    const kit = window.TrinityChartKit;
+    if (!kit || typeof kit.bindScaleOverlayFollow !== "function") return;
+    kit.bindScaleOverlayFollow(el, {
+      chart: chartInst,
+      series: seriesInst,
+      freezePrice: true,
+      onLayout: function () {
+        arbScaleLocked = true;
+      }
+    });
+    el.addEventListener("wheel", function () { arbScaleLocked = true; }, { passive: true });
+  }
+
+  function setLineDataKeep(chartInst, seriesInst, data) {
+    const kit = window.TrinityChartKit;
+    if (arbScaleLocked && kit && typeof kit.setSeriesDataKeepView === "function") {
+      kit.setSeriesDataKeepView(chartInst, seriesInst, data);
+    } else {
+      seriesInst.setData(data);
+    }
+  }
+
     if (!chart || !legsChart) return;
     function copy(from, to) {
       from.timeScale().subscribeVisibleTimeRangeChange(function (range) {
@@ -505,11 +531,13 @@
     if (spreadEl && !chart) {
       chart = LightweightCharts.createChart(spreadEl, whiteChartOpts(spreadEl, spreadEl.clientHeight || 360));
       series = chart.addLineSeries({ color: "#0b7a66", lineWidth: 2 });
+      bindArbChartScale(spreadEl, chart, series);
     }
     if (legsEl && !legsChart) {
       legsChart = LightweightCharts.createChart(legsEl, whiteChartOpts(legsEl, legsEl.clientHeight || 280));
       nearSeries = legsChart.addLineSeries({ color: "#15803d", lineWidth: 2, title: "near" });
       nextSeries = legsChart.addLineSeries({ color: "#b45309", lineWidth: 2, title: "next" });
+      bindArbChartScale(legsEl, legsChart, nearSeries);
       bindChartSync();
     }
     if (!resizeBound) {
@@ -533,10 +561,11 @@
     const spread = toLine(points, "spread");
     const near = toLine(points, "near");
     const next = toLine(points, "far");
-    if (series) series.setData(spread);
-    if (nearSeries) nearSeries.setData(near);
-    if (nextSeries) nextSeries.setData(next);
+    if (series) setLineDataKeep(chart, series, spread);
+    if (nearSeries) setLineDataKeep(legsChart, nearSeries, near);
+    if (nextSeries) setLineDataKeep(legsChart, nextSeries, next);
     if (pairChanged) {
+      arbScaleLocked = false;
       if (chart) chart.timeScale().fitContent();
       if (legsChart) legsChart.timeScale().fitContent();
     }
@@ -553,6 +582,7 @@
         window.__arbStructure = "";
         lastGood = null;
         lastSeriesKey = "";
+        arbScaleLocked = false;
         refresh().catch(function (e) { console.warn(e); });
       });
     }

@@ -20,8 +20,9 @@ Options — further deferred beyond the pillars; locked preview only in commerci
 
 Keep here so we do not lose commercial/research bets. **Do not implement until the gate for that item says so.**
 
+- **Кластерный анализ и индикаторы** — mid-September 2026. Source lessons: Volume, OI, Cumulative Delta, market profile, Bid×Ask clusters at levels. **Not** a full inject into pairs / both playbooks / calendar-arb. Scope when gated: soft EXT on trend #1 (armed shelf only) reusing tape/DOM; optional later #2 / slice of #4; **do not** wire into pairs EG/Z or calendar mean-reversion; never flip Exclusive/positional side. Needs accumulated `broker-tape` + journal/OOS first. See «Deferred: Кластерный анализ и индикаторы» below.
 - **#4 Volume desk (ATAS→probability)** — see section below; substitute for buying external volume terminals when user refuses autotrade and wants filtered entries → manual broker. Code: `trinity-marketdata` (feed SPI; stream later).
-- **DOM depth / «стены» в стакане (trend #1 + #2 EXT)** — see «Deferred: DOM depth» below. Additive filter near entry shelves only; never a price predictor; journal+OOS before wiring into arms.
+- **DOM depth / «стены» в стакане (trend #1 + #2 EXT)** — see «Deferred: DOM depth» below. Additive filter near entry shelves only; never a price predictor; journal+OOS before wiring into arms. Overlaps mid-Sep cluster/indicators idea — coordinate, do not duplicate.
 - Delivery Instance vs Core (лёгкий браузер vs локальный архив) + Core updater — autumn–winter 2026. **Не путать с осью IP** (Кости vs ядро) — она уже начата.
 - Soft commercial upsell / reverse trial — scaffolding OK; no real billing yet.
 - Options module — after pillars; locked preview only.
@@ -110,6 +111,24 @@ Honest constraints: needs data + OOS; Cursor IDE ≠ training compute; research 
 - Gate: after DAILY pairs paper validation; **do not start now**.
 - Fits strategy 1 first; later can filter trend (#2) / arb (#3).
 - Full Core / Оператор framing: «отфильтрованный вход в TRINITY → заявки у брокера вручную».
+
+## Deferred: Кластерный анализ и индикаторы (mid-September 2026)
+
+**Why:** operator lessons (Volume, Open Interest, Cumulative Delta, horizontal profile, Bid×Ask clusters at M5 levels) — ATAS-class cues for finer entry at shelves, not a fourth strategy.
+
+**Do not**
+- Inject into cointegration (EG/Z / FA / regime stay primary).
+- Inject into calendar-arb mean-reversion / live two-leg.
+- Flip Exclusive or positional side; no veto of valid §14/§8 without an explicit research kill-switch.
+- Treat OI/KD/clusters as standalone predictors («цена пойдёт сюда»).
+
+**Scope when gated (order)**
+1. Reuse `trinity-marketdata` tape + DOM; need weeks of archive first.
+2. Soft EXT on trend #1 only: at day-locked TOP/BOT — Bid×Ask cluster imprint, optional KD imbalance, volume-above-average context; UI = «давление / удержание», size/wait soft score.
+3. Journal labels + OOS: did it cut false arms? Wire only with lift.
+4. Optional later: thin EXT on #2; feed features into #4 Volume desk. OI on FORTS — soft «closing prints → skip open», not core checklist.
+
+**Gate:** **mid-September 2026** (not before). Until then: accumulate DOM/tape, keep DAILY pairs + trend/arb journal fidelity. Coordinate with DOM-walls EXT — one research track, two names.
 
 ## Deferred: DOM depth / walls near shelves (trend #1 + #2 EXT)
 

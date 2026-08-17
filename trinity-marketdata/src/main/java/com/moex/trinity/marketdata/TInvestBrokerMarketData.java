@@ -369,6 +369,11 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         return fetchCandles(figi, fromDay, tillDay, CandleInterval.CANDLE_INTERVAL_1_MIN, 1);
     }
 
+    /** Native M5 from broker (1-day chunks — T-Invest 5m window is short). */
+    public List<BrokerCandle> fetchM5Candles(String figi, LocalDate fromDay, LocalDate tillDay) {
+        return fetchCandles(figi, fromDay, tillDay, CandleInterval.CANDLE_INTERVAL_5_MIN, 1);
+    }
+
     /**
      * Native H1 candles from broker (not aggregated M1/M5).
      * Pulled in ~7-day chunks — enough for positional ~50–90 calendar days.

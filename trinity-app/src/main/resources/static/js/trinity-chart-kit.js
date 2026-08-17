@@ -197,6 +197,172 @@
   }
 
   /**
+   * Relayout HTML overlays while the user scales time or price.
+   * Native LWC lines move immediately; overlays must be recomputed in the same frames.
+   */
+  function bindScaleOverlayFollow(host, opts) {
+    opts = opts || {};
+    if (!host || host._trinityOverlayFollowBound) return;
+    host._trinityOverlayFollowBound = true;
+    const onLayout = typeof opts.onLayout === "function" ? opts.onLayout : function () {};
+    const freeze = opts.freezePrice !== false;
+    let gesture = false;
+    let until = 0;
+    let raf = 0;
+    function freezeNow() {
+      if (!freeze) return;
+      try {
+        if (opts.series && typeof opts.series.priceScale === "function") {
+          opts.series.priceScale().applyOptions({ autoScale: false });
+        }
+      } catch (_) {}
+      try {
+        if (opts.chart && typeof opts.chart.priceScale === "function") {
+          opts.chart.priceScale("right").applyOptions({ autoScale: false });
+        }
+      } catch (_) {}
+    }
+    function kick(ms) {
+      until = Math.max(until, Date.now() + (ms || 80));
+      if (raf) return;
+      function tick() {
+        freezeNow();
+        try { onLayout(); } catch (_) {}
+        if (gesture || Date.now() < until) {
+          raf = requestAnimationFrame(tick);
+        } else {
+          raf = 0;
+          freezeNow();
+          try { onLayout(); } catch (_) {}
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    }
+    host.addEventListener("wheel", function () { kick(480); }, { passive: true, capture: true });
+    host.addEventListener("mousedown", function () { gesture = true; kick(0); });
+    host.addEventListener("touchstart", function () { gesture = true; kick(0); }, { passive: true });
+    window.addEventListener("mousemove", function (ev) {
+      if (gesture || (ev && ev.buttons)) kick(0);
+    });
+    window.addEventListener("touchmove", function () {
+      if (gesture) kick(0);
+    }, { passive: true });
+    function endGesture() {
+      if (!gesture) return;
+      gesture = false;
+      kick(480);
+    }
+    window.addEventListener("mouseup", endGesture);
+    window.addEventListener("touchend", endGesture, { passive: true });
+    try {
+      function hookPrice(ps) {
+        if (ps && typeof ps.subscribeVisiblePriceRangeChange === "function") {
+          ps.subscribeVisiblePriceRangeChange(function () { kick(80); });
+        }
+      }
+      if (opts.series && typeof opts.series.priceScale === "function") hookPrice(opts.series.priceScale());
+      if (opts.chart && typeof opts.chart.priceScale === "function") hookPrice(opts.chart.priceScale("right"));
+    } catch (_) {}
+  }
+
+  function snapshotTimeScale(chart) {
+    if (!chart) return null;
+    try {
+      const opt = chart.timeScale().options();
+      return {
+        barSpacing: opt && opt.barSpacing,
+        logical: chart.timeScale().getVisibleLogicalRange()
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function applyTimeScaleSnap(chart, snap) {
+    if (!chart || !snap) return;
+    if (snap.barSpacing > 0) {
+      try { chart.timeScale().applyOptions({ barSpacing: snap.barSpacing }); } catch (_) {}
+    }
+    if (snap.logical) {
+      try { chart.timeScale().setVisibleLogicalRange(snap.logical); } catch (_) {}
+    }
+  }
+
+  var barDbPromise = null;
+  function barDb() {
+    if (barDbPromise) return barDbPromise;
+    barDbPromise = new Promise(function (resolve, reject) {
+      if (typeof indexedDB === "undefined") {
+        resolve(null);
+        return;
+      }
+      const req = indexedDB.open("trinity-candle-archive", 1);
+      req.onupgradeneeded = function () {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("bars")) {
+          db.createObjectStore("bars");
+        }
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { resolve(null); };
+    });
+    return barDbPromise;
+  }
+  function barCacheKey(instrument, tf) {
+    return String(instrument || "_").toUpperCase() + "|" + String(tf || "M5").toUpperCase();
+  }
+  async function barCacheGet(instrument, tf) {
+    try {
+      const db = await barDb();
+      if (!db) return null;
+      const key = barCacheKey(instrument, tf);
+      return await new Promise(function (resolve) {
+        const tx = db.transaction("bars", "readonly");
+        const rq = tx.objectStore("bars").get(key);
+        rq.onsuccess = function () {
+          const row = rq.result;
+          if (row && row.bars && row.bars.length) {
+            resolve(row);
+            return;
+          }
+          const last = tx.objectStore("bars").get("__last");
+          last.onsuccess = function () { resolve(last.result || null); };
+          last.onerror = function () { resolve(null); };
+        };
+        rq.onerror = function () { resolve(null); };
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+  async function barCachePut(instrument, tf, payload) {
+    try {
+      const db = await barDb();
+      if (!db || !payload || !payload.bars || !payload.bars.length) return;
+      const row = Object.assign({
+        instrument: instrument,
+        tf: tf || "M5",
+        savedAt: Date.now()
+      }, payload);
+      const key = barCacheKey(instrument, tf);
+      await new Promise(function (resolve) {
+        const tx = db.transaction("bars", "readwrite");
+        tx.objectStore("bars").put(row, key);
+        tx.objectStore("bars").put(row, "__last");
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+      });
+    } catch (_) {}
+  }
+
+  function setSeriesDataKeepView(chart, series, data) {
+    const snap = snapshotTimeScale(chart);
+    try { series.setData(data); } catch (_) { return; }
+    applyTimeScaleSnap(chart, snap);
+    requestAnimationFrame(function () { applyTimeScaleSnap(chart, snap); });
+  }
+
+  /**
    * Attach drawing tools to a Lightweight Charts instance.
    * @returns controller with getState/setState/destroy
    */
@@ -265,7 +431,7 @@
         const el = document.createElement("div");
         el.className = "chart-vap-band";
         el.style.top = Math.min(y1, y2) + "px";
-        el.style.height = Math.max(4, Math.abs(y2 - y1)) + "px";
+        el.style.height = Math.max(0.5, Math.abs(y2 - y1)) + "px";
         el.title = Number(b.low).toFixed(4) + "–" + Number(b.high).toFixed(4);
         bandOv.appendChild(el);
       });
@@ -860,6 +1026,15 @@
         scheduleToolLayout();
       });
     }
+    bindScaleOverlayFollow(host, {
+      chart: chart,
+      series: series,
+      freezePrice: opts.freezePrice !== false,
+      onLayout: function () {
+        scheduleToolLayout();
+        if (typeof opts.onScaleLayout === "function") opts.onScaleLayout();
+      }
+    });
     host.addEventListener("pointerdown", onPointerDown);
     host.addEventListener("pointermove", onPointerMove);
     host.addEventListener("pointerup", onPointerUp);
@@ -973,6 +1148,12 @@
     sma: sma,
     ema: ema,
     attachTools: attachTools,
+    bindScaleOverlayFollow: bindScaleOverlayFollow,
+    snapshotTimeScale: snapshotTimeScale,
+    applyTimeScaleSnap: applyTimeScaleSnap,
+    setSeriesDataKeepView: setSeriesDataKeepView,
+    barCacheGet: barCacheGet,
+    barCachePut: barCachePut,
     promptMaConfig: promptMaConfig,
     esc: esc
   };

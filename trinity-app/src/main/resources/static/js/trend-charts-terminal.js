@@ -121,12 +121,22 @@
       onChange: function () {
         scheduleSave();
         syncToolButtons();
-      }
+      },
+      freezePrice: true
     });
     panes[secid] = { wrap: wrap, el: el, chart: chart, series: series, tools: tools, bars: [],
       scaleLocked: false, barSpacing: null, logical: null };
     bindPaneScale(panes[secid]);
     return panes[secid];
+  }
+
+  async function paintPaneFromCache(secid) {
+    const p = panes[secid];
+    if (!p || !window.TrinityChartKit || typeof TrinityChartKit.barCacheGet !== "function") return;
+    const row = await TrinityChartKit.barCacheGet(secid, "M5");
+    if (!row || !row.bars || !row.bars.length) return;
+    p.bars = row.raw || row.bars;
+    try { p.series.setData(row.bars); } catch (_) {}
   }
 
   function snapshotPaneScale(p) {
@@ -237,13 +247,26 @@
         });
       });
       p.bars = toolBars;
-      p.series.setData(candles);
-      if (p.tools) p.tools.refreshOverlays();
+      const kit = window.TrinityChartKit;
+      if (kit && typeof kit.barCachePut === "function") {
+        kit.barCachePut(secid, "M5", { instrument: secid, tf: "M5", bars: candles, raw: toolBars });
+      }
       if (p.scaleLocked && p.barSpacing > 0) {
+        if (kit && typeof kit.setSeriesDataKeepView === "function") {
+          kit.setSeriesDataKeepView(p.chart, p.series, candles);
+        } else {
+          p.series.setData(candles);
+        }
         restorePaneScale(p);
       } else {
+        if (kit && typeof kit.setSeriesDataKeepView === "function") {
+          kit.setSeriesDataKeepView(p.chart, p.series, candles);
+        } else {
+          p.series.setData(candles);
+        }
         try { p.chart.timeScale().fitContent(); } catch (_) {}
       }
+      if (p.tools) p.tools.refreshOverlays();
     } catch (e) {
       console.warn("refreshPane", secid, e);
     }
@@ -284,6 +307,10 @@
 
     activeId = (layoutDoc.terminal && layoutDoc.terminal.active) || list[0].secid;
     setActive(activeId);
+
+    for (let i = 0; i < list.length; i++) {
+      await paintPaneFromCache(list[i].secid);
+    }
 
     // Sequential load to avoid instrument thrash
     for (let i = 0; i < list.length; i++) {
