@@ -49,8 +49,12 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
     private static final ZoneId MSK = ZoneId.of("Europe/Moscow");
     private static final String[] FUTURE_CLASS_CODES = {"SPBFUT", "FUT"};
     private static final long MARGIN_CACHE_MS = 30 * 60_000L;
+    private static final long FUTURES_LIST_CACHE_MS = 5 * 60_000L;
     private static final int MARGIN_MONTHS = 4;
     private static final ConcurrentHashMap<String, CachedMargin> MARGIN_CACHE = new ConcurrentHashMap<>();
+    private static final Object FUTURES_LIST_LOCK = new Object();
+    private static volatile long futuresListAtMs;
+    private static volatile List<Future> futuresListCache;
 
     private final InvestApi api;
     private final boolean sandbox;
@@ -91,7 +95,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
                 log.debug("getFutureByTicker {}/{}: {}", t, cc, ex.toString());
             }
         }
-        List<Future> all = api.getInstrumentsService().getFuturesSync(InstrumentStatus.INSTRUMENT_STATUS_BASE);
+        List<Future> all = listedFutures();
         for (Future f : all) {
             if (t.equalsIgnoreCase(f.getTicker()) || t.equalsIgnoreCase(f.getClassCode() + "." + f.getTicker())) {
                 return f.getFigi();
@@ -132,7 +136,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         Instant now = Instant.now();
         List<Future> all;
         try {
-            all = api.getInstrumentsService().getFuturesSync(InstrumentStatus.INSTRUMENT_STATUS_BASE);
+            all = listedFutures();
         } catch (Exception ex) {
             log.warn("getFutures for front-month {}: {}", family, ex.toString());
             return Optional.empty();
@@ -166,6 +170,27 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         return resolveFrontMonth(familyOrSecid).map(FrontMonth::ticker).orElse(familyOrSecid);
     }
 
+    /** Shared getFutures snapshot — calendar desk used to call this once per family per poll. */
+    private List<Future> listedFutures() {
+        long now = System.currentTimeMillis();
+        List<Future> hit = futuresListCache;
+        if (hit != null && now - futuresListAtMs < FUTURES_LIST_CACHE_MS) {
+            return hit;
+        }
+        synchronized (FUTURES_LIST_LOCK) {
+            now = System.currentTimeMillis();
+            hit = futuresListCache;
+            if (hit != null && now - futuresListAtMs < FUTURES_LIST_CACHE_MS) {
+                return hit;
+            }
+            List<Future> all = api.getInstrumentsService().getFuturesSync(InstrumentStatus.INSTRUMENT_STATUS_BASE);
+            List<Future> copy = List.copyOf(all);
+            futuresListCache = copy;
+            futuresListAtMs = now;
+            return copy;
+        }
+    }
+
     /**
      * Unexpired FORTS months of a family, nearest last-trade-date first.
      * Source: T-Invest {@code getFutures} — not ISS.
@@ -178,7 +203,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         Instant now = Instant.now();
         List<Future> all;
         try {
-            all = api.getInstrumentsService().getFuturesSync(InstrumentStatus.INSTRUMENT_STATUS_BASE);
+            all = listedFutures();
         } catch (Exception ex) {
             log.warn("getFutures for calendar {}: {}", family, ex.toString());
             return List.of();
@@ -379,7 +404,8 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
      * Pulled in ~7-day chunks — enough for positional ~50–90 calendar days.
      */
     public List<BrokerCandle> fetchHourCandles(String figi, LocalDate fromDay, LocalDate tillDay) {
-        return fetchCandles(figi, fromDay, tillDay, CandleInterval.CANDLE_INTERVAL_HOUR, 7);
+        // HOUR window is up to ~3 months; one chunk covers calendar-arb warmup (~40d).
+        return fetchCandles(figi, fromDay, tillDay, CandleInterval.CANDLE_INTERVAL_HOUR, 40);
     }
 
     private List<BrokerCandle> fetchCandles(
@@ -421,12 +447,12 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
                     }
                 } catch (Exception ex) {
                     log.warn("GetCandles {} {}..{} {}: {}", figi, d, chunkEnd, interval, ex.toString());
-                }
-                try {
-                    Thread.sleep(150);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
+                    try {
+                        Thread.sleep(150);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
             d = chunkEnd.plusDays(1);

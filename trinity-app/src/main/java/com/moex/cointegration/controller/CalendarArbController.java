@@ -50,6 +50,7 @@ public class CalendarArbController {
         m.putAll(settings.view());
         m.put("fairPaper", fairPaper.snapshot());
         m.put("statement", journal.statement());
+        m.put("families", desk.familyCatalog());
         return m;
     }
 

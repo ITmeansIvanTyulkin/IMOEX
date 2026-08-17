@@ -1,5 +1,12 @@
 (function () {
   const POLL_MS = 12000;
+  const DESK_TIMEOUT_MS = 12000;
+  const DEFAULT_FAMS = [
+    { code: "BR", name: "Нефть (BR)" },
+    { code: "SI", name: "Si (USD/RUB)" },
+    { code: "RI", name: "RTS (RI)" },
+    { code: "GD", name: "GOLD (GD)" }
+  ];
   let chart;
   let series;
   let legsChart;
@@ -64,14 +71,81 @@
     return !!(data && data.selected && data.selected.pair);
   }
 
+  async function fetchJson(url, ms) {
+    const ac = new AbortController();
+    const t = setTimeout(function () { ac.abort(); }, ms || DESK_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json" }, signal: ac.signal });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  function robotLine(data) {
+    const fp = (data && data.fairPaper) || {};
+    const settings = (data && data.settings) || data || {};
+    if (fp.open) {
+      return "В СДЕЛКЕ " + fp.open.side + " " + fp.open.pair;
+    }
+    if (settings.autoExecution === false || data.autoExecution === false) {
+      return "ВЫКЛ";
+    }
+    const act = fp.lastAction || "";
+    if (act === "SKIP_MACRO") return "ПАУЗА · макро";
+    if (act === "SKIP_NO_CURVE") return "ждёт кривую";
+    if (act === "NONE" || act === "") return fp.liveArmed ? "armed · ждёт вход" : "paper · ждёт вход";
+    return act + (fp.liveArmed ? " · live" : " · paper");
+  }
+
+  function paintStatus(data) {
+    if (!data) return;
+    const settings = data.settings || data;
+    const fp = data.fairPaper || {};
+    const st = data.statement || {};
+    if ($("arb-robot")) $("arb-robot").textContent = robotLine(data);
+    if ($("arb-source")) $("arb-source").textContent = data.dataSource || settings.dataSource || "T_INVEST";
+    if ($("arb-delivery") && settings.delivery) $("arb-delivery").textContent = settings.delivery;
+    if ($("arb-action") && ($("arb-action").textContent === "—" || $("arb-action").textContent === "…")) {
+      $("arb-action").textContent = fp.open ? "OPEN" : (fp.lastAction || "—");
+    }
+    if ($("arb-reason") && ($("arb-reason").textContent === "—" || $("arb-reason").textContent.indexOf("ждём") === 0
+        || $("arb-reason").textContent.indexOf("Загрузка") === 0)) {
+      if (fp.lastReason) $("arb-reason").textContent = fp.lastReason;
+    }
+    if ($("arb-fair")) {
+      $("arb-fair").textContent = fp.open
+        ? ("OPEN " + fp.open.side + " " + fp.open.pair)
+        : ((fp.lastAction || "idle") + (fp.lastReason ? " · " + fp.lastReason : ""));
+      if (fp.liveBroker) {
+        $("arb-fair").textContent += " · broker " + fp.liveBroker
+          + (fp.liveArmed ? " · LIVE ARMED" : "");
+      }
+    }
+    if ($("arb-paper-today") && st.todayPnlRub != null) {
+      $("arb-paper-today").textContent = Number(st.todayPnlRub).toFixed(0) + " ₽";
+    }
+    fillFamilySelect(data.families && data.families.length ? data.families : DEFAULT_FAMS, settings.family);
+    if ($("arb-desk-meta")) {
+      const armed = fp.liveArmed ? "live two-leg armed" : "paper";
+      $("arb-desk-meta").textContent = "Котировки T-Invest · " + armed
+        + (fp.open ? " · есть позиция" : " · нет открытой сделки");
+    }
+  }
+
+  async function refreshStatus() {
+    const data = await fetchJson("/api/calendar-arb/status", 8000);
+    paintStatus(data);
+    return data;
+  }
+
   async function refresh() {
     const fam = ($("arb-family") && $("arb-family").value) || loadFamilyFromUrl();
     const st = window.__arbStructure || loadStructureFromUrl();
     let qs = fam ? ("?family=" + encodeURIComponent(fam)) : "";
     if (st) qs += (qs ? "&" : "?") + "structure=" + encodeURIComponent(st);
-    const res = await fetch("/api/calendar-arb/desk" + qs, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    let data = await res.json();
+    let data = await fetchJson("/api/calendar-arb/desk" + qs, DESK_TIMEOUT_MS);
     const wantFam = (fam || "").toUpperCase();
     const wantSt = (st || "").toUpperCase();
     const goodSel = (lastGood && lastGood.selected) || {};
@@ -213,6 +287,7 @@
         + (sel.expiration ? (" · EXP " + sel.expiration) : ""))
       : (warming ? "ждём кривую у брокера…" : "нет кривой у брокера");
     const fp = data.fairPaper || {};
+    if ($("arb-robot")) $("arb-robot").textContent = robotLine(data);
     $("arb-fair").textContent = fp.open
       ? ("OPEN " + fp.open.side + " " + fp.open.pair)
       : ((fp.lastAction || "idle") + (fp.lastReason ? " · " + fp.lastReason : ""));
@@ -502,6 +577,7 @@
     }
   }
 
+  function bindChartSync() {
     if (!chart || !legsChart) return;
     function copy(from, to) {
       from.timeScale().subscribeVisibleTimeRangeChange(function (range) {
@@ -572,8 +648,10 @@
   }
 
   function bind() {
+    fillFamilySelect(DEFAULT_FAMS, loadFamilyFromUrl());
     if ($("arb-desk-refresh")) {
       $("arb-desk-refresh").addEventListener("click", function () {
+        refreshStatus().catch(function () {});
         refresh().catch(function (e) { $("arb-desk-meta").textContent = String(e); });
       });
     }
@@ -586,6 +664,7 @@
         refresh().catch(function (e) { console.warn(e); });
       });
     }
+    refreshStatus().catch(function () {});
     refresh().catch(function (e) {
       $("arb-desk-meta").textContent = "Desk: " + (e.message || e);
     });
@@ -593,6 +672,7 @@
       if (!everReady) refresh().catch(function () {});
     }, 2500);
     pollTimer = setInterval(function () {
+      refreshStatus().catch(function () {});
       refresh().catch(function () {});
     }, POLL_MS);
   }
