@@ -362,6 +362,118 @@
     requestAnimationFrame(function () { applyTimeScaleSnap(chart, snap); });
   }
 
+  function priceDecimals(pointSize) {
+    if (!(pointSize > 0)) return 2;
+    if (pointSize >= 1) return 0;
+    if (pointSize >= 0.1) return 1;
+    if (pointSize >= 0.01) return 2;
+    return 4;
+  }
+
+  function fmtOhlcPx(v, pointSize) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return n.toFixed(priceDecimals(pointSize));
+  }
+
+  /**
+   * TradingView-style OHLC tip anchored near candle close on crosshair hover.
+   */
+  function bindCandleOhlcTip(chart, series, hostEl, opts) {
+    if (!chart || !series || !hostEl) {
+      return { destroy: function () {}, setPointSize: function () {} };
+    }
+    let pointSize = (opts && opts.pointSize > 0) ? opts.pointSize : 0.01;
+    const getBars = (opts && typeof opts.getBars === "function") ? opts.getBars : null;
+    const tip = document.createElement("div");
+    tip.className = "trinity-candle-ohlc-tip";
+    tip.hidden = true;
+    tip.setAttribute("role", "tooltip");
+    hostEl.appendChild(tip);
+
+    function hide() {
+      tip.hidden = true;
+    }
+
+    function layoutTip(bar, x, y) {
+      const bull = Number(bar.close) >= Number(bar.open);
+      tip.classList.toggle("is-bull", bull);
+      tip.classList.toggle("is-bear", !bull);
+      tip.innerHTML = ""
+        + '<span class="trinity-ohlc-row"><b>O</b> ' + fmtOhlcPx(bar.open, pointSize) + "</span>"
+        + '<span class="trinity-ohlc-row"><b>H</b> ' + fmtOhlcPx(bar.high, pointSize) + "</span>"
+        + '<span class="trinity-ohlc-row"><b>L</b> ' + fmtOhlcPx(bar.low, pointSize) + "</span>"
+        + '<span class="trinity-ohlc-row"><b>C</b> ' + fmtOhlcPx(bar.close, pointSize) + "</span>";
+      tip.hidden = false;
+      const hostW = hostEl.clientWidth || 0;
+      const hostH = hostEl.clientHeight || 0;
+      const tipW = tip.offsetWidth || 72;
+      const tipH = tip.offsetHeight || 68;
+      let left = x + 12;
+      let top = y - tipH * 0.55;
+      if (left + tipW > hostW - 6) left = x - tipW - 12;
+      if (top < 6) top = 6;
+      if (top + tipH > hostH - 6) top = hostH - tipH - 6;
+      tip.style.left = Math.round(left) + "px";
+      tip.style.top = Math.round(top) + "px";
+    }
+
+    function barFromGetBars(time) {
+      if (!getBars || time == null) return null;
+      const bars = getBars();
+      if (!bars || !bars.length) return null;
+      let best = null;
+      let bestD = Infinity;
+      const want = Number(time);
+      for (let i = 0; i < bars.length; i++) {
+        const b = bars[i];
+        if (!b) continue;
+        const t = b.time != null ? b.time : b.t;
+        if (t == null) continue;
+        if (t === time || String(t) === String(time)) return b;
+        const d = Math.abs(Number(t) - want);
+        if (d < bestD) {
+          bestD = d;
+          best = b;
+        }
+      }
+      return bestD <= 2 * 3600 ? best : null;
+    }
+
+    const onCrosshair = function (param) {
+      if (!param || !param.point || param.time == null) {
+        hide();
+        return;
+      }
+      let data = param.seriesData && typeof param.seriesData.get === "function"
+        ? param.seriesData.get(series) : null;
+      if (!data || data.open == null || data.close == null) {
+        data = barFromGetBars(param.time);
+      }
+      if (!data || data.open == null || data.close == null) {
+        hide();
+        return;
+      }
+      let y = series.priceToCoordinate(data.close);
+      if (y == null || !Number.isFinite(y)) y = param.point.y;
+      layoutTip(data, param.point.x, y);
+    };
+
+    if (typeof chart.subscribeCrosshairMove === "function") {
+      chart.subscribeCrosshairMove(onCrosshair);
+    }
+
+    return {
+      setPointSize: function (ps) {
+        if (ps > 0) pointSize = ps;
+      },
+      destroy: function () {
+        hide();
+        if (tip.parentNode) tip.parentNode.removeChild(tip);
+      }
+    };
+  }
+
   /**
    * Attach drawing tools to a Lightweight Charts instance.
    * @returns controller with getState/setState/destroy
@@ -374,6 +486,10 @@
     let pointSize = opts.pointSize > 0 ? opts.pointSize : 0.01;
     const onChange = opts.onChange || function () {};
     const LC = global.LightweightCharts;
+    const ohlcTip = bindCandleOhlcTip(chart, series, host, {
+      pointSize: pointSize,
+      getBars: getBars
+    });
 
     let mode = null; // vap | trend | null
     let vapAnchor = null; // time of first candle while drawing
@@ -1077,6 +1193,7 @@
       const next = ps > 0 ? ps : 0.01;
       if (next === pointSize) return;
       pointSize = next;
+      if (ohlcTip && typeof ohlcTip.setPointSize === "function") ohlcTip.setPointSize(next);
       if (vapFrom != null && vapTo != null) {
         applyVapRange(vapFrom, vapTo, { silent: true });
       }
@@ -1092,6 +1209,7 @@
     }
 
     function destroy() {
+      if (ohlcTip && typeof ohlcTip.destroy === "function") ohlcTip.destroy();
       clearTrendLines();
       clearMas();
       clearVap();
@@ -1149,6 +1267,7 @@
     ema: ema,
     attachTools: attachTools,
     bindScaleOverlayFollow: bindScaleOverlayFollow,
+    bindCandleOhlcTip: bindCandleOhlcTip,
     snapshotTimeScale: snapshotTimeScale,
     applyTimeScaleSnap: applyTimeScaleSnap,
     setSeriesDataKeepView: setSeriesDataKeepView,

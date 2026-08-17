@@ -61,6 +61,15 @@
   const RIGHT_PAD_OFF = 4;
   const HI_LO_COLOR = "#b91c1c";
   const ZONE_EDGE = "#6d28d9";
+  const DESK_LIVE_MS = 2000;
+  const BOOK_LIVE_MS = 1500;
+  let lastWorkingOpen = null;
+  let lastOverlayPlan = {};
+  let lastOverlaySig = {};
+  let lastOverlayCandles = [];
+  let lastDeskSnapshot = null;
+  let liveFlatUntil = 0;
+  let liveTp1Until = 0;
 
   function $(id) { return document.getElementById(id); }
   function deMark(s) {
@@ -2030,7 +2039,7 @@
     if (ba > 0) return ba;
     return null;
   }
-  function paintLastCandle(px) {
+  function paintLastCandle(px, book) {
     if (!candleSeries || !(px > 0) || lastCandleTime == null) return;
     const raw = lastBarsRaw && lastBarsRaw.length ? lastBarsRaw[lastBarsRaw.length - 1] : null;
     if (!raw) return;
@@ -2040,6 +2049,10 @@
     if (![o, h, l].every(Number.isFinite)) return;
     if (px > h) h = px;
     if (px < l) l = px;
+    const bb = book && book.bids && book.bids[0] ? Number(book.bids[0].p) : NaN;
+    const ba = book && book.asks && book.asks[0] ? Number(book.asks[0].p) : NaN;
+    if (bb > 0) { if (bb > h) h = bb; if (bb < l) l = bb; }
+    if (ba > 0) { if (ba > h) h = ba; if (ba < l) l = ba; }
     raw.close = px;
     raw.high = h;
     raw.low = l;
@@ -2049,6 +2062,78 @@
     } catch (_) {}
     applyingScale = false;
     if (priceScaleLocked) freezePriceScale();
+    applyLiveManage(px, book);
+  }
+  function bookTouchPx(open, book, mid) {
+    const bb = book && book.bids && book.bids[0] ? Number(book.bids[0].p) : NaN;
+    const ba = book && book.asks && book.asks[0] ? Number(book.asks[0].p) : NaN;
+    const xs = [mid, bb, ba].filter(function (v) { return v > 0; });
+    if (!xs.length) return mid;
+    if (open && open.side === "BUY") return Math.max.apply(null, xs);
+    return Math.min.apply(null, xs);
+  }
+  function liveTouchedLevel(open, px, key) {
+    if (!open || !(px > 0)) return false;
+    const lvl = Number(open[key]);
+    if (!(lvl > 0)) return false;
+    return open.side === "BUY" ? px >= lvl : px <= lvl;
+  }
+  function liveWouldExit(open, px) {
+    if (!open || !(px > 0)) return false;
+    if (liveTouchedLevel(open, px, "tp2")) return true;
+    const sl = Number(open.sl);
+    if (!(sl > 0)) return false;
+    return open.side === "BUY" ? px <= sl : px >= sl;
+  }
+  function applyLiveManage(px, book) {
+    if (!lastWorkingOpen || !(px > 0)) return;
+    const open = lastWorkingOpen;
+    const touch = bookTouchPx(open, book, px);
+    if (liveTouchedLevel(open, touch, "tp2") || liveWouldExit(open, touch)) {
+      flattenWorking();
+      return;
+    }
+    if (!open.tp1Done && liveTouchedLevel(open, touch, "tp1")) {
+      const qty = Number(open.qty) || 0;
+      let q1 = Math.round(qty / 3);
+      if (q1 >= qty) q1 = qty - 1;
+      if (q1 < 0) q1 = 0;
+      if (q1 > 0) open.qty = qty - q1;
+      open.tp1Done = true;
+      if (Number(open.avg) > 0) open.sl = Number(open.avg);
+      liveTp1Until = Date.now() + 60000;
+      lastOverlayKey = "";
+      applyOverlays(lastOverlayPlan, lastOverlaySig, lastOverlayCandles, overlayStructure, open);
+      if (lastDeskSnapshot) {
+        try { syncStatusRail(lastDeskSnapshot); } catch (_) {}
+      }
+    }
+  }
+  function flattenWorking() {
+    lastWorkingOpen = null;
+    liveFlatUntil = Date.now() + 60000;
+    liveTp1Until = 0;
+    lastOverlayKey = "";
+    applyOverlays(
+      Object.assign({}, lastOverlayPlan, { actionable: false }),
+      lastOverlaySig,
+      lastOverlayCandles,
+      overlayStructure,
+      null
+    );
+    if (lastDeskSnapshot) {
+      const snap = lastDeskSnapshot;
+      if (snap.situation) {
+        snap.situation = Object.assign({}, snap.situation, {
+          inTrade: false,
+          posture: "WATCHING_ZONE"
+        });
+      }
+      if (snap.fairPaper) {
+        snap.fairPaper = Object.assign({}, snap.fairPaper, { open: null, openPlaybookId: null });
+      }
+      try { syncStatusRail(snap); } catch (_) {}
+    }
   }
   function renderDom(book) {
     const body = $("signal-dom-body");
@@ -2166,7 +2251,7 @@
         + "</div>";
     }
     body.innerHTML = html;
-    paintLastCandle(livePxFromBook(book));
+    paintLastCandle(livePxFromBook(book), book);
     // Center mid only on first paint; never scrollIntoView (it jumps the whole page)
     if (!hadRows || domFollowMid) {
       const bestEl = body.querySelector(".dom-spread") || body.querySelector(".is-best");
@@ -2343,10 +2428,35 @@
       const overlayPb = sit.playbookId
         || (data.parallelPlaybooks ? "levels-profile-br-m5" : data.playbookId)
         || "";
-      const overlayOpen = sit.inTrade ? fairPaperLaneOpen(fp, overlayPb) : null;
+      let overlayOpen = sit.inTrade ? fairPaperLaneOpen(fp, overlayPb) : null;
+      const touchPx = bookTouchPx(overlayOpen || lastWorkingOpen, data.book, livePx);
+      if (overlayOpen && liveFlatUntil > Date.now()
+          && liveWouldExit(overlayOpen, touchPx > 0 ? touchPx : Number(overlayOpen.avg))) {
+        overlayOpen = null;
+      } else if (overlayOpen) {
+        liveFlatUntil = 0;
+        if (liveTp1Until > Date.now() && !overlayOpen.tp1Done
+            && liveTouchedLevel(overlayOpen, touchPx, "tp1")) {
+          overlayOpen = Object.assign({}, overlayOpen, {
+            tp1Done: true,
+            sl: Number(overlayOpen.avg) > 0 ? overlayOpen.avg : overlayOpen.sl
+          });
+        } else if (overlayOpen.tp1Done) {
+          liveTp1Until = 0;
+        }
+      }
+      lastWorkingOpen = overlayOpen;
+      lastOverlayPlan = plan;
+      lastOverlaySig = sig;
+      lastOverlayCandles = candles;
+      lastDeskSnapshot = data;
       if (candles.length) {
         updateCandles(candles, !!forceFit);
-        applyOverlays(plan, sig, candles, data.structure || {}, overlayOpen);
+        const planForOv = (!overlayOpen && liveFlatUntil > Date.now())
+          ? Object.assign({}, plan, { actionable: false })
+          : plan;
+        applyOverlays(planForOv, sig, candles, data.structure || {}, overlayOpen);
+        if (livePx > 0) applyLiveManage(livePx, data.book);
       } else if (instrumentChanged && candleSeries) {
         // Don't leave the previous instrument's candles on screen.
         try { candleSeries.setData([]); } catch (_) {}
@@ -3062,6 +3172,14 @@
     });
   });
   loadBook();
-  setInterval(function () { loadDesk(false); }, DESK_MS);
-  setInterval(loadBook, BOOK_MS);
+  (function pollDeskLoop() {
+    setTimeout(function () {
+      loadDesk(false).finally(pollDeskLoop);
+    }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? DESK_LIVE_MS : DESK_MS);
+  })();
+  (function pollBookLoop() {
+    setTimeout(function () {
+      Promise.resolve(loadBook()).finally(pollBookLoop);
+    }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? BOOK_LIVE_MS : BOOK_MS);
+  })();
 })();
