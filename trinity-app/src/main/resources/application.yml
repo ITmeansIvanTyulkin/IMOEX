@@ -263,7 +263,7 @@ imoex:
       cooldown-bars-after-sl: 12
       retest-arm-max-distance-points: 10
       a-setup-bounce-only: false     # full checklist: BOUNCE + RETEST after break+hold
-      prefer-structural-entries: true  # operator: skip ACCUM/ZERO RETEST noise — TOP/BOT shelves
+      prefer-structural-entries: true  # map: HI/LO+ZERO+ACCUM; entries: only day TOP/BOT
       macro-bias-enabled: true         # smart macro: knife BUY/RETEST blocked; confirmed BOT bounce OK if HTF≠DOWN
       macro-min-day-move-points: 80
       min-shelf-volume: 30             # anti-thin: bar vol / tape lots floor for entry shelves

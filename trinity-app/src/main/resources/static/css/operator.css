@@ -2796,13 +2796,35 @@ body[data-upsell="off"] .full-core-badge {
   color: rgba(30, 42, 50, 0.5);
   font-weight: 600;
 }
-.trinity-candle-ohlc-tip.is-bull .trinity-ohlc-row:last-child {
+.trinity-candle-ohlc-tip.is-bull .trinity-ohlc-row:nth-child(4) {
   color: #16a34a;
   font-weight: 600;
 }
-.trinity-candle-ohlc-tip.is-bear .trinity-ohlc-row:last-child {
+.trinity-candle-ohlc-tip.is-bear .trinity-ohlc-row:nth-child(4) {
   color: #dc2626;
   font-weight: 600;
+}
+.trinity-ohlc-wait {
+  display: block;
+  max-width: 260px;
+  margin-top: 3px;
+  white-space: normal;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #6d28d9;
+  font-weight: 500;
+}
+.trinity-candle-ohlc-tip .trinity-ohlc-note {
+  display: block;
+  max-width: 260px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(30, 42, 50, 0.1);
+  white-space: normal;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #3f4a52;
+  font-weight: 500;
 }
 /* Zone bands like ATAS/Quik screenshots — translucent rectangles, not thin lines */
 .signal-zone-overlay {
@@ -3500,6 +3522,35 @@ body[data-upsell="off"] .full-core-badge {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted, #6a7580);
+}
+.signal-impulse-banner {
+  margin: 0 0 0.45rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  background: rgba(185, 28, 28, 0.08);
+  border: 1px solid rgba(185, 28, 28, 0.22);
+  color: #7f1d1d;
+}
+.signal-impulse-banner.is-spike {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.22);
+  color: #14532d;
+}
+.signal-impulse-banner[hidden] {
+  display: none !important;
+}
+.signal-impulse-banner strong {
+  display: block;
+  margin-bottom: 0.15rem;
+}
+.signal-impulse-banner em {
+  display: block;
+  margin-top: 0.35rem;
+  font-style: normal;
+  font-weight: 600;
+  color: #5b21b6;
 }
 .signal-guide-btn {
   font-size: 0.82rem;

@@ -376,6 +376,223 @@
     return n.toFixed(priceDecimals(pointSize));
   }
 
+  function barTimeKey(t) {
+    if (t == null) return "";
+    if (typeof t === "number" && Number.isFinite(t)) return String(Math.round(t));
+    const d = Date.parse(t);
+    if (Number.isFinite(d)) return String(Math.round(d / 1000));
+    return String(t);
+  }
+
+  function mskHourFromTime(t) {
+    let ms = null;
+    if (typeof t === "number" && Number.isFinite(t)) {
+      ms = t > 1e12 ? t : t * 1000;
+    } else {
+      const p = Date.parse(t);
+      if (Number.isFinite(p)) ms = p;
+    }
+    if (ms == null) return -1;
+    return new Date(ms + 3 * 3600 * 1000).getUTCHours();
+  }
+
+  function mskMinuteFromTime(t) {
+    let ms = null;
+    if (typeof t === "number" && Number.isFinite(t)) {
+      ms = t > 1e12 ? t : t * 1000;
+    } else {
+      const p = Date.parse(t);
+      if (Number.isFinite(p)) ms = p;
+    }
+    if (ms == null) return -1;
+    return new Date(ms + 3 * 3600 * 1000).getUTCMinutes();
+  }
+
+  /**
+   * Tag huge candles: knife / spike / stop-hunt. Looks back so the plaque
+   * still shows after the impulse bar has already closed.
+   */
+  function classifyImpulseSeries(bars, ctx) {
+    const out = { latest: null, notes: {}, fresh: false };
+    if (!bars || bars.length < 8) return out;
+    const ps = (ctx && ctx.pointSize > 0) ? ctx.pointSize : 0.01;
+    const st = (ctx && ctx.structure) || {};
+    const openH = (ctx && ctx.sessionOpenHour != null) ? ctx.sessionOpenHour : 10;
+    const ranges = [];
+    const from = Math.max(0, bars.length - 68);
+    for (let i = from; i < bars.length; i++) {
+      const b = bars[i];
+      if (!b) continue;
+      const r = Number(b.high) - Number(b.low);
+      if (r > 0) ranges.push(r);
+    }
+    if (!ranges.length) return out;
+    const sorted = ranges.slice().sort(function (a, b) { return a - b; });
+    const median = sorted[Math.floor(sorted.length / 2)] || 0;
+    const vols = [];
+    for (let i = from; i < bars.length; i++) {
+      const v = Number(bars[i] && bars[i].volume);
+      if (v > 0) vols.push(v);
+    }
+    vols.sort(function (a, b) { return a - b; });
+    const medianVol = vols.length ? vols[Math.floor(vols.length / 2)] : 0;
+    const getFp = ctx && typeof ctx.getFootprint === "function" ? ctx.getFootprint : null;
+    const scanFrom = Math.max(0, bars.length - 48);
+    let latest = null;
+    let latestIdx = -1;
+    for (let i = scanFrom; i < bars.length; i++) {
+      const fp = getFp ? getFp(bars[i].time) : null;
+      const tag = classifyImpulseBar(bars[i], median, ps, st, openH, medianVol, fp);
+      if (!tag) continue;
+      const key = barTimeKey(bars[i].time);
+      if (key) out.notes[key] = tag;
+      latest = tag;
+      latestIdx = i;
+    }
+    if (latest) {
+      out.latest = latest;
+      out.fresh = latestIdx >= bars.length - 3;
+    }
+    return out;
+  }
+
+  function footprintSkew(fp) {
+    if (!fp || !fp.levels || !fp.levels.length) return null;
+    let buy = 0, sell = 0;
+    fp.levels.forEach(function (l) {
+      buy += Number(l.buy) || 0;
+      sell += Number(l.sell) || 0;
+    });
+    const tot = buy + sell;
+    if (!(tot > 0)) return null;
+    return { buy: buy, sell: sell, tot: tot, delta: buy - sell };
+  }
+
+  function impulseLesson(pattern, dump, extra) {
+    extra = extra || {};
+    const vol = extra.volMult;
+    let volBit = "";
+    if (vol >= 3) {
+      volBit = " Объём примерно ×" + vol.toFixed(1) + " к обычной свече — сделок было много, не пустой скачок котировки.";
+    } else if (vol > 0 && vol < 1.35) {
+      volBit = " Объём почти как у обычной свечи, а ход большой — между ценами почти никого не было, цена проскочила пустоту. Это не «все знали новость».";
+    } else if (vol >= 1.35) {
+      volBit = " Объём выше среднего — ход подкреплён сделками.";
+    }
+    let tapeBit = "";
+    const fp = extra.fp;
+    if (fp) {
+      if (fp.sell > fp.buy * 1.25) {
+        tapeBit = " В ленте этой свечи больше продаж: продавали сразу «по любой цене», и очередь заявок на покупку съедалась уровень за уровнем.";
+      } else if (fp.buy > fp.sell * 1.25) {
+        tapeBit = " В ленте этой свечи больше покупок: покупали сразу «по любой цене», и очередь заявок на продажу съедалась уровень за уровнем.";
+      } else {
+        tapeBit = " В ленте покупки и продажи близки — скорее проскок пустых цен, чем одна сплошная толпа.";
+      }
+    }
+    const sessionBit = extra.sessionOpen
+      ? " Это первые минуты основной сессии 10:00 МСК: заявок ещё мало, ночной ход нефти выгружается в рынок. Не заголовок из ленты."
+      : "";
+    let why;
+    let wait;
+    if (pattern === "STOP_HUNT" && extra.sweptLow) {
+      why = "Сначала вынесли стопы под минимумом (продали туда, где почти не было покупателей), затем свеча закрылась выше — вынос не удержали."
+        + volBit + tapeBit + sessionBit;
+      wait = "Типично: дёрнули вниз, чтобы потом идти вверх. Не шортить вынос. Смотрим, удержит ли цена уровень над вынесенным лоем. Exclusive покупает только от BOT после закрытой свечи-отбоя — не в середине выноса.";
+    } else if (pattern === "STOP_HUNT") {
+      why = "Сначала вынесли стопы над максимумом (купили туда, где почти не было продавцов), затем свеча закрылась ниже — вынос хая не удержали."
+        + volBit + tapeBit + sessionBit;
+      wait = "Типично: дёрнули вверх, чтобы потом идти вниз. Не ловить лонг на шипе. Ждём, останется ли цена под вынесенным хаем. Exclusive шортит от TOP только после закрытого отбоя.";
+    } else if (pattern === "KNIFE") {
+      why = "Нож: продавали сразу по рынку. Заявки на покупку на каждом уровне исполнялись и исчезали — цена шла к следующей, более низкой. Закрытие у минимума: в этом баре покупатели так и не остановили падение."
+        + volBit + tapeBit + sessionBit;
+      wait = "Не ловить нож. Ждём остановку: сужение следующих свечей или касание полки/ZERO/BOT. Покупка у робота — только от зоны BOT после rejection, не «догонять дно».";
+    } else if (pattern === "ROCKET") {
+      why = "Импульс вверх: покупали сразу по рынку. Заявки на продажу на каждом уровне исполнялись и исчезали — цена шла к следующей, более высокой. Закрытие у максимума: продавцы ход не остановили."
+        + volBit + tapeBit + sessionBit;
+      wait = "Не догонять вверх. Для Exclusive шорт только от TOP после закрытого отбоя. Если нет зоны — ждём, не остановится ли ход на HI дня.";
+    } else if (pattern === "SPIKE") {
+      why = "Длинный фитиль и маленькое тело: цена пробежала пустые уровни и вернулась. Агрессия не закрепилась."
+        + volBit + tapeBit + sessionBit;
+      wait = "Шип сам по себе не вход. Ждём, с какой стороны закроются следующие 1–2 свечи. Ложный вынос часто возвращает цену в середину диапазона.";
+    } else {
+      why = (dump ? "Резкий ход вниз." : "Резкий ход вверх.") + volBit + tapeBit + sessionBit;
+      wait = "Не торговать середину импульса. Смотрим, где остановится относительно TOP/BOT/ZERO — и ждём реакцию, не прогноз заголовка.";
+    }
+    return {
+      why: why.replace(/\s+/g, " ").trim(),
+      wait: wait.replace(/\s+/g, " ").trim()
+    };
+  }
+
+  function classifyImpulseBar(bar, medianRange, ps, st, openH, medianVol, fp) {
+    if (!bar) return null;
+    const o = Number(bar.open), h = Number(bar.high), l = Number(bar.low), c = Number(bar.close);
+    if (![o, h, l, c].every(Number.isFinite) || h < l) return null;
+    const range = h - l;
+    const pts = range / ps;
+    const mult = medianRange > 1e-9 ? range / medianRange : pts;
+    if (pts < 20 && mult < 2.8) return null;
+    const body = Math.abs(c - o);
+    const upper = h - Math.max(o, c);
+    const lower = Math.min(o, c) - l;
+    const dump = c < o;
+    const bodyFrac = range > 0 ? body / range : 0;
+    const hi = Number(st.lookbackHigh);
+    const lo = Number(st.lookbackLow);
+    const top = st.zoneTop;
+    const bot = st.zoneBottom;
+    const sweptHigh = (hi > 0 && h >= hi - ps)
+      || (top && Number(top.low) > 0 && h >= Number(top.low) - ps);
+    const sweptLow = (lo > 0 && l <= lo + ps)
+      || (bot && Number(bot.high) > 0 && l <= Number(bot.high) + ps);
+    const closeBackHigh = c < h - 0.45 * range;
+    const closeBackLow = c > l + 0.45 * range;
+    let pattern = "IMPULSE";
+    let title = dump ? "Импульс вниз" : "Импульс вверх";
+    if (sweptHigh && closeBackHigh && upper >= 0.35 * range) {
+      pattern = "STOP_HUNT";
+      title = "Сбор стопов сверху";
+    } else if (sweptLow && closeBackLow && lower >= 0.35 * range) {
+      pattern = "STOP_HUNT";
+      title = "Сбор стопов снизу";
+    } else if (bodyFrac >= 0.68) {
+      pattern = dump ? "KNIFE" : "ROCKET";
+      title = dump ? "Нож" : "Импульс вверх";
+    } else if (Math.max(upper, lower) >= 0.5 * range && bodyFrac < 0.4) {
+      pattern = "SPIKE";
+      title = "Шип";
+    }
+    const hh = mskHourFromTime(bar.time);
+    const mm = mskMinuteFromTime(bar.time);
+    const sessionOpen = hh === openH && mm >= 0 && mm < 25;
+    if (sessionOpen) {
+      title += " · открытие сессии";
+    }
+    const vol = Number(bar.volume);
+    const volMult = (medianVol > 0 && vol > 0) ? vol / medianVol : 0;
+    const lesson = impulseLesson(pattern, dump, {
+      volMult: volMult,
+      fp: footprintSkew(fp),
+      sessionOpen: sessionOpen,
+      sweptHigh: sweptHigh,
+      sweptLow: sweptLow
+    });
+    const signed = (dump ? "−" : "+") + Math.round(pts);
+    const hover = lesson.why + " Что ждать: " + lesson.wait;
+    return {
+      pattern: pattern,
+      title: title,
+      hover: hover,
+      why: lesson.why,
+      wait: lesson.wait,
+      direction: dump ? "DUMP" : "SPIKE",
+      rangePoints: dump ? -Math.round(pts) : Math.round(pts),
+      headline: title + " " + signed + "п",
+      banner: lesson.why
+    };
+  }
+
   /**
    * TradingView-style OHLC tip anchored near candle close on crosshair hover.
    */
@@ -385,6 +602,7 @@
     }
     let pointSize = (opts && opts.pointSize > 0) ? opts.pointSize : 0.01;
     const getBars = (opts && typeof opts.getBars === "function") ? opts.getBars : null;
+    let impulseNotes = {};
     const tip = document.createElement("div");
     tip.className = "trinity-candle-ohlc-tip";
     tip.hidden = true;
@@ -404,6 +622,15 @@
         + '<span class="trinity-ohlc-row"><b>H</b> ' + fmtOhlcPx(bar.high, pointSize) + "</span>"
         + '<span class="trinity-ohlc-row"><b>L</b> ' + fmtOhlcPx(bar.low, pointSize) + "</span>"
         + '<span class="trinity-ohlc-row"><b>C</b> ' + fmtOhlcPx(bar.close, pointSize) + "</span>";
+      const note = impulseNotes[barTimeKey(bar.time)]
+        || impulseNotes[String(bar.time)]
+        || null;
+      if (note && (note.why || note.hover)) {
+        tip.innerHTML += '<span class="trinity-ohlc-note">' + (note.why || note.hover) + "</span>";
+        if (note.wait) {
+          tip.innerHTML += '<span class="trinity-ohlc-wait">Ждём: ' + note.wait + "</span>";
+        }
+      }
       tip.hidden = false;
       const hostW = hostEl.clientWidth || 0;
       const hostH = hostEl.clientHeight || 0;
@@ -456,6 +683,7 @@
       }
       let y = series.priceToCoordinate(data.close);
       if (y == null || !Number.isFinite(y)) y = param.point.y;
+      if (data.time == null) data.time = param.time;
       layoutTip(data, param.point.x, y);
     };
 
@@ -466,6 +694,9 @@
     return {
       setPointSize: function (ps) {
         if (ps > 0) pointSize = ps;
+      },
+      setImpulseNotes: function (notes) {
+        impulseNotes = notes || {};
       },
       destroy: function () {
         hide();
@@ -1237,6 +1468,9 @@
       getState: getState,
       setState: setState,
       setPointSize: setPointSize,
+      setImpulseNotes: function (notes) {
+        if (ohlcTip && typeof ohlcTip.setImpulseNotes === "function") ohlcTip.setImpulseNotes(notes);
+      },
       refreshOverlays: refreshOverlays,
       layoutStretchedVap: layoutStretchedVap,
       layoutTrendLines: layoutTrendLines,
@@ -1268,6 +1502,7 @@
     attachTools: attachTools,
     bindScaleOverlayFollow: bindScaleOverlayFollow,
     bindCandleOhlcTip: bindCandleOhlcTip,
+    classifyImpulseSeries: classifyImpulseSeries,
     snapshotTimeScale: snapshotTimeScale,
     applyTimeScaleSnap: applyTimeScaleSnap,
     setSeriesDataKeepView: setSeriesDataKeepView,

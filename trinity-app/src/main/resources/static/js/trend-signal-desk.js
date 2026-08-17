@@ -336,6 +336,11 @@
     else if (topRel || botRel) priceLine += " — " + (topRel || botRel);
     marketItems.push(priceLine);
 
+    const impulse = sit.impulse || {};
+    if (impulse.active && impulse.headline) {
+      marketItems.push("<strong>" + esc(impulse.headline) + "</strong> — " + esc(impulse.body || ""));
+    }
+
     if (sit.dayMovePoints != null) {
       const dm = sit.dayMovePoints;
       let dayLine = "День " + (dm >= 0 ? "+" : "") + dm + "п от открытия сессии";
@@ -647,6 +652,47 @@
     }
 
     return marketHtml + robotHtml + newsHtml + paperHtml;
+  }
+  function paintImpulseBanner(impulse) {
+    const el = $("signal-impulse-banner");
+    if (!el) return;
+    if (!impulse || !impulse.active || !impulse.headline) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.hidden = false;
+    el.classList.toggle("is-spike", impulse.direction === "SPIKE" || impulse.pattern === "ROCKET");
+    el.innerHTML = "<strong>" + escHtml(impulse.headline) + "</strong>"
+      + escHtml(impulse.body || "")
+      + (impulse.wait ? ("<em>" + escHtml(impulse.wait) + "</em>") : "");
+  }
+  function refreshImpulseUi(candles) {
+    const kit = window.TrinityChartKit;
+    if (!kit || typeof kit.classifyImpulseSeries !== "function") return;
+    const r = kit.classifyImpulseSeries(candles || [], {
+      pointSize: deskPointSize(lastDeskInstrument, 0),
+      structure: overlayStructure || {},
+      sessionOpenHour: 10,
+      getFootprint: function (t) {
+        return lookupFootprint(typeof t === "number" ? t : toChartTime(t));
+      }
+    });
+    if (chartTools && typeof chartTools.setImpulseNotes === "function") {
+      chartTools.setImpulseNotes(r.notes || {});
+    }
+    if (!r.latest) {
+      paintImpulseBanner({ active: false });
+      return;
+    }
+    paintImpulseBanner({
+      active: true,
+      direction: r.latest.direction,
+      pattern: r.latest.pattern,
+      headline: (r.fresh ? "Сейчас: " : "Недавно: ") + r.latest.headline,
+      body: r.latest.why || r.latest.banner || r.latest.hover || "",
+      wait: r.latest.wait || ""
+    });
   }
   function humanizeDeskReason(raw) {
     const s = deMark(raw || "");
@@ -2409,7 +2455,7 @@
       const candles = rawBars.map(function (b) {
         const t = toChartTime(b.time);
         if (t == null) return null;
-        return { time: t, open: b.open, high: b.high, low: b.low, close: b.close };
+        return { time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
       }).filter(Boolean);
       const livePx = livePxFromBook(data.book);
       if (livePx > 0 && candles.length) {
@@ -2457,6 +2503,7 @@
           : plan;
         applyOverlays(planForOv, sig, candles, data.structure || {}, overlayOpen);
         if (livePx > 0) applyLiveManage(livePx, data.book);
+        refreshImpulseUi(candles);
       } else if (instrumentChanged && candleSeries) {
         // Don't leave the previous instrument's candles on screen.
         try { candleSeries.setData([]); } catch (_) {}
@@ -3133,7 +3180,7 @@
       }
       const t = toChartTime(b.time);
       if (t == null) return null;
-      return { time: t, open: b.open, high: b.high, low: b.low, close: b.close };
+      return { time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
     }).filter(Boolean);
     if (!candles.length) return false;
     if (inst && inst !== lastDeskInstrument) {
@@ -3145,6 +3192,7 @@
     lastCandlesLen = 0;
     lastCandleTime = null;
     updateCandles(candles, false);
+    refreshImpulseUi(candles);
     const chartLabel = $("signal-chart-label");
     if (chartLabel) {
       chartLabel.textContent = "График · " + inst + " " + lastChartTf + " · локальный архив";
