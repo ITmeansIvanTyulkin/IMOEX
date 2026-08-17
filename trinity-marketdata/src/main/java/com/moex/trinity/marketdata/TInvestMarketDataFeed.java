@@ -273,6 +273,14 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         return streaming.get();
     }
 
+    /** Update in-memory book after unary REST refresh (stream down / stale snapshot). */
+    public void putBook(DomBook book) {
+        if (book == null || book.instrumentId() == null || book.instrumentId().isBlank()) {
+            return;
+        }
+        books.put(book.instrumentId().trim().toUpperCase(), book);
+    }
+
     @Override
     public Optional<DomBook> latestBook(String instrumentId) {
         if (instrumentId == null) {

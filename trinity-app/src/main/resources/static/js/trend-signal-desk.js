@@ -2207,9 +2207,15 @@
       if (btn) btn.disabled = false;
     }
   }
+  function deskInstrumentQuery() {
+    const instSel = $("sig-instrument");
+    const inst = (instSel && instSel.value) ? instSel.value.trim() : (lastDeskInstrument || "");
+    return inst ? ("?instrument=" + encodeURIComponent(inst)) : "";
+  }
   async function loadBook() {
     try {
-      const res = await fetch("/api/marketdata/book", { headers: { Accept: "application/json" } });
+      const res = await fetch("/api/marketdata/book" + deskInstrumentQuery(),
+        { headers: { Accept: "application/json" } });
       if (!res.ok) return;
       renderDom(await res.json());
     } catch (_) {}
