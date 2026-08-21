@@ -384,6 +384,76 @@
     }
   }
 
+  function smokeAuthHeaders(extra) {
+    const headers = Object.assign({ Accept: "application/json" }, extra || {});
+    try {
+      const token = localStorage.getItem(SB_TOKEN_KEY);
+      if (token) {
+        headers.Authorization = "Bearer " + token;
+        return headers;
+      }
+      const user = (localStorage.getItem("imoex.ops.user") || "").trim();
+      const pass = localStorage.getItem("imoex.ops.pass") || "";
+      if (user && pass && user.indexOf("@") < 0) {
+        headers.Authorization = "Basic " + btoa(unescape(encodeURIComponent(user + ":" + pass)));
+      }
+    } catch (_) {}
+    return headers;
+  }
+
+  function renderSmokeBanner(data) {
+    const el = $("trinity-smoke-banner");
+    if (!el) return;
+    const phase = (data && data.phase) || "";
+    const blocked = !!(data && data.executionBlocked);
+    const show = phase === "FAIL" || (phase === "OK" && blocked) || phase === "RUNNING" && blocked;
+    if (!show) {
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+    el.hidden = false;
+    const failed = ((data && data.checks) || []).filter(function (c) { return c && !c.ok; })
+      .map(function (c) { return c.name; }).join(", ");
+    const msg = (data && data.message) || "Startup smoke";
+    const detail = failed ? (" · " + failed) : "";
+    el.innerHTML =
+      "<strong>Smoke " + escapeHtml(phase) + "</strong>" +
+      "<span>" + escapeHtml(msg) + escapeHtml(detail) +
+      " — auto/live выкл. <a href=\"/api/ops/smoke\">/api/ops/smoke</a></span>" +
+      '<button type="button" class="btn btn-ghost" id="trinity-smoke-rerun">Повторить</button>';
+    const btn = $("trinity-smoke-rerun");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        fetch("/api/ops/smoke/rerun", {
+          method: "POST",
+          headers: smokeAuthHeaders({ "Content-Type": "application/json" }),
+          body: "{}"
+        }).then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        }).then(function (body) {
+          renderSmokeBanner(body);
+          appendLog("Smoke rerun accepted.", "info");
+        }).catch(function (e) {
+          appendLog("Smoke rerun: " + (e && e.message ? e.message : e), "err");
+        });
+      });
+    }
+  }
+
+  function pollSmokeOnce() {
+    fetch("/api/ops/smoke", { headers: { Accept: "application/json" } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) { if (data) renderSmokeBanner(data); })
+      .catch(function () {});
+  }
+
+  function startSmokePolling() {
+    pollSmokeOnce();
+    setInterval(pollSmokeOnce, 20000);
+  }
+
   function escapeHtml(s) {
     return String(s)
       .replace(/&/g, "&amp;")
@@ -1266,7 +1336,9 @@
         }
       });
     });
-    syncWidgetCardHeights();
+    requestAnimationFrame(function () {
+      requestAnimationFrame(syncWidgetCardHeights);
+    });
     if (!window.__trinityFlipResizeBound) {
       window.__trinityFlipResizeBound = true;
       let t = 0;
@@ -1277,57 +1349,108 @@
     }
   }
 
-  /** Все карточки дашборда — одна высота (= max по всем рядам). */
+  /**
+   * Equalize flippable card heights per .widget-grid row.
+   * Measure off-DOM: probing inside .widget-flip with width=0 (pre-layout)
+   * wrapped every glyph → multi-thousand-px cards that looked "endless".
+   */
   function syncWidgetCardHeights() {
-    const cards = Array.prototype.slice.call(
-      document.querySelectorAll(".widget-grid .widget-card.is-flippable")
-    );
-    if (!cards.length) return;
+    const grids = Array.prototype.slice.call(document.querySelectorAll(".widget-grid"));
+    if (!grids.length) return;
 
-    let globalMax = 360;
-    const measured = cards.map(function (card) {
-      const flip = card.querySelector(".widget-flip");
-      const front = card.querySelector(".widget-front");
-      const back = card.querySelector(".widget-back");
-      if (!flip || !front || !back) return null;
+    const MIN_H = 360;
+    const MAX_H = 520;
+    const MIN_W = 120;
 
-      function naturalHeight(face) {
-        const probe = face.cloneNode(true);
-        probe.removeAttribute("id");
-        probe.querySelectorAll("[id]").forEach(function (n) { n.removeAttribute("id"); });
-        probe.style.cssText = [
-          "position:static",
-          "transform:none",
-          "-webkit-transform:none",
-          "visibility:hidden",
-          "opacity:1",
-          "pointer-events:none",
-          "height:auto",
-          "min-height:0",
-          "inset:auto",
-          "display:block",
-          "width:" + flip.clientWidth + "px"
-        ].join(";");
-        flip.appendChild(probe);
-        const h = Math.ceil(probe.getBoundingClientRect().height);
-        probe.remove();
-        return h;
-      }
+    let host = document.getElementById("trinity-widget-measure-host");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "trinity-widget-measure-host";
+      host.setAttribute("aria-hidden", "true");
+      host.style.cssText = [
+        "position:absolute",
+        "left:-10000px",
+        "top:0",
+        "visibility:hidden",
+        "pointer-events:none",
+        "height:auto",
+        "overflow:visible"
+      ].join(";");
+      document.body.appendChild(host);
+    }
 
-      const h = Math.max(360, naturalHeight(front), naturalHeight(back)) + 4;
-      globalMax = Math.max(globalMax, h);
-      return { card: card, flip: flip, front: front, back: back };
-    });
+    function naturalHeight(face, widthPx) {
+      const probe = face.cloneNode(true);
+      probe.removeAttribute("id");
+      probe.querySelectorAll("[id]").forEach(function (n) { n.removeAttribute("id"); });
+      probe.style.cssText = [
+        "position:static",
+        "transform:none",
+        "-webkit-transform:none",
+        "visibility:hidden",
+        "opacity:1",
+        "pointer-events:none",
+        "height:auto",
+        "min-height:0",
+        "max-height:none",
+        "inset:auto",
+        "display:flex",
+        "flex-direction:column",
+        "box-sizing:border-box",
+        "width:" + widthPx + "px"
+      ].join(";");
+      probe.querySelectorAll(".widget-body, .widget-back-body").forEach(function (el) {
+        el.style.height = "auto";
+        el.style.minHeight = "0";
+        el.style.flex = "0 0 auto";
+      });
+      host.appendChild(probe);
+      const h = Math.ceil(probe.getBoundingClientRect().height);
+      probe.remove();
+      return h;
+    }
 
-    measured.forEach(function (m) {
-      if (!m) return;
-      m.flip.style.height = globalMax + "px";
-      m.card.style.height = globalMax + "px";
-      m.card.style.minHeight = globalMax + "px";
-      m.front.style.height = globalMax + "px";
-      m.back.style.height = globalMax + "px";
-      m.front.style.width = "100%";
-      m.back.style.width = "100%";
+    grids.forEach(function (grid) {
+      const cards = Array.prototype.slice.call(
+        grid.querySelectorAll(":scope > .widget-card.is-flippable")
+      );
+      if (!cards.length) return;
+
+      let rowMax = MIN_H;
+      const measured = [];
+      cards.forEach(function (card) {
+        const flip = card.querySelector(".widget-flip");
+        const front = card.querySelector(".widget-front");
+        const back = card.querySelector(".widget-back");
+        if (!flip || !front || !back) return;
+        const w = Math.max(
+          card.clientWidth || 0,
+          flip.clientWidth || 0,
+          Math.floor(card.getBoundingClientRect().width) || 0
+        );
+        if (w < MIN_W) {
+          measured.push({ card: card, flip: flip, front: front, back: back, skip: true });
+          return;
+        }
+        const h = Math.min(
+          MAX_H,
+          Math.max(MIN_H, naturalHeight(front, w), naturalHeight(back, w)) + 4
+        );
+        rowMax = Math.max(rowMax, h);
+        measured.push({ card: card, flip: flip, front: front, back: back, skip: false });
+      });
+
+      rowMax = Math.min(MAX_H, Math.max(MIN_H, rowMax));
+      measured.forEach(function (m) {
+        if (!m || m.skip) return;
+        m.flip.style.height = rowMax + "px";
+        m.card.style.height = rowMax + "px";
+        m.card.style.minHeight = rowMax + "px";
+        m.front.style.height = rowMax + "px";
+        m.back.style.height = rowMax + "px";
+        m.front.style.width = "100%";
+        m.back.style.width = "100%";
+      });
     });
   }
 
@@ -2443,6 +2566,7 @@
     bindStatementPagers();
     bindStatementPdfExport();
     startAlertPolling();
+    startSmokePolling();
     loadAuthMode().then(function () {
       updateSessionBar();
       maybeShowAuthGate();

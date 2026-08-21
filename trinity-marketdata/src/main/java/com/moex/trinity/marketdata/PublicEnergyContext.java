@@ -488,10 +488,11 @@ public final class PublicEnergyContext {
 
         public String ruLine() {
             if (!ok) {
-                return "Crack 3-2-1: нет CL/RB/HO (Yahoo).";
+                return "Маржу нефтезаводов не считаем: нет публичных цен нефти, бензина и мазута.";
             }
             return String.format(Locale.ROOT,
-                    "Crack 3-2-1 $%.2f/bbl (CL %.2f, RB %.3f, HO %.3f). Yahoo, не NYMEX desk.",
+                    "Нефтезаводы сейчас зарабатывают около $%.0f с барреля (нефть %.2f, бензин %.3f, мазут %.3f). "
+                            + "Цифры Yahoo, не стакан американской биржи.",
                     crack321Usd, cl, rb, ho);
         }
     }

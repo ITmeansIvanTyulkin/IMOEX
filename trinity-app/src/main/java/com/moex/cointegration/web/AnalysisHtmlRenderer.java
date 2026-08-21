@@ -84,7 +84,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260814-arb-live">
+              <link rel="stylesheet" href="/css/operator.css?v=20260821-widget-h">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -105,6 +105,7 @@ public class AnalysisHtmlRenderer {
               </header>
               {{NAV}}
               <div id="auth-session-bar" class="auth-session-bar" hidden></div>
+              <div id="trinity-smoke-banner" class="trinity-smoke-banner" hidden role="status" aria-live="polite"></div>
               <main>
                 {{OPS}}
                 {{BODY}}
@@ -157,7 +158,7 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260813-arb1"></script>
+              <script src="/js/operator.js?v=20260821-smoke"></script>
               <script src="/js/trinity-status-plaques.js?v=20260814-sync"></script>
             </body>
             </html>

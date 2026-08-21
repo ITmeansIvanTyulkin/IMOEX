@@ -235,6 +235,12 @@ imoex:
       url: ${SUPABASE_URL:}
       jwt-secret: ${SUPABASE_JWT_SECRET:}
       anon-key: ${SUPABASE_ANON_KEY:}
+  # Short HTTP smoke after ApplicationReady (not full Maven suite).
+  # FAIL → soft-block auto/live + retries; JVM stays up. See GET /api/ops/smoke
+  smoke:
+    on-startup: true
+    retry-max: 5
+    retry-delay-ms: 15000
   # Module feature flags (Maven modules trinity-pairs / trinity-trend / trinity-calendar-arb / trinity-marketdata)
   strategies:
     pairs:

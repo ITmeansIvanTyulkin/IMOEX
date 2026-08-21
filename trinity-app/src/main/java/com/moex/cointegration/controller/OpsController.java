@@ -8,6 +8,9 @@ import com.moex.cointegration.product.ProductEdition;
 import com.moex.cointegration.product.ProductEditionService;
 import com.moex.cointegration.service.OperatorTradeToastService;
 import com.moex.cointegration.service.PaperAlertService;
+import com.moex.cointegration.smoke.StartupSmokeRunner;
+import com.moex.cointegration.smoke.StartupSmokeStatus;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,17 +32,23 @@ public class OpsController {
     private final OperatorTradeToastService tradeToasts;
     private final ImoexProperties properties;
     private final ProductEditionService productEdition;
+    private final StartupSmokeStatus smokeStatus;
+    private final ObjectProvider<StartupSmokeRunner> smokeRunner;
 
     public OpsController(
             PaperAlertService alertService,
             OperatorTradeToastService tradeToasts,
             ImoexProperties properties,
-            ProductEditionService productEdition
+            ProductEditionService productEdition,
+            StartupSmokeStatus smokeStatus,
+            ObjectProvider<StartupSmokeRunner> smokeRunner
     ) {
         this.alertService = alertService;
         this.tradeToasts = tradeToasts;
         this.properties = properties;
         this.productEdition = productEdition;
+        this.smokeStatus = smokeStatus;
+        this.smokeRunner = smokeRunner;
     }
 
     /**
@@ -118,5 +127,28 @@ public class OpsController {
         m.put("ctaLabel", productEdition.lockCtaLabel(strategy));
         m.putAll(productEdition.dto());
         return m;
+    }
+
+    /** GET /api/ops/smoke — startup smoke status (soft-block + retries). */
+    @GetMapping("/smoke")
+    public Map<String, Object> smoke() {
+        return smokeStatus.dto();
+    }
+
+    /** POST /api/ops/smoke/rerun — kick another smoke pass (requires auth when enabled). */
+    @PostMapping("/smoke/rerun")
+    public Map<String, Object> smokeRerun() {
+        StartupSmokeRunner runner = smokeRunner.getIfAvailable();
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (runner == null) {
+            out.put("accepted", false);
+            out.put("error", "smoke_runner_disabled");
+            out.putAll(smokeStatus.dto());
+            return out;
+        }
+        runner.rerun();
+        out.put("accepted", true);
+        out.putAll(smokeStatus.dto());
+        return out;
     }
 }

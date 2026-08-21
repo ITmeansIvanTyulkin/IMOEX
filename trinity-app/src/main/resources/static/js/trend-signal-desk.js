@@ -95,6 +95,16 @@
     } catch (_) {}
     return headers;
   }
+  function hasDeskWriteAuth() {
+    try {
+      if (localStorage.getItem("trinity.supabase.access_token")) return true;
+      const user = (localStorage.getItem("imoex.ops.user") || "").trim();
+      const pass = localStorage.getItem("imoex.ops.pass") || "";
+      return !!(user && pass && user.indexOf("@") < 0);
+    } catch (_) {
+      return false;
+    }
+  }
   function fmtPot(v) {
     if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
     return "~" + (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ru-RU") + " ₽";
@@ -817,6 +827,15 @@
   function finitePrice(v) {
     return typeof v === "number" && isFinite(v) && v > 0;
   }
+  /** Desk band title: day-lock vs soft map-only (must match engine shelves, not HI/HIST). */
+  function zoneBandTitle(role, z) {
+    if (!z) return role;
+    const src = String(z.source || "");
+    const soft = z.validForEntry === false || /SOFT/i.test(src);
+    if (soft) return role + "·карта";
+    if (/\+DAY|\bDAY\b|PRIOR/i.test(src)) return role + "·день";
+    return role;
+  }
   function ensureZoneOverlay() {
     const el = $("signal-chart");
     if (!el) return null;
@@ -834,17 +853,49 @@
     if (!ov || !candleSeries) return;
     const st = overlayStructure || {};
     const items = [];
-    if (st.zoneTop) items.push({ z: st.zoneTop, role: "top", title: "TOP" });
-    if (st.zoneBottom) items.push({ z: st.zoneBottom, role: "bot", title: "BOT" });
+    if (st.zoneTop) {
+      items.push({
+        z: st.zoneTop,
+        role: "top",
+        title: zoneBandTitle("TOP", st.zoneTop)
+      });
+    }
+    if (st.zoneBottom) {
+      items.push({
+        z: st.zoneBottom,
+        role: "bot",
+        title: zoneBandTitle("BOT", st.zoneBottom)
+      });
+    }
+    const chartEl = $("signal-chart");
+    const chartH = chartEl ? (chartEl.clientHeight || 0) : 0;
     const seen = {};
     items.forEach(function (item) {
       if (!finitePrice(item.z.high) || !finitePrice(item.z.low)) return;
-      const y1 = candleSeries.priceToCoordinate(item.z.high);
-      const y2 = candleSeries.priceToCoordinate(item.z.low);
-      if (y1 == null || y2 == null) return;
+      let y1 = candleSeries.priceToCoordinate(item.z.high);
+      let y2 = candleSeries.priceToCoordinate(item.z.low);
+      // Off-scale zone (zoom missed morning BOT) — clamp to chart edges so the band never vanishes
+      if (y1 == null && y2 == null && chartH > 0) {
+        const mid = (Number(item.z.high) + Number(item.z.low)) / 2;
+        const yMid = candleSeries.priceToCoordinate(mid);
+        if (yMid == null) {
+          // Entire shelf outside view: pin a thin strip at the nearer edge
+          const last = candleSeries.priceToCoordinate(
+            finitePrice(st.lookbackLow) ? st.lookbackLow : Number(item.z.low)
+          );
+          if (last == null) return;
+          y1 = Math.max(0, Math.min(chartH - 8, last - 4));
+          y2 = y1 + 8;
+        } else {
+          y1 = 0;
+          y2 = chartH;
+        }
+      } else {
+        if (y1 == null) y1 = Number(item.z.high) > Number(item.z.low) ? 0 : chartH;
+        if (y2 == null) y2 = Number(item.z.high) > Number(item.z.low) ? chartH : 0;
+      }
       const top = Math.min(y1, y2);
-      const height = Math.abs(y2 - y1);
-      if (!(height >= 0.5)) return;
+      const height = Math.max(4, Math.abs(y2 - y1));
       seen[item.role] = true;
       let band = ov.querySelector(".signal-zone-band.is-" + item.role);
       if (!band) {
@@ -1436,13 +1487,14 @@
       lastOverlayKey = key;
       clearLines();
       // §3 historical — dashed gray
+      // Multi-day series extreme — never the tradable TOP/BOT shelf
       if (finitePrice(st.historicalHigh)
           && st.historicalHigh !== st.lookbackHigh) {
-        addLine(st.historicalHigh, "#94a3b8", "HIST↑", { lineWidth: 1, lineStyle: 2 });
+        addLine(st.historicalHigh, "#94a3b8", "HIST↑·серия", { lineWidth: 1, lineStyle: 2 });
       }
       if (finitePrice(st.historicalLow)
           && st.historicalLow !== st.lookbackLow) {
-        addLine(st.historicalLow, "#94a3b8", "HIST↓", { lineWidth: 1, lineStyle: 2 });
+        addLine(st.historicalLow, "#94a3b8", "HIST↓·серия", { lineWidth: 1, lineStyle: 2 });
       }
       // §4 zero
       if (finitePrice(st.previousZeroPoint)) {
@@ -1976,9 +2028,17 @@
     (raw || []).forEach(function (c) {
       if (!c || c.time == null) return;
       const t = c.time;
-      const o = Number(c.open), h = Number(c.high), l = Number(c.low), cl = Number(c.close);
+      let o = Number(c.open), h = Number(c.high), l = Number(c.low), cl = Number(c.close);
       if (![o, h, l, cl].every(Number.isFinite)) return;
       if (prev != null && t <= prev) return;
+      // Drop absurd wicks (live DOM / stale IndexedDB used to pin lows to ZERO ~1pt away).
+      const bodyLo = Math.min(o, cl);
+      const bodyHi = Math.max(o, cl);
+      const maxWick = Math.max(0.30, (bodyHi - bodyLo) * 4 + 0.08);
+      if (h < bodyHi) h = bodyHi;
+      if (l > bodyLo) l = bodyLo;
+      if (h - bodyHi > maxWick) h = bodyHi + maxWick;
+      if (bodyLo - l > maxWick) l = bodyLo - maxWick;
       out.push({ time: t, open: o, high: h, low: l, close: cl });
       prev = t;
     });
@@ -2010,7 +2070,12 @@
       applyingScale = false;
     });
   }
-  function updateCandles(candles, forceFit) {
+  /**
+   * @param {boolean} forceFit fit content / unlock
+   * @param {boolean} [fromServer] full series replace (desk poll) — incremental update alone
+   *   leaves fake wicks on older bars after IndexedDB/live DOM corruption
+   */
+  function updateCandles(candles, forceFit, fromServer) {
     candles = sanitizeCandles(candles);
     if (!candleSeries || !candles.length) return;
     resizeChartToHost();
@@ -2020,10 +2085,27 @@
     const sameLast = !firstPaint && last.time === lastCandleTime;
     const newBar = !firstPaint && prevBar && prevBar.time === lastCandleTime;
 
+    // Server desk payload: always rewrite series (keeps zoom). Live book only updates last bar.
+    if (fromServer && !forceFit && !firstPaint) {
+      replaceDataKeepView(candles);
+      lastCandleTime = last.time;
+      lastCandlesLen = candles.length;
+      if (priceScaleLocked) freezePriceScale();
+      requestAnimationFrame(function () {
+        if (priceScaleLocked) freezePriceScale();
+        layoutMarketOverlays();
+        syncMacdTimeScale();
+      });
+      return;
+    }
+
     if (!forceFit && !firstPaint) {
       if (sameLast || newBar) {
         applyingScale = true;
         try {
+          if (newBar && prevBar) {
+            candleSeries.update(prevBar);
+          }
           candleSeries.update(last);
         } catch (_) {
           replaceDataKeepView(candles);
@@ -2093,12 +2175,10 @@
     let h = Number(raw.high);
     let l = Number(raw.low);
     if (![o, h, l].every(Number.isFinite)) return;
+    // Chart: only last/mid trade expands the forming wick — NOT best bid/ask.
+    // Bid/ask extremes caused fake spikes to deep DOM levels; TP touch uses book separately.
     if (px > h) h = px;
     if (px < l) l = px;
-    const bb = book && book.bids && book.bids[0] ? Number(book.bids[0].p) : NaN;
-    const ba = book && book.asks && book.asks[0] ? Number(book.asks[0].p) : NaN;
-    if (bb > 0) { if (bb > h) h = bb; if (bb < l) l = bb; }
-    if (ba > 0) { if (ba > h) h = ba; if (ba < l) l = ba; }
     raw.close = px;
     raw.high = h;
     raw.low = l;
@@ -2497,7 +2577,7 @@
       lastOverlayCandles = candles;
       lastDeskSnapshot = data;
       if (candles.length) {
-        updateCandles(candles, !!forceFit);
+        updateCandles(candles, !!forceFit, true);
         const planForOv = (!overlayOpen && liveFlatUntil > Date.now())
           ? Object.assign({}, plan, { actionable: false })
           : plan;
@@ -2518,11 +2598,17 @@
       updateMacd(lastBarsRaw);
       layoutMarketOverlays();
       if (candles.length && window.TrinityChartKit && typeof TrinityChartKit.barCachePut === "function") {
+        // Cache server OHLC only (no live mid stretch) so IndexedDB cannot re-poison wicks.
+        const cacheBars = rawBars.map(function (b) {
+          const t = toChartTime(b.time);
+          if (t == null) return null;
+          return { time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
+        }).filter(Boolean);
         TrinityChartKit.barCachePut(chartInst, chartTf, {
           instrument: chartInst,
           tf: chartTf,
           pointSize: data.pointSize,
-          bars: candles,
+          bars: cacheBars,
           raw: rawBars
         });
       }
@@ -3040,9 +3126,19 @@
       }
     }
   }
-  async function saveDeskSelection(patch) {
+  async function saveDeskSelection(patch, opts) {
+    opts = opts || {};
+    const quiet = !!opts.quiet;
     deskSaveInFlight = true;
     try {
+      if (!hasDeskWriteAuth()) {
+        if (!quiet) {
+          alert("Войдите в кабинет (/view) — смена плейбука/инструмента требует авторизацию.");
+        } else {
+          console.warn("saveDeskSelection skipped — нет сессии (cold load / URL playbook)");
+        }
+        return false;
+      }
       const cur = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
       const view = cur.ok ? await cur.json() : {};
       const body = {
@@ -3064,10 +3160,14 @@
         window.TrinityPlaques.refresh();
       }
       await loadDesk(true);
+      return true;
     } catch (e) {
       console.warn("saveDeskSelection failed", e);
-      alert("Не удалось сменить плейбук/инструмент: " + (e && e.message ? e.message : e)
-        + "\nВойдите в кабинет (/view) — POST /api/trend/settings требует авторизацию.");
+      if (!quiet) {
+        alert("Не удалось сменить плейбук/инструмент: " + (e && e.message ? e.message : e)
+          + "\nВойдите в кабинет (/view) — POST /api/trend/settings требует авторизацию.");
+      }
+      return false;
     } finally {
       deskSaveInFlight = false;
     }
@@ -3210,7 +3310,8 @@
       const pb = (q.get("playbook") || "").trim();
       if (!pb || pb === "pairs-daily") return;
       if (pb.indexOf("levels-profile") < 0 && pb.indexOf("positional") < 0 && pb !== "both") return;
-      await saveDeskSelection({ playbookId: pb });
+      // Hard refresh with ?playbook= must not pop auth modal — persist only when session exists.
+      await saveDeskSelection({ playbookId: pb }, { quiet: true });
     } catch (_) {}
   }
 

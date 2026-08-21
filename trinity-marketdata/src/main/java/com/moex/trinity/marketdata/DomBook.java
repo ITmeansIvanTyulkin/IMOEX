@@ -18,19 +18,63 @@ public record DomBook(
 ) {
     public record DomLevel(double price, long quantityLots) {}
 
+    /** Highest bid — do not assume list order (stream snapshots can be unsorted). */
     public double bestBid() {
-        return bids == null || bids.isEmpty() ? Double.NaN : bids.get(0).price();
+        if (bids == null || bids.isEmpty()) {
+            return Double.NaN;
+        }
+        double best = Double.NaN;
+        for (DomLevel l : bids) {
+            if (l == null || !(l.price() > 0)) {
+                continue;
+            }
+            if (Double.isNaN(best) || l.price() > best) {
+                best = l.price();
+            }
+        }
+        return best;
     }
 
+    /** Lowest ask — do not assume list order. */
     public double bestAsk() {
-        return asks == null || asks.isEmpty() ? Double.NaN : asks.get(0).price();
+        if (asks == null || asks.isEmpty()) {
+            return Double.NaN;
+        }
+        double best = Double.NaN;
+        for (DomLevel l : asks) {
+            if (l == null || !(l.price() > 0)) {
+                continue;
+            }
+            if (Double.isNaN(best) || l.price() < best) {
+                best = l.price();
+            }
+        }
+        return best;
     }
 
     public long topBidLots() {
-        return bids == null || bids.isEmpty() ? 0 : Math.max(0, bids.get(0).quantityLots());
+        double bb = bestBid();
+        if (!(bb > 0) || bids == null) {
+            return 0;
+        }
+        for (DomLevel l : bids) {
+            if (l != null && Math.abs(l.price() - bb) < 1e-9) {
+                return Math.max(0, l.quantityLots());
+            }
+        }
+        return 0;
     }
 
     public long topAskLots() {
-        return asks == null || asks.isEmpty() ? 0 : Math.max(0, asks.get(0).quantityLots());
+        double ba = bestAsk();
+        if (!(ba > 0) || asks == null) {
+            return 0;
+        }
+        for (DomLevel l : asks) {
+            if (l != null && Math.abs(l.price() - ba) < 1e-9) {
+                return Math.max(0, l.quantityLots());
+            }
+        }
+        return 0;
     }
 }

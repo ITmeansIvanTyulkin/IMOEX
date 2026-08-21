@@ -30,27 +30,94 @@
 
   function fillQualityLine(q, warming) {
     if (!q || !q.bookOk) {
-      return warming ? "Качество fill: ждём стакан…" : "Качество fill: нет двух стаканов — mid vs executable недоступно.";
+      return warming
+        ? "Стакан ещё подгружается. Пока не видно, дорого ли собрать сделку по живым ценам."
+        : "В стакане пока нет обеих ног. Робот не входит вслепую: без двух цен нельзя понять, сколько съест исполнение.";
     }
-    const mid = "mid " + fmt(q.midSpread, 3);
-    const vs = "LONG +" + fmt(q.longVsMid, 3) + " / SHORT +" + fmt(q.shortVsMid, 3) + " к mid";
-    const rt = "крест " + (q.roundTripRub == null ? "—" : Math.round(Number(q.roundTripRub)) + " ₽");
-    const edge = "ход к среднему " + (q.edgeToMeanRub == null ? "—" : Math.round(Number(q.edgeToMeanRub)) + " ₽");
-    const cover = q.edgeCoversCross ? "край кроет крест" : "крест ≥ хода к среднему";
-    return "Качество fill: " + mid + " · " + vs + " · " + rt + " vs " + edge + " · " + cover;
+    const cost = q.roundTripRub == null ? null : Math.round(Number(q.roundTripRub));
+    const edge = q.edgeToMeanRub == null ? null : Math.round(Number(q.edgeToMeanRub));
+    let s = "Это не сигнал входить — только проверка стакана. ";
+    if (cost != null && edge != null) {
+      s += "Собрать сделку по текущим ценам (купить одну ногу, продать другую и потом закрыть) стоило бы около "
+        + cost + " ₽. Если разница месяцев вернётся к своему среднему, это было бы около "
+        + edge + " ₽. ";
+      s += q.edgeCoversCross
+        ? "Издержки меньше потенциального хода: стакан сделку не съел бы."
+        : "Издержки больше потенциального хода: даже удачный возврат к среднему мог бы уйти в ноль на спреде стакана.";
+    } else {
+      s += "Средняя разница месяцев сейчас " + fmt(q.midSpread, 3) + ".";
+    }
+    return s;
   }
 
-  function sessionSkipsLine(skips, warming) {
-    if (!skips || !skips.length) {
-      return warming ? "Скипы сессии: …" : "Скипы сессии: нет SKIP_* на карточках.";
+  function skipActionRu(act) {
+    if (act === "SKIP_MACRO") return "пауза: рынок нефти неспокойный";
+    if (act === "SKIP_REGIME") return "пауза: разница месяцев едет трендом";
+    if (act === "SKIP_EVENT") return "пауза из‑за новости по запасам";
+    if (act === "SKIP_ROLL") return "пауза: близко окончание контракта";
+    if (act === "SKIP_COST") return "пауза: ход не окупит стакан";
+    if (act === "SKIP_BOOK") return "пауза: стакан тонкий";
+    if (act === "SKIP_THIN") return "пауза: мало сделок в ногах";
+    if (act === "SKIP_GO") return "пауза: слишком большое гарантийное обеспечение";
+    if (act === "SKIP_LATE") return "пауза: уже слишком далеко от среднего";
+    if (act === "SKIP_NO_CURVE") return "ждём цены двух месяцев у брокера";
+    if (act === "SKIP_SQUEEZE") return "пауза: не шортим ближний месяц у экспирации";
+    if (act && String(act).indexOf("SKIP_") === 0) return "пауза";
+    return act || "";
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function uniqueNames(rows) {
+    const out = [];
+    rows.forEach(function (row) {
+      const n = row.name || row.family || "";
+      if (n && out.indexOf(n) < 0) out.push(n);
+    });
+    return out;
+  }
+
+  function paintSkipExplain(el, skips, warming) {
+    if (!el) return;
+    if (warming && (!skips || !skips.length)) {
+      el.innerHTML = "<p>Считаем рынки. Через несколько секунд здесь будет обычным языком, почему робот входит или ждёт.</p>";
+      return;
     }
-    return "Скипы сессии: " + skips.map(function (row) {
-      const fam = row.family || "?";
-      const st = row.structure ? ("/" + row.structure) : "";
-      const act = row.action || "SKIP";
-      const why = row.reason ? (" — " + row.reason) : "";
-      return fam + st + " " + act + why;
-    }).join(" · ");
+    if (!skips || !skips.length) {
+      el.innerHTML = "<p><strong>Сделок нет, потому что ещё рано</strong></p>"
+        + "<p>Робот здоров и ждёт. Ему нужна необычно дешёвая или дорогая разница между месяцами, которая начинает возвращаться к привычной. Сейчас такого нет — это нормально, не поломка.</p>";
+      return;
+    }
+    const macro = skips.filter(function (s) { return s.action === "SKIP_MACRO"; });
+    const regime = skips.filter(function (s) { return s.action === "SKIP_REGIME"; });
+    const other = skips.filter(function (s) {
+      return s.action !== "SKIP_MACRO" && s.action !== "SKIP_REGIME";
+    });
+    let html = "<p><strong>Почему робот включён, а сделок нет</strong></p>";
+    html += "<p>Это не зависание. Стратегия зарабатывает только в спокойной ситуации: разница цен двух месяцев уехала от обычной и должна вернуться. Сейчас такой ситуации нет ни на одном рынке ниже — робот специально стоит.</p>";
+    if (macro.length) {
+      html += "<p><strong>" + escapeHtml(uniqueNames(macro).join(", ") || "Нефть") + "</strong></p>";
+      html += "<p>" + escapeHtml(macro[0].reason || skipActionRu("SKIP_MACRO")) + "</p>";
+    }
+    if (regime.length) {
+      html += "<p><strong>" + escapeHtml(uniqueNames(regime).join(", ")) + "</strong></p>";
+      html += "<p>На этих рынках та же идея: купить дешёвую разницу месяцев, продать дорогую и ждать возврата к среднему. "
+        + "Сейчас разница уверенно едет в одну сторону. Если встать против этого, можно долго сидеть в минусе. Поэтому тоже пауза.</p>";
+    }
+    if (other.length) {
+      uniqueNames(other).forEach(function (name) {
+        const row = other.find(function (s) { return (s.name || s.family) === name; });
+        html += "<p><strong>" + escapeHtml(name) + "</strong></p>";
+        html += "<p>" + escapeHtml((row && row.reason) || skipActionRu(row && row.action)) + "</p>";
+      });
+    }
+    el.innerHTML = html;
   }
 
   function loadFamilyFromUrl() {
@@ -67,8 +134,77 @@
     } catch (_) { return ""; }
   }
 
-  function hasCurve(data) {
-    return !!(data && data.selected && data.selected.pair);
+  function hasPaint(data) {
+    const s = data && data.selected && data.selected.series;
+    return Array.isArray(s) && s.length > 0;
+  }
+
+  function seriesCacheId(fam, st, pair) {
+    return "ARB-" + String(fam || "").toUpperCase()
+      + "-" + String(st || "CALENDAR").toUpperCase()
+      + "-" + String(pair || "_").toUpperCase();
+  }
+
+  async function cachePutSeries(sel) {
+    if (!sel || !window.TrinityChartKit || typeof TrinityChartKit.barCachePut !== "function") return;
+    const series = sel.series;
+    if (!Array.isArray(series) || !series.length) return;
+    const payload = {
+      bars: series,
+      family: sel.family,
+      structure: sel.structure,
+      pair: sel.pair,
+      near: sel.near,
+      next: sel.next,
+      wing: sel.wing
+    };
+    const kit = TrinityChartKit;
+    await kit.barCachePut(seriesCacheId(sel.family, sel.structure, sel.pair), "ARB", payload);
+    await kit.barCachePut(seriesCacheId(sel.family, sel.structure, "_"), "ARB", payload);
+  }
+
+  async function paintCachedSeries(fam, st, pair) {
+    if (!window.TrinityChartKit || typeof TrinityChartKit.barCacheGet !== "function") return false;
+    const ids = [];
+    if (pair) ids.push(seriesCacheId(fam, st, pair));
+    ids.push(seriesCacheId(fam, st, "_"));
+    let row = null;
+    for (let i = 0; i < ids.length; i++) {
+      const hit = await TrinityChartKit.barCacheGet(ids[i], "ARB");
+      if (!hit || !hit.bars || !hit.bars.length) continue;
+      const tf = String(hit.tf || "").toUpperCase();
+      const inst = String(hit.instrument || "").toUpperCase();
+      if (tf !== "ARB" || inst !== ids[i].toUpperCase()) continue;
+      row = hit;
+      break;
+    }
+    if (!row) return false;
+    const sel = {
+      family: row.family || fam,
+      structure: row.structure || st,
+      pair: row.pair || pair,
+      near: row.near,
+      next: row.next,
+      series: row.bars
+    };
+    arbScaleLocked = false;
+    drawCharts(row.bars, sel);
+    if ($("arb-pair") && sel.pair) $("arb-pair").textContent = sel.pair;
+    if ($("arb-desk-meta")) {
+      $("arb-desk-meta").textContent = "локальный архив · " + row.bars.length + " баров · ждём сервер…";
+    }
+    if ($("arb-chart-label")) {
+      $("arb-chart-label").textContent = (sel.structure === "FLY"
+        ? "Fly near − 2·mid + far"
+        : "Спред far − near") + " · локальный архив";
+    }
+    if ($("arb-legs-chart-label") && (sel.near || sel.next)) {
+      $("arb-legs-chart-label").textContent = "Ноги H1 · "
+        + (sel.near || "near") + " / " + (sel.next || "next")
+        + (sel.structure === "FLY" ? " (mid)" : "")
+        + " · локальный архив";
+    }
+    return true;
   }
 
   async function fetchJson(url, ms) {
@@ -83,6 +219,16 @@
     }
   }
 
+  function liveBrokerNote(fp) {
+    if (!fp || !fp.liveBroker) return "";
+    if (fp.open) return " · broker " + fp.liveBroker + " · в сделке";
+    if (fp.liveArmed) {
+      const pause = String(fp.lastAction || "").indexOf("SKIP_") === 0;
+      return " · broker " + fp.liveBroker + (pause ? " · live включён, ордеров нет" : " · live готов");
+    }
+    return " · broker " + fp.liveBroker;
+  }
+
   function robotLine(data) {
     const fp = (data && data.fairPaper) || {};
     const settings = (data && data.settings) || data || {};
@@ -93,10 +239,14 @@
       return "ВЫКЛ";
     }
     const act = fp.lastAction || "";
-    if (act === "SKIP_MACRO") return "ПАУЗА · макро";
-    if (act === "SKIP_NO_CURVE") return "ждёт кривую";
-    if (act === "NONE" || act === "") return fp.liveArmed ? "armed · ждёт вход" : "paper · ждёт вход";
-    return act + (fp.liveArmed ? " · live" : " · paper");
+    const live = fp.liveArmed ? "live включён" : "paper";
+    if (act.indexOf("SKIP_") === 0) {
+      return "Не торгует · " + skipActionRu(act) + " · " + live + ", ордеров нет";
+    }
+    if (act === "NONE" || act === "") {
+      return live + " · ждёт вход по z";
+    }
+    return act + " · " + live;
   }
 
   function paintStatus(data) {
@@ -119,8 +269,7 @@
         ? ("OPEN " + fp.open.side + " " + fp.open.pair)
         : ((fp.lastAction || "idle") + (fp.lastReason ? " · " + fp.lastReason : ""));
       if (fp.liveBroker) {
-        $("arb-fair").textContent += " · broker " + fp.liveBroker
-          + (fp.liveArmed ? " · LIVE ARMED" : "");
+        $("arb-fair").textContent += liveBrokerNote(fp);
       }
     }
     if ($("arb-paper-today") && st.todayPnlRub != null) {
@@ -128,9 +277,10 @@
     }
     fillFamilySelect(data.families && data.families.length ? data.families : DEFAULT_FAMS, settings.family);
     if ($("arb-desk-meta")) {
-      const armed = fp.liveArmed ? "live two-leg armed" : "paper";
-      $("arb-desk-meta").textContent = "Котировки T-Invest · " + armed
-        + (fp.open ? " · есть позиция" : " · нет открытой сделки");
+      const armed = fp.open
+        ? "есть позиция"
+        : (fp.liveArmed ? "live включён, ордеров нет" : "paper, ордеров нет");
+      $("arb-desk-meta").textContent = "Котировки T-Invest · " + armed;
     }
   }
 
@@ -151,21 +301,18 @@
     const goodSel = (lastGood && lastGood.selected) || {};
     const sameInstrument = !!(lastGood && (goodSel.family || "").toUpperCase() === wantFam
       && (!wantSt || (goodSel.structure || "").toUpperCase() === wantSt));
-    // First cold poll often returns SKIP_NO_CURVE while T-Invest gRPC warms — keep last good / loading
-    // only for the same family+structure, otherwise charts/books stay on the previous instrument.
-    if (!hasCurve(data) && sameInstrument) {
+    // Cold poll / H1 still on disk fetch: keep last good paint for this tile, never wipe charts.
+    if (!hasPaint(data) && sameInstrument && hasPaint(lastGood)) {
       data = Object.assign({}, lastGood, {
         stale: true,
         warming: false,
         warning: data.warning || lastGood.warning
       });
     }
-    if (hasCurve(data)) {
+    if (hasPaint(data)) {
       lastGood = data;
       everReady = true;
-    } else if (!sameInstrument) {
-      lastGood = null;
-      lastSeriesKey = "";
+      cachePutSeries(data.selected).catch(function () {});
     }
     render(data);
   }
@@ -180,7 +327,11 @@
     $("arb-source").textContent = data.dataSource || "T_INVEST";
     $("arb-delivery").textContent = settings.delivery || "—";
     $("arb-pair").textContent = sel.pair || (warming ? "…" : "—");
-    if ($("arb-structure")) $("arb-structure").textContent = sel.structure || (warming ? "…" : "—");
+    if ($("arb-structure")) {
+      $("arb-structure").textContent = sel.structure === "FLY"
+        ? "три месяца"
+        : (sel.structure ? "два месяца" : (warming ? "…" : "—"));
+    }
     if ($("arb-hedge")) $("arb-hedge").textContent = sel.hedge || (warming ? "…" : "—");
     if ($("arb-go")) {
       const go = sel.goRub;
@@ -236,9 +387,12 @@
           + (o.histDomBars ? (" · DOM " + o.histDomBars) : ""));
     }
     if ($("arb-oos-note")) {
-      $("arb-oos-note").textContent = (sel.oos && sel.oos.note)
-        ? sel.oos.note
-        : "Journal sandbox со стаканом — главный счёт. Replay — сноска. Research, не обещание доходности.";
+      let note = "Дневник сделок — песочница по реальным ценам стакана брокера. Это основной счёт, чтобы видеть, как робот вёл бы себя без живых денег. "
+        + "Прогон старой истории ниже — только справка, не обещание, что так будет завтра.";
+      if (sel.oos && sel.oos.histDomBars) {
+        note += " Для этой пары в архиве есть стакан на " + sel.oos.histDomBars + " часовых свечах.";
+      }
+      $("arb-oos-note").textContent = note;
     }
     if ($("arb-fill-quality")) {
       $("arb-fill-quality").textContent = fillQualityLine(sel.fillQuality, warming);
@@ -247,12 +401,11 @@
       const nl = !!sel.nearLocked;
       $("arb-near-locked").hidden = !nl;
       if (nl) {
-        $("arb-near-locked").textContent = "Near-locked: скрещённый стакан (edge "
-          + fmt(sel.lockedEdgePoints, 4) + ") — research flag, не авто-ордер.";
+        $("arb-near-locked").textContent = "Цены в стакане пересеклись (редкий сбой котировок). Это пометка для разбора, робот из‑за этого ордер сам не шлёт.";
       }
     }
     if ($("arb-session-skips")) {
-      $("arb-session-skips").textContent = sessionSkipsLine(data.sessionSkips, warming);
+      paintSkipExplain($("arb-session-skips"), data.sessionSkips, warming);
     }
     if ($("arb-chart-label")) {
       $("arb-chart-label").textContent = sel.structure === "FLY"
@@ -270,8 +423,10 @@
     $("arb-spread").textContent = warming && sel.spread == null ? "…" : fmt(sel.spread, 3);
     $("arb-z").textContent = warming && sel.z == null ? "…" : fmt(sel.z, 2);
     $("arb-action").textContent = warming && !sel.action
-      ? "LOADING"
-      : (sel.action || "—");
+      ? "загрузка"
+      : (String(sel.action || "").indexOf("SKIP_") === 0
+        ? skipActionRu(sel.action)
+        : (sel.action === "NONE" ? "ждёт z" : (sel.action || "—")));
     $("arb-reason").textContent = warming
       ? "Загрузка near/next у T-Invest (первый запрос часто пустой, пока прогреется gRPC)…"
       : (data.stale
@@ -292,8 +447,7 @@
       ? ("OPEN " + fp.open.side + " " + fp.open.pair)
       : ((fp.lastAction || "idle") + (fp.lastReason ? " · " + fp.lastReason : ""));
     if (fp.liveBroker) {
-      $("arb-fair").textContent += " · broker " + fp.liveBroker
-        + (fp.liveArmed ? " · LIVE ARMED" : "");
+      $("arb-fair").textContent += liveBrokerNote(fp);
     }
     const warn = $("arb-warning");
     if (data.warning) {
@@ -309,13 +463,17 @@
       fillCards(data.cards || [], sel);
     }
     fillPaper(data.paper || {});
-    drawCharts(sel.series || [], sel);
+    const series = sel.series || [];
+    if (series.length) {
+      drawCharts(series, sel);
+    }
     $("arb-desk-meta").textContent =
       "Котировки " + (data.dataSource || "T-Invest") +
       (data.tokenPresent === false ? " · нет токена" : " · H1 брокера") +
-      (sel.bars ? (" · баров " + sel.bars) : "") +
+      (series.length ? (" · баров " + series.length) : (sel.bars ? (" · баров " + sel.bars) : "")) +
       (warming ? " · загрузка…" : "") +
-      (data.stale ? " · stale" : "");
+      (data.stale ? " · локальный снимок" : "") +
+      (fp.open ? " · есть позиция" : (fp.liveArmed ? " · live включён, ордеров нет" : " · paper, ордеров нет"));
   }
 
   function fmtPx(p, pointSize) {
@@ -496,7 +654,8 @@
       const on = (c.family || "") === fam && (!st || cst === st);
       return '<button type="button" class="arb-card' + (on ? " is-active" : "") +
         '" data-family="' + (c.family || "") +
-        '" data-structure="' + cst + '">' +
+        '" data-structure="' + cst +
+        '" data-pair="' + (c.pair || "") + '">' +
         "<strong>" + (c.family || "") + " " + (cst === "FLY" ? "FLY" : "") + "</strong> " + (c.pair || "—") +
         "<span>z=" + z + " · " + (c.action || "") + "</span></button>";
     }).join("");
@@ -504,12 +663,13 @@
       btn.addEventListener("click", function () {
         const fam = btn.getAttribute("data-family");
         const st = btn.getAttribute("data-structure") || "";
+        const pair = btn.getAttribute("data-pair") || "";
         if ($("arb-family")) $("arb-family").value = fam;
         window.__arbStructure = st;
-        lastGood = null;
-        lastSeriesKey = "";
         arbScaleLocked = false;
-        refresh().catch(function (e) { console.warn(e); });
+        paintCachedSeries(fam, st, pair).finally(function () {
+          refresh().catch(function (e) { console.warn(e); });
+        });
       });
     });
   }
@@ -631,17 +791,18 @@
 
   function drawCharts(points, sel) {
     ensureCharts();
+    const spread = toLine(points, "spread");
+    if (!spread.length) return;
     const key = (sel.family || "") + "|" + (sel.structure || "") + "|" + (sel.pair || "");
     const pairChanged = key !== lastSeriesKey;
     lastSeriesKey = key;
-    const spread = toLine(points, "spread");
+    if (pairChanged) arbScaleLocked = false;
     const near = toLine(points, "near");
     const next = toLine(points, "far");
     if (series) setLineDataKeep(chart, series, spread);
     if (nearSeries) setLineDataKeep(legsChart, nearSeries, near);
     if (nextSeries) setLineDataKeep(legsChart, nextSeries, next);
     if (pairChanged) {
-      arbScaleLocked = false;
       if (chart) chart.timeScale().fitContent();
       if (legsChart) legsChart.timeScale().fitContent();
     }
@@ -658,15 +819,20 @@
     if ($("arb-family")) {
       $("arb-family").addEventListener("change", function () {
         window.__arbStructure = "";
-        lastGood = null;
-        lastSeriesKey = "";
         arbScaleLocked = false;
-        refresh().catch(function (e) { console.warn(e); });
+        const fam = $("arb-family").value;
+        paintCachedSeries(fam, "", "").finally(function () {
+          refresh().catch(function (e) { console.warn(e); });
+        });
       });
     }
     refreshStatus().catch(function () {});
-    refresh().catch(function (e) {
-      $("arb-desk-meta").textContent = "Desk: " + (e.message || e);
+    const fam0 = ($("arb-family") && $("arb-family").value) || loadFamilyFromUrl();
+    const st0 = window.__arbStructure || loadStructureFromUrl();
+    paintCachedSeries(fam0, st0, "").finally(function () {
+      refresh().catch(function (e) {
+        $("arb-desk-meta").textContent = "Desk: " + (e.message || e);
+      });
     });
     setTimeout(function () {
       if (!everReady) refresh().catch(function () {});

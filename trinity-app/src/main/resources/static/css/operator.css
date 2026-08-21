@@ -1726,6 +1726,30 @@ a.full-core-badge:hover {
   box-shadow: var(--shadow);
 }
 
+.trinity-smoke-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
+  background: var(--danger-soft, #fde8e8);
+  color: var(--danger, #b42318);
+  border: 1px solid rgba(180, 35, 24, 0.25);
+  border-left: 3px solid var(--danger, #b42318);
+  border-radius: var(--radius);
+  padding: 0.65rem 1rem;
+  margin: 0.5rem 1.15rem 0;
+  font-size: 0.9rem;
+}
+.trinity-smoke-banner[hidden] {
+  display: none !important;
+}
+.trinity-smoke-banner strong {
+  font-weight: 600;
+}
+.trinity-smoke-banner button {
+  margin-left: auto;
+}
+
 .trial-banner p {
   margin: 0;
   flex: 1 1 14rem;
@@ -2218,6 +2242,7 @@ body[data-upsell="off"] .full-core-badge {
 .widget-grid-pillars .widget-card.is-flippable {
   min-height: 340px;
   height: 340px;
+  max-height: 520px;
 }
 
 .widget-card.is-flippable {
@@ -2227,11 +2252,12 @@ body[data-upsell="off"] .full-core-badge {
   -webkit-tap-highlight-color: transparent;
   outline: none;
   min-height: 360px;
-  height: 360px; /* JS выровняет весь ряд по max */
+  height: 360px; /* JS equalizes per .widget-grid row (capped); never global across sections */
+  max-height: 520px;
   overflow: hidden;
   background: #ffffff;
   isolation: isolate;
-  align-self: stretch;
+  align-self: start;
 }
 
 .widget-card.is-flippable:focus-visible {
@@ -4426,8 +4452,30 @@ a.signal-tool {
   .arb-book-pair { grid-template-columns: 1fr; }
 }
 #calendar-arb-desk #arb-fill-quality,
-#calendar-arb-desk #arb-session-skips {
-  max-width: 72rem;
+#calendar-arb-desk #arb-reason,
+#calendar-arb-desk #arb-oos-note {
+  max-width: 44rem;
+  line-height: 1.55;
+}
+#calendar-arb-desk .arb-explain {
+  max-width: 44rem;
+  margin: 0.75rem 0 1.1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e4eaee;
+  border-radius: 10px;
+  background: #f7fafb;
+  line-height: 1.55;
+  color: #1a2228;
+}
+#calendar-arb-desk .arb-explain p {
+  margin: 0 0 0.7rem;
+}
+#calendar-arb-desk .arb-explain p:last-child {
+  margin-bottom: 0;
+}
+#calendar-arb-desk .arb-explain strong {
+  display: block;
+  margin-bottom: 0.2rem;
 }
 #calendar-arb-desk #arb-journal {
   color: #0b7a66;

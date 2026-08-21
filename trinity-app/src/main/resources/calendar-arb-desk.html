@@ -3,7 +3,7 @@
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
       <h2>Календарный арбитраж</h2>
-      <p class="meta" id="arb-desk-meta">Котировки T-Invest · calendar + fly · DV01 · event blackout · live two-leg (armed) / paper</p>
+      <p class="meta" id="arb-desk-meta">Котировки T-Invest · calendar + fly · live включён отдельно от сделок</p>
     </div>
     <div class="signal-desk-actions">
       <button type="button" class="btn btn-ghost" id="arb-desk-refresh">Обновить</button>
@@ -37,10 +37,10 @@
     </div>
   </div>
   <p class="meta" id="arb-reason">—</p>
-  <p class="meta" id="arb-fill-quality">Качество fill: ждём стакан T-Invest.</p>
-  <p class="meta" id="arb-near-locked" hidden>Near-locked: скрещённый стакан — research flag.</p>
-  <p class="meta" id="arb-session-skips">—</p>
-  <p class="meta" id="arb-oos-note">Journal sandbox со стаканом — главный счёт. Replay — сноска. Research, не обещание доходности.</p>
+  <p class="meta" id="arb-fill-quality">Стакан ещё подгружается.</p>
+  <p class="meta" id="arb-near-locked" hidden>Стакан скрещён — это флаг для исследования, не авто-ордер.</p>
+  <div class="arb-explain" id="arb-session-skips"></div>
+  <p class="meta" id="arb-oos-note">Дневник сделок — песочница по стакану брокера. Прогон истории — справка, не обещание прибыли.</p>
   <p class="meta" id="arb-warning" hidden></p>
   <div class="arb-cards" id="arb-cards"></div>
   <div class="signal-paper-panel" id="arb-paper-panel" hidden>
@@ -114,7 +114,7 @@
         Главный счёт — sandbox journal со стаканом. Replay OOS — сноска: hist DOM из
         <code>data/broker-tape</code> где архив есть, датированные EIA/COT (print ≤ bar),
         без сегодняшнего crack. Live две ноги: market PostOrder near+far
-        при <code>live-execution=true</code> + брокер armed (по умолчанию выкл). Fly live пока paper.
+        при <code>live-execution=true</code> + брокер готов слать две ноги. Fly live пока paper.
         Research / decision-support, не обещание доходности.
         CFTC + crack — публичные источники. Street consensus — <code>data/eia-consensus.json</code>.</p>
     </aside>
@@ -122,4 +122,4 @@
 </section>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-chart-kit.js?v=20260817-overlay"></script>
-<script src="/js/calendar-arb-desk.js?v=20260817-desk3"></script>
+<script src="/js/calendar-arb-desk.js?v=20260817-desk6"></script>

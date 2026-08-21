@@ -12,15 +12,22 @@ import ru.tinkoff.piapi.core.stream.StreamProcessor;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Live T-Invest MarketDataStream → order book (max depth) + trades tape + optional disk archive.
+ * Transient gRPC EOS / INTERNAL disconnects auto-reconnect with backoff.
  */
 public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseable {
 
@@ -30,6 +37,7 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     private final int orderbookDepth;
     private final BrokerTapeArchive archive;
     private final AtomicBoolean streaming = new AtomicBoolean(false);
+    private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicReference<String> status = new AtomicReference<>("T-Invest feed idle (no token / not started)");
     private final Map<String, String> figiByInstrument = new ConcurrentHashMap<>();
     private final Map<String, DomBook> books = new ConcurrentHashMap<>();
@@ -38,10 +46,22 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
 
     /** Min gap between persisted DOM snapshots (stream can be very chatty). */
     private static final long DOM_ARCHIVE_MIN_MS = 500;
+    private static final long RECONNECT_MAX_DELAY_MS = 60_000L;
 
     private volatile InvestApi api;
     private volatile MarketDataSubscriptionService stream;
     private volatile String tokenHint;
+    private volatile String lastToken;
+    private volatile boolean lastSandbox;
+
+    private final AtomicInteger reconnectAttempt = new AtomicInteger(0);
+    private final AtomicBoolean reconnectPending = new AtomicBoolean(false);
+    private final ScheduledExecutorService reconnectExec = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "tinvest-md-reconnect");
+        t.setDaemon(true);
+        return t;
+    });
+    private volatile ScheduledFuture<?> reconnectFuture;
 
     public TInvestMarketDataFeed(int tapeCapacity, int orderbookDepth) {
         this(tapeCapacity, orderbookDepth, new BrokerTapeArchive(java.nio.file.Path.of("data", "broker-tape")));
@@ -70,7 +90,10 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
      * Open MarketDataStream for the given FIGIs (keys = operator instrument ids e.g. BRU6).
      */
     public synchronized void start(String token, boolean sandbox, Map<String, String> instrumentToFigi) {
-        stop();
+        if (closed.get()) {
+            return;
+        }
+        stopStreamOnly();
         if (token == null || token.isBlank()) {
             status.set("T-Invest feed: token missing — preview only");
             streaming.set(false);
@@ -81,6 +104,8 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
             streaming.set(false);
             return;
         }
+        this.lastToken = token;
+        this.lastSandbox = sandbox;
         this.tokenHint = token.substring(0, Math.min(4, token.length())) + "…";
         this.api = TInvestApiFactory.create(token, sandbox);
         figiByInstrument.clear();
@@ -98,16 +123,11 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         stream = api.getMarketDataStreamService().newStream(
                 "trinity-md",
                 processor,
-                err -> {
-                    streaming.set(false);
-                    status.set("T-Invest stream error: " + err.getMessage());
-                    log.warn("T-Invest marketdata stream failed: {}", err.toString());
-                }
+                this::onStreamError
         );
         List<String> figis = new ArrayList<>(instrumentToFigi.values());
         stream.subscribeTrades(figis);
         stream.subscribeOrderbook(figis, orderbookDepth);
-        // seed books via unary max-depth snapshot + archive
         for (Map.Entry<String, String> e : instrumentToFigi.entrySet()) {
             try {
                 var ob = api.getMarketDataService().getOrderBookSync(e.getValue(), orderbookDepth);
@@ -129,12 +149,69 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
             }
         }
         streaming.set(true);
+        reconnectAttempt.set(0);
         status.set("T-Invest MarketDataStream live (sandbox=" + sandbox + ", depth=" + orderbookDepth
                 + ", instruments=" + figis.size() + ", token=" + tokenHint + ")");
         log.info("{}", status.get());
     }
 
-    /** Convenience: resolve credentials + FIGI for one instrument and start. */
+    private void onStreamError(Throwable err) {
+        streaming.set(false);
+        String msg = err == null ? "unknown" : err.getMessage();
+        status.set("T-Invest stream error: " + msg);
+        if (isTransientStreamDrop(err)) {
+            log.info("T-Invest marketdata stream dropped (will reconnect): {}", err);
+            scheduleReconnect();
+        } else {
+            log.warn("T-Invest marketdata stream failed (no auto-reconnect): {}", err == null ? "?" : err.toString());
+        }
+    }
+
+    static boolean isTransientStreamDrop(Throwable err) {
+        if (err == null) {
+            return false;
+        }
+        String s = err.toString();
+        return s.contains("EOS")
+                || s.contains("UNAVAILABLE")
+                || s.contains("INTERNAL")
+                || s.contains("Broken pipe")
+                || s.contains("Connection reset")
+                || s.contains("GOAWAY")
+                || s.contains("Http2");
+    }
+
+    private void scheduleReconnect() {
+        if (closed.get() || lastToken == null || lastToken.isBlank() || figiByInstrument.isEmpty()) {
+            return;
+        }
+        if (!reconnectPending.compareAndSet(false, true)) {
+            return;
+        }
+        int attempt = Math.max(1, reconnectAttempt.incrementAndGet());
+        long delay = Math.min(RECONNECT_MAX_DELAY_MS, 1_000L * (1L << Math.min(5, attempt - 1)));
+        status.set("T-Invest stream reconnect in " + delay + "ms (attempt " + attempt + ")");
+        log.info("{}", status.get());
+        reconnectFuture = reconnectExec.schedule(() -> {
+            reconnectPending.set(false);
+            if (closed.get()) {
+                return;
+            }
+            try {
+                Map<String, String> map = new LinkedHashMap<>(figiByInstrument);
+                String token = lastToken;
+                boolean sandbox = lastSandbox;
+                if (token == null || map.isEmpty()) {
+                    return;
+                }
+                start(token, sandbox, map);
+            } catch (Exception ex) {
+                log.warn("T-Invest reconnect failed: {}", ex.toString());
+                scheduleReconnect();
+            }
+        }, delay, TimeUnit.MILLISECONDS);
+    }
+
     public synchronized void startAuto(String instrumentId) {
         TInvestCredentials creds = TInvestCredentials.resolve();
         if (!creds.present()) {
@@ -199,10 +276,6 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         return List.copyOf(out);
     }
 
-    /**
-     * Subscribe extra FORTS legs on the live stream (calendar near/next).
-     * No-op if the stream is not running.
-     */
     public synchronized void addInstruments(Map<String, String> extra) {
         if (extra == null || extra.isEmpty()) {
             return;
@@ -230,7 +303,7 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         }
     }
 
-    public synchronized void stop() {
+    private synchronized void stopStreamOnly() {
         if (stream != null) {
             try {
                 stream.cancel();
@@ -245,9 +318,25 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         streaming.set(false);
     }
 
+    public synchronized void stop() {
+        cancelReconnect();
+        stopStreamOnly();
+    }
+
+    private void cancelReconnect() {
+        ScheduledFuture<?> f = reconnectFuture;
+        reconnectFuture = null;
+        if (f != null) {
+            f.cancel(false);
+        }
+        reconnectPending.set(false);
+    }
+
     @Override
     public void close() {
+        closed.set(true);
         stop();
+        reconnectExec.shutdownNow();
     }
 
     @Override
@@ -273,7 +362,6 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         return streaming.get();
     }
 
-    /** Update in-memory book after unary REST refresh (stream down / stale snapshot). */
     public void putBook(DomBook book) {
         if (book == null || book.instrumentId() == null || book.instrumentId().isBlank()) {
             return;
