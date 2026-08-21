@@ -46,6 +46,7 @@ public class TrendRobotController {
     private final OperatorTradeToastService tradeToasts;
     private final TrendDeskService deskService;
     private final TrendPaperJournalService paperJournal;
+    private final com.moex.cointegration.ops.LiveExecutionGate liveGate;
 
     public TrendRobotController(
             TrendResearchService researchService,
@@ -54,7 +55,8 @@ public class TrendRobotController {
             TrendSettingsService trendSettings,
             OperatorTradeToastService tradeToasts,
             TrendDeskService deskService,
-            TrendPaperJournalService paperJournal
+            TrendPaperJournalService paperJournal,
+            com.moex.cointegration.ops.LiveExecutionGate liveGate
     ) {
         this.researchService = researchService;
         this.engine = engine;
@@ -63,6 +65,7 @@ public class TrendRobotController {
         this.tradeToasts = tradeToasts;
         this.deskService = deskService;
         this.paperJournal = paperJournal;
+        this.liveGate = liveGate;
     }
 
     @GetMapping("/settings")
@@ -71,8 +74,21 @@ public class TrendRobotController {
     }
 
     @PostMapping("/settings")
-    public TrendSettingsService.View saveSettings(@RequestBody TrendSettingsService.UpdateRequest request) {
-        return trendSettings.save(request);
+    public ResponseEntity<?> saveSettings(@RequestBody TrendSettingsService.UpdateRequest request) {
+        boolean enablingLive = request != null
+                && Boolean.TRUE.equals(request.liveExecution())
+                && !trendSettings.liveExecution();
+        if (enablingLive) {
+            String block = liveGate.blockEnableLiveReason();
+            if (block != null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "live_gate_blocked",
+                        "message", block,
+                        "gate", liveGate.checklist()
+                ));
+            }
+        }
+        return ResponseEntity.ok(trendSettings.save(request));
     }
 
     /** One-click toggle: signal-only ↔ auto-execution (sandbox journal). */

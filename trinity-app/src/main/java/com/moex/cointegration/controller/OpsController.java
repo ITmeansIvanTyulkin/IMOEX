@@ -34,6 +34,7 @@ public class OpsController {
     private final ProductEditionService productEdition;
     private final StartupSmokeStatus smokeStatus;
     private final ObjectProvider<StartupSmokeRunner> smokeRunner;
+    private final com.moex.cointegration.ops.LiveExecutionGate liveExecutionGate;
 
     public OpsController(
             PaperAlertService alertService,
@@ -41,7 +42,8 @@ public class OpsController {
             ImoexProperties properties,
             ProductEditionService productEdition,
             StartupSmokeStatus smokeStatus,
-            ObjectProvider<StartupSmokeRunner> smokeRunner
+            ObjectProvider<StartupSmokeRunner> smokeRunner,
+            com.moex.cointegration.ops.LiveExecutionGate liveExecutionGate
     ) {
         this.alertService = alertService;
         this.tradeToasts = tradeToasts;
@@ -49,6 +51,7 @@ public class OpsController {
         this.productEdition = productEdition;
         this.smokeStatus = smokeStatus;
         this.smokeRunner = smokeRunner;
+        this.liveExecutionGate = liveExecutionGate;
     }
 
     /**
@@ -150,5 +153,11 @@ public class OpsController {
         out.put("accepted", true);
         out.putAll(smokeStatus.dto());
         return out;
+    }
+
+    /** GET /api/ops/live-gate — checklist before enabling trend liveExecution. */
+    @GetMapping("/live-gate")
+    public Map<String, Object> liveGateStatus() {
+        return liveExecutionGate.checklist();
     }
 }

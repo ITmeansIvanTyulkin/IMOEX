@@ -197,7 +197,7 @@
         + "<td>" + shortTime(t.closedAt)
         + (t.exitPrice != null ? " · " + fmtPx(t.exitPrice) : "") + "</td>"
         + "<td>" + (t.side || "—") + "</td>"
-        + "<td>" + (t.qty != null ? t.qty : "—") + "</td>"
+        + "<td>" + fmtQtyFilledPlanned(t) + "</td>"
         + "<td>" + (t.exitReason || "—") + "</td>"
         + "<td class='" + cls + "'>" + fmtPnl(pnl) + "</td>"
         + "<td>" + (t.tag || "—") + "</td>"
@@ -225,6 +225,19 @@
     const notes = (t && t.notes) ? String(t.notes) : "";
     const m = notes.match(/playbook=([^\s.;]+)/);
     return m ? m[1] : null;
+  }
+  /** Filled lots vs armed grid — e.g. 1/3 when only one limit filled. */
+  function fmtQtyFilledPlanned(t) {
+    if (!t || t.qty == null) return "—";
+    const filled = Number(t.qty);
+    const planned = t.plannedQty != null ? Number(t.plannedQty) : NaN;
+    if (Number.isFinite(planned) && planned > 0 && planned !== filled) {
+      return filled + "/" + planned;
+    }
+    const notes = (t.notes && String(t.notes)) || "";
+    const m = notes.match(/filled\s+(\d+)\s*\/\s*(\d+)/i);
+    if (m) return m[1] + "/" + m[2];
+    return String(filled);
   }
   function shortDate(iso) {
     if (!iso) return "—";
@@ -413,6 +426,14 @@
           + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high);
       }
       marketHtml += ". HI/LO " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow) + ".";
+      if (sit.hiAboveTopPts != null && sit.hiAboveTopPts > 0) {
+        marketHtml += " <span class='signal-daylock-gap'>HI выше TOP·день на "
+          + sit.hiAboveTopPts + "п — зона §8 (полка не едет за хаем).</span>";
+      }
+      if (sit.loBelowBotPts != null && sit.loBelowBotPts > 0) {
+        marketHtml += " <span class='signal-daylock-gap'>LO ниже BOT·день на "
+          + sit.loBelowBotPts + "п.</span>";
+      }
       if (st.previousZeroPoint != null) {
         marketHtml += " Zero " + fmtPx(st.previousZeroPoint)
           + (st.zeroPointBroken ? " (пробита)." : " (держится).");

@@ -27,6 +27,8 @@ Keep here so we do not lose commercial/research bets. **Do not implement until t
 - Soft commercial upsell / reverse trial — scaffolding OK; no real billing yet.
 - Options module — after pillars; locked preview only.
 - Trend desk drawing-tools polish (SVG trendline / VAP / footprint UX) — deferred polish, not a product pillar.
+- **Нагрузка ≥1000 пользователей + fragility pack** — see «Engineering: нагрузка ≥1000…» below. Gate: before public Instance delivery / before `liveExecution`; does not block current sandbox.
+- **Ops live-gate** — `GET /api/ops/live-gate`; enabling `liveExecution` blocked until startup smoke OK (+ checklist items). Statement qty = filled/planned.
 
 ## IP: публичные Кости vs закрытое ядро (сейчас)
 
@@ -148,3 +150,45 @@ Honest constraints: needs data + OOS; Cursor IDE ≠ training compute; research 
 5. Fits under #4 Volume desk later; can ship a thin EXT earlier **after** DAILY pairs paper/OOS and after trend #1/#2 OOS journals are honest.
 
 **Gate:** do **not** start now. Current focus: DAILY pairs validation + trend fair-paper/OOS, not new microstructure predictors.
+
+## Engineering: нагрузка ≥1000 пользователей + хрупкие места
+
+**Why:** после закрытия операторских багов Trend desk (auth quiet, smoke, wick, day-lock/§8, reconnect) продукт всё ещё **research/sandbox**. Перед Instance/Core delivery и коммерческим трафиком нужны явные ворота на нагрузку и на регрессию «EXT снова убивает чеклист».
+
+**Do not** treat this as a reason to pause DAILY pairs paper / trend fair-paper / calendar sandbox — это **параллельный engineering backlog**, gated.
+
+### A. Нагрузочное тестирование (≥1000 пользователей)
+
+Цель: убедиться, что оболочка + API + desk выдерживают **≥1000 одновременных** операторских сессий (и запас выше), без деградации торгового контура.
+
+**Scope when gated (order)**
+1. **Профиль нагрузки** — типичный оператор: dashboard + trend desk poll (`/api/trend/desk|status`), pairs views, statement, static JS/CSS; отдельно «тяжёлый» сценарий (desk + DOM/tape + candles scroll).
+2. **Метрики** — p50/p95 latency API, error rate, JVM heap/GC, Tomcat threads, DB/file I/O (journals, candle archive), T-Invest reconnect storm under load.
+3. **Инструмент** — k6 / Gatling / JMeter (один выбранный); сценарии в репо + пороги в CI (nightly), не на каждый PR.
+4. **Масштаб** — ступени 100 → 500 → **1000** → 2000 (soak); отдельно cold-start smoke × N (не путать с user load).
+5. **Изоляция** — нагрузка на Instance-профиль / staging; **не** бить live broker и не смешивать с OOS replay CPU.
+
+**Gate:** после стабильного fair-paper/OOS Trend #1 и перед публичным delivery Instance (autumn–winter 2026). Не блокирует текущий sandbox.
+
+### B. Хрупкие места (fragility hardening)
+
+Хрупкость сейчас **средняя**: много EXT-фильтров вокруг Exclusive — легко снова конфликтовать с §8 / side law. Фиксируем список, чтобы не потерять.
+
+| Хрупкое место | Риск | Что делать when gated |
+|---------------|------|------------------------|
+| **EXT vs §8 / side law** | HTF soft, macro knife, gap-fill, one-setup, anti-thin, day-phase, touch-quality — могут снова **veto** валидный §8 RETEST или перевернуть BOT/TOP | Контрактные тесты: «§8 break+hold never blocked by EXT»; gate в `ExclusiveSide` / `ChecklistCompliance`; любой новый EXT — additive size/wait only |
+| **Day-lock vs HI/HIST / soft desk** | Snug/relock TOP под HI убивает §8; soft `DESK§5+SOFT` путается с торговой полкой; HIST≠day TOP | Регрессии `DayZoneLock` + structure: TOP frozen until day-wipe; desk labels `TOP·день` / `HIST·серия`; после рестарта lock-файл не «уплывает» |
+| **Melt-up / reject confirm** | Оператор ждёт SELL от касания wick; код требует closed reject (§11/§16) | UI why-текст + journal reason; не ослаблять confirm без явного research kill-switch |
+| **Grid qty: план vs fill** | Fair-paper заливает 1 ногу из 3 → в statement qty≠grid; путаница «робот взял мало/много» | Statement/journal: `filled/planned`; не менять §9 сетку молча |
+| **Smoke soft-block vs live gate** | FAIL smoke гасит auto/live; после heal live не поднимать автоматически | Явный ops checklist перед `liveExecution=true`; smoke ≠ load test |
+| **Partial fills + SL geometry** | Полный грид BUY → крупнее SL в ₽ при том же сетапе | Оставить по чеклисту; опционально UI risk preview «если зальются все N ног» |
+| **Marketdata reconnect / broken-pipe** | EOS gRPC + client disconnect шум / ложный «рынок умер» | Уже тихий reconnect; soak под нагрузкой (A) — не регрессировать |
+| **Два playbook на одном desk** | Exclusive M5 vs positional H1 — риск перепутать side law / unlock | `PositionalSide` / `ExclusiveSide` не смешивать; plaque не «заражать» чужим oil context |
+| **Calendar-arb HTTP** | Тяжёлый H1/OOS в запросе снова подвесит desk | Держать async/cache; нагрузочный сценарий отдельно от trend desk |
+
+**Regression pack (when gated)**
+- Unit: day-lock freeze, §8 vs EXT, ExclusiveSide illegal arm, wick sanitize, auth quiet URL apply.
+- Integration: startup smoke contract, T-Invest reconnect, desk structure zoneTop == TREND_HI lock.
+- Manual day: после рестарта TOP·день не следует за каждым HI; HIST отдельно.
+
+**Gate:** наращивать pack **параллельно** с fair-paper; полный fragility pass — перед включением `liveExecution` и перед нагрузкой ≥1000. Checklist fidelity rule остаётся главным: **при конфликте EXT и §8/§14 — wins checklist**.
