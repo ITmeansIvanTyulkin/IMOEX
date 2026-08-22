@@ -343,6 +343,23 @@
     if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
     return v.toFixed(2);
   }
+  function commentaryHtml(data) {
+    const c = (data && data.commentary) || ((data && data.situation) ? data.situation.commentary : null);
+    if (!c || !c.headline) return "";
+    const story = Array.isArray(c.story) ? c.story : [];
+    let html = "<div class='signal-narration'>";
+    html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Разбор · как видит робот</p>";
+    html += "<p class='signal-narration-head'><strong>" + escHtml(c.verdict || "") + "</strong> — "
+      + escHtml(c.headline) + "</p>";
+    story.forEach(function (p) {
+      if (p) html += "<p class='signal-narration-p'>" + escHtml(p) + "</p>";
+    });
+    if (c.disclaimer) {
+      html += "<p class='signal-narration-disc'>" + escHtml(c.disclaimer) + "</p>";
+    }
+    html += "</div>";
+    return html;
+  }
   function buildPositionalBrief(data) {
     const esc = escHtml;
     const bars = deskBars(data);
@@ -491,7 +508,7 @@
         + " · " + (paperSt.wins || 0) + "/" + (paperSt.losses || 0)
         + " по этому инструменту / плейбуку.</p>";
     }
-    return html;
+    return commentaryHtml(data) + html;
   }
   function buildOperatorBrief(data) {
     const bars = deskBars(data);
@@ -725,6 +742,9 @@
       robotHtml += "<p class='signal-brief-note'>" + esc(sit.sessionPhaseRu);
       if (sit.shelfLocal) robotHtml += " · фокус сдвинут на ближнюю полку";
       if (sit.touchQ != null) robotHtml += " · качество касания " + esc(String(sit.touchQ));
+      if (sit.cluster && sit.cluster.points != null) {
+        robotHtml += " · полка +" + sit.cluster.points + "/2 очка (кластер/дельта, не фильтр)";
+      }
       robotHtml += ".</p>";
     }
 
@@ -904,7 +924,7 @@
         + " · всего на statement <strong>" + total + "</strong>.</p>";
     }
 
-    return marketHtml + robotHtml + newsHtml + paperHtml;
+    return commentaryHtml(data) + marketHtml + robotHtml + newsHtml + paperHtml;
   }
   function paintImpulseBanner(impulse) {
     const el = $("signal-impulse-banner");
@@ -3420,6 +3440,8 @@
     const rawWhy = sit.why || data.summary || plan.rationale || "";
     const whyHuman = humanizeDeskReason(rawWhy);
     const usableWhy = (whyHuman && !looksTechnicalStatus(whyHuman)) ? whyHuman : "";
+    const comm = (data && data.commentary) || sit.commentary || {};
+    const head = comm.headline || "";
 
     let cls = "is-scan";
     let status = "Сканирует";
@@ -3455,7 +3477,9 @@
     } else if (posture === "WATCHING_ZONE") {
       cls = "is-watch";
       status = "Смотрит зону";
-      if (usableWhy) {
+      if (head) {
+        detail = head;
+      } else if (usableWhy) {
         detail = usableWhy;
       } else {
         const bits = [];
@@ -3474,11 +3498,13 @@
       } else {
         status = "Не в сделке";
       }
-      detail = usableWhy || "Нового сетапа сейчас нет";
+      detail = head || usableWhy || "Нового сетапа сейчас нет";
     } else {
       cls = "is-scan";
       status = "Сканирует";
-      if (usableWhy) {
+      if (head) {
+        detail = head;
+      } else if (usableWhy) {
         detail = usableWhy;
       } else {
         const bits = [];
@@ -3493,7 +3519,7 @@
       const closed = lastCloseBit(sit, fp, pbId);
       if (closed) detail = closed + " · " + detail;
     }
-    if (detail.length > 160) detail = detail.slice(0, 158) + "…";
+    if (detail.length > 220) detail = detail.slice(0, 218) + "…";
     return { cls: cls, status: status, detail: detail };
   }
   function syncStatusRail(data) {

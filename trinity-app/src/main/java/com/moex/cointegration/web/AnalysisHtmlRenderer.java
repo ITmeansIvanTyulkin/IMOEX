@@ -84,7 +84,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260821-chart-bands">
+              <link rel="stylesheet" href="/css/operator.css?v=20260822-narrate">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"

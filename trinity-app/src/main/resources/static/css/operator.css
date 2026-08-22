@@ -3048,6 +3048,27 @@ body[data-upsell="off"] .full-core-badge {
 .signal-brief-body > .signal-brief-kicker:first-child {
   margin-top: 0 !important;
 }
+.signal-narration {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.8rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(30, 42, 50, 0.12);
+  background: rgba(255, 255, 255, 0.55);
+}
+.signal-narration-head {
+  margin: 0 0 0.45rem !important;
+  font-size: 1.02rem;
+  line-height: 1.35;
+}
+.signal-narration-p {
+  margin: 0 0 0.45rem !important;
+  color: var(--ink);
+}
+.signal-narration-disc {
+  margin: 0.2rem 0 0 !important;
+  font-size: 0.78rem;
+  color: var(--muted, #6a7580);
+}
 .signal-brief-body code {
   font-family: var(--mono, "IBM Plex Mono", monospace);
   font-size: 0.85em;

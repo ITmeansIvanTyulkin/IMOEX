@@ -404,6 +404,11 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     }
 
     @Override
+    public List<TradePrint> recentTradesWindow(String instrumentId, Instant from, Instant to) {
+        return tape.snapshotWindow(instrumentId, from, to);
+    }
+
+    @Override
     public void subscribeTrades(String instrumentId) {
         status.set(status.get() + " | subscribeTrades(" + instrumentId + ") noted");
     }

@@ -77,6 +77,42 @@ public final class TradeTapeBuffer {
         }
     }
 
+    /**
+     * Prints in {@code [from, to)} for one instrument — no full-buffer copy.
+     */
+    public List<TradePrint> snapshotWindow(String instrumentId, Instant from, Instant to) {
+        lock.readLock().lock();
+        try {
+            if (buf.isEmpty()) {
+                return List.of();
+            }
+            String u = instrumentId == null ? "" : instrumentId.trim().toUpperCase();
+            boolean brFamily = "BR".equals(u);
+            List<TradePrint> out = new ArrayList<>();
+            for (TradePrint p : buf) {
+                if (p == null || p.time() == null) {
+                    continue;
+                }
+                if (from != null && p.time().isBefore(from)) {
+                    continue;
+                }
+                if (to != null && !p.time().isBefore(to)) {
+                    continue;
+                }
+                if (!u.isEmpty()) {
+                    String id = p.instrumentId() == null ? "" : p.instrumentId().toUpperCase();
+                    if (!id.equals(u) && !(brFamily && id.startsWith("BR"))) {
+                        continue;
+                    }
+                }
+                out.add(p);
+            }
+            return out;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
     /** Prints with {@code time <= asOf} (inclusive), for look-ahead-safe replay. */
     public List<TradePrint> snapshotUntil(Instant asOf) {
         if (asOf == null) {

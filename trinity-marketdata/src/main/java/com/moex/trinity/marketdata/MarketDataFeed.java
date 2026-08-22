@@ -1,5 +1,7 @@
 package com.moex.trinity.marketdata;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,6 +27,31 @@ public interface MarketDataFeed {
      */
     default List<TradePrint> recentTrades(String instrumentId) {
         return List.of();
+    }
+
+    /**
+     * Tape prints in {@code [from, to)} for one instrument. Default filters {@link #recentTrades};
+     * live feeds should override to avoid copying the whole buffer.
+     */
+    default List<TradePrint> recentTradesWindow(String instrumentId, Instant from, Instant to) {
+        List<TradePrint> all = recentTrades(instrumentId);
+        if (all == null || all.isEmpty()) {
+            return List.of();
+        }
+        List<TradePrint> out = new ArrayList<>();
+        for (TradePrint p : all) {
+            if (p == null || p.time() == null) {
+                continue;
+            }
+            if (from != null && p.time().isBefore(from)) {
+                continue;
+            }
+            if (to != null && !p.time().isBefore(to)) {
+                continue;
+            }
+            out.add(p);
+        }
+        return out;
     }
 
     /**
