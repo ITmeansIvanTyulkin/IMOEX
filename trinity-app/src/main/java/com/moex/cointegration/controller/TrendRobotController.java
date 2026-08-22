@@ -129,9 +129,10 @@ public class TrendRobotController {
      */
     @GetMapping("/desk")
     public Map<String, Object> desk(
-            @RequestParam(name = "instrument", required = false) String instrument
+            @RequestParam(name = "instrument", required = false) String instrument,
+            @RequestParam(name = "playbook", required = false) String playbook
     ) {
-        return deskService.desk(instrument);
+        return deskService.desk(instrument, playbook);
     }
 
     /**

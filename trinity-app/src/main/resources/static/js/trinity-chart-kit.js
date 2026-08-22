@@ -437,12 +437,13 @@
     vols.sort(function (a, b) { return a - b; });
     const medianVol = vols.length ? vols[Math.floor(vols.length / 2)] : 0;
     const getFp = ctx && typeof ctx.getFootprint === "function" ? ctx.getFootprint : null;
+    const positional = !!(ctx && ctx.positional);
     const scanFrom = Math.max(0, bars.length - 48);
     let latest = null;
     let latestIdx = -1;
     for (let i = scanFrom; i < bars.length; i++) {
       const fp = getFp ? getFp(bars[i].time) : null;
-      const tag = classifyImpulseBar(bars[i], median, ps, st, openH, medianVol, fp);
+      const tag = classifyImpulseBar(bars[i], median, ps, st, openH, medianVol, fp, positional);
       if (!tag) continue;
       const key = barTimeKey(bars[i].time);
       if (key) out.notes[key] = tag;
@@ -490,34 +491,49 @@
         tapeBit = " В ленте покупки и продажи близки — скорее проскок пустых цен, чем одна сплошная толпа.";
       }
     }
+    const positional = !!extra.positional;
     const sessionBit = extra.sessionOpen
-      ? " Это первые минуты основной сессии 10:00 МСК: заявок ещё мало, ночной ход нефти выгружается в рынок. Не заголовок из ленты."
+      ? (positional
+        ? " Первые минуты сессии: стакан тонкий, ход часто пустой — это не вход."
+        : " Это первые минуты основной сессии 10:00 МСК: заявок ещё мало, ночной ход нефти выгружается в рынок. Не заголовок из ленты.")
       : "";
     let why;
     let wait;
     if (pattern === "STOP_HUNT" && extra.sweptLow) {
       why = "Сначала вынесли стопы под минимумом (продали туда, где почти не было покупателей), затем свеча закрылась выше — вынос не удержали."
         + volBit + tapeBit + sessionBit;
-      wait = "Типично: дёрнули вниз, чтобы потом идти вверх. Не шортить вынос. Смотрим, удержит ли цена уровень над вынесенным лоем. Exclusive покупает только от BOT после закрытой свечи-отбоя — не в середине выноса.";
+      wait = positional
+        ? "Дёрнули вниз, часто чтобы потом идти вверх. Не шортить вынос. Позиционная не покупает от BOT Exclusive: сторона только с тренда H1, вход — в промежуточную полку объёма, не в середине выноса."
+        : "Типично: дёрнули вниз, чтобы потом идти вверх. Не шортить вынос. Смотрим, удержит ли цена уровень над вынесенным лоем. Exclusive покупает только от BOT после закрытой свечи-отбоя — не в середине выноса.";
     } else if (pattern === "STOP_HUNT") {
       why = "Сначала вынесли стопы над максимумом (купили туда, где почти не было продавцов), затем свеча закрылась ниже — вынос хая не удержали."
         + volBit + tapeBit + sessionBit;
-      wait = "Типично: дёрнули вверх, чтобы потом идти вниз. Не ловить лонг на шипе. Ждём, останется ли цена под вынесенным хаем. Exclusive шортит от TOP только после закрытого отбоя.";
+      wait = positional
+        ? "Дёрнули вверх, часто чтобы потом идти вниз. Не ловить лонг на шипе. Шорт только если час вниз и цена в промежуточной полке — не от TOP Exclusive."
+        : "Типично: дёрнули вверх, чтобы потом идти вниз. Не ловить лонг на шипе. Ждём, останется ли цена под вынесенным хаем. Exclusive шортит от TOP только после закрытого отбоя.";
     } else if (pattern === "KNIFE") {
       why = "Нож: продавали сразу по рынку. Заявки на покупку на каждом уровне исполнялись и исчезали — цена шла к следующей, более низкой. Закрытие у минимума: в этом баре покупатели так и не остановили падение."
         + volBit + tapeBit + sessionBit;
-      wait = "Не ловить нож. Ждём остановку: сужение следующих свечей или касание полки/ZERO/BOT. Покупка у робота — только от зоны BOT после rejection, не «догонять дно».";
+      wait = positional
+        ? "Не ловить нож. Ждём остановку у полки объёма. Лонг только если час вверх и вход в промежуточную полку — не «дно» и не BOT Exclusive."
+        : "Не ловить нож. Ждём остановку: сужение следующих свечей или касание полки/ZERO/BOT. Покупка у робота — только от зоны BOT после rejection, не «догонять дно».";
     } else if (pattern === "ROCKET") {
       why = "Импульс вверх: покупали сразу по рынку. Заявки на продажу на каждом уровне исполнялись и исчезали — цена шла к следующей, более высокой. Закрытие у максимума: продавцы ход не остановили."
         + volBit + tapeBit + sessionBit;
-      wait = "Не догонять вверх. Для Exclusive шорт только от TOP после закрытого отбоя. Если нет зоны — ждём, не остановится ли ход на HI дня.";
+      wait = positional
+        ? "Не догонять импульс. Шорт только если час вниз и зона входа — средняя полка объёма, не TOP дня Exclusive."
+        : "Не догонять вверх. Для Exclusive шорт только от TOP после закрытого отбоя. Если нет зоны — ждём, не остановится ли ход на HI дня.";
     } else if (pattern === "SPIKE") {
       why = "Длинный фитиль и маленькое тело: цена пробежала пустые уровни и вернулась. Агрессия не закрепилась."
         + volBit + tapeBit + sessionBit;
-      wait = "Шип сам по себе не вход. Ждём, с какой стороны закроются следующие 1–2 свечи. Ложный вынос часто возвращает цену в середину диапазона.";
+      wait = positional
+        ? "Шип сам по себе не вход. Ждём 1–2 закрытия. Позиционная торгует полку по тренду H1, не середину шипа и не TOP/BOT Exclusive."
+        : "Шип сам по себе не вход. Ждём, с какой стороны закроются следующие 1–2 свечи. Ложный вынос часто возвращает цену в середину диапазона.";
     } else {
       why = (dump ? "Резкий ход вниз." : "Резкий ход вверх.") + volBit + tapeBit + sessionBit;
-      wait = "Не торговать середину импульса. Смотрим, где остановится относительно TOP/BOT/ZERO — и ждём реакцию, не прогноз заголовка.";
+      wait = positional
+        ? "Середину импульса не торгуем. Смотрим, где ход остановится относительно полок объёма и тренда на часе — без TOP/BOT/ZERO Exclusive."
+        : "Не торговать середину импульса. Смотрим, где остановится относительно TOP/BOT/ZERO — и ждём реакцию, не прогноз заголовка.";
     }
     return {
       why: why.replace(/\s+/g, " ").trim(),
@@ -525,7 +541,7 @@
     };
   }
 
-  function classifyImpulseBar(bar, medianRange, ps, st, openH, medianVol, fp) {
+  function classifyImpulseBar(bar, medianRange, ps, st, openH, medianVol, fp, positional) {
     if (!bar) return null;
     const o = Number(bar.open), h = Number(bar.high), l = Number(bar.low), c = Number(bar.close);
     if (![o, h, l, c].every(Number.isFinite) || h < l) return null;
@@ -540,8 +556,8 @@
     const bodyFrac = range > 0 ? body / range : 0;
     const hi = Number(st.lookbackHigh);
     const lo = Number(st.lookbackLow);
-    const top = st.zoneTop;
-    const bot = st.zoneBottom;
+    const top = positional ? null : st.zoneTop;
+    const bot = positional ? null : st.zoneBottom;
     const sweptHigh = (hi > 0 && h >= hi - ps)
       || (top && Number(top.low) > 0 && h >= Number(top.low) - ps);
     const sweptLow = (lo > 0 && l <= lo + ps)
@@ -576,7 +592,8 @@
       fp: footprintSkew(fp),
       sessionOpen: sessionOpen,
       sweptHigh: sweptHigh,
-      sweptLow: sweptLow
+      sweptLow: sweptLow,
+      positional: !!positional
     });
     const signed = (dump ? "−" : "+") + Math.round(pts);
     const hover = lesson.why + " Что ждать: " + lesson.wait;

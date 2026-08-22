@@ -1,8 +1,8 @@
-<section class="signal-desk" id="trend-signal-desk">
+<section class="signal-desk" id="trend-signal-desk" data-desk-scope="range">
   <div class="signal-desk-head">
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
-      <h2>Сигнал · Trend</h2>
+      <h2 id="signal-desk-title">Диапазонная торговля</h2>
       <p class="meta" id="signal-desk-meta">Загрузка desk…</p>
       <div class="us-oil-banner" id="us-oil-banner" role="status">
         <strong>Американская нефть (CL / WTI)</strong>
@@ -17,7 +17,7 @@
       </label>
       <label class="check-label signal-follow-label">
         <input type="checkbox" id="signal-desk-volume">
-        Объём M5
+        <span id="signal-desk-volume-label">Объём M5</span>
       </label>
       <button type="button" class="btn btn-ghost is-active" id="signal-desk-pad"
               title="Отступ справа: текущая свеча не лепится к краю шкалы"
@@ -28,7 +28,12 @@
     </div>
   </div>
   <div class="signal-desk-strip" id="signal-desk-strip">
-    <div class="signal-chip signal-chip-select">
+    <div class="signal-chip signal-chip-robot" id="sig-robot-chip">
+      <span class="k">Робот</span>
+      <strong id="sig-robot-status">—</strong>
+      <span class="signal-chip-sub" id="sig-robot-detail" hidden></span>
+    </div>
+    <div class="signal-chip signal-chip-select" id="sig-playbook-chip" hidden>
       <span class="k">Плейбук</span>
       <label class="signal-select-wrap">
         <select id="sig-playbook" aria-label="Активный playbook"></select>
@@ -180,7 +185,7 @@
       <div>
         <p class="signal-guide-kicker">TRINITY · Trend</p>
         <h3 id="signal-guide-title">Как работает стратегия</h3>
-        <p class="signal-guide-lead">Короткая инструкция: почему только BR, что делает робот и как читать сигнал без автоторгов.</p>
+        <p class="signal-guide-lead" id="signal-guide-lead">Короткая инструкция: полки TOP/BOT на BR M5, сторона по чеклисту, как читать desk.</p>
       </div>
       <button type="button" class="signal-guide-close" id="signal-guide-close"
               data-guide-close aria-label="Закрыть">×</button>
@@ -199,7 +204,7 @@
         <a href="#guide-risk">Риск</a>
       </nav>
 
-      <article class="signal-guide-section" id="guide-idea">
+      <article class="signal-guide-section" id="guide-idea" data-guide-scope="range">
         <h4>Идея в одном абзаце</h4>
         <p>
           Робот торгует <strong>только нефтяной фьючерс BR на M5</strong> у дневных полок объёма
@@ -210,7 +215,17 @@
         </p>
       </article>
 
-      <article class="signal-guide-section" id="guide-why-oil">
+      <article class="signal-guide-section" id="guide-idea-pos" data-guide-scope="positional" hidden>
+        <h4>Идея в одном абзаце</h4>
+        <p>
+          Позиционный робот ищет <strong>явный тренд на H1</strong> (HH/HL → только LONG, LH/LL → только SHORT)
+          и входит сеткой 1:1:2:4 в <strong>промежуточный объёмный диапазон</strong> последних трёх полок.
+          Семьи: BR, RTS, газ, Si, золото, MIX — ротация §1, не параллельные гриды.
+          «Сканирует» значит робот <strong>включён</strong>, но чеклист не дал вход.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-why-oil" data-guide-scope="range">
         <h4>Почему робот торгует исключительно нефть</h4>
         <p>
           Это <strong>узкая специализация</strong>, а не «универсальный бот на всё».
@@ -370,5 +385,5 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-chart-kit.js?v=20260817-impulse5"></script>
-<script src="/js/trend-signal-desk.js?v=20260821-qty-livegate"></script>
+<script src="/js/trinity-chart-kit.js?v=20260822-pb-split"></script>
+<script src="/js/trend-signal-desk.js?v=20260822-pb-split"></script>

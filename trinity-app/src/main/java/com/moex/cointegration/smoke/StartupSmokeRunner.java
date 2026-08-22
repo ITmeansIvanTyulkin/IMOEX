@@ -134,6 +134,7 @@ public class StartupSmokeRunner implements ApplicationListener<ApplicationReadyE
         List<Check> out = new ArrayList<>();
         out.add(getOk("actuator.health", "/actuator/health", 200));
         out.add(getOk("view.trend-signal", "/view/trend-signal", 200));
+        out.add(getOk("view.trend-positional", "/view/trend-positional", 200));
         out.add(getOk("api.trend.settings", "/api/trend/settings", 200));
         out.add(getNot5xx("api.trend.desk", "/api/trend/desk"));
         if (properties.auth() != null && properties.auth().enabled()) {

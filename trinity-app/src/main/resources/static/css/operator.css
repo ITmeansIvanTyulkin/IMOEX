@@ -2702,6 +2702,8 @@ body[data-upsell="off"] .full-core-badge {
   flex-wrap: wrap;
   gap: 0.65rem;
   margin: 0.75rem 0 0.5rem;
+  align-items: stretch;
+  min-width: 0;
 }
 .signal-chip {
   background: rgba(30, 42, 50, 0.06);
@@ -2709,6 +2711,8 @@ body[data-upsell="off"] .full-core-badge {
   border-radius: 10px;
   padding: 0.45rem 0.7rem;
   min-width: 6.5rem;
+  max-width: 100%;
+  overflow: hidden;
 }
 .signal-chip .k {
   display: block;
@@ -2722,8 +2726,30 @@ body[data-upsell="off"] .full-core-badge {
   font-family: var(--mono, "IBM Plex Mono", monospace);
   font-size: 0.95rem;
 }
-.signal-chip strong.is-buy { color: #2f8a55; }
-.signal-chip strong.is-sell { color: #b85a4c; }
+.signal-chip.is-trade strong { color: #2f8a55; }
+.signal-chip.is-armed strong { color: #b8860b; }
+.signal-chip.is-watch strong { color: #3d6a8a; }
+.signal-chip.is-scan strong { color: var(--muted, #6a7580); }
+.signal-chip-robot {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  max-width: 16rem;
+}
+.signal-chip-robot strong,
+.signal-chip-sub {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.signal-chip-sub {
+  margin-top: 0.12rem;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  color: var(--muted, #6a7580);
+  font-family: var(--mono, "IBM Plex Mono", monospace);
+}
 .signal-chip-select {
   min-width: 9.5rem;
 }
@@ -2928,11 +2954,19 @@ body[data-upsell="off"] .full-core-badge {
   position: absolute;
   top: 2px;
   left: 6px;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: rgba(76, 29, 149, 0.9);
   text-shadow: 0 0 4px rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+}
+.signal-zone-band.is-hvn {
+  min-height: 3px;
+  background: rgba(167, 139, 250, 0.22);
 }
 .signal-volume-wrap {
   margin-top: 0.35rem;

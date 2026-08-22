@@ -20,6 +20,9 @@ target/
 /run_gen_pptx_pdf.cmd
 /data/
 
+# Labeled research corpus (training JSONL). Local only; later cloud. Never commit.
+/research-corpus/
+
 # Local secrets (required to run; never commit)
 /application-local.yml
 /config/application-local.yml

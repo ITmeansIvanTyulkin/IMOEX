@@ -19,6 +19,10 @@ imoex:
     require-entry-reversal: true
   data-dir: data
   charts-dir: data/charts
+  # Labeled engine corpus (training). Not UI. Folder is gitignored; upload later.
+  research-corpus-dir: research-corpus
+  research-corpus:
+    enabled: true
   news:
     enabled: true
     lookback-days: 10

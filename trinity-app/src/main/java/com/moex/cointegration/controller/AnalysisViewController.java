@@ -167,6 +167,11 @@ public class AnalysisViewController {
         return htmlRenderer.renderTrendSignalPage();
     }
 
+    @GetMapping(value = "/trend-positional", produces = MediaType.TEXT_HTML_VALUE)
+    public String trendPositional() {
+        return htmlRenderer.renderTrendPositionalPage();
+    }
+
     @GetMapping(value = "/trend-charts", produces = MediaType.TEXT_HTML_VALUE)
     public String trendCharts() {
         return htmlRenderer.renderTrendChartsPage();

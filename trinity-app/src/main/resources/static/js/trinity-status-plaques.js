@@ -15,7 +15,8 @@
   let refreshInFlight = false;
 
   function pathIsSignal() {
-    return location.pathname.indexOf("/view/trend-signal") >= 0;
+    return location.pathname.indexOf("/view/trend-signal") >= 0
+      || location.pathname.indexOf("/view/trend-positional") >= 0;
   }
   function pathIsCharts() {
     return location.pathname.indexOf("/view/trend-charts") >= 0;
@@ -240,25 +241,16 @@
   }
 
   function navigateRobot(robot) {
-    const href = (robot && robot.href) || "/view";
     const pb = (robot && robot.playbookId) || "";
-    if (pb && (pb.indexOf("levels-profile") >= 0 || pb.indexOf("positional") >= 0)) {
-      fetch("/api/trend/settings", {
-        method: "POST",
-        headers: plaqueAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ playbookId: pb })
-      }).catch(function () {}).finally(function () {
-        if (location.pathname.indexOf("/view/trend-signal") >= 0) {
-          const url = "/view/trend-signal?playbook=" + encodeURIComponent(pb);
-          if (location.pathname + location.search === url) location.reload();
-          else location.href = url;
-        } else {
-          location.href = href;
-        }
-      });
+    if (pb.indexOf("positional") >= 0) {
+      location.href = "/view/trend-positional";
       return;
     }
-    location.href = href;
+    if (pb.indexOf("levels-profile") >= 0) {
+      location.href = "/view/trend-signal";
+      return;
+    }
+    location.href = (robot && robot.href) || "/view";
   }
 
   function focusWindInstrument(secid) {

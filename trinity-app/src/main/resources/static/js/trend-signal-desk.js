@@ -8,6 +8,7 @@
   let overlayStructure = {};
   let lastCandleTime = null;
   let lastBarsRaw = [];
+  let lastSanitizedCandles = [];
   let chartNeedsFit = false;
   let userPinned = false;
   let followLive = true;
@@ -72,6 +73,72 @@
   let liveTp1Until = 0;
 
   function $(id) { return document.getElementById(id); }
+  function deskScope() {
+    const root = $("trend-signal-desk");
+    const s = root && root.getAttribute("data-desk-scope");
+    return s === "positional" ? "positional" : "range";
+  }
+  function viewPlaybookId() {
+    return deskScope() === "positional" ? "positional-volume-h1" : "levels-profile-br-m5";
+  }
+  function deskBars(data) {
+    if (deskScope() === "positional" || (data && data.deskScope === "positional")) {
+      if (data && Array.isArray(data.barsH1) && data.barsH1.length) return data.barsH1;
+    }
+    return (data && data.bars) || [];
+  }
+  function instrumentTitle(data) {
+    if (!data) return "—";
+    if (data.instrumentName) return data.instrumentName + " · " + (data.instrument || "");
+    return data.instrument || "—";
+  }
+  function applyDeskChrome() {
+    const pos = deskScope() === "positional";
+    const volLab = $("signal-desk-volume-label");
+    if (volLab) volLab.textContent = pos ? "Объём H1" : "Объём M5";
+    const hint = $("signal-chart-hint");
+    if (hint && pos) {
+      hint.innerHTML = "Часовой график · след / MACD / профиль / линии · "
+        + "<a href=\"/view/trend-charts\">терминал графиков</a> · "
+        + "вход в промежуточную полку объёма · сетка 1:1:2:4 · стоп и тейк";
+    }
+    const oilBan = $("us-oil-banner");
+    if (oilBan) oilBan.hidden = pos;
+    const lead = $("signal-guide-lead");
+    const gtitle = $("signal-guide-title");
+    if (pos) {
+      if (gtitle) gtitle.textContent = "Как работает позиционная";
+      if (lead) lead.textContent = "Часовой тренд, вход в среднюю полку объёма, сетка 1:1:2:4. «Сканирует» значит робот включён, по правилам входа сейчас нет.";
+    }
+    const kick = $("sig-kick-btn");
+    if (kick) kick.hidden = pos;
+    document.querySelectorAll("[data-guide-scope]").forEach(function (el) {
+      const want = el.getAttribute("data-guide-scope");
+      el.hidden = !!(want && want !== "both" && want !== deskScope());
+    });
+  }
+  function paintRobotChip(data) {
+    const chip = $("sig-robot-chip");
+    const el = $("sig-robot-status");
+    if (!chip || !el) return;
+    const sit = (data && data.situation) || {};
+    const posture = sit.posture || "";
+    const copy = buildRobotFabCopy(data);
+    const status = (copy && copy.status) ? copy.status : "Сканирует";
+    const detail = (copy && copy.detail) ? copy.detail : "";
+    el.textContent = status;
+    const sub = $("sig-robot-detail");
+    if (sub) {
+      sub.textContent = detail;
+      sub.hidden = !detail;
+    }
+    chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan");
+    if (posture === "IN_TRADE") chip.classList.add("is-trade");
+    else if (posture === "WAITING_FILL") chip.classList.add("is-armed");
+    else if (posture === "WATCHING_ZONE") chip.classList.add("is-watch");
+    else chip.classList.add("is-scan");
+    chip.title = detail ? (status + " · " + detail) : status;
+  }
   function deMark(s) {
     return String(s == null ? "" : s).replace(/§\s*/g, "").replace(/\s+/g, " ").trim();
   }
@@ -214,6 +281,7 @@
       if (s.indexOf("SI") === 0) return "SI";
       if (s.indexOf("NG") === 0) return "NG";
       if (s.indexOf("GD") === 0) return "GD";
+      if (s.indexOf("MX") === 0 || s.indexOf("MIX") === 0) return "MX";
       return s.replace(/\d+$/, "");
     }
     return fam(a) === fam(b);
@@ -275,8 +343,158 @@
     if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
     return v.toFixed(2);
   }
+  function buildPositionalBrief(data) {
+    const esc = escHtml;
+    const bars = deskBars(data);
+    const last = bars.length ? bars[bars.length - 1] : null;
+    const close = last && typeof last.close === "number" ? last.close : null;
+    const sit = data.situation || {};
+    const plan = data.plan || {};
+    const st = data.structure || {};
+    const sig = data.signal || {};
+    const paperSt = (data.paper && data.paper.statement) || {};
+    const events = data.events || [];
+    const title = instrumentTitle(data);
+    const tf = data.timeframe || "H1";
+    const posture = sit.posture || "SCANNING";
+    const postureRu = ({
+      IN_TRADE: "В СДЕЛКЕ",
+      WAITING_FILL: "ЖДЁТ ИСПОЛНЕНИЯ",
+      WATCHING_ZONE: "СМОТРИТ ЗОНУ",
+      NOT_IN_TRADE: "НЕ В СДЕЛКЕ",
+      SCANNING: "СКАНИРУЕТ"
+    })[posture] || posture;
+    const reason = humanizeDeskReason(sit.why || data.summary || plan.rationale || "");
+    const htf = sit.htf || st.htf || "?";
+    const range = plan.range || {};
+    const grid = plan.grid || {};
+
+    let html = "<p class='signal-brief-kicker signal-brief-kicker--gold'>Рынок · позиционная H1</p>";
+    html += "<ul class='signal-brief-list'>";
+    html += "<li>" + esc(title) + " · <strong>" + (close != null ? fmtPx(close) : "—")
+      + "</strong> · " + (tf === "H1" ? "час" : esc(tf)) + "</li>";
+    if (htf === "UP") {
+      html += "<li>Тренд на часе <strong>вверх</strong>: хаи и лои растут лесенкой. Сторона только лонг, шорт против тренда не берём.</li>";
+    } else if (htf === "DOWN") {
+      html += "<li>Тренд на часе <strong>вниз</strong>: хаи и лои снижаются. Сторона только шорт, лонг против тренда не берём.</li>";
+    } else {
+      html += "<li>На часе нет явного тренда — ни восходящей лесенки (хаи/лои выше), ни нисходящей. Флэт или пила: в лонг и в шорт не лезем, ждём структуру.</li>";
+    }
+    if (range.low != null && range.high != null) {
+      html += "<li>Зона входа — промежуточная полка объёма: " + fmtPx(range.low) + "–" + fmtPx(range.high)
+        + (range.valid === false ? " · пока не рабочая" : "") + "</li>";
+    }
+    const levels = st.checklistLevels || [];
+    if (levels.length) {
+      html += "<li>Полки объёма: " + levels.map(function (l) {
+        const role = l.role === "ENTRY_ZONE" ? "вход" : ("полка " + String(l.role || "").replace(/^HVN_?/i, ""));
+        return esc(role) + " " + (l.rangeLow != null ? fmtPx(l.rangeLow) + "–" + fmtPx(l.rangeHigh) : fmtPx(l.price));
+      }).join("; ") + "</li>";
+    }
+    const noteRu = humanizeDeskReason(st.note || "");
+    if (noteRu && noteRu.indexOf("positional") < 0 && /[А-Яа-я]/.test(noteRu)) {
+      html += "<li>" + esc(noteRu) + "</li>";
+    }
+    const srcRu = h1SourceRu(data.h1Source);
+    html += "<li>На графике " + (data.barCount || bars.length) + " часовых свечей"
+      + (srcRu ? (" · " + esc(srcRu)) : "") + "</li>";
+    html += "</ul>";
+
+    const sel = data.instrumentSelect || {};
+    const cands = sel.candidates || [];
+    if (cands.length) {
+      const reasons = cands.map(function (c) { return humanizeDeskReason(c.reason || ""); });
+      const allFail = cands.every(function (c) { return !c.pass; });
+      const allSame = reasons.length > 1 && reasons.every(function (r) { return r && r === reasons[0]; });
+      if (allFail && allSame) {
+        html += "<p class='signal-brief-note'><strong>Выбор инструмента.</strong> "
+          + esc(reasons[0])
+          + " Смотрели все семьи: "
+          + cands.map(function (c) { return familyRu(c.family); }).join(", ")
+          + ".</p>";
+      } else {
+        html += "<p class='signal-brief-note'><strong>Выбор инструмента</strong> — в работу берём одну семью:</p>";
+        html += "<ul class='signal-brief-list'>";
+        cands.forEach(function (c) {
+          const why = c.pass ? "проходит" : humanizeDeskReason(c.reason || "нет сетапа");
+          html += "<li>" + esc(familyRu(c.family)) + (c.pass ? " — " : " — не берём: ")
+            + esc(why) + "</li>";
+        });
+        html += "</ul>";
+      }
+    }
+    if (data.robotInstrument && data.instrument
+        && String(data.robotInstrument).toUpperCase() !== String(data.instrument).toUpperCase()) {
+      html += "<p class='signal-brief-note'>На графике " + esc(data.instrument)
+        + ", робот #2 выбрал " + esc(data.robotInstrument)
+        + " — смените инструмент в селекте, чтобы смотреть его H1.</p>";
+    }
+
+    html += "<p class='signal-brief-kicker signal-brief-kicker--robot"
+      + (posture === "IN_TRADE" ? " is-in-trade" : "")
+      + "'>Робот · " + esc(postureRu) + "</p>";
+    html += "<p>" + esc(engineStateRu(plan.state || sit.engineState || data.engineState || "SCAN"));
+    const side = (sit.setupLevels && sit.setupLevels.side) || plan.side || sig.side || "";
+    if (side === "BUY") html += " · лонг";
+    else if (side === "SELL") html += " · шорт";
+    html += " · "
+      + (sit.liveExecution || data.liveExecution ? "боевой счёт"
+        : ((sit.autoExecution || data.autoExecution) ? "песочница (бумага на H1)" : "только сигнал"))
+      + ".</p>";
+    html += "<p>" + esc(reason || "Робот включён и смотрит час. По чеклисту входа сейчас нет.") + "</p>";
+    html += "<p class='signal-brief-note'>" + esc(sit.fillModeRu || "Стоп и тейк — по закрытию часового бара, не по тику.") + "</p>";
+    if (grid && grid.totalQty) {
+      html += "<p class='signal-brief-note'>Сетка усреднения 1:1:2:4, всего " + grid.totalQty + " лот."
+        + (grid.avg != null ? (" Средняя " + fmtPx(grid.avg) + ".") : "")
+        + (plan.stopLoss != null ? (" Стоп " + fmtPx(plan.stopLoss) + ".") : "")
+        + (plan.tp1 != null ? (" Тейк " + fmtPx(plan.tp1) + ".") : "")
+        + "</p>";
+    }
+    const fp = sit.fairPaper || {};
+    if (fp.open) {
+      const os = fp.open.side === "BUY" ? "лонг" : (fp.open.side === "SELL" ? "шорт" : (fp.open.side || ""));
+      html += "<p class='signal-brief-note'><strong>В бумаге открыто:</strong> "
+        + esc(os) + " по " + fmtPx(fp.open.avg) + ", " + fp.open.qty + " лот.</p>";
+    } else if (fp.pending) {
+      html += "<p class='signal-brief-note'>Лимитки выставлены, ждём исполнение"
+        + (fp.pending.side ? (" (" + (fp.pending.side === "BUY" ? "лонг" : "шорт") + ")") : "")
+        + ".</p>";
+    }
+    if (fp.lastClose && fp.lastClose.pnlRub != null) {
+      html += "<p class='signal-brief-note'>Последнее закрытие: "
+        + esc(({ SL: "стоп", TP: "тейк", TP1: "тейк-1", TP2: "тейк-2", BE: "безубыток", TIME: "по времени" })[fp.lastClose.exitReason]
+          || humanizeDeskReason(fp.lastClose.exitReason || "выход"))
+        + " · "
+        + (fp.lastClose.pnlRub >= 0 ? "+" : "") + Math.round(fp.lastClose.pnlRub) + " ₽.</p>";
+    }
+
+    html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Новости и сессия</p>";
+    const upcoming = events.filter(function (e) { return e.status === "UPCOMING"; }).slice(0, 3);
+    if (upcoming.length) {
+      html += "<p>Скоро: " + upcoming.map(function (e) {
+        return "<strong>" + esc(e.title) + "</strong> " + esc(e.date || "") + " " + esc(e.time || "");
+      }).join("; ") + ".</p>";
+    } else {
+      html += "<p class='signal-brief-note'>Календарь этого инструмента пуст в горизонте desk — это не Exclusive EIA по нефти.</p>";
+    }
+    if (sit.sessionBlock) {
+      html += "<p class='signal-brief-note'>Сессия: " + esc(humanizeDeskReason(sit.sessionBlock)) + "</p>";
+    }
+    if (sit.newsDisclaimer) {
+      html += "<p class='signal-brief-note'>" + esc(sit.newsDisclaimer) + "</p>";
+    }
+
+    if (paperSt && typeof paperSt.todayPnlRub === "number") {
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Счёт бумаги · позиционная</p>"
+        + "<p>Сегодня <strong>" + ((paperSt.todayPnlRub >= 0 ? "+" : "")
+          + Math.round(paperSt.todayPnlRub).toLocaleString("ru-RU")) + " ₽</strong>"
+        + " · " + (paperSt.wins || 0) + "/" + (paperSt.losses || 0)
+        + " по этому инструменту / плейбуку.</p>";
+    }
+    return html;
+  }
   function buildOperatorBrief(data) {
-    const bars = data.bars || [];
+    const bars = deskBars(data);
     const last = bars.length ? bars[bars.length - 1] : null;
     const close = last && typeof last.close === "number" ? last.close : null;
     const look1h = bars.slice(Math.max(0, bars.length - 12));
@@ -348,9 +566,13 @@
     const liveBroker = !!sit.liveExecution || !!data.liveExecution;
     const autoJ = !!sit.autoExecution || !!data.autoExecution;
 
+    if (deskScope() === "positional" || data.deskScope === "positional") {
+      return buildPositionalBrief(data);
+    }
+
     // ——— 1. Рынок сейчас ———
     const marketItems = [];
-    let priceLine = "BR <strong>" + (close != null ? fmtPx(close) : "—") + "</strong>";
+    let priceLine = esc(instrumentTitle(data)) + " <strong>" + (close != null ? fmtPx(close) : "—") + "</strong>";
     const topRel = relZone(st.zoneTop, close, "TOP");
     const botRel = relZone(st.zoneBottom, close, "BOT");
     if (topRel && nearZone(st.zoneTop, close)) priceLine += " — " + topRel;
@@ -705,6 +927,7 @@
       pointSize: deskPointSize(lastDeskInstrument, 0),
       structure: overlayStructure || {},
       sessionOpenHour: 10,
+      positional: deskScope() === "positional",
       getFootprint: function (t) {
         return lookupFootprint(typeof t === "number" ? t : toChartTime(t));
       }
@@ -725,27 +948,126 @@
       wait: r.latest.wait || ""
     });
   }
+  function familyRu(code) {
+    const u = String(code || "").toUpperCase();
+    if (u === "BR") return "нефть (BR)";
+    if (u === "RI") return "RTS (RI)";
+    if (u === "NG") return "газ (NG)";
+    if (u === "SI") return "Si (доллар)";
+    if (u === "GD") return "золото (GD)";
+    if (u === "MX") return "MIX (MX)";
+    return code || "?";
+  }
+  function h1SourceRu(src) {
+    const s = String(src || "").trim();
+    if (!s) return "";
+    return s
+      .replace(/disk-archive/gi, "архив")
+      .replace(/broker-h1/gi, "брокерский H1")
+      .replace(/iss-h1/gi, "ISS H1")
+      .replace(/\biss\b/gi, "ISS")
+      .replace(/interval-guard/gi, "проверка шага")
+      .replace(/aggregate/gi, "сборка из M5")
+      .replace(/\+/g, " + ");
+  }
+  function engineStateRu(st) {
+    const u = String(st || "").toUpperCase();
+    if (u === "NO_TRADE") return "без входа";
+    if (u === "SCAN") return "сканирует";
+    if (u === "ARMED_BOUNCE") return "сетка выставлена";
+    if (u === "ZONE_READY") return "зона готова — ждём подход цены";
+    if (u === "IN_POSITION" || u === "IN_TRADE") return "в позиции";
+    if (u === "ABORT") return "сброс сетапа";
+    return st || "";
+  }
   function humanizeDeskReason(raw) {
     const s = deMark(raw || "");
     if (!s) return "";
     const u = s.toUpperCase();
-    if (u.indexOf("WAITING RETEST FROM BELOW") >= 0 || (u.indexOf("TREND_HI") >= 0 && u.indexOf("RETEST") >= 0)) {
+    if (u.indexOf("LATE H1") >= 0 || u.indexOf("OVERNIGHT GAP") >= 0 || u.indexOf("NO NEW ENTRY") >= 0) {
+      return "После 16:00 новый вход не ставим — чтобы не ловить гэп на ночь. Если пирамида уже открыта, добор по часовым барам идёт дальше. Свежий вход — завтра до 16:00.";
+    }
+    if (u.indexOf("SIZE=") >= 0 || (u.indexOf("NEED") >= 0 && u.indexOf("4 LOT") >= 0)
+        || (u.indexOf("1:1:2:4") >= 0 && u.indexOf("< 4") >= 0)) {
+      return "Рукав 1% не тянет сетку 1:1:2:4 (нужно минимум 4 лота). На этом стопе/инструменте объём не набирается — не режем сетку до одного лота.";
+    }
+    const narrow = s.match(/too narrow\s+([\d.]+)\s*pts\s*<\s*([\d.]+)/i);
+    if (narrow) {
+      return "Промежуточная полка объёма слишком узкая (" + narrow[1]
+        + " п., нужно от " + narrow[2] + " п.) — сетку ставить некуда. Ждём нормальный диапазон, не вход в тик.";
+    }
+    const wide = s.match(/too wide\s+([\d.]+)\s*pts\s*>\s*([\d.]+)/i);
+    if (wide) {
+      return "Промежуточная полка слишком широкая (" + wide[1]
+        + " п., потолок " + wide[2] + " п.) — это уже не зона входа, а каша. Ждём более собранный объём.";
+    }
+    if (u.indexOf("ZERO-WIDTH") >= 0 || u.indexOf("ZERO WIDTH") >= 0) {
+      return "Полка объёма схлопнулась в одну цену — диапазона нет, сетку не ставим.";
+    }
+    if (u.indexOf("NO VOLUME SHELF") >= 0 || u.indexOf("SHELF FOR SL") >= 0) {
+      return "Нет соседней полки объёма под стоп — стоп в пустоту по плейбуку не ставим.";
+    }
+    if (u.indexOf("RISK") >= 0 && u.indexOf("BUDGET") >= 0) {
+      return "Риск сделки больше выделенного 1% рукава — объём не проходит, вход не берём.";
+    }
+    if (u.indexOf("FALLBACK RR") >= 0 || (u.indexOf("RR") >= 0 && u.indexOf("MIN") >= 0)) {
+      return "До следующего экстремума далеко, запасной тейк даёт слабый RR — сделку пропускаем.";
+    }
+    if (u.indexOf("BOOK GUARD") >= 0 || u.indexOf("STREAK PAUSE") >= 0) {
+      return "Книга сделок на паузе: серия стопов или просадка. Новых входов нет, открытое не режем.";
+    }
+    if (u.indexOf("COOLDOWN UNTIL") >= 0) {
+      const d = s.match(/until\s+(\d{4}-\d{2}-\d{2})/i);
+      return "После стопа по этой семье пауза"
+        + (d ? (" до " + d[1]) : "") + " — не мстим рынку сразу тем же инструментом.";
+    }
+    if (u.indexOf("STRUCTURE") >= 0 && u.indexOf("MIN") >= 0) {
+      return "Тренд на часе слабоват (лесенка хаёв/лоёв нечёткая) — в ротацию эту семью не берём.";
+    }
+    if (u.indexOf("BEST SCORE") >= 0 || (u.indexOf("SCORE") >= 0 && u.indexOf("NO ARM") >= 0)) {
+      return "Даже лучшая семья не дотянула по качеству сетапа — сегодня без нового входа.";
+    }
+    if (u.indexOf("OUTRANKED") >= 0) {
+      const m = s.match(/outranked by\s+([A-Z]{2})/i);
+      return "Сетап есть, но слабее " + familyRu(m ? m[1] : "")
+        + " — в работу берём одну семью, эту пропускаем.";
+    }
+    if (u.indexOf("INSUFFICIENT") >= 0) {
+      return "На часе мало структуры: нет явного тренда и/или трёх полок объёма. Сторону не выдумываем, ждём лесенку хаёв и лоёв.";
+    }
+    if (u.indexOf("EMPTY") >= 0 && u.indexOf("PYRAMID") >= 0) {
+      return "Сетка 1:1:2:4 не собралась — входа нет.";
+    }
+    if (u.indexOf("SL COINCIDES") >= 0) {
+      return "Стоп совпал со входом — так не торгуем.";
+    }
+    if (u === "PASS" || u.indexOf("PASS") === 0) {
+      return "проходит — кандидат на вход";
+    }
+    if (u.indexOf("HH/HL") >= 0 || u.indexOf("LH/LL") >= 0 || u.indexOf("NEED CLEAR H1") >= 0) {
+      return "На часе нет явного тренда: ни восходящей лесенки (хаи и лои выше), ни нисходящей. Флэт или пила — в лонг/шорт не лезем.";
+    }
+    if (u.indexOf("VOLUME RANGE") >= 0 || (u.indexOf("POSITIONAL") >= 0 && u.indexOf("NEED") >= 0)) {
+      return "Нужен явный тренд на часе и минимум три полки объёма. Пока этого нет — сетапа нет.";
+    }
+    const exclusiveDesk = deskScope() !== "positional";
+    if (exclusiveDesk && (u.indexOf("WAITING RETEST FROM BELOW") >= 0 || (u.indexOf("TREND_HI") >= 0 && u.indexOf("RETEST") >= 0))) {
       const m = s.match(/(\d+[.,]\d+)\s*[–-]\s*(\d+[.,]\d+)/);
       const zone = m ? ("TOP " + m[1] + "–" + m[2]) : "верхней зоне дня (TOP)";
       return "Цена под верхней зоной (" + zone + "). Ждём возврат снизу к TOP после пробоя низа — без касания зоны новый вход не ставим.";
     }
-    if (u.indexOf("WAITING RETEST FROM ABOVE") >= 0 || (u.indexOf("TREND_LO") >= 0 && u.indexOf("RETEST") >= 0)) {
+    if (exclusiveDesk && (u.indexOf("WAITING RETEST FROM ABOVE") >= 0 || (u.indexOf("TREND_LO") >= 0 && u.indexOf("RETEST") >= 0))) {
       const m = s.match(/(\d+[.,]\d+)\s*[–-]\s*(\d+[.,]\d+)/);
       const zone = m ? ("BOT " + m[1] + "–" + m[2]) : "нижней зоне дня (BOT)";
       return "Цена над нижней зоной (" + zone + "). Ждём возврат сверху к BOT после пробоя верха.";
     }
-    if (u.indexOf("BOUNCE") >= 0 && u.indexOf("WAITING") >= 0 && u.indexOf("REJECTION") >= 0) {
+    if (exclusiveDesk && u.indexOf("BOUNCE") >= 0 && u.indexOf("WAITING") >= 0 && u.indexOf("REJECTION") >= 0) {
       return "Цена у зоны — ждём закрытую свечу-отбой (rejection), чтобы подтвердить bounce.";
     }
-    if (u.indexOf("WAITING RETURN TO SHELF") >= 0 || u.indexOf("PRICE ABOVE BOT") >= 0) {
+    if (exclusiveDesk && (u.indexOf("WAITING RETURN TO SHELF") >= 0 || u.indexOf("PRICE ABOVE BOT") >= 0)) {
       return "Цена ещё не в зоне BOT — ждём возврат к полке для входа.";
     }
-    if (u.indexOf("PRICE BELOW TOP") >= 0) {
+    if (exclusiveDesk && u.indexOf("PRICE BELOW TOP") >= 0) {
       return "Цена ещё не в зоне TOP — ждём возврат к полке для входа.";
     }
     if (u.indexOf("MAX SETUPS") >= 0 || u.indexOf("MAX FILLS") >= 0) {
@@ -755,16 +1077,24 @@
       return "Сработал лимит убытка за день — робот на паузе до завтра.";
     }
     if (u.indexOf("NO VALID PROFILE") >= 0 || u.indexOf("PROFILE") >= 0 && u.indexOf("§6") >= 0) {
-      return "Нет рабочего объёмного профиля на активном уровне — ждём касание TOP/BOT с объёмом.";
+      return exclusiveDesk
+        ? "Нет рабочего объёмного профиля на активном уровне — ждём касание TOP/BOT с объёмом."
+        : "Нет трёх полок объёма на часе — позиционный вход без них не ставим.";
     }
     if (u.indexOf("MACRO") >= 0 || u.indexOf("KNIFE") >= 0 || u.indexOf("NO BUY") >= 0) {
-      return "Фильтр дня/тренда режет покупку против сильного дампа (не ловим нож).";
+      return exclusiveDesk
+        ? "Фильтр дня/тренда режет покупку против сильного дампа (не ловим нож)."
+        : "Сильный дамп против тренда H1 — не ловим нож, ждём полку по стороне часа.";
     }
     if (u.indexOf("SESSION") >= 0) {
-      return "Вне торгового окна — новые входы закрыты.";
+      return exclusiveDesk
+        ? "Вне торгового окна — новые входы закрыты."
+        : "После 16:00 МСК новых входов нет — уже открытую пирамиду не рвём.";
     }
     if (u.indexOf("EVENT") >= 0 || u.indexOf("BLACKOUT") >= 0) {
-      return "Календарный blackout вокруг события — ждём окончания окна.";
+      return exclusiveDesk
+        ? "Календарный blackout вокруг события — ждём окончания окна."
+        : "Календарь Exclusive (EIA и т.п.) на позиционную пирамиду не действует.";
     }
     if (u.indexOf("COOLDOWN") >= 0) {
       return "Пауза после стопа (cooldown) — ждём таймер.";
@@ -773,9 +1103,17 @@
       return "Зона размечена, сетап ещё не подтверждён — наблюдаем, без входа.";
     }
     // fallback: strip jargon tokens, keep readable chunk
+    if (exclusiveDesk) {
+      return s
+        .replace(/\bTREND_HI\b/gi, "TOP")
+        .replace(/\bTREND_LO\b/gi, "BOT")
+        .replace(/\bACCUM\b/gi, "накопление")
+        .replace(/\bNO_TRADE\b/gi, "без входа")
+        .replace(/\bZONE_READY\b/gi, "зона готова")
+        .replace(/\s*\|\s*/g, ". ")
+        .slice(0, 220);
+    }
     return s
-      .replace(/\bTREND_HI\b/gi, "TOP")
-      .replace(/\bTREND_LO\b/gi, "BOT")
       .replace(/\bACCUM\b/gi, "накопление")
       .replace(/\bNO_TRADE\b/gi, "без входа")
       .replace(/\bZONE_READY\b/gi, "зона готова")
@@ -848,6 +1186,84 @@
   function finitePrice(v) {
     return typeof v === "number" && isFinite(v) && v > 0;
   }
+  function isPositionalChart() {
+    return deskScope() === "positional"
+      || (lastDeskSnapshot && lastDeskSnapshot.deskScope === "positional");
+  }
+  function lastCloseOf(candles) {
+    if (!candles || !candles.length) return NaN;
+    return Number(candles[candles.length - 1].close);
+  }
+  function candleSpanOf(candles) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    (candles || []).forEach(function (c) {
+      if (!c) return;
+      const l = Number(c.low);
+      const h = Number(c.high);
+      if (l < lo) lo = l;
+      if (h > hi) hi = h;
+    });
+    if (!isFinite(lo) || !isFinite(hi) || hi < lo) return null;
+    return { lo: lo, hi: hi };
+  }
+  function visibleCandleSpan() {
+    const all = lastSanitizedCandles;
+    if (!all || !all.length) return null;
+    if (!chart) return candleSpanOf(all);
+    try {
+      const vr = chart.timeScale().getVisibleLogicalRange();
+      if (!vr) return candleSpanOf(all);
+      const from = Math.max(0, Math.floor(vr.from));
+      const to = Math.min(all.length - 1, Math.ceil(vr.to));
+      if (to < from) return candleSpanOf(all);
+      return candleSpanOf(all.slice(from, to + 1)) || candleSpanOf(all);
+    } catch (_) {
+      return candleSpanOf(all);
+    }
+  }
+  /** Overlay is on-screen if it sits near visible candles — not 2-month GOLD extrema. */
+  function nearVisiblePrice(px, candles, slack) {
+    if (!finitePrice(px)) return false;
+    const span = candleSpanOf(candles) || visibleCandleSpan();
+    const last = lastCloseOf(candles);
+    if (!span && !finitePrice(last)) return true;
+    const ref = finitePrice(last) ? last : (span ? (span.lo + span.hi) / 2 : px);
+    const width = span ? Math.max(span.hi - span.lo, Math.abs(ref) * 0.002) : Math.abs(ref) * 0.02;
+    const pad = Math.max(width * (slack || 3), Math.abs(ref) * 0.06, 1);
+    const lo = span ? span.lo - pad : ref - pad;
+    const hi = span ? span.hi + pad : ref + pad;
+    return px >= lo && px <= hi;
+  }
+  function pricesNearlyEqual(a, b, ref) {
+    const x = Number(a);
+    const y = Number(b);
+    if (!finitePrice(x) || !finitePrice(y)) return false;
+    const scale = Math.abs(ref || x) || 1;
+    return Math.abs(x - y) <= Math.max(scale * 0.0002, 0.05);
+  }
+  function plausibleLivePx(ref, px) {
+    if (!(px > 0)) return false;
+    if (!(ref > 0)) return true;
+    return Math.abs(px - ref) <= Math.max(Math.abs(ref) * 0.02, 0.5);
+  }
+  function fitPriceToVisibleCandles() {
+    if (!candleSeries || priceScaleLocked) return;
+    const span = visibleCandleSpan();
+    if (!span) return;
+    const pad = Math.max((span.hi - span.lo) * 0.12, Math.abs(span.hi) * 0.003, 0.01);
+    const minV = span.lo - pad;
+    const maxV = span.hi + pad;
+    if (!(maxV > minV)) return;
+    try {
+      candleSeries.applyOptions({
+        autoscaleInfoProvider: function () {
+          return { priceRange: { minValue: minV, maxValue: maxV } };
+        }
+      });
+      candleSeries.priceScale().applyOptions({ autoScale: true });
+    } catch (_) {}
+  }
   /** Desk band title: day-lock vs soft map-only (must match engine shelves, not HI/HIST). */
   function zoneBandTitle(role, z) {
     if (!z) return role;
@@ -873,20 +1289,41 @@
     const ov = ensureZoneOverlay();
     if (!ov || !candleSeries) return;
     const st = overlayStructure || {};
+    const positional = isPositionalChart();
     const items = [];
-    if (st.zoneTop) {
-      items.push({
-        z: st.zoneTop,
-        role: "top",
-        title: zoneBandTitle("TOP", st.zoneTop)
+    if (positional) {
+      const hvn = st.checklistLevels || [];
+      hvn.forEach(function (l, i) {
+        if (!l) return;
+        const lo = Number(l.rangeLow);
+        const hi = Number(l.rangeHigh);
+        if (!finitePrice(lo) || !finitePrice(hi)) return;
+        if (pricesNearlyEqual(lo, hi, hi)) return;
+        const tag = l.role === "ENTRY_ZONE" ? "HVN вход" : (l.role || "HVN");
+        items.push({
+          z: { low: Math.min(lo, hi), high: Math.max(lo, hi) },
+          role: "hvn-" + i,
+          kind: "hvn",
+          title: tag
+        });
       });
-    }
-    if (st.zoneBottom) {
-      items.push({
-        z: st.zoneBottom,
-        role: "bot",
-        title: zoneBandTitle("BOT", st.zoneBottom)
-      });
+    } else {
+      if (st.zoneTop) {
+        items.push({
+          z: st.zoneTop,
+          role: "top",
+          kind: "top",
+          title: zoneBandTitle("TOP", st.zoneTop)
+        });
+      }
+      if (st.zoneBottom) {
+        items.push({
+          z: st.zoneBottom,
+          role: "bot",
+          kind: "bot",
+          title: zoneBandTitle("BOT", st.zoneBottom)
+        });
+      }
     }
     const chartEl = $("signal-chart");
     const chartH = chartEl ? (chartEl.clientHeight || 0) : 0;
@@ -895,12 +1332,12 @@
       if (!finitePrice(item.z.high) || !finitePrice(item.z.low)) return;
       let y1 = candleSeries.priceToCoordinate(item.z.high);
       let y2 = candleSeries.priceToCoordinate(item.z.low);
-      // Off-scale zone (zoom missed morning BOT) — clamp to chart edges so the band never vanishes
+      if (positional && (y1 == null || y2 == null)) return;
+      // Off-scale Exclusive zone (zoom missed morning BOT) — clamp so the band never vanishes
       if (y1 == null && y2 == null && chartH > 0) {
         const mid = (Number(item.z.high) + Number(item.z.low)) / 2;
         const yMid = candleSeries.priceToCoordinate(mid);
         if (yMid == null) {
-          // Entire shelf outside view: pin a thin strip at the nearer edge
           const last = candleSeries.priceToCoordinate(
             finitePrice(st.lookbackLow) ? st.lookbackLow : Number(item.z.low)
           );
@@ -918,10 +1355,11 @@
       const top = Math.min(y1, y2);
       const height = Math.max(4, Math.abs(y2 - y1));
       seen[item.role] = true;
-      let band = ov.querySelector(".signal-zone-band.is-" + item.role);
+      let band = ov.querySelector('.signal-zone-band[data-zone="' + item.role + '"]');
       if (!band) {
         band = document.createElement("div");
-        band.className = "signal-zone-band is-" + item.role;
+        band.className = "signal-zone-band is-" + (item.kind || item.role);
+        band.dataset.zone = item.role;
         const label = document.createElement("span");
         label.className = "signal-zone-label";
         band.appendChild(label);
@@ -933,10 +1371,11 @@
       if (labelEl) {
         labelEl.textContent = item.title + " "
           + Number(item.z.low).toFixed(2) + "–" + Number(item.z.high).toFixed(2);
+        labelEl.hidden = height < 10;
       }
     });
     Array.prototype.slice.call(ov.querySelectorAll(".signal-zone-band")).forEach(function (el) {
-      const role = el.classList.contains("is-top") ? "top" : "bot";
+      const role = el.dataset.zone || "";
       if (!seen[role]) el.parentNode.removeChild(el);
     });
   }
@@ -1490,10 +1929,13 @@
   function overlayKey(plan, sig, st, open) {
     const zt = st && st.zoneTop ? (st.zoneTop.low + "/" + st.zoneTop.high) : "";
     const zb = st && st.zoneBottom ? (st.zoneBottom.low + "/" + st.zoneBottom.high) : "";
+    const lv = (st && st.checklistLevels || []).map(function (l) {
+      return l ? (l.role + ":" + l.rangeLow + "-" + l.rangeHigh) : "";
+    }).join(",");
     return [
       st && st.lookbackHigh, st && st.lookbackLow,
       st && st.historicalHigh, st && st.historicalLow, st && st.previousZeroPoint,
-      zt, zb,
+      zt, zb, lv,
       plan && plan.side, plan && plan.entry, plan && plan.stopLoss,
       plan && plan.tp1, plan && plan.actionable, sig && sig.side,
       open && open.avg, open && open.sl, open && open.tp1, open && open.tp2,
@@ -1507,28 +1949,70 @@
     if (key !== lastOverlayKey) {
       lastOverlayKey = key;
       clearLines();
-      // §3 historical — dashed gray
-      // Multi-day series extreme — never the tradable TOP/BOT shelf
-      if (finitePrice(st.historicalHigh)
-          && st.historicalHigh !== st.lookbackHigh) {
+      const positionalChart = isPositionalChart();
+      // §3 historical — dashed gray. Skip on positional (2-month GOLD extrema crush the pane).
+      // Exclusive: only if near visible candles — never the tradable TOP/BOT shelf.
+      if (!positionalChart && finitePrice(st.historicalHigh)
+          && st.historicalHigh !== st.lookbackHigh
+          && nearVisiblePrice(st.historicalHigh, candles)) {
         addLine(st.historicalHigh, "#94a3b8", "HIST↑·серия", { lineWidth: 1, lineStyle: 2 });
       }
-      if (finitePrice(st.historicalLow)
-          && st.historicalLow !== st.lookbackLow) {
+      if (!positionalChart && finitePrice(st.historicalLow)
+          && st.historicalLow !== st.lookbackLow
+          && nearVisiblePrice(st.historicalLow, candles)) {
         addLine(st.historicalLow, "#94a3b8", "HIST↓·серия", { lineWidth: 1, lineStyle: 2 });
       }
-      // §4 zero
-      if (finitePrice(st.previousZeroPoint)) {
+      // §4 Exclusive ZERO — playbook #2 has no session zero point
+      if (!positionalChart && finitePrice(st.previousZeroPoint) && nearVisiblePrice(st.previousZeroPoint, candles)) {
         addLine(st.previousZeroPoint, "#ca8a04", "ZERO", { lineWidth: 1, lineStyle: 2 });
       }
-      // §5 current trend extremes — thick solid red
-      if (finitePrice(st.lookbackHigh)) {
+      // §5 Exclusive: day HI/LO. Playbook #2 has no daily min/max overlay — only HVN.
+      if (!positionalChart && finitePrice(st.lookbackHigh)) {
         addLine(st.lookbackHigh, HI_LO_COLOR, "HI", { lineWidth: 2, lineStyle: 0 });
       }
-      if (finitePrice(st.lookbackLow)) {
+      if (!positionalChart && finitePrice(st.lookbackLow)) {
         addLine(st.lookbackLow, HI_LO_COLOR, "LO", { lineWidth: 2, lineStyle: 0 });
       }
       // Zone edges as thin purple guides (fill = HTML band)
+      if (positionalChart) {
+        const hvn = st.checklistLevels || [];
+        const drawn = [];
+        hvn.forEach(function (l) {
+          if (!l) return;
+          const lo = Number(l.rangeLow);
+          const hi = Number(l.rangeHigh);
+          const tag = l.role === "ENTRY_ZONE" ? "HVN вход" : (l.role || "HVN");
+          if (finitePrice(hi) && finitePrice(lo) && pricesNearlyEqual(lo, hi, hi)) {
+            if (nearVisiblePrice(hi, candles)) {
+              addLine((lo + hi) / 2, ZONE_EDGE, tag, { lineWidth: 1, lineStyle: 0 });
+            }
+            drawn.push((lo + hi) / 2);
+            return;
+          }
+          if (finitePrice(hi) && nearVisiblePrice(hi, candles)) {
+            addLine(hi, ZONE_EDGE, tag + "↑", { lineWidth: 1, lineStyle: 0 });
+            drawn.push(hi);
+          }
+          if (finitePrice(lo) && !pricesNearlyEqual(lo, hi, hi) && nearVisiblePrice(lo, candles)) {
+            addLine(lo, ZONE_EDGE, tag + "↓", { lineWidth: 1, lineStyle: 0 });
+            drawn.push(lo);
+          }
+        });
+        if (plan && plan.range) {
+          const already = function (px) {
+            return drawn.some(function (d) { return pricesNearlyEqual(d, px, px); });
+          };
+          if (finitePrice(plan.range.high) && !already(plan.range.high)
+              && nearVisiblePrice(plan.range.high, candles)) {
+            addLine(plan.range.high, ZONE_EDGE, "вход↑", { lineWidth: 1, lineStyle: 2 });
+          }
+          if (finitePrice(plan.range.low) && !already(plan.range.low)
+              && !pricesNearlyEqual(plan.range.low, plan.range.high, plan.range.high)
+              && nearVisiblePrice(plan.range.low, candles)) {
+            addLine(plan.range.low, ZONE_EDGE, "вход↓", { lineWidth: 1, lineStyle: 2 });
+          }
+        }
+      } else {
       if (st.zoneTop) {
         if (finitePrice(st.zoneTop.high)) {
           addLine(st.zoneTop.high, ZONE_EDGE, "TOP↑", { lineWidth: 1, lineStyle: 0 });
@@ -1544,6 +2028,7 @@
         if (finitePrice(st.zoneBottom.low)) {
           addLine(st.zoneBottom.low, ZONE_EDGE, "BOT↓", { lineWidth: 1, lineStyle: 0 });
         }
+      }
       }
       // Working trade: actual fill levels. Flat: armed plan — label as план so it
       // is not mistaken for the last closed BUY/SELL.
@@ -1584,6 +2069,7 @@
       }
       applyCombinedMarkers();
     }
+    fitPriceToVisibleCandles();
     layoutMarketOverlays();
   }
   function ensureVolumeChart() {
@@ -1706,7 +2192,6 @@
     scaleLocked = true;
     lockedBarSpacing = saved.barSpacing;
     lockedLogical = saved.logical || null;
-    priceScaleLocked = true;
     return true;
   }
   function freezePriceScale() {
@@ -1894,6 +2379,7 @@
       wickUpColor: "#16a34a", wickDownColor: "#dc2626"
     });
     chart.timeScale().subscribeVisibleLogicalRangeChange(function () {
+      fitPriceToVisibleCandles();
       layoutMarketOverlays();
       syncMacdTimeScale();
       if (!followLive) {
@@ -2060,6 +2546,11 @@
       if (l > bodyLo) l = bodyLo;
       if (h - bodyHi > maxWick) h = bodyHi + maxWick;
       if (bodyLo - l > maxWick) l = bodyLo - maxWick;
+      const mid = Math.abs(cl) || Math.abs(o);
+      if (mid > 0 && (h - l) > mid * 0.25) {
+        h = bodyHi;
+        l = bodyLo;
+      }
       out.push({ time: t, open: o, high: h, low: l, close: cl });
       prev = t;
     });
@@ -2098,6 +2589,7 @@
    */
   function updateCandles(candles, forceFit, fromServer) {
     candles = sanitizeCandles(candles);
+    lastSanitizedCandles = candles;
     if (!candleSeries || !candles.length) return;
     resizeChartToHost();
     const last = candles[candles.length - 1];
@@ -2114,6 +2606,7 @@
       if (priceScaleLocked) freezePriceScale();
       requestAnimationFrame(function () {
         if (priceScaleLocked) freezePriceScale();
+        else fitPriceToVisibleCandles();
         layoutMarketOverlays();
         syncMacdTimeScale();
       });
@@ -2140,6 +2633,7 @@
       if (priceScaleLocked) freezePriceScale();
       requestAnimationFrame(function () {
         if (priceScaleLocked) freezePriceScale();
+        else fitPriceToVisibleCandles();
         layoutMarketOverlays();
         syncMacdTimeScale();
       });
@@ -2172,7 +2666,7 @@
     applyingScale = false;
     requestAnimationFrame(function () {
       resizeChartToHost();
-      freezePriceScale();
+      fitPriceToVisibleCandles();
       layoutMarketOverlays();
       syncMacdTimeScale();
     });
@@ -2196,6 +2690,7 @@
     let h = Number(raw.high);
     let l = Number(raw.low);
     if (![o, h, l].every(Number.isFinite)) return;
+    if (!plausibleLivePx(o, px) && !plausibleLivePx(Number(raw.close), px)) return;
     // Chart: only last/mid trade expands the forming wick — NOT best bid/ask.
     // Bid/ask extremes caused fake spikes to deep DOM levels; TP touch uses book separately.
     if (px > h) h = px;
@@ -2453,16 +2948,21 @@
     } catch (_) {}
   }
   let deskInFlight = false;
+  let deskReloadQueued = false;
   async function loadDesk(forceFit) {
+    if (deskInFlight) {
+      deskReloadQueued = true;
+      return;
+    }
     if (deskInFlight) return;
     deskInFlight = true;
     const meta = $("signal-desk-meta");
     try {
       const instSel = $("sig-instrument");
-      const q = (instSel && instSel.value) ? ("?instrument=" + encodeURIComponent(instSel.value)) : "";
-      // GET /api/** is public — do NOT send Bearer here: an expired Supabase token
-      // makes Spring OAuth2 return 401 even though anonymous access is allowed.
-      const res = await fetch("/api/trend/desk" + q, { headers: { Accept: "application/json" } });
+      const q = [];
+      if (instSel && instSel.value) q.push("instrument=" + encodeURIComponent(instSel.value));
+      q.push("playbook=" + encodeURIComponent(viewPlaybookId()));
+      const res = await fetch("/api/trend/desk?" + q.join("&"), { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       if (meta) {
@@ -2476,6 +2976,9 @@
           + clockMeta((data.situation) || {});
       }
       fillDeskSelects(data);
+      paintRobotChip(data);
+      const oilBanWrap = $("us-oil-banner");
+      if (oilBanWrap) oilBanWrap.hidden = deskScope() === "positional";
       const oilBan = $("us-oil-banner-text");
       const oil = (data.situation && data.situation.usOil) || {};
       if (oilBan) {
@@ -2531,8 +3034,8 @@
       }
       lastChartTf = chartTf;
       if (chartLabel) {
-        chartLabel.textContent = "График · " + chartInst + " " + chartTf
-          + (chartSource ? (" · " + chartSource) : "");
+        chartLabel.textContent = "График · " + chartInst + " " + (chartTf === "H1" ? "час" : chartTf)
+          + (chartSource ? (" · " + h1SourceRu(chartSource)) : "");
       }
       const instrumentChanged = !!chartInst && chartInst !== lastDeskInstrument;
       if (instrumentChanged) {
@@ -2561,9 +3064,12 @@
       const livePx = livePxFromBook(data.book);
       if (livePx > 0 && candles.length) {
         const last = candles[candles.length - 1];
-        last.close = livePx;
-        if (livePx > last.high) last.high = livePx;
-        if (livePx < last.low) last.low = livePx;
+        const ref = Number(last.close);
+        if (plausibleLivePx(ref, livePx)) {
+          last.close = livePx;
+          if (livePx > last.high) last.high = livePx;
+          if (livePx < last.low) last.low = livePx;
+        }
       }
       if (meta && rawBars.length && !candles.length) {
         meta.textContent = (meta.textContent || "") + " · chart: bad bar times";
@@ -2573,6 +3079,7 @@
       const sit = data.situation || {};
       const fp = sit.fairPaper || data.fairPaper || {};
       const overlayPb = sit.playbookId
+        || viewPlaybookId()
         || (data.parallelPlaybooks ? "levels-profile-br-m5" : data.playbookId)
         || "";
       let overlayOpen = sit.inTrade ? fairPaperLaneOpen(fp, overlayPb) : null;
@@ -2645,6 +3152,10 @@
       if (meta) meta.textContent = "Ошибка desk: " + (err.message || err);
     } finally {
       deskInFlight = false;
+      if (deskReloadQueued) {
+        deskReloadQueued = false;
+        loadDesk(!!forceFit);
+      }
     }
   }
   const btn = $("signal-desk-refresh");
@@ -2895,6 +3406,7 @@
     // Server posture is source of truth — do not override with a stale top-level fp.open.
     const posture = sit.posture || "SCANNING";
     const pbId = sit.playbookId
+      || viewPlaybookId()
       || (data && data.parallelPlaybooks ? "levels-profile-br-m5" : (data && data.playbookId))
       || "";
     const laneOpen = fairPaperLaneOpen(fp, pbId);
@@ -3126,21 +3638,31 @@
         }
       }
     }
-    const pb = pbSel.value;
+    const wantPb = viewPlaybookId();
     for (let i = 0; i < instSel.options.length; i++) {
       const ids = (instSel.options[i].dataset.playbookIds || "").split(",");
-      // "both" arms every playbook — show all instruments
-      const ok = !pb || pb === "both" || !ids[0] || ids.indexOf(pb) >= 0;
+      const ok = !ids[0] || ids.indexOf(wantPb) >= 0;
       instSel.options[i].hidden = !ok;
       instSel.options[i].disabled = !ok;
     }
+    const cur = instSel.options[instSel.selectedIndex];
+    if (cur && (cur.hidden || cur.disabled)) {
+      for (let i = 0; i < instSel.options.length; i++) {
+        if (!instSel.options[i].hidden && !instSel.options[i].disabled) {
+          instSel.value = instSel.options[i].value;
+          break;
+        }
+      }
+    }
     if (!deskSelectsWired) {
       deskSelectsWired = true;
-      pbSel.addEventListener("change", function () {
-        saveDeskSelection({ playbookId: pbSel.value });
-      });
       instSel.addEventListener("change", function () {
-        saveDeskSelection({ instrumentId: instSel.value });
+        lastDeskInstrument = "";
+        lastOverlayKey = "";
+        const persist = saveDeskSelection({ instrumentId: instSel.value }, { quiet: true });
+        Promise.resolve(persist).finally(function () {
+          loadDesk(true);
+        });
       });
       if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
         window.TrinityPlaques.refresh();
@@ -3154,9 +3676,7 @@
     try {
       if (!hasDeskWriteAuth()) {
         if (!quiet) {
-          alert("Войдите в кабинет (/view) — смена плейбука/инструмента требует авторизацию.");
-        } else {
-          console.warn("saveDeskSelection skipped — нет сессии (cold load / URL playbook)");
+          console.warn("saveDeskSelection skipped — нет сессии; desk всё равно покажет выбранный инструмент");
         }
         return false;
       }
@@ -3287,6 +3807,7 @@
   }
 
   async function paintCachedChart() {
+    if (deskScope() === "positional") return false;
     if (!window.TrinityChartKit || typeof TrinityChartKit.barCacheGet !== "function") return false;
     const instSel = $("sig-instrument");
     const want = instSel && instSel.value ? instSel.value : "";
@@ -3331,11 +3852,22 @@
       const pb = (q.get("playbook") || "").trim();
       if (!pb || pb === "pairs-daily") return;
       if (pb.indexOf("levels-profile") < 0 && pb.indexOf("positional") < 0 && pb !== "both") return;
+      if (deskScope() === "positional") {
+        return;
+      }
+      if (pb.indexOf("positional") >= 0) {
+        location.replace("/view/trend-positional");
+        return;
+      }
       // Hard refresh with ?playbook= must not pop auth modal — persist only when session exists.
-      await saveDeskSelection({ playbookId: pb }, { quiet: true });
+      // Dedicated desks keep fair-paper on `both`; do not persist levels-only.
+      if (pb === "both") {
+        await saveDeskSelection({ playbookId: pb }, { quiet: true });
+      }
     } catch (_) {}
   }
 
+  applyDeskChrome();
   paintCachedChart().then(function (hadCache) {
     applyUrlPlaybookOnce().finally(function () {
       loadDesk(!hadCache);

@@ -26,7 +26,8 @@
     "/view/final": "Итог + новости",
     "/view/paper": "Statement",
     "/view/statement": "Statement",
-    "/view/trend-signal": "Сигнал Trend",
+    "/view/trend-signal": "Диапазонная торговля",
+    "/view/trend-positional": "Позиционная торговля",
     "/view/trend-charts": "Терминал графиков",
     "/view/walk-forward": "Walk-forward",
     "/view/strategy": "Описание стратегии",
@@ -2589,7 +2590,8 @@
     { path: "/view", title: "Дашборд", body: "Обзор: режим рынка, KPI, «что сделать сейчас». Отсюда же можно снова запустить обучение." },
     { path: "/view/final", title: "Итог + новости", body: "Главный экран pairs DAILY после FA: ENTER / REDUCE / WATCH / BLOCK." },
     { path: "/view/statement", title: "Statement", body: "Paper track-record по стратегиям. Сделки trend тегируются playbookId." },
-    { path: "/view/trend-signal", title: "Сигнал Trend", body: "Селекты Плейбук (#1 уровни M5 / #2 позиционная H1) и Инструмент (BR / RTS / газ)." },
+    { path: "/view/trend-signal", title: "Диапазонная торговля", body: "Exclusive BR M5: полки TOP/BOT, bounce/retest. Робот #2 при этом не выключается — у него свой раздел." },
+    { path: "/view/trend-positional", title: "Позиционная торговля", body: "H1: тренд HH/HL, промежуточный HVN, сетка 1:1:2:4. «Сканирует» = робот включён, входа по чеклисту нет." },
     { path: "/view/guide", title: "Справка", body: "Полная инструкция: почему TRINITY так устроена, капитал, два playbook, ежедневный цикл." }
   ];
 

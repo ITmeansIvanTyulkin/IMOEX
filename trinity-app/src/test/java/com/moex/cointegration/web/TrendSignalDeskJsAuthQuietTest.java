@@ -32,5 +32,11 @@ class TrendSignalDeskJsAuthQuietTest {
                 "applyUrlPlaybookOnce must call saveDeskSelection quietly");
         assertTrue(src.contains("saveDeskSelection skipped") || src.contains("hasDeskWriteAuth()"),
                 "saveDeskSelection should skip/guard when no session");
+        assertTrue(src.contains("function deskScope"), "deskScope missing");
+        assertTrue(src.contains("view/trend-positional"), "positional URL redirect missing");
+        assertTrue(src.contains("function buildPositionalBrief"), "positional brief missing");
+        assertTrue(src.contains("function familyRu"), "positional family labels missing");
+        assertTrue(src.contains("После 16:00 новый вход не ставим"), "late-arm copy must be Russian");
+        assertTrue(src.contains("deskReloadQueued"), "instrument change must queue desk reload");
     }
 }

@@ -84,7 +84,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260821-widget-h">
+              <link rel="stylesheet" href="/css/operator.css?v=20260821-chart-bands">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -158,8 +158,8 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260821-smoke"></script>
-              <script src="/js/trinity-status-plaques.js?v=20260814-sync"></script>
+              <script src="/js/operator.js?v=20260821-desksplit"></script>
+              <script src="/js/trinity-status-plaques.js?v=20260821-desksplit"></script>
             </body>
             </html>
             """;
@@ -807,7 +807,7 @@ public class AnalysisHtmlRenderer {
                           <div class="widget-stat"><span class="k">Режим</span><span class="v">сигнал / авто</span></div>
                           <div class="widget-stat"><span class="k">Данные</span><span class="v">T-Invest tape+DOM</span></div>
                         </div>
-                        <a class="widget-back-link" href="/view/trend-signal">Экран сигнала →</a>
+                        <a class="widget-back-link" href="/view/trend-signal">Диапазонная торговля →</a>
                         """
                 ),
                 flipCard(
@@ -1665,7 +1665,9 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="trend">Trend: два playbook</h3>
                   <p>
-                    На <a href="/view/trend-signal">Сигнал · Trend</a> два селекта: <strong>Плейбук</strong> и <strong>Инструмент</strong>.
+                    На <a href="/view/trend-signal">диапазонной торговле</a> — Exclusive BR M5.
+                    На <a href="/view/trend-positional">позиционной</a> — H1, тот же desk.
+                    Fair-paper при «оба» крутит оба робота; страницы только разделяют график.
                   </p>
                   <ul>
                     <li><code>levels-profile-br-m5</code> — BR M5, bounce/retest по TOP/BOT (playbook #1).</li>
@@ -2050,12 +2052,29 @@ public class AnalysisHtmlRenderer {
         return page("График " + tickerY + "/" + tickerX, body, nav("none"));
     }
 
-    /** Лёгкий экран сигнала trend: M5 + DOM + entry/SL/TP. */
+    /** Диапазонная торговля: Exclusive BR M5. */
     public String renderTrendSignalPage() {
         if (!productEdition.hasTrend()) {
             return renderStrategyLockedPage("TREND", "trend-signal");
         }
-        return page("TRINITY — сигнал Trend", loadClasspathUtf8("trend-signal-desk.html"), nav("trend-signal"), OpsMode.NONE);
+        return page("TRINITY — диапазонная торговля", trendDeskHtml("range"), nav("trend-signal"), OpsMode.NONE);
+    }
+
+    /** Позиционная торговля: H1, тот же desk UI. */
+    public String renderTrendPositionalPage() {
+        if (!productEdition.hasTrend()) {
+            return renderStrategyLockedPage("TREND", "trend-positional");
+        }
+        return page("TRINITY — позиционная торговля", trendDeskHtml("positional"), nav("trend-positional"), OpsMode.NONE);
+    }
+
+    private String trendDeskHtml(String scope) {
+        String html = loadClasspathUtf8("trend-signal-desk.html");
+        if ("positional".equals(scope)) {
+            html = html.replace("data-desk-scope=\"range\"", "data-desk-scope=\"positional\"");
+            html = html.replace(">Диапазонная торговля<", ">Позиционная торговля<");
+        }
+        return html;
     }
 
     /** Multi-instrument chart terminal (ATAS-like study desk). */
@@ -3085,7 +3104,8 @@ public class AnalysisHtmlRenderer {
                   <a href="/view/strategy" class="%s">Описание</a>
                 </nav>
                 <nav class="topnav-secondary" data-for="trend" hidden>
-                  <a href="/view/trend-signal" class="%s" data-requires="trend">Сигнал</a>
+                  <a href="/view/trend-signal" class="%s" data-requires="trend">Диапазонная торговля</a>
+                  <a href="/view/trend-positional" class="%s" data-requires="trend">Позиционная торговля</a>
                   <a href="/view/trend-charts" class="%s" data-requires="trend">Терминал графиков</a>
                 </nav>
                 <nav class="topnav-secondary" data-for="arb" hidden>
@@ -3110,6 +3130,7 @@ public class AnalysisHtmlRenderer {
                 a.equals("walkforward") ? "active" : "",
                 a.equals("strategy") ? "active" : "",
                 a.equals("trend-signal") ? "active" : "",
+                a.equals("trend-positional") ? "active" : "",
                 a.equals("trend-charts") ? "active" : "",
                 a.equals("calendar-arb") ? "active" : "",
                 a.equals("fullcore") ? "active" : ""
@@ -3122,7 +3143,7 @@ public class AnalysisHtmlRenderer {
     }
 
     private static boolean isTrendNav(String a) {
-        return a.equals("trend-signal") || a.equals("trend-charts");
+        return a.equals("trend-signal") || a.equals("trend-positional") || a.equals("trend-charts");
     }
 
     private static boolean isArbNav(String a) {
