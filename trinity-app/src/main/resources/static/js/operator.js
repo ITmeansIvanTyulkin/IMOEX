@@ -910,8 +910,8 @@
   }
 
   function setText(id, text) {
-    const el = $(id);
-    if (el) el.textContent = text;
+    const el = typeof id === "string" ? $(id) : id;
+    if (el) el.textContent = text == null ? "" : String(text);
   }
 
   function setBusy(on) {
@@ -1530,6 +1530,238 @@
     syncWidgetCardHeights();
   }
 
+  function dashRobotStripeClass(robot) {
+    if (!robot) return "is-scan";
+    const status = String(robot.status || "");
+    const tone = String(robot.tone || "scan");
+    if (tone === "trade" || status === "В сделке") return "is-trade";
+    if (robot.sessionTradable === false || status === "Сессия закрыта" || status === "Выкл") {
+      return "is-session-off";
+    }
+    if (tone === "flat") return "is-session-off";
+    return "is-scan";
+  }
+
+  function fmtTimeShort(iso) {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    } catch (_) {
+      return "—";
+    }
+  }
+
+  function toastLineRu(t) {
+    if (!t) return "—";
+    const kind = String(t.kind || "").toUpperCase();
+    const strat = String(t.strategy || "").toUpperCase();
+    let who = strat === "TREND" ? "Тренд" : (strat === "PAIRS" ? "Pairs" : strat);
+    if (t.title && String(t.title).indexOf("Trend") < 0 && String(t.title).indexOf("Pairs") < 0) {
+      return String(t.summary || t.title || who);
+    }
+    if (kind === "ENTRY") return who + ": вход · " + (t.summary || t.instrument || "");
+    if (kind === "CLOSE") return who + ": закрытие · " + (t.summary || "");
+    if (kind === "SIGNAL") return who + ": сигнал · " + (t.summary || "");
+    return (t.summary || t.title || who);
+  }
+
+  function humanizeDashDetail(text) {
+    if (text == null || text === "") return "";
+    return String(text).replace(/(\d+\.\d{3,})/g, function (m) {
+      const v = parseFloat(m);
+      return isFinite(v) ? v.toFixed(2) : m;
+    });
+  }
+
+  function arbDashDetail(arb) {
+    const fp = arb && arb.fairPaper;
+    const open = fp && fp.open;
+    if (open) {
+      const sideRu = open.side === "LONG_SPREAD" ? "long spread"
+        : (open.side === "SHORT_SPREAD" ? "short spread" : (open.side || "—"));
+      const sideLabel = open.side === "LONG_SPREAD" ? "длинный спред"
+        : (open.side === "SHORT_SPREAD" ? "короткий спред" : sideRu);
+      const spread = open.entrySpread != null ? humanizeDashDetail(String(open.entrySpread)) : "—";
+      const pair = open.pair || open.family || "FORTS";
+      return pair + " · " + sideLabel + " · вход " + spread;
+    }
+    const msg = arb && arb.message ? String(arb.message) : "";
+    if (/Calendar arbitrage/i.test(msg)) {
+      return "Котировки T-Invest · paper-сделки, live-ордера отключены";
+    }
+    return msg || "Сканирует календарные спреды FORTS";
+  }
+
+  function applyDashRobotCard(id, robot) {
+    const el = $(id);
+    if (!el || !robot) return;
+    setText(el.querySelector(".dash-robot-status"), robot.status || "—");
+    const scopeEl = el.querySelector(".dash-robot-scope");
+    if (scopeEl && robot.title) setText(scopeEl, robot.title);
+    setText(el.querySelector(".dash-robot-detail"), humanizeDashDetail(robot.detail || ""));
+    if (robot.href) el.setAttribute("href", robot.href);
+    el.classList.remove("is-trade", "is-armed", "is-watch", "is-flat", "is-scan", "is-session-off");
+    el.classList.add(dashRobotStripeClass(robot));
+  }
+
+  function renderDashFeed(toasts) {
+    const ul = $("dash-event-feed");
+    if (!ul) return;
+    const items = Array.isArray(toasts) ? toasts.slice(0, 18) : [];
+    const sig = items.map(function (t) { return t && t.id; }).join("|");
+    if (ul.dataset.sig === sig) return;
+    ul.dataset.sig = sig;
+    if (!items.length) {
+      ul.innerHTML = "<li class=\"dash-feed-empty\">Пока тихо — роботы сканируют рынок.</li>";
+      return;
+    }
+    ul.innerHTML = items.map(function (t) {
+      return "<li><time datetime=\"" + escapeHtml(String(t.at || "")) + "\">"
+        + escapeHtml(fmtTimeShort(t.at)) + "</time>"
+        + "<span>" + escapeHtml(toastLineRu(t)) + "</span></li>";
+    }).join("");
+  }
+
+  function renderDashOpenList(paper, robots) {
+    const ul = $("dash-open-list");
+    if (!ul) return;
+    const rows = [];
+    const entries = paper && Array.isArray(paper.entries) ? paper.entries : [];
+    entries.forEach(function (e) {
+      if (!e || String(e.status || "").toUpperCase() !== "OPEN") return;
+      rows.push({
+        key: "p:" + (e.id || e.tickerY),
+        text: "Pairs · " + (e.tickerY || "?") + "/" + (e.tickerX || "?")
+          + " · " + (e.signal || "—")
+      });
+    });
+    (robots || []).forEach(function (r) {
+      if (!r || r.posture !== "IN_TRADE") return;
+      const label = r.key === "oil" ? "Диапазонная" : (r.key === "positional" ? "Позиционная" : r.title);
+      rows.push({
+        key: "r:" + r.key,
+        text: label + " · " + (r.instrument || "—") + " · в сделке"
+      });
+    });
+    const sig = rows.map(function (r) { return r.key + r.text; }).join("|");
+    if (ul.dataset.sig === sig) return;
+    ul.dataset.sig = sig;
+    if (!rows.length) {
+      ul.innerHTML = "<li class=\"dash-feed-empty\">Нет открытых paper-позиций.</li>";
+      return;
+    }
+    ul.innerHTML = rows.map(function (r) {
+      return "<li>" + escapeHtml(r.text) + "</li>";
+    }).join("");
+  }
+
+  async function loadDashboardCockpit() {
+    if (!$("dash-cockpit")) return;
+    const plaquePromise = fetch("/api/desk/plaques", { headers: { Accept: "application/json" } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        const robots = (data && data.robots) || [];
+        robots.forEach(function (r) {
+          if (!r || !r.key) return;
+          if (r.key === "pairs") applyDashRobotCard("dash-robot-pairs", r);
+          if (r.key === "oil") applyDashRobotCard("dash-robot-range", r);
+          if (r.key === "positional") applyDashRobotCard("dash-robot-pos", r);
+        });
+        return robots;
+      })
+      .catch(function () { return []; });
+
+    try {
+      const fetches = [
+        plaquePromise,
+        fetch("/api/ops/trade-toasts", { headers: { Accept: "application/json" } }),
+        fetch("/api/paper/journal", { headers: { Accept: "application/json" } }),
+        fetch("/api/broker/status", { headers: { Accept: "application/json" } }),
+        fetch("/api/marketdata/status", { headers: { Accept: "application/json" } })
+      ];
+      if ($("dash-robot-arb")) {
+        fetches.push(fetch("/api/calendar-arb/status", { headers: { Accept: "application/json" } }));
+      }
+      const results = await Promise.all(fetches);
+      const robots = results[0] || [];
+      const toastRes = results[1];
+      const paperRes = results[2];
+      const brokerRes = results[3];
+      const tapeRes = results[4];
+      const arbRes = results[5];
+
+      if (arbRes && arbRes.ok) {
+        const arb = await arbRes.json();
+        const fp = arb && arb.fairPaper;
+        const detail = arbDashDetail(arb);
+        let status = "Сканирует";
+        let tone = "scan";
+        if (fp && fp.open) {
+          status = "В сделке";
+          tone = "trade";
+        } else if (detail.indexOf("SKIP") >= 0 || detail.indexOf("Пропуск") >= 0) {
+          status = "Пропуск";
+          tone = "flat";
+        }
+        applyDashRobotCard("dash-robot-arb", {
+          status: status,
+          title: "FORTS spread",
+          detail: detail.length > 120 ? detail.slice(0, 117) + "…" : detail,
+          tone: tone,
+          href: "/view/calendar-arb"
+        });
+      } else if ($("dash-robot-arb")) {
+        applyDashRobotCard("dash-robot-arb", {
+          status: "Выкл",
+          title: "FORTS spread",
+          detail: "Модуль календарного арбитража выключен",
+          tone: "flat",
+          href: "/view/calendar-arb"
+        });
+      }
+
+      if (toastRes.ok) {
+        renderDashFeed(await toastRes.json());
+      }
+
+      let paper = null;
+      if (paperRes.ok) {
+        paper = await paperRes.json();
+        const realized = paper.realizedPnlRub;
+        const unrealized = paper.unrealizedPnlRub;
+        const hasAny = (typeof realized === "number" && isFinite(realized))
+          || (typeof unrealized === "number" && isFinite(unrealized));
+        const pnlSum = hasAny ? (realized || 0) + (unrealized || 0) : null;
+        const pnlEl = $("dash-day-pnl");
+        if (pnlEl) {
+          pnlEl.textContent = pnlSum == null ? "PnL —" : ("Paper " + fmtMoneyRub(pnlSum));
+          pnlEl.classList.toggle("is-pos", pnlSum != null && pnlSum >= 0);
+          pnlEl.classList.toggle("is-neg", pnlSum != null && pnlSum < 0);
+        }
+        renderDashOpenList(paper, robots);
+      }
+
+      if (brokerRes.ok) {
+        const status = await brokerRes.json();
+        const armed = status && status.armed;
+        const enabled = status && status.enabled;
+        setText("dash-contour-broker",
+          armed ? "Брокер OK" : (enabled ? "Брокер…" : "Брокер выкл"));
+      }
+      if (tapeRes.ok) {
+        const md = await tapeRes.json();
+        const tapeLabel = md.streaming
+          ? ("Лента live · " + (md.liveTapeSize || 0))
+          : "Лента off";
+        setText("dash-contour-tape", tapeLabel);
+      }
+    } catch (_) {
+      // ignore transient errors
+    }
+  }
+
   async function loadDashboardConsolidatedSummary() {
     if (!$("dash-paper-open") && !$("widget-paper")) return;
     try {
@@ -2076,9 +2308,12 @@
   }
 
   function startAlertPolling() {
-    // ops-panel = полный пульт (settings); dash-cta = дискретная кнопка на дашборде
-    if (!$("ops-panel") && !$("dash-cta")) return;
+    // ops-panel = полный пульт (settings); dash-cta / dash-cockpit = дашборд
+    if (!$("ops-panel") && !$("dash-cta") && !$("dash-cockpit")) return;
     bindAlertPrefs();
+    if ($("dash-cockpit")) {
+      loadDashboardCockpit();
+    }
     seedSeenFromJournal().then(function () {
       pollPaperAlerts();
       pollAutoRunStatus();
@@ -2088,31 +2323,37 @@
       if ($("broker-save-settings") || $("widget-broker") || $("dash-broker-status")) {
         loadBrokerWidget();
       }
-      loadDashboardConsolidatedSummary().then(function () {
-        requestAnimationFrame(function () {
-          requestAnimationFrame(igniteAllDonuts);
+      if ($("widget-paper")) {
+        loadDashboardConsolidatedSummary().then(function () {
+          requestAnimationFrame(function () {
+            requestAnimationFrame(igniteAllDonuts);
+          });
         });
-      });
-      // Double-rAF fallback if summary skipped
-      requestAnimationFrame(function () {
+      }
+      if ($("widget-paper")) {
         requestAnimationFrame(function () {
-          if (!$("widget-paper")) return;
-          /* capital/strategies already in HTML — ignite if summary did not */
-          setTimeout(function () {
-            document.querySelectorAll(".widget-card .donut[id]").forEach(function (el) {
-              if (el.dataset.ignited === "1") return;
-              igniteAllDonuts();
-            });
-          }, 400);
+          requestAnimationFrame(function () {
+            setTimeout(function () {
+              document.querySelectorAll(".widget-card .donut[id]").forEach(function (el) {
+                if (el.dataset.ignited === "1") return;
+                igniteAllDonuts();
+              });
+            }, 400);
+          });
         });
-      });
+      }
     });
     setInterval(pollPaperAlerts, POLL_MS);
     setInterval(pollAutoRunStatus, POLL_MS * 5);
     if ($("broker-save-settings") || $("widget-broker") || $("dash-broker-status")) {
       setInterval(loadBrokerWidget, POLL_MS * 2);
     }
-    setInterval(loadDashboardConsolidatedSummary, POLL_MS * 2);
+    if ($("widget-paper")) {
+      setInterval(loadDashboardConsolidatedSummary, POLL_MS * 2);
+    }
+    if ($("dash-cockpit")) {
+      setInterval(loadDashboardCockpit, 15000);
+    }
   }
 
   async function apiPost(path, startMessage, okMessage) {

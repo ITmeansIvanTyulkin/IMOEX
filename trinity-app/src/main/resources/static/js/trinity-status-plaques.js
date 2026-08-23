@@ -14,6 +14,11 @@
   let layoutTimer = 0;
   let refreshInFlight = false;
 
+  function pathIsDashboard() {
+    const p = location.pathname;
+    return p === "/view" || p === "/view/";
+  }
+
   function pathIsSignal() {
     return location.pathname.indexOf("/view/trend-signal") >= 0
       || location.pathname.indexOf("/view/trend-positional") >= 0;
@@ -342,7 +347,12 @@
   }
 
   function render(data) {
-    ensureHost();
+    const host = ensureHost();
+    if (pathIsDashboard()) {
+      host.hidden = true;
+      return;
+    }
+    host.hidden = false;
     const stack = $("trinity-robot-stack");
     const rail = $("trinity-wind-rail");
     if (!stack) return;

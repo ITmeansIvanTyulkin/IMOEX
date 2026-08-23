@@ -84,7 +84,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260822-narrate">
+              <link rel="stylesheet" href="/css/operator.css?v=20260823-cockpit7">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -144,21 +144,23 @@ public class AnalysisHtmlRenderer {
                     <p class="trinity-auth-foot">Тот же email и пароль, что в кабинете TRINITY.</p>
                   </div>
                   <div class="trinity-welcome" id="trinity-welcome" hidden aria-live="polite">
-                    <div class="trinity-logo trinity-logo-xl" aria-hidden="true">
-                      <span class="ring ring-a"></span>
-                      <span class="ring ring-b"></span>
-                      <span class="ring ring-c"></span>
+                    <div class="trinity-welcome-glass">
+                      <div class="trinity-logo trinity-logo-xl" aria-hidden="true">
+                        <span class="ring ring-a"></span>
+                        <span class="ring ring-b"></span>
+                        <span class="ring ring-c"></span>
+                      </div>
+                      <p class="trinity-welcome-kicker">Сессия открыта</p>
+                      <h2 class="trinity-welcome-title">Добро пожаловать в TRINITY</h2>
+                      <p class="trinity-welcome-copy">
+                        Коинтеграция, тренд и календарный арбитраж — один операторский пульт.
+                        Сейчас откроется дашборд.
+                      </p>
                     </div>
-                    <p class="trinity-welcome-kicker">Сессия открыта</p>
-                    <h2 class="trinity-welcome-title">Добро пожаловать в TRINITY!</h2>
-                    <p class="trinity-welcome-copy">
-                      Три стратегии + самообучаемый искусственный интеллект в одной платформе —
-                      ваш билет в мир автоматической торговли
-                    </p>
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260821-desksplit"></script>
+              <script src="/js/operator.js?v=20260823-cockpit5"></script>
               <script src="/js/trinity-status-plaques.js?v=20260821-desksplit"></script>
             </body>
             </html>
@@ -264,53 +266,111 @@ public class AnalysisHtmlRenderer {
             List<TradingRecommendation> recommendations,
             com.moex.cointegration.model.MarketRegimeSnapshot regime
     ) {
-        List<TradingRecommendation> actionableSignals = recommendations.stream()
-                .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
-                .sorted((a, b) -> Double.compare(
-                        Math.abs(b.currentZScore()),
-                        Math.abs(a.currentZScore())))
-                .toList();
-
-        long actionable = actionableSignals.size();
-
         StringBuilder body = new StringBuilder();
         body.append("<div class=\"dash-shell\">");
-        body.append(dashboardWidgetGrid(regime, report, actionable));
-        body.append("""
-                <aside class="next-steps" id="dash-next-steps">
-                  <p class="next-steps-label">Что сделать сейчас</p>
-                  <ol>
-                    <li>Три карточки стратегий: боковик / тренд / арбитраж.</li>
-                    <li>Смотрите «Режим рынка» — TREND блокирует новые pairs-входы.</li>
-                    <li>Нажмите <em>Анализ + paper</em> — обновит сигналы и журнал.
-                      Trend и брокер — в <a href="/view/settings">Настройках</a>.</li>
-                    <li>
-                      <button type="button" class="btn btn-ghost btn-xs" id="trinity-tour-start"
-                              data-tour-start>
-                        Пройти обучение
-                      </button>
-                      — куда жать и зачем (можно повторить позже).
-                      Полная инструкция: <a href="/view/guide">Справка</a>.
-                    </li>
-                  </ol>
-                </aside>
-                """);
-        body.append(trialBanner());
-        body.append(dashboardFullCoreTeasers());
+        body.append(dashboardCockpit(regime));
         body.append(dashboardQuietCta());
-        body.append(summaryBlock(report, recommendations.size(), actionable));
-        body.append("<section class=\"dash-section\"><h2>Сигналы входа (LONG / SHORT)</h2>");
-        body.append(dashboardActionableSignalsTable(
-                actionableSignals,
-                "Нет активных сигналов LONG/SHORT сейчас. См. полный список рекомендаций."
-        ));
-        body.append("</section>");
-        body.append("<section class=\"dash-section\"><h2>Топ-пары по Sharpe</h2>");
-        body.append(topPairsTableCompact(report.topPairs()));
-        body.append("</section>");
+        body.append("""
+                <nav class="dash-foot-links" aria-label="Ещё">
+                  <a href="/view/recommendations">Рекомендации</a>
+                  <a href="/view/statement">Statement</a>
+                  <a href="/view/guide">Справка</a>
+                  <button type="button" class="btn btn-ghost btn-xs" id="trinity-tour-start" data-tour-start>
+                    Обучение
+                  </button>
+                </nav>
+                """);
         body.append("</div>");
 
         return page("TRINITY — дашборд", body.toString(), nav("dashboard"), OpsMode.NONE);
+    }
+
+    /**
+     * Live ops cockpit: contour + 4 robot cards (plain links) + event feed + open positions.
+     */
+    private String dashboardCockpit(MarketRegimeSnapshot regime) {
+        if (regime == null) {
+            regime = MarketRegimeSnapshot.unknown();
+        }
+        String regimeLabel = regime.label() == null ? "—" : regime.label();
+        String adx = Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.0f", regime.adx());
+        String regimeHint = switch (regimeLabel) {
+            case "SIDEWAYS" -> "боковик — pairs ok";
+            case "NEUTRAL" -> "нейтрально — pairs осторожно";
+            case "TREND" -> "тренд — новые pairs стоп";
+            default -> "режим неизвестен";
+        };
+        boolean pairsOn = strategyPairsEnabled;
+        boolean trendOn = strategyTrendEnabled;
+        boolean arbOn = strategyCalendarArbEnabled;
+
+        String arbHref = arbOn ? "/view/calendar-arb" : "/view/full-core?feature=calendar-arb";
+        String arbRequires = arbOn ? "" : " data-requires=\"arb\"";
+
+        return """
+                <div class="dash-cockpit" id="dash-cockpit">
+                  <header class="dash-contour" aria-label="Контур">
+                    <span class="dash-contour-item" id="dash-contour-broker">Брокер…</span>
+                    <span class="dash-contour-sep" aria-hidden="true">·</span>
+                    <span class="dash-contour-item" id="dash-contour-tape">Лента…</span>
+                    <span class="dash-contour-sep" aria-hidden="true">·</span>
+                    <span class="dash-contour-item" id="dash-contour-regime">%s · ADX %s</span>
+                    <span class="dash-contour-sep" aria-hidden="true">·</span>
+                    <span class="dash-contour-item dash-contour-muted" id="dash-contour-hint">%s</span>
+                  </header>
+
+                  <section class="dash-robots" aria-label="Роботы сейчас">
+                    <a class="dash-robot-card is-scan" id="dash-robot-pairs" href="/view/final">
+                      <span class="dash-robot-kicker">Коинтеграция</span>
+                      <span class="dash-robot-status">…</span>
+                      <span class="dash-robot-scope">Pairs · DAILY</span>
+                      <span class="dash-robot-detail">Загрузка…</span>
+                    </a>
+                    <a class="dash-robot-card is-scan" id="dash-robot-range" href="/view/trend-signal"%s>
+                      <span class="dash-robot-kicker">Тренд · диапазон</span>
+                      <span class="dash-robot-status">…</span>
+                      <span class="dash-robot-scope">BR M5</span>
+                      <span class="dash-robot-detail">Загрузка…</span>
+                    </a>
+                    <a class="dash-robot-card is-scan" id="dash-robot-pos" href="/view/trend-positional"%s>
+                      <span class="dash-robot-kicker">Тренд · позиционная</span>
+                      <span class="dash-robot-status">…</span>
+                      <span class="dash-robot-scope">H1</span>
+                      <span class="dash-robot-detail">Загрузка…</span>
+                    </a>
+                    <a class="dash-robot-card is-scan" id="dash-robot-arb" href="%s"%s>
+                      <span class="dash-robot-kicker">Календарный арбитраж</span>
+                      <span class="dash-robot-status">…</span>
+                      <span class="dash-robot-scope">FORTS spread</span>
+                      <span class="dash-robot-detail">Загрузка…</span>
+                    </a>
+                  </section>
+
+                  <div class="dash-live-grid">
+                    <section class="dash-panel dash-feed-panel" aria-label="Лента событий">
+                      <h2 class="dash-panel-title">Сейчас</h2>
+                      <ul class="dash-feed" id="dash-event-feed">
+                        <li class="dash-feed-empty">Загрузка ленты…</li>
+                      </ul>
+                    </section>
+                    <section class="dash-panel dash-open-panel" aria-label="Открытые позиции">
+                      <h2 class="dash-panel-title">Открыто · paper</h2>
+                      <p class="dash-day-pnl" id="dash-day-pnl">PnL —</p>
+                      <ul class="dash-open-list" id="dash-open-list">
+                        <li class="dash-feed-empty">Загрузка…</li>
+                      </ul>
+                    </section>
+                  </div>
+                </div>
+                """.formatted(
+                escape(regimeLabel),
+                escape(adx),
+                escape(regimeHint),
+                trendOn ? "" : " data-requires=\"trend\"",
+                trendOn ? "" : " data-requires=\"trend\"",
+                escape(arbHref),
+                arbRequires
+        );
     }
 
     /**
