@@ -104,6 +104,9 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
             streaming.set(false);
             return;
         }
+        if (archive != null) {
+            archive.compressClosedDays();
+        }
         this.lastToken = token;
         this.lastSandbox = sandbox;
         this.tokenHint = token.substring(0, Math.min(4, token.length())) + "…";
