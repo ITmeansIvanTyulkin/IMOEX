@@ -10,6 +10,7 @@ import com.moex.cointegration.service.TrendPaperJournalService;
 import com.moex.cointegration.upsell.UpsellAccess;
 import com.moex.cointegration.upsell.UpsellService;
 import com.moex.cointegration.model.AnalysisReport;
+import com.moex.cointegration.model.ClusterReviewReport;
 import com.moex.cointegration.model.FinalTradeDecision;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.MarketRegimeSnapshot;
@@ -22,6 +23,7 @@ import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
 import com.moex.cointegration.model.WalkForwardReport;
 import com.moex.cointegration.service.RssHeadlineService;
+import com.moex.cointegration.universe.SectorCatalog;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -84,7 +86,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260823-cockpit7">
+              <link rel="stylesheet" href="/css/operator.css?v=20260824-pairsdesk-table">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -160,7 +162,7 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260823-cockpit5"></script>
+              <script src="/js/operator.js?v=20260824-pairsdesk-light"></script>
               <script src="/js/trinity-status-plaques.js?v=20260821-desksplit"></script>
             </body>
             </html>
@@ -1308,7 +1310,7 @@ public class AnalysisHtmlRenderer {
                       <li><a href="#pipeline">Что за чем происходит</a></li>
                       <li><a href="#universe">Как отбираются акции</a></li>
                       <li><a href="#pairs">Как пары попадают в анализ</a></li>
-                      <li><a href="#clusters">Ежемесячный пересмотр кластеров</a></li>
+                      <li><a href="#clusters">Чемпион сектора</a></li>
                       <li><a href="#regime">Режим рынка: только боковик</a></li>
                       <li><a href="#signals">Как появляется сигнал</a></li>
                       <li><a href="#news">Новостной фильтр</a></li>
@@ -1345,12 +1347,12 @@ public class AnalysisHtmlRenderer {
                   <div class="flow" aria-hidden="true">
                     <span>MOEX daily</span><i>→</i>
                     <span>Capital → DAILY</span><i>→</i>
-                    <span>EG/FDR + cluster</span><i>→</i>
+                    <span>EG/FDR + чемпион</span><i>→</i>
                     <span>FA → paper</span>
                   </div>
                   <ol class="pipeline">
                     <li><strong>Капитал.</strong> Equity → слоты DAILY (100%% gross). Без плеча до 1M.</li>
-                    <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → monthly cluster gate → фундамент (MOEX+RSS) → paper-journal.json.</li>
+                    <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → чемпион сектора → фундамент (MOEX+RSS) → paper-journal.json.</li>
                     <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы DAILY при TREND.</li>
                   </ol>
                   <div class="callout">
@@ -1423,18 +1425,23 @@ public class AnalysisHtmlRenderer {
                     Сырой сигнал LONG/SHORT ещё не равен разрешению торговать: дальше режим рынка, новости и лимиты книги.
                   </div>
 
-                  <h3 id="clusters">4a. Ежемесячный пересмотр кластеров</h3>
+                  <h3 id="clusters">4a. Чемпион сектора (research всегда)</h3>
                   <p>
-                    Раз в месяц (на стыке месяца в replay / при live-прогоне) поверх EG/FDR/quality
-                    считается <strong>секторный rolling cash PnL и profit factor</strong> по закрытым paper-сделкам
-                    за lookback (<code>imoex.cluster-review.lookback-months</code>, по умолчанию 6).
+                    Каждый daily-прогон (cron 09:55 МСК) <strong>сканирует все кандидаты</strong>
+                    — нефть, металлы, банки, ритейл — по EG/FDR/quality.
+                    В торговые слоты идёт <strong>только один фаворит</strong>, не «все, кто не провалился».
                   </p>
                   <ul>
-                    <li>в слоты — только сектора с <strong>net &gt; 0</strong> и <strong>PF ≥ 1.1</strong> (при ≥ N закрытий);</li>
-                    <li>мало истории — сектор допускается временно (cold start), кроме нефти;</li>
-                    <li><strong>OIL_GAS</strong> всегда вне DAILY pairs (нефть → roadmap фьючерсы/опционы);</li>
-                    <li>пары с достаточной собственной историей дополнительно режутся тем же net/PF-порогом.</li>
+                    <li>если по сектору уже есть ≥ N закрытых paper-сделок — чемпион по rolling <strong>net &gt; 0</strong> и <strong>PF ≥ 1.1</strong>;</li>
+                    <li>если журнала мало — смотрим research: сколько quality-пар сейчас (R² / half-life / coverage). Больше quality-пар у нефти в одном году, у металлов в другом — торгуем того;</li>
+                    <li>нет доказанного фаворита — <strong>sit-out</strong>, слоты пустые (не provisional-allow холодных секторов);</li>
+                    <li>пара с двумя убытками подряд или rolling PF ниже порога — вне слотов, даже если сектор чемпион.</li>
                   </ul>
+                  <p>
+                    Нулевой убыток на каждой сделке статистика не обещает: стоп по Z и time-stop остаются.
+                    Усиление — не входить без фаворита и не размазывать слоты по слабым секторам.
+                    Сводка: <code>GET /api/analysis/cluster-review</code>, файл <code>data/cluster-review.json</code>.
+                  </p>
 
                   <h3 id="regime">5. Режим рынка: стратегия только боковик</h3>
                   <p>
@@ -1760,7 +1767,7 @@ public class AnalysisHtmlRenderer {
                   <table class="params">
                     <thead><tr><th>Книга</th><th>Расписание (по умолчанию)</th><th>Что внутри</th></tr></thead>
                     <tbody>
-                      <tr><td><strong>DAILY</strong></td><td>Пн–Пт <strong>19:05</strong></td><td>Дневные свечи → техника → FA → paper (<code>paper-journal.json</code>)</td></tr>
+                      <tr><td><strong>DAILY</strong></td><td>Пн–Пт <strong>09:55</strong> Europe/Moscow</td><td>По итогам предыдущего дня → техника → FA → paper (<code>paper-journal.json</code>), до открытия 10:00</td></tr>
                     </tbody>
                   </table>
                   <p>
@@ -2203,6 +2210,17 @@ public class AnalysisHtmlRenderer {
             AnalysisReport report,
             RssHeadlineService.Snapshot rss
     ) {
+        return renderFinalTable(rows, technical, regime, report, rss, null);
+    }
+
+    public String renderFinalTable(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            RssHeadlineService.Snapshot rss,
+            ClusterReviewReport cluster
+    ) {
         if (rows == null) {
             rows = List.of();
         }
@@ -2217,38 +2235,63 @@ public class AnalysisHtmlRenderer {
         }
 
         StringBuilder body = new StringBuilder();
+        body.append(renderPairsDesk(cluster, regime, report, rows, technical));
+        if (!rows.isEmpty()) {
+            body.append(renderFinalSummaryStrip(rows));
+        }
+        body.append(renderFinalDecisionTable(rows));
         body.append("""
                 <div class="hint">
                   <strong>Итог после фундамента (multi-day / DAILY).</strong>
-                  Порядок: техника → cluster gate → фундамент (MOEX + RSS) → рекомендация → paper.
+                  Порядок: техника → чемпион сектора → фундамент (MOEX + RSS) → рекомендация → paper.
                   Это research / decision-support, не инвестиционная рекомендация и не обещание прибыли.
                 </div>
                 """);
 
-        body.append(renderFinalExplainPanel(rows, technical, regime, report));
+        body.append(renderFinalExplainPanel(rows, technical, regime, report, cluster));
+        body.append(renderFinalNewsSection(rss));
+        body.append("<script src=\"/js/pairs-final-desk.js?v=20260824-desk-zauth\"></script>");
+        return page("TRINITY — итог", body.toString(), nav("final"), OpsMode.NONE);
+    }
 
-        if (!rows.isEmpty()) {
-            body.append(renderFinalSummaryStrip(rows));
+    private String renderFinalDecisionTable(List<FinalTradeRecommendation> rows) {
+        StringBuilder body = new StringBuilder();
+        body.append("""
+                <div class="table-wrap pairs-final-table-wrap" id="pairs-final-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Итог</th>
+                      <th>Пара</th>
+                      <th>Техсигнал</th>
+                      <th>Z</th>
+                      <th>Нов. риск</th>
+                      <th>Асимм.</th>
+                      <th>Почему</th>
+                      <th>График</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                """);
+        if (rows.isEmpty()) {
             body.append("""
-                    <div class="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Итог</th>
-                          <th>Пара</th>
-                          <th>Техсигнал</th>
-                          <th>Z</th>
-                          <th>Нов. риск</th>
-                          <th>Асимм.</th>
-                          <th>Почему</th>
-                          <th>График</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <tr class="pairs-final-empty" id="pairs-final-empty-row">
+                      <td colspan="8"><span data-empty-msg>
+                        Таблица пуста — фильтры Все / Вход / Watch / Блок покажут строки, когда они появятся после анализа.
+                      </span></td>
+                    </tr>
                     """);
-
+        } else {
+            body.append("""
+                    <tr class="pairs-final-empty" id="pairs-final-empty-row" style="display:none">
+                      <td colspan="8"><span data-empty-msg>Нет строк по текущему фильтру.</span></td>
+                    </tr>
+                    """);
             for (FinalTradeRecommendation f : rows) {
-                body.append("<tr>");
+                String decision = f.decision() == null ? "" : f.decision().name();
+                String pair = f.tickerY() + "/" + f.tickerX();
+                body.append("<tr data-decision=\"").append(escape(decision))
+                        .append("\" data-pair=\"").append(escape(pair)).append("\">");
                 body.append("<td>").append(decisionBadge(f.decision())).append("</td>");
                 body.append("<td><strong>").append(escape(f.tickerY())).append("</strong> / ")
                         .append(escape(f.tickerX())).append("</td>");
@@ -2263,12 +2306,216 @@ public class AnalysisHtmlRenderer {
                 body.append("<td class=\"links\">").append(chartPageLink(f.tickerY(), f.tickerX())).append("</td>");
                 body.append("</tr>");
             }
-
-            body.append("</tbody></table></div>");
         }
+        body.append("</tbody></table></div>");
+        return body.toString();
+    }
 
-        body.append(renderFinalNewsSection(rss));
-        return page("TRINITY — итог", body.toString(), nav("final"));
+    private String renderPairsDesk(
+            ClusterReviewReport cluster,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical
+    ) {
+        String champ = cluster != null && cluster.champion() != null
+                ? SectorCatalog.labelRu(cluster.champion())
+                : "—";
+        boolean sitOut = cluster != null && cluster.sitOut();
+        String reason = cluster != null && cluster.championReason() != null
+                ? cluster.championReason()
+                : "Дождитесь прогона «Анализ + paper».";
+        String adx = regime == null || Double.isNaN(regime.adx())
+                ? "—"
+                : String.format(Locale.ROOT, "%.0f", regime.adx());
+        String regimeLabel = regime == null || regime.label() == null ? "—" : regime.label();
+        int tickers = report != null ? report.tickersAnalyzed() : 0;
+        int tested = report != null ? report.pairsTested() : 0;
+        int coint = report != null ? report.cointegratedPairs() : 0;
+        long enter = rows.stream().filter(f -> f.decision() == FinalTradeDecision.ENTER
+                || f.decision() == FinalTradeDecision.REDUCE_SIZE).count();
+        String watchPair = "";
+        if (!rows.isEmpty()) {
+            watchPair = rows.get(0).tickerY() + "/" + rows.get(0).tickerX();
+        } else if (technical != null && !technical.isEmpty()) {
+            watchPair = technical.get(0).tickerY() + "/" + technical.get(0).tickerX();
+        } else if (report != null && report.topPairs() != null && !report.topPairs().isEmpty()) {
+            var p = report.topPairs().get(0);
+            watchPair = p.tickerY() + "/" + p.tickerX();
+        } else if (cluster != null && cluster.champion() != null) {
+            watchPair = switch (cluster.champion()) {
+                case OIL_GAS -> "GAZP/LKOH";
+                case METALS_MINING -> "NLMK/GMKN";
+                case BANKS -> "SBER/VTBR";
+                case RETAIL -> "MGNT/FIVE";
+                default -> "GAZP/LKOH";
+            };
+        } else {
+            watchPair = "GAZP/LKOH";
+        }
+        String posture = sitOut ? "sitout" : (enter > 0 ? "armed" : "scan");
+        String boot = pairsDeskBootJson(cluster, regime, report);
+        return """
+                <section class="pairs-desk" id="pairs-desk" data-posture="%s" data-watch="%s">
+                  <div class="busy-bar" id="ops-busy"></div>
+                  <header class="pairs-desk-head">
+                    <div>
+                      <p class="pairs-desk-kicker">Коинтеграция · DAILY</p>
+                      <h2>Пульт пар</h2>
+                      <p class="pairs-desk-lead" id="pairs-desk-lead">%s</p>
+                    </div>
+                    <div class="pairs-desk-live">
+                      <span class="pairs-live-dot" aria-hidden="true"></span>
+                      <span id="pairs-desk-clock">онлайн</span>
+                    </div>
+                  </header>
+
+                  <div class="pairs-desk-plaques">
+                    <article class="pairs-plaque" id="pairs-plaque-champ">
+                      <span class="pairs-plaque-kicker">Фаворит</span>
+                      <strong id="pairs-champ-name">%s</strong>
+                      <span class="pairs-plaque-meta" id="pairs-champ-meta">%s</span>
+                    </article>
+                    <article class="pairs-plaque" id="pairs-plaque-regime">
+                      <span class="pairs-plaque-kicker">Режим IMOEX</span>
+                      <strong id="pairs-regime-label">%s</strong>
+                      <span class="pairs-plaque-meta">ADX <span id="pairs-regime-adx">%s</span></span>
+                    </article>
+                    <article class="pairs-plaque" id="pairs-plaque-scan">
+                      <span class="pairs-plaque-kicker">Скан</span>
+                      <strong id="pairs-scan-coint">%d коинт.</strong>
+                      <span class="pairs-plaque-meta" id="pairs-scan-meta">%d акций · %d пар</span>
+                    </article>
+                    <article class="pairs-plaque" id="pairs-plaque-paper">
+                      <span class="pairs-plaque-kicker">Paper</span>
+                      <strong id="pairs-paper-open">открыто —</strong>
+                      <span class="pairs-plaque-meta" id="pairs-paper-meta">журнал DAILY</span>
+                    </article>
+                  </div>
+
+                  <div class="pairs-desk-toolbar">
+                    <label class="mode-switch is-signal" title="Сигнал: только paper-журнал. Авто: ещё ордера брокера после анализа, если брокер armed.">
+                      <span class="mode-switch-label">Сигнал</span>
+                      <input type="checkbox" id="pairs-auto-execution" role="switch" aria-checked="false">
+                      <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+                      <span class="mode-switch-label">Авто</span>
+                    </label>
+                    <p class="pairs-desk-delivery" id="pairs-delivery-hint">Paper всегда пишется. Авто = ордера брокера после анализа.</p>
+                    <div class="pairs-filter" role="group" aria-label="Фильтр итога">
+                      <button type="button" class="pairs-chip is-on" data-filter="ALL">Все</button>
+                      <button type="button" class="pairs-chip" data-filter="ENTER">Вход</button>
+                      <button type="button" class="pairs-chip" data-filter="WATCH">Watch</button>
+                      <button type="button" class="pairs-chip" data-filter="BLOCK">Блок</button>
+                    </div>
+                    <div class="pairs-desk-actions">
+                      <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
+                      <a class="btn btn-ghost" href="/view/settings">Настройки</a>
+                    </div>
+                  </div>
+                  <p class="pairs-filter-status" id="pairs-filter-status" aria-live="polite"></p>
+
+                  <div class="pairs-desk-grid">
+                    <article class="pairs-panel">
+                      <h3>Research секторов</h3>
+                      <p class="meta">Качество пар. Обводка — research-фаворит. Клик по столбику открывает Z этой отрасли.</p>
+                      <canvas id="pairs-sector-chart" width="640" height="220" aria-label="Рейтинг секторов"></canvas>
+                    </article>
+                    <article class="pairs-panel">
+                      <h3>Z спреда <span id="pairs-z-pair">%s</span></h3>
+                      <p class="meta" id="pairs-z-meta">Не победитель скана. При 0 коинтегрированных — watch-пара сектора-фаворита. Кнопки или столбик слева меняют график.</p>
+                      <div class="pairs-z-switch" id="pairs-z-switch" role="group" aria-label="Сектор для Z"></div>
+                      <canvas id="pairs-z-chart" width="640" height="220" aria-label="Z-score пары"></canvas>
+                    </article>
+                    <article class="pairs-panel">
+                      <h3>ADX индекса</h3>
+                      <p class="meta">Боковик &lt; 20 · осторожно 20–25 · тренд ≥ 25 блокирует новые входы.</p>
+                      <canvas id="pairs-adx-chart" width="640" height="220" aria-label="ADX IMOEX"></canvas>
+                    </article>
+                    <article class="pairs-panel">
+                      <h3>Ноги пары</h3>
+                      <p class="meta">Последние close Y и X — не биржевой стакан (у спреда его нет), а живая лента котировок ног.</p>
+                      <div class="pairs-legs" id="pairs-legs">
+                        <div class="pairs-leg">
+                          <header id="pairs-leg-y-h">Y</header>
+                          <ol id="pairs-leg-y"></ol>
+                        </div>
+                        <div class="pairs-leg">
+                          <header id="pairs-leg-x-h">X</header>
+                          <ol id="pairs-leg-x"></ol>
+                        </div>
+                      </div>
+                    </article>
+                  </div>
+                  <script type="application/json" id="pairs-desk-boot">%s</script>
+                </section>
+                """.formatted(
+                escape(posture),
+                escape(watchPair),
+                escape(reason),
+                escape(champ),
+                sitOut ? "sit-out · слоты пустые" : "торгуем только этот сектор",
+                escape(regimeLabel),
+                escape(adx),
+                coint,
+                tickers,
+                tested,
+                watchPair.isBlank() ? "—" : escape(watchPair),
+                boot
+        );
+    }
+
+    private static String pairsDeskBootJson(
+            ClusterReviewReport cluster,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report
+    ) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        sb.append("\"sitOut\":").append(cluster != null && cluster.sitOut()).append(',');
+        sb.append("\"champion\":");
+        if (cluster != null && cluster.champion() != null) {
+            sb.append('"').append(cluster.champion().name()).append('"');
+        } else {
+            sb.append("null");
+        }
+        sb.append(",\"championReason\":").append(jsonStr(cluster != null ? cluster.championReason() : null));
+        sb.append(",\"adx\":");
+        if (regime != null && !Double.isNaN(regime.adx())) {
+            sb.append(String.format(Locale.ROOT, "%.2f", regime.adx()));
+        } else {
+            sb.append("null");
+        }
+        sb.append(",\"label\":").append(jsonStr(regime != null ? regime.label() : null));
+        sb.append(",\"tickersAnalyzed\":").append(report != null ? report.tickersAnalyzed() : 0);
+        sb.append(",\"pairsTested\":").append(report != null ? report.pairsTested() : 0);
+        sb.append(",\"cointegratedPairs\":").append(report != null ? report.cointegratedPairs() : 0);
+        sb.append(",\"sectors\":[");
+        boolean first = true;
+        if (cluster != null && cluster.sectors() != null) {
+            for (var row : cluster.sectors()) {
+                if (row == null || row.sector() == null) {
+                    continue;
+                }
+                if (!first) {
+                    sb.append(',');
+                }
+                first = false;
+                sb.append("{\"sector\":\"").append(row.sector().name()).append('"')
+                        .append(",\"qualityPairs\":").append(row.qualityPairs())
+                        .append(",\"researchScore\":")
+                        .append(String.format(Locale.ROOT, "%.4f", row.researchScore()))
+                        .append('}');
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    private static String jsonStr(String s) {
+        if (s == null) {
+            return "null";
+        }
+        return '"' + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + '"';
     }
 
     private String renderFinalExplainPanel(
@@ -2276,6 +2523,16 @@ public class AnalysisHtmlRenderer {
             List<TradingRecommendation> technical,
             MarketRegimeSnapshot regime,
             AnalysisReport report
+    ) {
+        return renderFinalExplainPanel(rows, technical, regime, report, null);
+    }
+
+    private String renderFinalExplainPanel(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            ClusterReviewReport cluster
     ) {
         boolean empty = rows.isEmpty();
         StringBuilder sb = new StringBuilder();
@@ -2302,13 +2559,25 @@ public class AnalysisHtmlRenderer {
         sb.append("<p>TRINITY — mean-reversion по коинтегрированным парам IMOEX <em>только в боковике</em>. ")
                 .append("Страница «Итог» — операторский вердикт после цепочки, а не сырой LONG/SHORT.</p>");
         sb.append("<ol class=\"final-pipeline\">");
-        sb.append("<li><strong>Техника</strong> — EG/FDR, Z-score, качество пары, разворот входа.</li>");
-        sb.append("<li><strong>Cluster gate</strong> — месячная eligibility секторов (net&gt;0, PF≥1.1); OIL_GAS вне pairs.</li>");
+        sb.append("<li><strong>Research всегда</strong> — EG/FDR и quality по нефти, металлам, банкам, ритейлу.</li>");
+        sb.append("<li><strong>Чемпион</strong> — в слоты один фаворит (cash PF≥1.1 или ≥2 quality-пары). Нет доказательства — sit-out.</li>");
+        sb.append("<li><strong>Техника</strong> — Z-score, half-life, разворот входа, CUSUM, ADX боковика.</li>");
         sb.append("<li><strong>FA</strong> — новости MOEX + RSS; CONFLICT с техникой снижает или блокирует вход.</li>");
-        sb.append("<li><strong>Рекомендация</strong> — ENTER / REDUCE / WATCH / BLOCK.</li>");
-        sb.append("<li><strong>Paper</strong> — журнал открывает только ENTER/REDUCE при свободном слоте и не-TREND.</li>");
+        sb.append("<li><strong>Paper / брокер</strong> — журнал пишет ENTER/REDUCE; авто-ордера брокера — только если включён переключатель «Авто» и брокер armed.</li>");
         sb.append("</ol>");
-        sb.append("<p class=\"meta\">Research / decision-support: система помогает думать, не исполняет у брокера и не гарантирует результат.</p>");
+        if (cluster != null) {
+            sb.append("<p class=\"meta\">Сейчас: ");
+            if (cluster.sitOut()) {
+                sb.append("<strong>sit-out</strong> — ").append(escape(cluster.championReason()));
+            } else if (cluster.champion() != null) {
+                sb.append("фаворит <strong>").append(escape(SectorCatalog.labelRu(cluster.champion())))
+                        .append("</strong> — ").append(escape(cluster.championReason()));
+            } else {
+                sb.append(escape(cluster.championReason() != null ? cluster.championReason() : "рейтинг ещё копится"));
+            }
+            sb.append("</p>");
+        }
+        sb.append("<p class=\"meta\">Research / decision-support: система помогает думать, не гарантирует результат.</p>");
         sb.append("</article>");
 
         sb.append("<article class=\"final-explain-block\">");
@@ -2316,7 +2585,7 @@ public class AnalysisHtmlRenderer {
             sb.append("<h3>Почему сейчас 0 строк</h3>");
             sb.append("<p>Ниже — реальные причины по текущим данным (если что-то не сработало в этом прогоне, пункт отмечен).</p>");
             sb.append("<ul class=\"final-reasons\">");
-            for (String reason : diagnoseEmptyFinalReasons(rows, technical, regime, report)) {
+            for (String reason : diagnoseEmptyFinalReasons(rows, technical, regime, report, cluster)) {
                 sb.append("<li>").append(reason).append("</li>");
             }
             sb.append("</ul>");
@@ -2409,6 +2678,16 @@ public class AnalysisHtmlRenderer {
             MarketRegimeSnapshot regime,
             AnalysisReport report
     ) {
+        return diagnoseEmptyFinalReasons(rows, technical, regime, report, null);
+    }
+
+    private List<String> diagnoseEmptyFinalReasons(
+            List<FinalTradeRecommendation> rows,
+            List<TradingRecommendation> technical,
+            MarketRegimeSnapshot regime,
+            AnalysisReport report,
+            ClusterReviewReport cluster
+    ) {
         List<String> reasons = new ArrayList<>();
         long techActionable = technical.stream()
                 .filter(r -> r.signal() == TradingSignal.LONG_SPREAD || r.signal() == TradingSignal.SHORT_SPREAD)
@@ -2448,8 +2727,17 @@ public class AnalysisHtmlRenderer {
                     + ").");
         }
 
-        reasons.add("<strong>Cluster gate</strong> — ежемесячный пересмотр секторов (net&gt;0, PF≥1.1) и hard-ban OIL_GAS "
-                + "режут пары <em>до</em> техники. Если в отчёте мало коинтегрированных пар при живом индексе — смотрите cluster-review / сектора.");
+        if (cluster != null && cluster.sitOut()) {
+            reasons.add(0, "<strong>Sit-out чемпиона</strong> — "
+                    + escape(cluster.championReason() != null ? cluster.championReason()
+                    : "нет фаворита, слоты пустые. Research идёт, сделок нет."));
+        } else if (cluster != null && cluster.champion() != null) {
+            reasons.add("<strong>Чемпион:</strong> " + escape(SectorCatalog.labelRu(cluster.champion()))
+                    + " — " + escape(cluster.championReason() != null ? cluster.championReason() : ""));
+        } else {
+            reasons.add("<strong>Чемпион сектора</strong> — research всегда (нефть / металлы / банки / ритейл), "
+                    + "в слоты только фаворит; без доказательства — sit-out.");
+        }
 
         reasons.add("<strong>FA CONFLICT</strong> — при расхождении техники и новостей строка обычно <em>остаётся</em> "
                 + "как REDUCE/BLOCK с текстом «CONFLICT: техника vs фундамент», а не исчезает. "

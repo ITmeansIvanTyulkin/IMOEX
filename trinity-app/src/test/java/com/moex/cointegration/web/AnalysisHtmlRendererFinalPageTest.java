@@ -51,6 +51,8 @@ class AnalysisHtmlRendererFinalPageTest {
 
         assertTrue(html.contains("final-explain"));
         assertTrue(html.contains("Что значит «Итог»"));
+        assertTrue(html.contains("Чемпион"));
+        assertTrue(html.contains("pairs-desk"));
         assertTrue(html.contains("Почему сейчас 0 строк"));
         assertTrue(html.contains("TREND"));
         assertTrue(html.contains("ENTER / REDUCE / WATCH / BLOCK")
@@ -59,6 +61,7 @@ class AnalysisHtmlRendererFinalPageTest {
         assertTrue(html.contains("Новости (RSS)"));
         assertFalse(html.contains("Итоговых рекомендаций нет."));
         assertFalse(html.contains("Строк: 0"));
+        assertFalse(html.contains("OIL_GAS вне pairs"));
     }
 
     @Test

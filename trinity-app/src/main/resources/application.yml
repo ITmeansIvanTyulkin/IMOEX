@@ -126,7 +126,9 @@ imoex:
     notional-per-leg-pct: 0.30
     journal-file: paper-journal.json
     auto-run-daily: true
-    daily-cron: "0 5 19 * * MON-FRI"
+    # До открытия основной сессии (10:00 MSK): прогон по итогам предыдущего дня
+    daily-cron: "0 55 9 * * MON-FRI"
+    daily-cron-zone: Europe/Moscow
     # INTRADAY pairs: detached from operator UX / «Анализ + paper» / DAILY cron.
     # Research entrypoint remains runIntradayOnly + this cron (kept off).
     auto-run-intraday: false
@@ -154,13 +156,18 @@ imoex:
     # Channel-scoped SSL for T-Invest only (embedded Russian Trusted CA; not JVM cacerts).
     # Defaults to true when sandbox=true. Set true for live if Corretto lacks Russian Trusted CA.
     trust-all-ssl: true
-  # Ежемесячный пересмотр кластеров (секторный cash PnL / PF)
+  # Ежемесячный пересмотр кластеров: research всегда, в слоты — только чемпион
   cluster-review:
     enabled: true
     lookback-months: 6
     min-profit-factor: 1.10
     min-closed-trades: 4
-    exclude-oil-gas: true
+    exclude-oil-gas: false
+    champion-only: true
+    sit-out-if-unproven: true
+    min-quality-pairs: 2
+    pair-min-closed-trades: 2
+    pair-loss-streak: 2
   # Simulated SKU for operator UX locks (no billing). Override in Settings at runtime.
   # PAIRS | PAIRS_TREND | FULL
   product:
@@ -187,9 +194,10 @@ imoex:
     min-price: 5.0
     max-zero-volume-fraction: 0.15
     exclude-preferred: true
-    # пары внутри сектора или related-группы (ENERGY=oil+utilities, …)
+    # только same-sector (нефть≠энергетика): чемпион не смешивается с related
     same-sector-only: true
-    allow-related-sectors: true
+    allow-related-sectors: false
+    research-focus-sectors-only: true
     # обе ноги ≥ этого ADV; и ADV ratio ≤ max-turnover-ratio
     min-pair-turnover-rub: 50000000
     max-turnover-ratio: 20.0
@@ -222,9 +230,9 @@ imoex:
       breakout-delta-min: 0.60
       footprint-lookback-bars: 24
   portfolio:
-    # при max 2 парах — не больше 1 на сектор
+    # чемпион уже один сектор — оба DAILY-слота можно занять внутри него
     diversify-by-sector: true
-    max-pairs-per-sector: 1
+    max-pairs-per-sector: 2
   # Секреты НЕ в git: unlock + пароль только из env / application-local.yml
   run:
     unlock: ${IMOEX_UNLOCK:}
@@ -365,7 +373,7 @@ imoex:
     provider: T_INVEST
     # token falls back to imoex.broker.token / data/broker-ui-settings.json
     sandbox: false   # market data from prod API (trading may stay sandbox)
-    tape-capacity: 200000
+    tape-capacity: 50000              # bounded RAM tape; desk/footprint use recent window
     orderbook-depth: 50   # T-Invest max (allowed: 10/20/30/40/50)
     # hist DOM = our archive data/broker-tape/dom-*.jsonl (broker has no hist DOM API)
     auto-resolve-instrument: BRU6

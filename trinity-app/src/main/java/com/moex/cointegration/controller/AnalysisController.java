@@ -4,8 +4,10 @@ import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.AnalysisReport;
 import com.moex.cointegration.model.BookKind;
 import com.moex.cointegration.model.ChartPayload;
+import com.moex.cointegration.model.ClusterReviewReport;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.HistoricalReplayReport;
+import com.moex.cointegration.model.MarketRegimeSnapshot;
 import com.moex.cointegration.model.PairAnalysisResult;
 import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.TradingRecommendation;
@@ -17,6 +19,7 @@ import com.moex.cointegration.service.CointegrationAnalysisService;
 import com.moex.cointegration.service.FinalRecommendationService;
 import com.moex.cointegration.service.HistoricalReplayService;
 import com.moex.cointegration.service.MarketDataService;
+import com.moex.cointegration.service.MarketRegimeService;
 import com.moex.cointegration.service.PaperTradingService;
 import com.moex.cointegration.service.PairExecutionService;
 import com.moex.cointegration.service.RiskPolicyService;
@@ -60,6 +63,7 @@ public class AnalysisController {
     private final PairExecutionService pairExecutionService;
     private final RiskPolicyService riskPolicyService;
     private final HistoricalReplayService historicalReplayService;
+    private final MarketRegimeService marketRegimeService;
 
     public AnalysisController(
             CointegrationAnalysisService analysisService,
@@ -73,7 +77,8 @@ public class AnalysisController {
             PaperTradingService paperTradingService,
             PairExecutionService pairExecutionService,
             RiskPolicyService riskPolicyService,
-            HistoricalReplayService historicalReplayService
+            HistoricalReplayService historicalReplayService,
+            MarketRegimeService marketRegimeService
     ) {
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
@@ -87,6 +92,7 @@ public class AnalysisController {
         this.pairExecutionService = pairExecutionService;
         this.riskPolicyService = riskPolicyService;
         this.historicalReplayService = historicalReplayService;
+        this.marketRegimeService = marketRegimeService;
     }
 
     /**
@@ -234,6 +240,24 @@ public class AnalysisController {
             pairExecutionService.executeActionableDaily(finals);
         }
         return finals;
+    }
+
+    /**
+     * GET /api/analysis/regime — ADX IMOEX: SIDEWAYS / NEUTRAL / TREND.
+     */
+    @GetMapping("/analysis/regime")
+    public MarketRegimeSnapshot regime() {
+        return marketRegimeService.currentOrRefresh();
+    }
+
+    /**
+     * GET /api/analysis/cluster-review — последний research-рейтинг секторов и чемпион.
+     */
+    @GetMapping("/analysis/cluster-review")
+    public ClusterReviewReport clusterReview() throws IOException {
+        return storage.loadClusterReview()
+                .orElseThrow(() -> new IllegalStateException(
+                        "No cluster-review yet. Run POST /api/analysis/run first."));
     }
 
     /**

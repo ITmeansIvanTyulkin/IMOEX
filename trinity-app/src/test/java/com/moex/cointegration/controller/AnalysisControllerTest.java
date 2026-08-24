@@ -68,6 +68,8 @@ class AnalysisControllerTest {
     @MockBean
     HistoricalReplayService historicalReplayService;
     @MockBean
+    com.moex.cointegration.service.MarketRegimeService marketRegimeService;
+    @MockBean
     ImoexProperties imoexProperties;
 
     @Test

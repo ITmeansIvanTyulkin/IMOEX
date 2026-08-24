@@ -1,6 +1,7 @@
 package com.moex.cointegration.controller;
 
 import com.moex.cointegration.model.AnalysisReport;
+import com.moex.cointegration.model.ClusterReviewReport;
 import com.moex.cointegration.model.FinalTradeRecommendation;
 import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.TradingRecommendation;
@@ -94,12 +95,19 @@ public class AnalysisViewController {
             return htmlRenderer.renderEmpty();
         }
         List<FinalTradeRecommendation> rows = finalRecommendationService.getLastFinal();
+        ClusterReviewReport cluster = null;
+        try {
+            cluster = storage.loadClusterReview().orElse(null);
+        } catch (IOException ignored) {
+            cluster = null;
+        }
         return htmlRenderer.renderFinalTable(
                 rows,
                 recommendationService.getLastRecommendations(),
-                marketRegimeService.current(),
+                marketRegimeService.currentOrRefresh(),
                 report.get(),
-                rssHeadlineService.current()
+                rssHeadlineService.current(),
+                cluster
         );
     }
 

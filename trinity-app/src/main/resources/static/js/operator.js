@@ -1594,6 +1594,38 @@
     return msg || "Сканирует календарные спреды FORTS";
   }
 
+  function overlayPairsChampion(rev) {
+    const el = $("dash-robot-pairs");
+    if (!el || !rev) return;
+    const ru = {
+      METALS_MINING: "металлы",
+      OIL_GAS: "нефть",
+      BANKS: "банки",
+      RETAIL: "ритейл"
+    };
+    const prefix = rev.sitOut
+      ? ("Sit-out: " + (rev.championReason || "нет фаворита") + ". ")
+      : (rev.champion ? ("Фаворит: " + (ru[rev.champion] || rev.champion) + ". ") : "");
+    const detailEl = el.querySelector(".dash-robot-detail");
+    if (prefix && detailEl) {
+      const cur = detailEl.textContent || "";
+      if (cur.indexOf("Фаворит:") < 0 && cur.indexOf("Sit-out:") < 0) {
+        setText(detailEl, prefix + cur);
+      }
+    }
+    const statusEl = el.querySelector(".dash-robot-status");
+    const statusNow = statusEl ? (statusEl.textContent || "") : "";
+    if (rev.sitOut && statusEl && statusNow.indexOf("сделке") < 0) {
+      setText(statusEl, "Ресёрч");
+      el.classList.remove("is-trade", "is-armed", "is-watch", "is-flat", "is-scan", "is-session-off");
+      el.classList.add("is-scan");
+    }
+    const scopeEl = el.querySelector(".dash-robot-scope");
+    if (scopeEl && !rev.sitOut && rev.champion) {
+      setText(scopeEl, "Pairs · " + (ru[rev.champion] || rev.champion));
+    }
+  }
+
   function applyDashRobotCard(id, robot) {
     const el = $(id);
     if (!el || !robot) return;
@@ -1679,7 +1711,8 @@
         fetch("/api/ops/trade-toasts", { headers: { Accept: "application/json" } }),
         fetch("/api/paper/journal", { headers: { Accept: "application/json" } }),
         fetch("/api/broker/status", { headers: { Accept: "application/json" } }),
-        fetch("/api/marketdata/status", { headers: { Accept: "application/json" } })
+        fetch("/api/marketdata/status", { headers: { Accept: "application/json" } }),
+        fetch("/api/analysis/cluster-review", { headers: { Accept: "application/json" } })
       ];
       if ($("dash-robot-arb")) {
         fetches.push(fetch("/api/calendar-arb/status", { headers: { Accept: "application/json" } }));
@@ -1690,7 +1723,8 @@
       const paperRes = results[2];
       const brokerRes = results[3];
       const tapeRes = results[4];
-      const arbRes = results[5];
+      const clusterRes = results[5];
+      const arbRes = results[6];
 
       if (arbRes && arbRes.ok) {
         const arb = await arbRes.json();
@@ -1756,6 +1790,9 @@
           ? ("Лента live · " + (md.liveTapeSize || 0))
           : "Лента off";
         setText("dash-contour-tape", tapeLabel);
+      }
+      if (clusterRes && clusterRes.ok) {
+        overlayPairsChampion(await clusterRes.json());
       }
     } catch (_) {
       // ignore transient errors
@@ -2308,8 +2345,8 @@
   }
 
   function startAlertPolling() {
-    // ops-panel = полный пульт (settings); dash-cta / dash-cockpit = дашборд
-    if (!$("ops-panel") && !$("dash-cta") && !$("dash-cockpit")) return;
+    // ops-panel = полный пульт (settings); dash-cta / dash-cockpit = дашборд; pairs-desk = итог
+    if (!$("ops-panel") && !$("dash-cta") && !$("dash-cockpit") && !$("pairs-desk")) return;
     bindAlertPrefs();
     if ($("dash-cockpit")) {
       loadDashboardCockpit();
