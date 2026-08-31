@@ -17,6 +17,8 @@
   let lastGood = null;
   let everReady = false;
   let lastSeriesKey = "";
+  let lastSpreadData = [];
+  let lastNearData = [];
   let arbScaleLocked = false;
   let syncingRange = false;
   let resizeBound = false;
@@ -708,19 +710,33 @@
         horzLine: { color: "rgba(30,42,50,0.45)", labelBackgroundColor: "#1a2228", width: 1 }
       },
       rightPriceScale: { borderColor: "#d5dde2" },
-      timeScale: { borderColor: "#d5dde2", timeVisible: true, secondsVisible: false }
+      timeScale: { borderColor: "#d5dde2", timeVisible: true, secondsVisible: false },
+      handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: true }
     };
   }
 
-  function bindArbChartScale(el, chartInst, seriesInst) {
+  function bindArbChartScale(el, chartInst, seriesInst, getBars, pointSize) {
     if (!el || !chartInst || !seriesInst) return;
-    if (el._trinityOverlayFollowBound) return;
     const kit = window.TrinityChartKit;
+    if (kit && typeof kit.attachFriendlyNav === "function") {
+      kit.attachFriendlyNav({
+        chart: chartInst,
+        series: seriesInst,
+        hostEl: el,
+        barSec: 3600,
+        pointSize: pointSize > 0 ? pointSize : 0.01,
+        getBars: getBars,
+        onTimeGesture: function () { arbScaleLocked = true; }
+      });
+      return;
+    }
     if (!kit || typeof kit.bindScaleOverlayFollow !== "function") return;
+    if (el._trinityOverlayFollowBound) return;
     kit.bindScaleOverlayFollow(el, {
       chart: chartInst,
       series: seriesInst,
-      freezePrice: true,
+      freezePrice: false,
       onLayout: function () {
         arbScaleLocked = true;
       }
@@ -767,13 +783,13 @@
     if (spreadEl && !chart) {
       chart = LightweightCharts.createChart(spreadEl, whiteChartOpts(spreadEl, spreadEl.clientHeight || 360));
       series = chart.addLineSeries({ color: "#0b7a66", lineWidth: 2 });
-      bindArbChartScale(spreadEl, chart, series);
+      bindArbChartScale(spreadEl, chart, series, function () { return lastSpreadData; }, 0.01);
     }
     if (legsEl && !legsChart) {
       legsChart = LightweightCharts.createChart(legsEl, whiteChartOpts(legsEl, legsEl.clientHeight || 280));
       nearSeries = legsChart.addLineSeries({ color: "#15803d", lineWidth: 2, title: "near" });
       nextSeries = legsChart.addLineSeries({ color: "#b45309", lineWidth: 2, title: "next" });
-      bindArbChartScale(legsEl, legsChart, nearSeries);
+      bindArbChartScale(legsEl, legsChart, nearSeries, function () { return lastNearData; }, 0.01);
       bindChartSync();
     }
     if (!resizeBound) {
@@ -799,6 +815,8 @@
     if (pairChanged) arbScaleLocked = false;
     const near = toLine(points, "near");
     const next = toLine(points, "far");
+    lastSpreadData = spread;
+    lastNearData = near;
     if (series) setLineDataKeep(chart, series, spread);
     if (nearSeries) setLineDataKeep(legsChart, nearSeries, near);
     if (nextSeries) setLineDataKeep(legsChart, nextSeries, next);
@@ -806,6 +824,13 @@
       if (chart) chart.timeScale().fitContent();
       if (legsChart) legsChart.timeScale().fitContent();
     }
+    function paintNav(el) {
+      const api = el && el._trinityFriendlyNav;
+      if (api && api.ohlcTip && typeof api.ohlcTip.paintLast === "function") api.ohlcTip.paintLast();
+      if (api && api.syncGoLive) api.syncGoLive();
+    }
+    paintNav($("arb-chart"));
+    paintNav($("arb-legs-chart"));
   }
 
   function bind() {

@@ -4,7 +4,7 @@
       <p class="meta"><a href="/view/trend-signal">← диапазонная торговля</a>
         · <a href="/view/trend-positional">позиционная</a></p>
       <h2>Терминал графиков · Trend</h2>
-      <p class="meta" id="charts-terminal-meta">Раскладки сохраняются под вашим логином (data/chart-layouts).</p>
+      <p class="meta" id="charts-terminal-meta">Рисунки сохраняются под логином, пока сами не удалите. Панель действует на активный график (синяя рамка).</p>
     </div>
     <div class="charts-terminal-actions">
       <button type="button" class="btn btn-ghost" id="charts-fit">Весь график</button>
@@ -12,18 +12,304 @@
       <button type="button" class="btn btn-ghost" id="charts-exit-fs" hidden>Выйти из полного экрана</button>
     </div>
   </div>
-  <div class="charts-terminal-toolbar">
-    <label class="check-label">Инструмент
-      <select id="charts-instrument"></select>
-    </label>
-    <button type="button" class="btn btn-ghost" id="charts-tool-vap" aria-pressed="false">Натянуть профиль</button>
-    <button type="button" class="btn btn-ghost" id="charts-tool-trend" aria-pressed="false">Линия тренда</button>
-    <button type="button" class="btn btn-ghost" id="charts-tool-ma">MA…</button>
-    <button type="button" class="btn btn-ghost" id="charts-tool-clear">Сброс рисунков</button>
-    <button type="button" class="btn" id="charts-fullscreen">Полный экран панели</button>
+  <div class="charts-tv-toolbar" id="charts-tv-toolbar" role="toolbar" aria-label="Инструменты активного графика">
+    <div class="charts-tv-active" id="charts-active-chip" title="Клик по графику делает его активным">
+      <span class="k">Активен</span>
+      <strong id="charts-active-name">—</strong>
+    </div>
+    <div class="charts-tv-group" role="group" aria-label="Курсор">
+      <button type="button" class="charts-tv-btn is-active" id="charts-tool-cursor" data-tool="" aria-pressed="true" title="Курсор · Esc">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l6 16 2.2-6.2L19 12z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span class="charts-tv-tip">Курсор</span>
+      </button>
+    </div>
+    <div class="charts-tv-group" role="group" aria-label="Линии">
+      <button type="button" class="charts-tv-btn" id="charts-tool-trend" data-tool="trend" aria-pressed="false" title="Линия тренда · два клика">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18L20 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="charts-tv-tip">Линия тренда</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-ray" data-tool="ray" aria-pressed="false" title="Луч · два клика, продлевается">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18L16 8M16 8h5M16 8v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="charts-tv-tip">Луч</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-hline" data-tool="hline" aria-pressed="false" title="Горизонталь · клик по цене">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2"/></svg>
+        <span class="charts-tv-tip">Горизонталь</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-vline" data-tool="vline" aria-pressed="false" title="Вертикаль · клик по времени">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2"/></svg>
+        <span class="charts-tv-tip">Вертикаль</span>
+      </button>
+    </div>
+    <div class="charts-tv-group" role="group" aria-label="Фигуры">
+      <button type="button" class="charts-tv-btn" id="charts-tool-rect" data-tool="rect" aria-pressed="false" title="Прямоугольник · два клика">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span class="charts-tv-tip">Прямоугольник</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-fib" data-tool="fib" aria-pressed="false" title="Фибоначчи · два клика (high/low)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 10h16M4 14h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span class="charts-tv-tip">Фибоначчи</span>
+      </button>
+    </div>
+    <div class="charts-tv-group" role="group" aria-label="Измерить">
+      <button type="button" class="charts-tv-btn" id="charts-tool-measure" data-tool="measure" aria-pressed="false" title="Линейка · клик или Shift+тяни">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20L20 4M7.5 16.5l1.2 1.2M10.5 13.5l1.2 1.2M13.5 10.5l1.2 1.2M16.5 7.5l1.2 1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="charts-tv-tip">Линейка</span>
+      </button>
+    </div>
+    <div class="charts-tv-group" role="group" aria-label="Объём">
+      <button type="button" class="charts-tv-btn" id="charts-tool-clusters" aria-pressed="false" title="Кластеры: объём по цене внутри свечи. Без ленты — по OHLC. Приближает последние бары">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18h3v-6H5zm5 0h3V6h-3zm5 0h3v-10h-3z"/></svg>
+        <span class="charts-tv-tip">Кластеры</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-footprint" data-tool="footprint" aria-pressed="false" title="Footprint: клик → тяните диапазон → второй клик. Buy×sell на свечах">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span class="charts-tv-tip">Footprint</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-hvol" aria-pressed="false" title="Горизонтальные объёмы — volume profile сессии справа">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H8v2h13V5zm0 6H11v2h10v-2zm0 6H6v2h15v-2zM3 4h2v16H3z"/></svg>
+        <span class="charts-tv-tip">Горизонтальные объёмы</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-vap" data-tool="vap" aria-pressed="false" title="Натянуть профиль объёма · два клика по свечам">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zm6 4h4v12h-4zm6-2h4v14h-4z"/></svg>
+        <span class="charts-tv-tip">Натянуть VAP</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-ma" title="Скользящая средняя SMA/EMA">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16c4-8 6-2 9-6s5 2 9 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span class="charts-tv-tip">MA…</span>
+      </button>
+    </div>
+    <div class="charts-tv-group" role="group" aria-label="Правка">
+      <button type="button" class="charts-tv-btn" id="charts-tool-magnet" aria-pressed="false" title="Магнит к OHLC">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v8a5 5 0 0010 0V4M7 4H4v8a8 8 0 0016 0V4h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="charts-tv-tip">Магнит</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-hide" aria-pressed="false" title="Скрыть рисунки (не удаляет)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span class="charts-tv-tip">Скрыть</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-lock" aria-pressed="false" title="Замок: не двигать и не удалять">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 11V8a4 4 0 018 0v3" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span class="charts-tv-tip">Замок</span>
+      </button>
+      <button type="button" class="charts-tv-btn" id="charts-tool-delete" title="Двойной клик по линии, фигуре или MA — затем Delete">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span class="charts-tv-tip">Удалить выбранное</span>
+      </button>
+    </div>
+    <div class="charts-tv-rest">
+      <label class="check-label charts-tv-select">График
+        <select id="charts-instrument"></select>
+      </label>
+      <button type="button" class="btn btn-ghost btn-xs" id="charts-tool-clear" title="Только этот график, с подтверждением">Стереть всё…</button>
+      <button type="button" class="btn btn-ghost btn-xs" id="charts-fullscreen">Полный экран</button>
+    </div>
   </div>
   <div class="charts-terminal-grid" id="charts-terminal-grid" aria-label="Графики инструментов"></div>
 </section>
+<style>
+.charts-tv-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
+  padding: 0.4rem 0.55rem;
+  margin-bottom: 0.75rem;
+  background: #1a2228;
+  color: #e8eef2;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.charts-tv-active {
+  display: flex;
+  flex-direction: column;
+  min-width: 7.5rem;
+  padding: 0.15rem 0.65rem 0.15rem 0.2rem;
+  margin-right: 0.2rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+.charts-tv-active .k {
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(232, 238, 242, 0.5);
+}
+.charts-tv-active strong {
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+.charts-tv-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 0.45rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+.charts-tv-btn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #d5dee4;
+  cursor: pointer;
+  padding: 0;
+}
+.charts-tv-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+.charts-tv-btn svg [fill="none"] {
+  fill: none;
+}
+.charts-tv-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.charts-tv-btn.is-active {
+  background: rgba(37, 99, 235, 0.35);
+  color: #fff;
+}
+.charts-tv-tip {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #0f1418;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  z-index: 30;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+.charts-tv-btn:hover .charts-tv-tip,
+.charts-tv-btn:focus-visible .charts-tv-tip {
+  display: block;
+}
+.charts-tv-rest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+.charts-tv-select {
+  color: #d5dee4;
+  gap: 0.35rem;
+}
+.charts-tv-select select {
+  background: #12181d;
+  color: #e8eef2;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.charts-tv-toolbar .btn-ghost {
+  color: #d5dee4;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.chart-draw-hline,
+.chart-draw-vline {
+  stroke: #d97706;
+  stroke-width: 2;
+  fill: none;
+}
+.chart-draw-hline.is-selected,
+.chart-draw-vline.is-selected {
+  stroke: #ea580c;
+  stroke-width: 3;
+}
+.chart-draw-sel-label {
+  font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+  fill: #9a3412;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  pointer-events: none;
+}
+.chart-draw-hline.is-preview,
+.chart-draw-vline.is-preview,
+.chart-draw-rect.is-preview,
+.chart-draw-fib.is-preview {
+  stroke-dasharray: 5 4;
+  opacity: 0.85;
+}
+.chart-draw-rect {
+  fill: rgba(37, 99, 235, 0.08);
+  stroke: #2563eb;
+  stroke-width: 1.5;
+}
+.chart-draw-rect.is-selected {
+  stroke: #1d4ed8;
+  stroke-width: 2;
+}
+.chart-draw-fib-box {
+  fill: rgba(124, 58, 237, 0.06);
+  stroke: none;
+}
+.chart-draw-fib {
+  stroke: #7c3aed;
+  stroke-width: 1;
+  fill: none;
+}
+.charts-flow-profile {
+  position: absolute;
+  top: 0;
+  right: 56px;
+  bottom: 28px;
+  width: 80px;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
+}
+.charts-flow-profile .signal-vap-bar {
+  left: auto;
+  right: 0;
+  background: linear-gradient(270deg, rgba(109, 40, 217, 0.82), rgba(109, 40, 217, 0.1));
+}
+.charts-cluster-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+}
+.charts-cluster-tick {
+  position: absolute;
+  height: 6px;
+  border-radius: 1px;
+  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.35);
+}
+.charts-cluster-tick.is-buy { background: rgba(22, 163, 74, 0.92); }
+.charts-cluster-tick.is-sell { background: rgba(220, 38, 38, 0.92); }
+.charts-cluster-tick.is-ohlc { opacity: 0.72; }
+.chart-ma-sel-label {
+  font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+  fill: #0f766e;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  pointer-events: none;
+}
+.charts-pane.is-fs-target {
+  z-index: 5;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.16);
+}
+.charts-pane.is-fs-motion,
+.charts-pane.is-fs-ghost {
+  will-change: transform, opacity, box-shadow;
+  pointer-events: none;
+}
+.chart-draw-handle.is-level-h { cursor: ns-resize; }
+.chart-draw-handle.is-level-v { cursor: ew-resize; }
+</style>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-chart-kit.js?v=20260831-layout1"></script>
-<script src="/js/trend-charts-terminal.js?v=20260817-archive"></script>
+<script src="/js/trinity-chart-kit.js?v=20260831-tvbar11"></script>
+<script src="/js/trend-charts-terminal.js?v=20260831-tvbar11"></script>

@@ -86,7 +86,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260831-timeline2">
+              <link rel="stylesheet" href="/css/operator.css?v=20260831-tvnav5">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -1988,10 +1988,11 @@ public class AnalysisHtmlRenderer {
     /** Страница интерактивного графика пары. */
     public String renderChartPage(String tickerY, String tickerX) {
         String body = """
-                <div class="chart-head">
+                <div class="chart-head" id="pairs-charts-root" data-y="{{Y}}" data-x="{{X}}">
                   <a class="back" href="/view/signals">← к сигналам</a>
                   <h2>График пары {{Y}} / {{X}}</h2>
                   <p class="meta" id="chart-meta">Загрузка данных…</p>
+                  <p class="meta">Колесо — зум под курсором · Shift+колесо — сдвиг · линейка на графике или Shift+тяни · двойной клик — авто-цена · End — к последней свече</p>
                   <div class="legend">
                     <span class="lg buy">▲ зелёная стрелка — купить спред (после разворота к 0)</span>
                     <span class="lg sell">▼ красная стрелка — продать спред (после разворота к 0)</span>
@@ -2021,98 +2022,8 @@ public class AnalysisHtmlRenderer {
                   <div id="chart-z" class="chart tall"></div>
                 </div>
                 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-                <script>
-                (async function () {
-                  const y = "{{Y}}";
-                  const x = "{{X}}";
-                  const resp = await fetch("/api/charts/" + y + "/" + x + "/data");
-                  if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({ error: resp.statusText }));
-                    document.getElementById("chart-meta").textContent = "Ошибка: " + (err.error || resp.status);
-                    return;
-                  }
-                  const data = await resp.json();
-                  document.getElementById("chart-meta").textContent =
-                    "Сигнал: " + data.signal + " | Z=" + data.currentZScore.toFixed(2)
-                    + " | beta=" + data.hedgeRatio.toFixed(3)
-                    + " | half-life≈" + data.halfLifeDays.toFixed(0) + "д"
-                    + " | Sharpe=" + data.sharpeRatio.toFixed(2);
-                  document.getElementById("chart-explain").innerHTML =
-                    '<div class="summary">' + escapeHtml(data.summary || "") + "</div>"
-                    + "<div>" + escapeHtml(data.details || "").replace(/\\n/g, "<br>") + "</div>";
-
-                  const common = { layout: { background: { color: "#ffffff" }, textColor: "#1a1a2e" },
-                    grid: { vertLines: { color: "#eee" }, horzLines: { color: "#eee" } },
-                    rightPriceScale: { borderColor: "#ddd" },
-                    timeScale: { borderColor: "#ddd" } };
-
-                  // Price candles Y
-                  const priceEl = document.getElementById("chart-price");
-                  const priceChart = LightweightCharts.createChart(priceEl, { ...common, height: 320 });
-                  const candles = priceChart.addCandlestickSeries({
-                    upColor: "#16a34a", downColor: "#dc2626", borderVisible: false,
-                    wickUpColor: "#16a34a", wickDownColor: "#dc2626"
-                  });
-                  candles.setData(data.candlesY.map(b => ({
-                    time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
-                  })));
-
-                  const priceXEl = document.getElementById("chart-price-x");
-                  const priceXChart = LightweightCharts.createChart(priceXEl, { ...common, height: 280 });
-                  const candlesX = priceXChart.addCandlestickSeries({
-                    upColor: "#16a34a", downColor: "#dc2626", borderVisible: false,
-                    wickUpColor: "#16a34a", wickDownColor: "#dc2626"
-                  });
-                  candlesX.setData(data.candlesX.map(b => ({
-                    time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
-                  })));
-
-                  // Divergence normalized
-                  const divEl = document.getElementById("chart-divergence");
-                  const divChart = LightweightCharts.createChart(divEl, { ...common, height: 260 });
-                  const ny = divChart.addLineSeries({ color: "#0f3460", lineWidth: 2, title: y });
-                  const nx = divChart.addLineSeries({ color: "#e94560", lineWidth: 2, title: x });
-                  ny.setData(data.normalizedY.map(p => ({ time: p.time, value: p.value })));
-                  nx.setData(data.normalizedX.map(p => ({ time: p.time, value: p.value })));
-
-                  // Spread + KAMA
-                  const spEl = document.getElementById("chart-spread");
-                  const spChart = LightweightCharts.createChart(spEl, { ...common, height: 260 });
-                  const spread = spChart.addLineSeries({ color: "#0f3460", lineWidth: 2, title: "Spread" });
-                  const kama = spChart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "KAMA" });
-                  spread.setData(data.spread.map(p => ({ time: p.time, value: p.value })));
-                  kama.setData(data.kama.map(p => ({ time: p.time, value: p.value })));
-
-                  // Z-score
-                  const zEl = document.getElementById("chart-z");
-                  const zChart = LightweightCharts.createChart(zEl, { ...common, height: 360 });
-                  const zSeries = zChart.addLineSeries({ color: "#7c3aed", lineWidth: 2, title: "Z" });
-                  zSeries.setData(data.zScore.map(p => ({ time: p.time, value: p.value })));
-                  zSeries.createPriceLine({ price: 0, color: "#94a3b8", lineWidth: 1, lineStyle: 2, title: "0" });
-                  zSeries.createPriceLine({ price: data.zEntry, color: "#dc2626", lineWidth: 1, lineStyle: 2, title: "+" + data.zEntry });
-                  zSeries.createPriceLine({ price: -data.zEntry, color: "#16a34a", lineWidth: 1, lineStyle: 2, title: "-" + data.zEntry });
-
-                  const markers = (data.markers || [])
-                    .filter(m => m.series === "zscore")
-                    .map(m => ({
-                      time: m.time,
-                      position: m.position,
-                      color: m.color,
-                      shape: m.shape,
-                      text: m.text
-                    }));
-                  // lightweight-charts keeps one marker per time — keep last (current signal wins)
-                  const byTime = {};
-                  markers.forEach(m => { byTime[m.time] = m; });
-                  zSeries.setMarkers(Object.values(byTime).sort((a, b) => a.time.localeCompare(b.time)));
-
-                  [priceChart, priceXChart, divChart, spChart, zChart].forEach(c => c.timeScale().fitContent());
-
-                  function escapeHtml(s) {
-                    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-                  }
-                })();
-                </script>
+                <script src="/js/trinity-chart-kit.js?v=20260831-tvnav4"></script>
+                <script src="/js/pairs-charts.js?v=20260831-tvnav4"></script>
                 """
                 .replace("{{Y}}", escape(tickerY))
                 .replace("{{X}}", escape(tickerX));

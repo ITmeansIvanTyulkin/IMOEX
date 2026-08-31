@@ -1911,7 +1911,7 @@ a.final-news-title:hover { color: var(--accent, var(--info)); text-decoration: u
   padding: 0.75rem 1rem 1rem;
 }
 .chart-block h3 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--navy); font-family: var(--font); }
-.chart { width: 100%; height: 320px; }
+.chart { width: 100%; height: 320px; position: relative; overscroll-behavior: contain; }
 .chart.tall { height: 360px; }
 #chart-explain {
   background: #f7f4ee;
@@ -3860,6 +3860,173 @@ body[data-upsell="off"] .full-core-badge {
   background: rgba(37, 99, 235, 0.1);
   color: #1d4ed8;
 }
+.signal-chart-legend {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 14;
+  pointer-events: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.7rem;
+  max-width: calc(100% - 160px);
+  padding: 3px 8px 3px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: #1a2228;
+}
+.signal-legend-sym {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.signal-legend-ohlc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.45rem;
+  color: #3f4a52;
+}
+.signal-legend-ohlc i {
+  font-style: normal;
+  font-weight: 600;
+  color: rgba(30, 42, 50, 0.42);
+  margin-right: 0.15rem;
+}
+.signal-legend-ohlc b {
+  font-weight: 700;
+}
+.signal-legend-ohlc.is-bull b,
+.signal-legend-ohlc.is-bull .signal-legend-chg {
+  color: #16a34a;
+}
+.signal-legend-ohlc.is-bear b,
+.signal-legend-ohlc.is-bear .signal-legend-chg {
+  color: #dc2626;
+}
+.signal-legend-chg {
+  font-style: normal;
+  font-weight: 700;
+}
+.signal-chart-lock-btn,
+.signal-chart-live-btn,
+.signal-chart-measure-btn {
+  position: absolute;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  border: 1px solid rgba(30, 42, 50, 0.16);
+  background: rgba(255, 255, 255, 0.94);
+  color: #1a2228;
+  box-shadow: 0 2px 8px rgba(30, 42, 50, 0.1);
+}
+.signal-chart-lock-btn {
+  top: 8px;
+  right: 102px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.signal-chart-lock-btn.is-on {
+  border-color: rgba(217, 119, 6, 0.5);
+  background: rgba(253, 230, 138, 0.55);
+}
+.signal-chart-live-btn {
+  right: 64px;
+  bottom: 36px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.35);
+}
+.signal-chart-live-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.signal-chart-live-btn:hover,
+.signal-chart-lock-btn:hover,
+.signal-chart-measure-btn:hover {
+  border-color: rgba(37, 99, 235, 0.55);
+}
+.signal-chart-live-btn[hidden],
+.signal-chart-lock-btn[hidden] {
+  display: none !important;
+}
+.signal-chart-measure-btn {
+  top: 8px;
+  right: 64px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  padding: 0;
+}
+.signal-chart-measure-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.signal-chart-measure-btn.is-on {
+  border-color: rgba(37, 99, 235, 0.5);
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+.trinity-has-measure .signal-chart-lock-btn {
+  right: 98px;
+}
+.trinity-measure-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 16;
+}
+.trinity-measure-fill {
+  position: absolute;
+  box-sizing: border-box;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px dashed rgba(37, 99, 235, 0.55);
+}
+.trinity-measure-line {
+  position: absolute;
+  height: 0;
+  border-top: 1.5px solid #1d4ed8;
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+.trinity-measure-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: #1d4ed8;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.35);
+  pointer-events: none;
+}
+.signal-macd-wrap,
+.signal-volume-wrap,
+.signal-volume,
+.signal-macd {
+  overscroll-behavior: contain;
+}
+.trinity-measure-box {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: #1d4ed8;
+  padding: 3px 8px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(29, 78, 216, 0.28);
+}
 .signal-dom {
   position: sticky;
   top: 0.5rem;
@@ -4522,6 +4689,20 @@ body[data-upsell="off"] .full-core-badge {
   pointer-events: all;
   cursor: grab;
 }
+.chart-draw-handle.is-level-h { cursor: ns-resize; }
+.chart-draw-handle.is-level-v { cursor: ew-resize; }
+.chart-ma-sel-label,
+.chart-draw-sel-label {
+  font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+  fill: #0f766e;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  pointer-events: none;
+}
+.chart-draw-sel-label {
+  fill: #9a3412;
+}
 .chart-draw-anchor {
   fill: #2563eb;
   stroke: #ffffff;
@@ -4557,8 +4738,10 @@ body[data-upsell="off"] .full-core-badge {
 }
 .signal-chart.is-vap-tool,
 .signal-chart.is-trend-tool,
+.signal-chart.is-measure-tool,
 .charts-pane-chart.is-vap-tool,
 .charts-pane-chart.is-trend-tool,
+.charts-pane-chart.is-measure-tool,
 .signal-chart.is-drawing,
 .charts-pane-chart.is-drawing {
   cursor: crosshair;
@@ -4613,6 +4796,15 @@ a.signal-tool {
   border-color: rgba(37, 99, 235, 0.45);
   box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
 }
+.charts-pane.is-fs-target {
+  z-index: 5;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.16);
+}
+.charts-pane.is-fs-motion,
+.charts-pane.is-fs-ghost {
+  will-change: transform, opacity, box-shadow;
+  pointer-events: none;
+}
 .charts-pane-head {
   display: flex;
   justify-content: space-between;
@@ -4625,6 +4817,7 @@ a.signal-tool {
   position: relative;
   width: 100%;
   height: 320px;
+  overscroll-behavior: contain;
 }
 .charts-terminal-grid.is-fullscreen .charts-pane-chart {
   height: calc(100vh - 200px);

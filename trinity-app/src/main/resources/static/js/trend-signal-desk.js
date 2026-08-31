@@ -20,6 +20,7 @@
   let priceScaleLocked = false;
   let scaleRememberTimer = null;
   let userScaleGesture = false;
+  let chartNav = null;
   const SCALE_STORE = "trinity.trend.desk.scale";
   const INST_STORE = "trinity.trend.desk.instrument";
   const PB_STORE = "trinity.trend.desk.playbook";
@@ -1650,6 +1651,10 @@
     setToolPressed("tool-footprint", fpToolActive);
     syncChartCursor();
     layoutFootprint();
+    if (fpToolActive && chartNav && typeof chartNav.setMeasureMode === "function") {
+      chartNav.setMeasureMode(false);
+      setToolPressed("tool-measure", false);
+    }
   }
   function clearFpPins() {
     fpPinned = [];
@@ -1974,6 +1979,7 @@
                     if (macdChart) {
                       macdChart.applyOptions({ width: el.clientWidth || ($("signal-chart") || {}).clientWidth || 600 });
                       syncMacdTimeScale();
+                      bindChartSlavePanes();
                       return;
                     }
                     macdChart = LightweightCharts.createChart(el, {
@@ -2012,6 +2018,7 @@
                         syncMacdTimeScale();
                       });
                     }
+                    bindChartSlavePanes();
                   }
                   function updateMacd(bars) {
                     if (!showMacd) {
@@ -2333,6 +2340,7 @@
     if (!showVolume) return;
     if (volumeChart) {
       volumeChart.applyOptions({ width: el.clientWidth });
+      bindChartSlavePanes();
       return;
     }
     volumeChart = LightweightCharts.createChart(el, {
@@ -2352,10 +2360,17 @@
     if (chart) {
       chart.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
         if (range && volumeChart) {
-          try { volumeChart.timeScale().setVisibleLogicalRange(range); } catch (_) {}
+          try {
+            volumeChart.timeScale().applyOptions({
+              rightOffset: currentRightOffset(),
+              barSpacing: (chart.timeScale().options().barSpacing) || 8
+            });
+            volumeChart.timeScale().setVisibleLogicalRange(range);
+          } catch (_) {}
         }
       });
     }
+    bindChartSlavePanes();
   }
   function updateVolume(bars) {
     if (!showVolume) return;
@@ -2456,6 +2471,7 @@
         chart.priceScale("right").applyOptions({ autoScale: false });
       }
     } catch (_) {}
+    syncPriceLockBtn();
   }
   function unlockPriceScale() {
     priceScaleLocked = false;
@@ -2467,6 +2483,7 @@
         chart.priceScale("right").applyOptions({ autoScale: true });
       }
     } catch (_) {}
+    syncPriceLockBtn();
   }
   function rememberUserScale() {
     if (applyingScale || !chart) return;
@@ -2474,16 +2491,17 @@
     if (!snap || !(snap.barSpacing > 0)) return;
     scaleLocked = true;
     lockedBarSpacing = snap.barSpacing;
-    if (followLive) {
+    const edge = atRightEdge();
+    if (followLive && edge) {
       lockedLogical = null;
       userPinned = false;
     } else {
       lockedLogical = snap.logical;
       userPinned = true;
     }
-    freezePriceScale();
     saveScaleLocal(lastDeskInstrument);
     scheduleSaveDeskLayout();
+    syncGoLiveBtn();
   }
   function scheduleRememberUserScale() {
     if (applyingScale) return;
@@ -2502,7 +2520,7 @@
       if (followLive && !userPinned) {
         chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
         chart.timeScale().scrollToRealTime();
-      } else if (!followLive && lockedLogical) {
+      } else if (lockedLogical) {
         chart.timeScale().setVisibleLogicalRange(lockedLogical);
       }
       if (priceScaleLocked) freezePriceScale();
@@ -2512,17 +2530,28 @@
   function bindUserScaleCapture(el) {
     if (!el || el._trinityScaleBound) return;
     el._trinityScaleBound = true;
-    const mark = function () {
-      freezePriceScale();
+    const markTime = function () {
       scheduleRememberUserScale();
     };
-    el.addEventListener("wheel", mark, { passive: true, capture: true });
-    el.addEventListener("mousedown", function () { userScaleGesture = true; });
+    el.addEventListener("wheel", markTime, { passive: true, capture: true });
+    el.addEventListener("mousedown", function (ev) {
+      userScaleGesture = true;
+      const rect = el.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      let priceW = 56;
+      try {
+        if (chart && typeof chart.priceScale === "function") {
+          priceW = chart.priceScale("right").width() || 56;
+        }
+      } catch (_) {}
+      if (x > rect.width - priceW - 4) freezePriceScale();
+    });
     el.addEventListener("touchstart", function () { userScaleGesture = true; }, { passive: true });
     const endGesture = function () {
       if (!userScaleGesture) return;
       userScaleGesture = false;
-      mark();
+      markTime();
+      syncPriceLockBtn();
     };
     window.addEventListener("mouseup", endGesture);
     window.addEventListener("touchend", endGesture, { passive: true });
@@ -2542,6 +2571,59 @@
     if (deskBtn) {
       deskBtn.textContent = rightPadOn ? "Автоотступ · вкл" : "Автоотступ";
     }
+  }
+  function syncPriceLockBtn() {
+    const btn = $("signal-chart-price-lock");
+    if (!btn) return;
+    btn.hidden = !priceScaleLocked;
+    btn.setAttribute("aria-pressed", priceScaleLocked ? "true" : "false");
+    btn.classList.toggle("is-on", priceScaleLocked);
+  }
+  function syncGoLiveBtn() {
+    if (chartNav && typeof chartNav.syncGoLive === "function") {
+      chartNav.syncGoLive();
+      return;
+    }
+    const btn = $("signal-chart-live");
+    if (!btn) return;
+    btn.hidden = !chart || atRightEdge();
+  }
+  function setMeasureTool(on) {
+    if (!chartNav || typeof chartNav.setMeasureMode !== "function") return;
+    if (on) {
+      if (fpToolActive) toggleFpTool();
+      if (chartTools && chartTools.getMode()) {
+        chartTools.setMode(null);
+        syncDrawToolButtons();
+      }
+    }
+    chartNav.setMeasureMode(!!on);
+    setToolPressed("tool-measure", !!on);
+  }
+  function bindChartSlavePanes() {
+    if (!chartNav || typeof chartNav.bindSlavePane !== "function") return;
+    const macdEl = $("signal-macd");
+    const volEl = $("signal-volume");
+    if (macdEl && macdChart) chartNav.bindSlavePane(macdEl, macdChart);
+    if (volEl && volumeChart) chartNav.bindSlavePane(volEl, volumeChart);
+  }
+  function goLive() {
+    followLive = true;
+    userPinned = false;
+    const follow = $("signal-desk-follow");
+    if (follow) follow.checked = true;
+    if (chart) applyRightPad(true);
+    syncGoLiveBtn();
+  }
+  function setChartLegendSymbol(inst, tf) {
+    const el = $("signal-legend-sym");
+    if (!el) return;
+    const tfl = tf === "H1" ? "H1" : (tf || lastChartTf || "M5");
+    el.textContent = (inst || lastDeskInstrument || "—") + " · " + tfl;
+  }
+  function paintChartOhlc() {
+    if (chartTools && typeof chartTools.paintOhlc === "function") chartTools.paintOhlc();
+    syncGoLiveBtn();
   }
   function applyRightPad(scrollLive) {
     if (!chart) return;
@@ -2564,6 +2646,41 @@
     rightPadOn = !rightPadOn;
     applyRightPad(true);
   }
+  function ensureChartHud() {
+    const main = document.querySelector(".signal-chart-main");
+    const host = $("signal-chart");
+    if (!main || !host) return;
+    if (!$("signal-chart-legend")) {
+      const legend = document.createElement("div");
+      legend.id = "signal-chart-legend";
+      legend.className = "signal-chart-legend";
+      legend.innerHTML = '<span class="signal-legend-sym" id="signal-legend-sym">—</span>'
+        + '<span class="signal-legend-ohlc" id="signal-legend-ohlc"></span>';
+      main.insertBefore(legend, host);
+    }
+    if (!$("signal-chart-live")) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.id = "signal-chart-live";
+      b.className = "signal-chart-live-btn";
+      b.hidden = true;
+      b.title = "К последней свече (End)";
+      b.setAttribute("aria-label", "К последней свече");
+      b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h11M12 6l8 6-8 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      host.appendChild(b);
+    }
+    if (!$("signal-chart-price-lock")) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.id = "signal-chart-price-lock";
+      b.className = "signal-chart-lock-btn";
+      b.hidden = true;
+      b.title = "Цена закреплена — двойной клик по графику вернёт автомасштаб";
+      b.setAttribute("aria-label", "Сбросить масштаб цены");
+      b.textContent = "🔒";
+      host.appendChild(b);
+    }
+  }
   function deskPointSize(secid, fromApi) {
     if (fromApi > 0) return fromApi;
     if (window.TrinityChartKit && typeof TrinityChartKit.pointSizeFor === "function") {
@@ -2574,6 +2691,7 @@
   function ensureChart(secid, pointSize) {
     const el = $("signal-chart");
     if (!el) return;
+    ensureChartHud();
     if (chart) {
       if (chartTools && typeof chartTools.setPointSize === "function") {
         chartTools.setPointSize(deskPointSize(secid, pointSize));
@@ -2622,8 +2740,8 @@
         lockVisibleTimeRangeOnResize: true,
         shiftVisibleRangeOnNewBar: true
       },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
-      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+      handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: true }
     });
     syncPadButtons();
     candleSeries = chart.addCandlestickSeries({
@@ -2635,6 +2753,7 @@
       fitPriceToVisibleCandles();
       layoutMarketOverlays();
       syncMacdTimeScale();
+      syncGoLiveBtn();
       if (!followLive) {
         userPinned = true;
         return;
@@ -2672,7 +2791,8 @@
         },
         onChange: scheduleSaveDeskLayout,
         onScaleLayout: layoutMarketOverlays,
-        freezePrice: false
+        freezePrice: false,
+        legendEl: $("signal-chart-legend")
       });
       loadDeskLayoutOnce();
     }
@@ -2707,6 +2827,37 @@
     ensureProfileOverlay();
     ensureFootprintOverlay();
     bindUserScaleCapture(el);
+    if (window.TrinityChartKit && typeof TrinityChartKit.bindTradingViewNav === "function" && !chartNav) {
+      chartNav = TrinityChartKit.bindTradingViewNav({
+        chart: chart,
+        series: candleSeries,
+        hostEl: el,
+        goLiveBtn: $("signal-chart-live"),
+        lockBtn: $("signal-chart-price-lock"),
+        barSec: lastChartTf === "H1" ? 3600 : 300,
+        isDrawing: function () {
+          return !!(fpToolActive || (chartTools && chartTools.getMode()));
+        },
+        atRightEdge: atRightEdge,
+        getPointSize: function () { return deskPointSize(lastDeskInstrument); },
+        onTimeGesture: function () {
+          scheduleRememberUserScale();
+          layoutMarketOverlays();
+        },
+        onPriceLock: function (locked) {
+          if (locked) freezePriceScale();
+          else {
+            unlockPriceScale();
+            fitPriceToVisibleCandles();
+          }
+        },
+        onGoLive: goLive,
+        onMeasureMode: function (on) {
+          setToolPressed("tool-measure", !!on);
+        }
+      });
+      bindChartSlavePanes();
+    }
     if (!scaleLocked) adoptSavedScale(secid);
   }
   function formatChartTimeMsk(t) {
@@ -2863,6 +3014,7 @@
         else fitPriceToVisibleCandles();
         layoutMarketOverlays();
         syncMacdTimeScale();
+        paintChartOhlc();
       });
       return;
     }
@@ -2890,6 +3042,7 @@
         else fitPriceToVisibleCandles();
         layoutMarketOverlays();
         syncMacdTimeScale();
+        paintChartOhlc();
       });
       return;
     }
@@ -2923,6 +3076,7 @@
       fitPriceToVisibleCandles();
       layoutMarketOverlays();
       syncMacdTimeScale();
+      paintChartOhlc();
     });
   }
   function livePxFromBook(book) {
@@ -3287,6 +3441,7 @@
         }
       }
       lastChartTf = chartTf;
+      setChartLegendSymbol(chartInst, chartTf);
       if (chartLabel) {
         chartLabel.textContent = "График · " + chartInst + " " + (chartTf === "H1" ? "час" : chartTf)
           + (chartSource ? (" · " + h1SourceRu(chartSource)) : "");
@@ -3433,6 +3588,8 @@
       applyRightPad(true);
     }
     loadDesk(true);
+    syncGoLiveBtn();
+    syncPriceLockBtn();
   });
   const padBtn = $("signal-desk-pad");
   if (padBtn) padBtn.addEventListener("click", toggleRightPad);
@@ -3450,6 +3607,7 @@
           applyRightPad(true);
         }
       }
+      syncGoLiveBtn();
     });
   }
   const volToggle = $("signal-desk-volume");
@@ -3489,10 +3647,21 @@
     });
   }
   document.addEventListener("keydown", function (ev) {
+    const tag = (ev.target && ev.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (ev.key === "End" && chart) {
+      ev.preventDefault();
+      goLive();
+      return;
+    }
     if (ev.key === "Escape") {
       const gate = $("signal-guide-modal");
       if (gate && !gate.hidden) {
         closeStrategyGuide();
+        return;
+      }
+      if (chartNav && typeof chartNav.getMeasureMode === "function" && chartNav.getMeasureMode()) {
+        setMeasureTool(false);
         return;
       }
       if (chartTools && chartTools.getMode()) {
@@ -4038,6 +4207,7 @@
     const mode = chartTools ? chartTools.getMode() : null;
     setToolPressed("tool-vap-stretch", mode === "vap");
     setToolPressed("tool-trendline", mode === "trend");
+    setToolPressed("tool-measure", !!(chartNav && chartNav.getMeasureMode && chartNav.getMeasureMode()));
   }
 
 
@@ -4047,6 +4217,7 @@
       if (!chartTools) return;
       const on = chartTools.getMode() !== "vap";
       if (on && fpToolActive) toggleFpTool();
+      if (on) setMeasureTool(false);
       chartTools.setMode(on ? "vap" : null);
       syncDrawToolButtons();
     });
@@ -4057,8 +4228,16 @@
       if (!chartTools) return;
       const on = chartTools.getMode() !== "trend";
       if (on && fpToolActive) toggleFpTool();
+      if (on) setMeasureTool(false);
       chartTools.setMode(on ? "trend" : null);
       syncDrawToolButtons();
+    });
+  }
+  const toolMeasure = $("tool-measure");
+  if (toolMeasure) {
+    toolMeasure.addEventListener("click", function () {
+      const on = !(chartNav && chartNav.getMeasureMode && chartNav.getMeasureMode());
+      setMeasureTool(on);
     });
   }
   const toolMa = $("tool-ma");
@@ -4106,6 +4285,7 @@
       adoptSavedScale(inst);
     }
     lastChartTf = row.tf || "M5";
+    setChartLegendSymbol(inst, lastChartTf);
     if (row.raw && row.raw.length) lastBarsRaw = row.raw;
     lastCandlesLen = 0;
     lastCandleTime = null;

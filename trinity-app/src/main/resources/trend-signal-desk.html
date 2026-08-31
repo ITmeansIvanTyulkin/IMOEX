@@ -99,6 +99,11 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l7-7 4 4 7-8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
             <span class="signal-tool-tip">Линия тренда</span>
           </button>
+          <button type="button" class="signal-tool" id="tool-measure" aria-pressed="false"
+                  data-tip="Линейка: клик — старт, тяните или второй клик — финиш. Shift+тяни без кнопки. Esc — сброс. Показывает свечи, пункты, %.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20L20 4M7.5 16.5l1.2 1.2M10.5 13.5l1.2 1.2M13.5 10.5l1.2 1.2M16.5 7.5l1.2 1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span class="signal-tool-tip">Линейка</span>
+          </button>
           <button type="button" class="signal-tool" id="tool-ma" aria-pressed="false"
                   data-tip="Скользящая средняя — SMA/EMA и период (сохраняется в раскладке).">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16c4-8 6-2 9-6s5 2 9 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>
@@ -111,9 +116,21 @@
           </a>
         </aside>
         <div class="signal-chart-main">
+          <div class="signal-chart-legend" id="signal-chart-legend">
+            <span class="signal-legend-sym" id="signal-legend-sym">—</span>
+            <span class="signal-legend-ohlc" id="signal-legend-ohlc"></span>
+          </div>
           <button type="button" class="signal-chart-pad-btn is-on" id="signal-chart-pad"
                   title="Автоотступ справа (белое пространство у текущей свечи)"
                   aria-pressed="true" aria-label="Автоотступ">⇆</button>
+          <button type="button" class="signal-chart-lock-btn" id="signal-chart-price-lock" hidden
+                  title="Цена закреплена — двойной клик по графику вернёт автомасштаб"
+                  aria-pressed="false" aria-label="Сбросить масштаб цены">🔒</button>
+          <button type="button" class="signal-chart-live-btn" id="signal-chart-live" hidden
+                  title="К последней свече (End)"
+                  aria-label="К последней свече">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h11M12 6l8 6-8 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
           <div id="signal-chart" class="chart signal-chart"></div>
           <div id="signal-macd-wrap" class="signal-macd-wrap" hidden>
             <div id="signal-macd" class="chart signal-macd"></div>
@@ -124,7 +141,8 @@
         </div>
       </div>
       <p class="meta" id="signal-chart-hint">
-        M5 · Footprint / MACD / VAP / натянуть профиль / тренд / MA ·
+        M5 · колесо — зум под курсором (и на MACD/объёме) · Shift+колесо — сдвиг · линейка в тулбаре или Shift+тяни · двойной клик — авто-цена ·
+        Footprint / MACD / VAP / тренд / MA ·
         <a href="/view/trend-charts">терминал графиков</a> ·
         <span class="lg-hi">HI/LO</span> ·
         <span class="lg-zone">TOP/BOT</span> · ENTRY/SL/TP
@@ -385,5 +403,5 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-chart-kit.js?v=20260831-layout1"></script>
-<script src="/js/trend-signal-desk.js?v=20260831-expiry1"></script>
+<script src="/js/trinity-chart-kit.js?v=20260831-tvnav4"></script>
+<script src="/js/trend-signal-desk.js?v=20260831-tvnav3"></script>
