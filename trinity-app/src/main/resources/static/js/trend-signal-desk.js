@@ -21,6 +21,9 @@
   let scaleRememberTimer = null;
   let userScaleGesture = false;
   const SCALE_STORE = "trinity.trend.desk.scale";
+  const INST_STORE = "trinity.trend.desk.instrument";
+  const PB_STORE = "trinity.trend.desk.playbook";
+  let deskInstrumentPinned = null;
   let rightPadOn = true;
   let showVolume = false;
   let showProfile = true;
@@ -45,6 +48,7 @@
   let macdSynced = false;
   let lastDivMarkers = [];
   let lastSignalMarkers = [];
+  let lastTimelineMarkers = [];
   let lastDivMarkersKey = "";
   let lastDeskInstrument = "";
   let chartTools = null;
@@ -52,7 +56,7 @@
   let deskLayoutTimer = null;
   let domFollowMid = true;
   let domScrollBound = false;
-  const DESK_MS = 20000;
+  const DESK_MS = 12000;
   const BOOK_MS = 8000;
   const FP_PIN_MAX = 8;
   const MACD_FAST = 12;
@@ -172,6 +176,72 @@
       return false;
     }
   }
+  function readStoredInstrument() {
+    try { return (localStorage.getItem(INST_STORE) || "").trim(); } catch (_) { return ""; }
+  }
+  function writeStoredInstrument(v) {
+    try {
+      if (v) localStorage.setItem(INST_STORE, String(v).trim());
+    } catch (_) {}
+  }
+  function readStoredPlaybook() {
+    try { return (localStorage.getItem(PB_STORE) || "").trim(); } catch (_) { return ""; }
+  }
+  function writeStoredPlaybook(v) {
+    try {
+      if (v) localStorage.setItem(PB_STORE, String(v).trim());
+    } catch (_) {}
+  }
+  function matchInstrumentOption(sel, secid) {
+    if (!sel || !secid) return false;
+    for (let i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === secid) {
+        sel.value = secid;
+        return true;
+      }
+    }
+    const fam = String(secid).slice(0, 2).toUpperCase();
+    for (let i = 0; i < sel.options.length; i++) {
+      const v = String(sel.options[i].value || "").toUpperCase();
+      if (v.indexOf(fam) === 0) {
+        sel.value = sel.options[i].value;
+        return true;
+      }
+    }
+    return false;
+  }
+  function applyBootInstrumentFromStorage() {
+    const instSel = $("sig-instrument");
+    if (!instSel || instSel.options.length === 0) return;
+    const fromLayout = deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.instrument;
+    const pick = deskInstrumentPinned || fromLayout || readStoredInstrument();
+    if (pick && matchInstrumentOption(instSel, pick)) {
+      deskInstrumentPinned = instSel.value;
+    }
+    const pbSel = $("sig-playbook");
+    const pbPick = (deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.playbookId)
+      || readStoredPlaybook();
+    if (pbSel && pbPick && pbSel.options.length) {
+      for (let i = 0; i < pbSel.options.length; i++) {
+        if (pbSel.options[i].value === pbPick) {
+          pbSel.value = pbPick;
+          break;
+        }
+      }
+    }
+  }
+  function applyUrlInstrumentOnce() {
+    try {
+      const inst = (new URLSearchParams(location.search).get("instrument") || "").trim();
+      if (!inst) return;
+      const instSel = $("sig-instrument");
+      if (instSel && matchInstrumentOption(instSel, inst)) {
+        deskInstrumentPinned = instSel.value;
+        writeStoredInstrument(instSel.value);
+        scheduleSaveDeskLayout();
+      }
+    } catch (_) {}
+  }
   function fmtPot(v) {
     if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
     return "~" + (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ru-RU") + " ₽";
@@ -191,9 +261,9 @@
     const rb = sit.robotBar ? shortTime(sit.robotBar) : "";
     const cb = sit.chartBar ? shortTime(sit.chartBar) : "";
     if (rb && cb && rb !== cb) {
-      return " · робот " + rb + " · график " + cb + " · SL по закрытию бара";
+      return " · робот " + rb + " · график " + cb + " · SL по ходу бара";
     }
-    if (rb) return " · робот " + rb + " · SL по закрытию бара";
+    if (rb) return " · робот " + rb + " · SL по ходу бара";
     if (sit.fillModeRu) return " · " + sit.fillModeRu;
     return "";
   }
@@ -203,7 +273,9 @@
     if (!lc || !lc.exitReason) return "";
     const t = shortTime(lc.closedAt);
     const pnl = typeof lc.pnlRub === "number" ? (" " + fmtPnl(lc.pnlRub)) : "";
-    return "Последняя: " + lc.exitReason + pnl + (t && t !== "—" ? (" в " + t) : "");
+    return "Последняя: " + lc.exitReason
+      + (lc.slKind === "SWEEP" ? " sweep" : "")
+      + pnl + (t && t !== "—" ? (" в " + t) : "");
   }
   function renderPaper(paper, desk) {
     const st = (paper && paper.statement) || {};
@@ -360,6 +432,18 @@
     html += "</div>";
     return html;
   }
+  function contractExpiryBriefHtml(sit, esc) {
+    const ex = sit && sit.contractExpiry;
+    if (!ex || !ex.headline) return "";
+    const cls = ex.isToday ? "signal-brief-expiry signal-brief-expiry--today" : "signal-brief-expiry";
+    let html = "<p class='" + cls + "'><strong>" + esc(ex.headline) + "</strong>";
+    if (ex.detail) html += " — " + esc(ex.detail);
+    html += "</p>";
+    return html;
+  }
+  function isDeskEventUpcoming(e) {
+    return e && (e.status === "UPCOMING" || e.status === "TODAY");
+  }
   function buildPositionalBrief(data) {
     const esc = escHtml;
     const bars = deskBars(data);
@@ -459,7 +543,7 @@
         : ((sit.autoExecution || data.autoExecution) ? "песочница (бумага на H1)" : "только сигнал"))
       + ".</p>";
     html += "<p>" + esc(reason || "Робот включён и смотрит час. По чеклисту входа сейчас нет.") + "</p>";
-    html += "<p class='signal-brief-note'>" + esc(sit.fillModeRu || "Стоп и тейк — по закрытию часового бара, не по тику.") + "</p>";
+    html += "<p class='signal-brief-note'>" + esc(sit.fillModeRu || "Стоп и тейк — по ходу бара, как у брокера.") + "</p>";
     if (grid && grid.totalQty) {
       html += "<p class='signal-brief-note'>Сетка усреднения 1:1:2:4, всего " + grid.totalQty + " лот."
         + (grid.avg != null ? (" Средняя " + fmtPx(grid.avg) + ".") : "")
@@ -486,7 +570,8 @@
     }
 
     html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Новости и сессия</p>";
-    const upcoming = events.filter(function (e) { return e.status === "UPCOMING"; }).slice(0, 3);
+    html += contractExpiryBriefHtml(sit, esc);
+    const upcoming = events.filter(isDeskEventUpcoming).slice(0, 3);
     if (upcoming.length) {
       html += "<p>Скоро: " + upcoming.map(function (e) {
         return "<strong>" + esc(e.title) + "</strong> " + esc(e.date || "") + " " + esc(e.time || "");
@@ -589,6 +674,11 @@
 
     // ——— 1. Рынок сейчас ———
     const marketItems = [];
+    if (sit.contractExpiry && sit.contractExpiry.headline) {
+      marketItems.push("<strong class='signal-brief-expiry-inline'>"
+        + esc(sit.contractExpiry.headline) + "</strong>"
+        + (sit.contractExpiry.detail ? (" — " + esc(sit.contractExpiry.detail)) : ""));
+    }
     let priceLine = esc(instrumentTitle(data)) + " <strong>" + (close != null ? fmtPx(close) : "—") + "</strong>";
     const topRel = relZone(st.zoneTop, close, "TOP");
     const botRel = relZone(st.zoneBottom, close, "BOT");
@@ -601,6 +691,17 @@
     const impulse = sit.impulse || {};
     if (impulse.active && impulse.headline) {
       marketItems.push("<strong>" + esc(impulse.headline) + "</strong> — " + esc(impulse.body || ""));
+    }
+
+    const gap = sit.gapFill || {};
+    if (gap.present) {
+      const gapTitle = gap.title || (gap.filled ? "Ночной гэп — закрыт" : "Ночной (утренний) гэп");
+      const gapNote = gap.note || "";
+      if (gapNote) {
+        marketItems.push("<strong>" + esc(gapTitle) + "</strong>. " + esc(gapNote));
+      } else {
+        marketItems.push("<strong>" + esc(gapTitle) + "</strong>.");
+      }
     }
 
     if (sit.dayMovePoints != null) {
@@ -859,7 +960,8 @@
 
     // ——— 3. Новости / календарь ———
     let newsHtml = "<p class='signal-brief-kicker signal-brief-kicker--gold'>Новости и события</p>";
-    const upcoming = events.filter(function (e) { return e.status === "UPCOMING"; }).slice(0, 3);
+    newsHtml += contractExpiryBriefHtml(sit, esc);
+    const upcoming = events.filter(isDeskEventUpcoming).slice(0, 3);
     const recent = events.filter(function (e) { return e.status === "PAST"; }).slice(0, 2);
 
     if (!events.length) {
@@ -1004,6 +1106,18 @@
     const s = deMark(raw || "");
     if (!s) return "";
     const u = s.toUpperCase();
+    if (u.indexOf("GAP-FILL") >= 0 || u.indexOf("GAP FILL") >= 0 || u.indexOf("НОЧН") >= 0 && u.indexOf("ГЭП") >= 0) {
+      if (u.indexOf("AGAINST") >= 0 || u.indexOf("NO BUY") >= 0 || u.indexOf("NO SELL") >= 0
+          || u.indexOf("ПРОТИВ ЗАПОЛН") >= 0) {
+        return "Открыт ночной (утренний) гэп: сделку против его закрытия сейчас не берём. "
+          + "Ждём касание вчерашнего закрытия или сценарий §8 после пробоя и удержания.";
+      }
+      if (u.indexOf("HTF") >= 0 || u.indexOf("ПРОПУЩЕН") >= 0 || u.indexOf("SKIP") >= 0) {
+        return "Ночной гэп ещё открыт, но час смотрит не в сторону закрытия — "
+          + "отдельную сделку «на закрытие гэпа» пропускаем. Полки и §8 живут по своим правилам.";
+      }
+      return "Сработал фильтр ночного гэпа — смотри блок «Ночной гэп» в разделе «Рынок сейчас».";
+    }
     if (u.indexOf("LATE H1") >= 0 || u.indexOf("OVERNIGHT GAP") >= 0 || u.indexOf("NO NEW ENTRY") >= 0) {
       return "После 16:00 новый вход не ставим — чтобы не ловить гэп на ночь. Если пирамида уже открыта, добор по часовым барам идёт дальше. Свежий вход — завтра до 16:00.";
     }
@@ -1703,10 +1817,128 @@
     }
     return markers.slice(-12);
   }
+  function timelineMarkersFromDesk(data) {
+    const raw = (data && data.chartMarkers) || [];
+    const out = [];
+    for (let i = 0; i < raw.length; i++) {
+      const m = raw[i];
+      if (!m) continue;
+      const t = toChartTime(m.time);
+      if (t == null) continue;
+      out.push({
+        time: t,
+        position: m.position || "belowBar",
+        color: m.color || "#6366f1",
+        shape: m.shape || "circle",
+        text: m.text || m.kind || "•",
+        _kind: m.kind || "",
+        _title: m.title || "",
+        _detail: m.detail || ""
+      });
+    }
+    out.sort(function (a, b) { return a.time - b.time; });
+    return out.slice(-48);
+  }
+  function ensureTimelineOverlay() {
+    const host = document.querySelector(".signal-chart-main") || $("signal-chart");
+    if (!host) return null;
+    let ov = $("signal-timeline-rail");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "signal-timeline-rail";
+      ov.className = "signal-timeline-rail";
+      ov.setAttribute("aria-hidden", "true");
+      host.appendChild(ov);
+    }
+    return ov;
+  }
+  function layoutTimelineMarkers() {
+    const ov = ensureTimelineOverlay();
+    if (!ov || !chart) return;
+    ov.innerHTML = "";
+    const chartEl = $("signal-chart");
+    const chartW = chartEl ? chartEl.clientWidth : 0;
+    const ts = chart.timeScale();
+    const items = lastTimelineMarkers || [];
+    if (!items.length) {
+      ov.hidden = true;
+      return;
+    }
+    ov.hidden = false;
+    items.forEach(function (m) {
+      if (!m || m.time == null) return;
+      let x = null;
+      try { x = ts.timeToCoordinate(m.time); } catch (_) {}
+      if (x == null) {
+        const t = nearestBarTime(m.time);
+        if (t != null) {
+          try { x = ts.timeToCoordinate(t); } catch (_) {}
+        }
+      }
+      if (x == null || x < -16 || x > chartW + 16) return;
+      const chip = document.createElement("div");
+      chip.className = "signal-timeline-chip";
+      chip.style.left = Math.round(x) + "px";
+      const title = m._title || m.text || m._kind || "";
+      const detail = m._detail || "";
+      chip.title = detail ? (title + "\n" + detail) : title;
+      const dot = document.createElement("span");
+      dot.className = "signal-timeline-dot";
+      dot.style.background = m.color || "#6366f1";
+      const letter = document.createElement("span");
+      letter.className = "signal-timeline-letter";
+      letter.textContent = (m.text || m._kind || "•").slice(0, 3);
+      dot.appendChild(letter);
+      chip.appendChild(dot);
+      ov.appendChild(chip);
+    });
+  }
+  function lwMarker(m) {
+    if (!m || m.time == null) return null;
+    const t = nearestBarTime(m.time);
+    if (t == null) return null;
+    return {
+      time: t,
+      position: m.position || "belowBar",
+      color: m.color || "#6366f1",
+      shape: m.shape || "circle",
+      text: m.text || ""
+    };
+  }
+  function mergeChartMarkers(groups) {
+    // LW 3.x: one marker per bar time — timeline beats MACD div beats live signal.
+    const byTime = {};
+    const rank = { signal: 1, div: 2, timeline: 3 };
+    groups.forEach(function (g) {
+      const r = rank[g.kind] || 0;
+      (g.items || []).forEach(function (raw) {
+        const m = lwMarker(raw);
+        if (!m) return;
+        const prev = byTime[m.time];
+        if (!prev || r >= prev._rank) {
+          m._rank = r;
+          byTime[m.time] = m;
+        }
+      });
+    });
+    return Object.keys(byTime).sort(function (a, b) { return Number(a) - Number(b); })
+      .map(function (k) {
+        const m = byTime[k];
+        return { time: m.time, position: m.position, color: m.color, shape: m.shape, text: m.text };
+      })
+      .slice(-64);
+  }
   function applyCombinedMarkers() {
     if (!candleSeries) return;
-    const all = (lastSignalMarkers || []).concat(showMacd ? (lastDivMarkers || []) : []);
-    try { candleSeries.setMarkers(all); } catch (_) {}
+    // Timeline (roll/gap/calendar) → top-edge overlay; candles keep signal + MACD div only.
+    const all = mergeChartMarkers([
+      { kind: "signal", items: lastSignalMarkers || [] },
+      { kind: "div", items: showMacd ? (lastDivMarkers || []) : [] }
+    ]);
+    try { candleSeries.setMarkers(all); } catch (err) {
+      if (typeof console !== "undefined") console.warn("setMarkers", err);
+    }
+    layoutTimelineMarkers();
   }
   let macdRangeSyncing = false;
                   function syncMacdTimeScale() {
@@ -1931,6 +2163,7 @@
   function layoutMarketOverlaysNow() {
     layoutZoneBands();
     layoutProfile(lastProfile);
+    layoutTimelineMarkers();
     if (chartTools) {
       chartTools.layoutStretchedVap();
       if (typeof chartTools.layoutTrendLines === "function") chartTools.layoutTrendLines();
@@ -2600,6 +2833,7 @@
       applyTimeSnap(snap);
       if (priceScaleLocked) freezePriceScale();
       applyingScale = false;
+      applyCombinedMarkers();
     });
   }
   /**
@@ -3124,6 +3358,7 @@
       lastOverlaySig = sig;
       lastOverlayCandles = candles;
       lastDeskSnapshot = data;
+      lastTimelineMarkers = timelineMarkersFromDesk(data);
       if (candles.length) {
         updateCandles(candles, !!forceFit, true);
         const planForOv = (!overlayOpen && liveFlatUntil > Date.now())
@@ -3144,6 +3379,8 @@
       indexFootprints(lastFootprint);
       updateVolume(lastBarsRaw);
       updateMacd(lastBarsRaw);
+      // setData on desk poll clears LW markers unless we re-apply every refresh.
+      applyCombinedMarkers();
       layoutMarketOverlays();
       if (candles.length && window.TrinityChartKit && typeof TrinityChartKit.barCachePut === "function") {
         // Cache server OHLC only (no live mid stretch) so IndexedDB cannot re-poison wicks.
@@ -3644,7 +3881,9 @@
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
       if (activePb) pbSel.value = activePb;
-      if (activeInst) {
+      if (deskInstrumentPinned && matchInstrumentOption(instSel, deskInstrumentPinned)) {
+        /* keep user's instrument across reload / server roll */
+      } else if (activeInst) {
         let matched = false;
         for (let i = 0; i < instSel.options.length; i++) {
           if (instSel.options[i].value === activeInst) {
@@ -3685,6 +3924,9 @@
       instSel.addEventListener("change", function () {
         lastDeskInstrument = "";
         lastOverlayKey = "";
+        deskInstrumentPinned = instSel.value;
+        writeStoredInstrument(instSel.value);
+        scheduleSaveDeskLayout();
         const persist = saveDeskSelection({ instrumentId: instSel.value }, { quiet: true });
         Promise.resolve(persist).finally(function () {
           loadDesk(true);
@@ -3701,8 +3943,14 @@
     deskSaveInFlight = true;
     try {
       if (!hasDeskWriteAuth()) {
+        if (patch.instrumentId) {
+          deskInstrumentPinned = patch.instrumentId;
+          writeStoredInstrument(patch.instrumentId);
+        }
+        if (patch.playbookId) writeStoredPlaybook(patch.playbookId);
+        scheduleSaveDeskLayout();
         if (!quiet) {
-          console.warn("saveDeskSelection skipped — нет сессии; desk всё равно покажет выбранный инструмент");
+          console.warn("saveDeskSelection: нет сессии — сохранено локально (instrument/playbook)");
         }
         return false;
       }
@@ -3747,12 +3995,14 @@
     deskLayoutTimer = setTimeout(persistDeskLayout, 500);
   }
   async function loadDeskLayoutOnce() {
-    if (!window.TrinityChartKit || !chartTools) return;
+    if (!window.TrinityChartKit) return;
     try {
       deskLayoutDoc = await TrinityChartKit.loadLayouts();
-      const st = (deskLayoutDoc.desk || {}).tools || null;
-      if (st) chartTools.setState(st);
-      const sc = (deskLayoutDoc.desk || {}).scale;
+      const desk = deskLayoutDoc.desk || {};
+      if (desk.instrument) deskInstrumentPinned = desk.instrument;
+      const st = desk.tools || null;
+      if (chartTools && st) chartTools.setState(st);
+      const sc = desk.scale;
       if (!scaleLocked && lastCandleTime == null && sc && sc.barSpacing > 0
           && (!sc.instrument || sc.instrument === lastDeskInstrument)) {
         scaleLocked = true;
@@ -3836,7 +4086,7 @@
     if (deskScope() === "positional") return false;
     if (!window.TrinityChartKit || typeof TrinityChartKit.barCacheGet !== "function") return false;
     const instSel = $("sig-instrument");
-    const want = instSel && instSel.value ? instSel.value : "";
+    const want = (instSel && instSel.value) || deskInstrumentPinned || readStoredInstrument() || "";
     const row = await TrinityChartKit.barCacheGet(want || "_last", "M5");
     if (!row || !row.bars || !row.bars.length) return false;
     const inst = row.instrument || want || "BR";
@@ -3893,21 +4143,36 @@
     } catch (_) {}
   }
 
-  applyDeskChrome();
-  paintCachedChart().then(function (hadCache) {
-    applyUrlPlaybookOnce().finally(function () {
-      loadDesk(!hadCache);
-    });
-  });
-  loadBook();
-  (function pollDeskLoop() {
-    setTimeout(function () {
-      loadDesk(false).finally(pollDeskLoop);
-    }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? DESK_LIVE_MS : DESK_MS);
-  })();
-  (function pollBookLoop() {
-    setTimeout(function () {
-      Promise.resolve(loadBook()).finally(pollBookLoop);
-    }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? BOOK_LIVE_MS : BOOK_MS);
-  })();
+  async function bootDesk() {
+    applyDeskChrome();
+    try {
+      if (window.TrinityChartKit) {
+        await loadDeskLayoutOnce();
+      }
+    } catch (_) {}
+    if (!deskInstrumentPinned) {
+      const ls = readStoredInstrument();
+      if (ls) deskInstrumentPinned = ls;
+    }
+    applyUrlInstrumentOnce();
+    const hadCache = await paintCachedChart();
+    try {
+      await applyUrlPlaybookOnce();
+    } catch (_) {}
+    applyBootInstrumentFromStorage();
+    await loadDesk(!hadCache);
+    loadBook();
+    (function pollDeskLoop() {
+      setTimeout(function () {
+        loadDesk(false).finally(pollDeskLoop);
+      }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? DESK_LIVE_MS : DESK_MS);
+    })();
+    (function pollBookLoop() {
+      setTimeout(function () {
+        Promise.resolve(loadBook()).finally(pollBookLoop);
+      }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? BOOK_LIVE_MS : BOOK_MS);
+    })();
+  }
+
+  bootDesk();
 })();

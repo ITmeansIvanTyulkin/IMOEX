@@ -77,6 +77,34 @@ public final class TradeTapeBuffer {
         }
     }
 
+    /** Last print for one instrument — O(n) scan, no buffer copy. */
+    public TradePrint last(String instrumentId) {
+        lock.readLock().lock();
+        try {
+            if (buf.isEmpty()) {
+                return null;
+            }
+            String u = instrumentId == null ? "" : instrumentId.trim().toUpperCase();
+            boolean brFamily = "BR".equals(u);
+            for (int i = buf.size() - 1; i >= 0; i--) {
+                TradePrint p = buf.get(i);
+                if (p == null) {
+                    continue;
+                }
+                if (u.isEmpty()) {
+                    return p;
+                }
+                String id = p.instrumentId() == null ? "" : p.instrumentId().toUpperCase();
+                if (id.equals(u) || (brFamily && id.startsWith("BR"))) {
+                    return p;
+                }
+            }
+            return null;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
     /**
      * Prints in {@code [from, to)} for one instrument — no full-buffer copy.
      */

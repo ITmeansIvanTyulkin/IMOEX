@@ -39,19 +39,36 @@
   }
 
   async function loadLayouts() {
-    const res = await fetch("/api/charts/layouts", { headers: authHeaders() });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return res.json();
+    try {
+      const res = await fetch("/api/charts/layouts", { headers: authHeaders() });
+      if (res.ok) {
+        const doc = await res.json();
+        try { localStorage.setItem("trinity.chart.layouts.local", JSON.stringify(doc)); } catch (_) {}
+        return doc;
+      }
+    } catch (_) {}
+    try {
+      const raw = localStorage.getItem("trinity.chart.layouts.local");
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    throw new Error("HTTP layout unavailable");
   }
 
   async function saveLayouts(doc) {
-    const res = await fetch("/api/charts/layouts", {
-      method: "PUT",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(doc || {})
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return res.json();
+    try { localStorage.setItem("trinity.chart.layouts.local", JSON.stringify(doc || {})); } catch (_) {}
+    try {
+      const res = await fetch("/api/charts/layouts", {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(doc || {})
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        try { localStorage.setItem("trinity.chart.layouts.local", JSON.stringify(saved)); } catch (_) {}
+        return saved;
+      }
+    } catch (_) {}
+    return doc || {};
   }
 
   /** FORTS quote step — RI/Si must never use BR's 0.01 (that freezes the tab). */

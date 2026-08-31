@@ -260,10 +260,15 @@ imoex:
     trend:
       enabled: true
       auto-execution: true    # fair-paper live → SANDBOX_FAIR append to trend-paper-journal
-      live-execution: false   # real T-Invest FORTS orders still deferred
-      # both = #1 levels BR M5 + #2 positional H1 параллельно (fair-paper lanes)
-      playbook: both
-      parallel-playbooks: true
+      live-execution: false   # paper only — боевой FORTS SL позже
+      # Max broker imitation on paper (FORMING_BAR + sim journal limits/PostStop; no live orders)
+      broker-sim-max: true
+      sandbox-broker-stop: true
+      sandbox-broker-stop-dry-run: true   # paper: не слать в sandbox (PostStop там всё равно нельзя)
+      sandbox-broker-stop-qty: 1
+      # Exclusive-only while positional H1 (hvnHills) OOMs the JVM; restore both after fix
+      playbook: levels-profile-br-m5
+      parallel-playbooks: false
       desk-go-long-rub: 20000
       desk-go-short-rub: 22000
       grid: MODERATE
@@ -318,6 +323,7 @@ imoex:
         stop-points: 20              # checklist BR=20 (15–20 table); pad only via explicit override
         tp1-points: 20
         rub-per-point: 7.0
+        sl-sweep-buffer-points: 5    # за day-полкой +5 пт против ложного SWEEP; иначе skip если > stop-points
     calendar-arb:
       enabled: true
       auto-execution: true          # fair-paper fills on T-Invest H1 close

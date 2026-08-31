@@ -4,6 +4,7 @@ import com.moex.cointegration.service.OperatorTradeToastService;
 import com.moex.cointegration.service.TrendDeskService;
 import com.moex.cointegration.service.TrendExecutionBridge;
 import com.moex.cointegration.service.TrendPaperJournalService;
+import com.moex.cointegration.service.TrendSandboxStopService;
 import com.moex.cointegration.service.TrendSettingsService;
 import com.moex.trinity.trend.LimitGridPlan;
 import com.moex.trinity.trend.MergedVolumeRange;
@@ -47,6 +48,7 @@ public class TrendRobotController {
     private final TrendDeskService deskService;
     private final TrendPaperJournalService paperJournal;
     private final com.moex.cointegration.ops.LiveExecutionGate liveGate;
+    private final TrendSandboxStopService sandboxStop;
 
     public TrendRobotController(
             TrendResearchService researchService,
@@ -56,7 +58,9 @@ public class TrendRobotController {
             OperatorTradeToastService tradeToasts,
             TrendDeskService deskService,
             TrendPaperJournalService paperJournal,
-            com.moex.cointegration.ops.LiveExecutionGate liveGate
+            com.moex.cointegration.ops.LiveExecutionGate liveGate,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            TrendSandboxStopService sandboxStop
     ) {
         this.researchService = researchService;
         this.engine = engine;
@@ -66,6 +70,7 @@ public class TrendRobotController {
         this.deskService = deskService;
         this.paperJournal = paperJournal;
         this.liveGate = liveGate;
+        this.sandboxStop = sandboxStop;
     }
 
     @GetMapping("/settings")
@@ -251,6 +256,59 @@ public class TrendRobotController {
     @GetMapping("/journal")
     public TrendExecutionBridge.JournalFile journal() {
         return bridge.journal();
+    }
+
+    /** Phase C′: статус sandbox-стопа (dry-run / песочница). */
+    @GetMapping("/sandbox-stop")
+    public Map<String, Object> sandboxStopStatus() {
+        if (sandboxStop == null) {
+            return Map.of("enabled", false, "error", "TrendSandboxStopService missing");
+        }
+        return sandboxStop.status();
+    }
+
+    /**
+     * Phase C′ probe: записать DRY_RUN или отправить PostStop в sandbox.
+     * Не трогает pad/knife. Боевой счёт не используется.
+     */
+    @PostMapping("/sandbox-stop/probe")
+    public ResponseEntity<?> sandboxStopProbe(@RequestBody(required = false) SandboxStopProbeBody body) {
+        if (sandboxStop == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "sandbox stop service missing"));
+        }
+        String ticker = body != null && body.ticker() != null ? body.ticker() : "BRU6";
+        boolean buy = body == null || body.buy() == null || body.buy();
+        double stop = body != null && body.stopLossPrice() != null ? body.stopLossPrice() : 88.0;
+        TrendSandboxStopService.Result r = sandboxStop.probe(ticker, buy, stop);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", r.ok());
+        out.put("dryRun", r.dryRun());
+        out.put("skipped", r.skipped());
+        out.put("message", r.message());
+        out.put("stopOrderId", r.stopOrderId());
+        out.put("figi", r.figi());
+        out.put("intent", r.intent() == null ? null : r.intent().toMap());
+        out.put("notes", r.notes());
+        out.put("status", sandboxStop.status());
+        return r.ok() ? ResponseEntity.ok(out) : ResponseEntity.badRequest().body(out);
+    }
+
+    @PostMapping("/sandbox-stop/cancel")
+    public ResponseEntity<?> sandboxStopCancel() {
+        if (sandboxStop == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "sandbox stop service missing"));
+        }
+        TrendSandboxStopService.Result r = sandboxStop.cancelLast();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", r.ok());
+        out.put("message", r.message());
+        out.put("stopOrderId", r.stopOrderId());
+        out.put("notes", r.notes());
+        out.put("status", sandboxStop.status());
+        return r.ok() ? ResponseEntity.ok(out) : ResponseEntity.badRequest().body(out);
+    }
+
+    public record SandboxStopProbeBody(String ticker, Boolean buy, Double stopLossPrice) {
     }
 
     /** Closed paper trades + statement (research PnL track-record). */

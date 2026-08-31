@@ -3411,6 +3411,50 @@ body[data-upsell="off"] .full-core-badge {
   z-index: 3;
   overflow: hidden;
 }
+/* TradingView-style event rail — bottom of chart, above time scale */
+.signal-timeline-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 28px;
+  pointer-events: none;
+  z-index: 20;
+  overflow: visible;
+}
+.signal-timeline-chip {
+  position: absolute;
+  bottom: 3px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: default;
+}
+.signal-timeline-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.signal-timeline-letter {
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+}
+.signal-timeline-chip:hover .signal-timeline-dot {
+  transform: scale(1.12);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.4);
+}
 .signal-profile-overlay {
   position: absolute;
   top: 0;
@@ -3548,6 +3592,14 @@ body[data-upsell="off"] .full-core-badge {
 }
 .signal-brief-kicker--gold {
   color: var(--gold, #c4a35a);
+}
+.signal-brief-expiry,
+.signal-brief-expiry-inline {
+  color: #d97706;
+}
+.signal-brief-expiry--today,
+.signal-brief-expiry-inline.signal-brief-expiry--today {
+  color: #dc2626;
 }
 .signal-brief-kicker--robot {
   color: var(--gold, #c4a35a);

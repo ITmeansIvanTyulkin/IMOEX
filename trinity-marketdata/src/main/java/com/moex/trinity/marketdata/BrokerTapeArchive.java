@@ -241,49 +241,75 @@ public final class BrokerTapeArchive {
             return List.of();
         }
         List<TradePrint> out = new ArrayList<>();
-        for (String line : readAllLines(file)) {
-            if (line == null || line.isBlank()) {
-                continue;
+        try (BufferedReader in = openLines(file)) {
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                var node = MAPPER.readTree(line);
+                String side = node.path("side").asText("UNKNOWN");
+                TradePrint.TradeSide ts = switch (side) {
+                    case "BUY" -> TradePrint.TradeSide.BUY;
+                    case "SELL" -> TradePrint.TradeSide.SELL;
+                    default -> TradePrint.TradeSide.UNKNOWN;
+                };
+                out.add(new TradePrint(
+                        instrumentId,
+                        node.path("price").asDouble(),
+                        node.path("qty").asLong(),
+                        Instant.parse(node.path("time").asText()),
+                        ts
+                ));
             }
-            var node = MAPPER.readTree(line);
-            String side = node.path("side").asText("UNKNOWN");
-            TradePrint.TradeSide ts = switch (side) {
-                case "BUY" -> TradePrint.TradeSide.BUY;
-                case "SELL" -> TradePrint.TradeSide.SELL;
-                default -> TradePrint.TradeSide.UNKNOWN;
-            };
-            out.add(new TradePrint(
-                    instrumentId,
-                    node.path("price").asDouble(),
-                    node.path("qty").asLong(),
-                    Instant.parse(node.path("time").asText()),
-                    ts
-            ));
         }
         return out;
     }
 
-    /** DOM snapshots for the day, sorted by time ascending. */
+    /**
+     * DOM snapshots for the day, sorted by time ascending.
+     * Subsamples to ≤1 book per minute while streaming the file — live days grow to
+     * tens of MB at 500ms cadence across many FIGIs; loading every snapshot OOMs the heap
+     * (calendar-arb OOS hist lookup). H1/replay only needs the latest book at bar clock.
+     */
     public List<DomBook> loadDomDay(String instrumentId, LocalDate day) throws Exception {
         Path file = existingReadable(domPathFor(instrumentId, day));
         if (file == null || !Files.isRegularFile(file)) {
             return List.of();
         }
         List<DomBook> out = new ArrayList<>();
-        for (String line : readAllLines(file)) {
-            if (line == null || line.isBlank()) {
-                continue;
+        long lastKeptEpochMin = Long.MIN_VALUE;
+        try (BufferedReader in = openLines(file)) {
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                JsonNode node = MAPPER.readTree(line);
+                Instant t = Instant.parse(node.path("time").asText());
+                long epochMin = t.getEpochSecond() / 60L;
+                if (epochMin == lastKeptEpochMin && !out.isEmpty()) {
+                    // Keep the latest snapshot inside the same minute bucket.
+                    out.set(out.size() - 1, new DomBook(
+                            instrumentId,
+                            node.path("depth").asInt(TInvestBrokerMarketData.MAX_ORDERBOOK_DEPTH),
+                            mapsToLevels(node.path("bids")),
+                            mapsToLevels(node.path("asks")),
+                            t,
+                            node.path("consistent").asBoolean(true)
+                    ));
+                    continue;
+                }
+                lastKeptEpochMin = epochMin;
+                out.add(new DomBook(
+                        instrumentId,
+                        node.path("depth").asInt(TInvestBrokerMarketData.MAX_ORDERBOOK_DEPTH),
+                        mapsToLevels(node.path("bids")),
+                        mapsToLevels(node.path("asks")),
+                        t,
+                        node.path("consistent").asBoolean(true)
+                ));
             }
-            JsonNode node = MAPPER.readTree(line);
-            Instant t = Instant.parse(node.path("time").asText());
-            out.add(new DomBook(
-                    instrumentId,
-                    node.path("depth").asInt(TInvestBrokerMarketData.MAX_ORDERBOOK_DEPTH),
-                    mapsToLevels(node.path("bids")),
-                    mapsToLevels(node.path("asks")),
-                    t,
-                    node.path("consistent").asBoolean(true)
-            ));
         }
         out.sort(Comparator.comparing(DomBook::asOf, Comparator.nullsLast(Comparator.naturalOrder())));
         return out;

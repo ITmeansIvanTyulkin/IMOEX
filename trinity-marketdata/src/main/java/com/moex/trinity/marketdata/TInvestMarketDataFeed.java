@@ -45,7 +45,7 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     private final Map<String, Long> lastDomArchiveMs = new ConcurrentHashMap<>();
 
     /** Min gap between persisted DOM snapshots (stream can be very chatty). */
-    private static final long DOM_ARCHIVE_MIN_MS = 500;
+    private static final long DOM_ARCHIVE_MIN_MS = 2_000;
     private static final long RECONNECT_MAX_DELAY_MS = 60_000L;
 
     private volatile InvestApi api;
@@ -391,19 +391,12 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
 
     @Override
     public List<TradePrint> recentTrades(String instrumentId) {
-        List<TradePrint> all = tape.snapshot();
-        if (instrumentId == null || instrumentId.isBlank()) {
-            return all;
-        }
-        String u = instrumentId.trim().toUpperCase();
-        List<TradePrint> filtered = new ArrayList<>();
-        for (TradePrint p : all) {
-            if (p.instrumentId() != null && (p.instrumentId().equalsIgnoreCase(u)
-                    || ("BR".equals(u) && p.instrumentId().toUpperCase().startsWith("BR")))) {
-                filtered.add(p);
-            }
-        }
-        return List.copyOf(filtered);
+        return tape.snapshotWindow(instrumentId, null, null);
+    }
+
+    @Override
+    public Optional<TradePrint> lastTrade(String instrumentId) {
+        return Optional.ofNullable(tape.last(instrumentId));
     }
 
     @Override

@@ -29,6 +29,15 @@ public interface MarketDataFeed {
         return List.of();
     }
 
+    /** Last tape print for the instrument, or empty. */
+    default Optional<TradePrint> lastTrade(String instrumentId) {
+        List<TradePrint> all = recentTrades(instrumentId);
+        if (all == null || all.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(all.get(all.size() - 1));
+    }
+
     /**
      * Tape prints in {@code [from, to)} for one instrument. Default filters {@link #recentTrades};
      * live feeds should override to avoid copying the whole buffer.

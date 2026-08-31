@@ -119,6 +119,14 @@ public class BrokerController {
         return pairExecutionService.payInSandbox(amountRub);
     }
 
+    /** Песочница не списывает — закрываем счета и открываем новый с целевым балансом. */
+    @PostMapping("/sandbox-reset-balance")
+    public BrokerSandboxPayInResult sandboxResetBalance(
+            @RequestParam(defaultValue = "200000") double amountRub
+    ) {
+        return pairExecutionService.resetSandboxToRub(amountRub);
+    }
+
     @PostMapping("/preview")
     public BrokerExecutionReport preview(
             @RequestParam String tickerY,
