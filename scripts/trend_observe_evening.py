@@ -79,11 +79,13 @@ def desk_snapshot():
     lc = sit.get("lastClose") or fp.get("latestClose") or paper.get("latestClose") or {}
     if not isinstance(lc, dict):
         lc = {}
+    fp_lane = sit.get("fairPaper") if isinstance(sit.get("fairPaper"), dict) else {}
+    open_ = fp_lane.get("open") or fp.get("open")
     return {
         "fillMode": fp.get("fillMode") or sit.get("fillMode"),
         "fillModeRu": fp.get("fillModeRu") or sit.get("fillModeRu"),
         "engineState": d.get("engineState") or sit.get("engineState"),
-        "blockReason": (d.get("blockReason") or "")[:240],
+        "blockReason": (d.get("blockReason") or sit.get("blockReason") or "")[:240],
         "inTrade": bool(sit.get("inTrade")),
         "liveExecution": sit.get("liveExecution"),
         "todayPnlRub": st.get("todayPnlRub"),
@@ -92,6 +94,8 @@ def desk_snapshot():
         "todayLosses": st.get("todayLosses"),
         "lastCloseSlKind": lc.get("slKind"),
         "lastCloseId": lc.get("id"),
+        "open": open_ if isinstance(open_, dict) else None,
+        "contractExpiry": sit.get("contractExpiry"),
     }
 
 
@@ -280,6 +284,34 @@ def main():
             "phaseA": "intraday/morning — seal only at ~18:02 EOD",
             "tune": "none — doNotTuneOnSight",
         }
+        for i, d in enumerate(log["days"]):
+            if d.get("date") == day:
+                log["days"][i] = entry
+                break
+    else:
+        # Evening seal for optional/extra days (expiry, day 5+) — not in observeDaysTarget.
+        gh = sum(gates["counts"].values())
+        phase = (
+            eod.get("phaseA")
+            or f"EOD · trades={len(trades)} pnl={pnl:.1f} gateHits={gh}"
+        )
+        eod_block = {
+            **eod,
+            "at": entry["checkedAt"],
+            "countAsFullObserveDay": False,
+            "phaseA": phase,
+            "pnlRub": round(pnl, 2),
+            "kinds": kinds,
+            "gateHits": gh,
+            "tune": "none — doNotTuneOnSight",
+        }
+        if desk.get("open"):
+            eod_block["overnight"] = desk["open"]
+        if desk.get("contractExpiry"):
+            ce = desk["contractExpiry"]
+            if isinstance(ce, dict) and ce.get("headline"):
+                eod_block["contractExpiry"] = ce.get("headline")
+        entry["eod"] = eod_block
         for i, d in enumerate(log["days"]):
             if d.get("date") == day:
                 log["days"][i] = entry
