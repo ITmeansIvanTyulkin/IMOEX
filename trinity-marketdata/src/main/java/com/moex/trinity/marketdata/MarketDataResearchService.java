@@ -1,10 +1,15 @@
 package com.moex.trinity.marketdata;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,16 +19,25 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class MarketDataResearchService {
 
+    private static final Logger log = LoggerFactory.getLogger(MarketDataResearchService.class);
     private static final ZoneId MSK = ZoneId.of("Europe/Moscow");
     /** When stream is down or book older than this, pull unary GetOrderBook from broker. */
     private static final long BOOK_STALE_MS = 20_000L;
     /** Min gap between unary book refreshes per instrument (desk + DOM poll). */
     private static final long BOOK_REST_MIN_GAP_MS = 5_000L;
+    /** Reuse resolved live front-month (desk polls the book every few seconds). */
+    private static final long LIVE_FRONT_MS = 60_000L;
+    private static final long ENSURE_MIN_GAP_MS = 30_000L;
 
     private final MarketDataFeed feed;
     private final BrokerTapeArchive archive;
-    private final String defaultInstrument;
+    private volatile String defaultInstrument;
     private final ConcurrentHashMap<String, Long> lastBookRestMs = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CachedFront> liveFrontCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> lastEnsureMs = new ConcurrentHashMap<>();
+
+    private record CachedFront(String ticker, long atMs) {
+    }
 
     public MarketDataResearchService(MarketDataFeed feed) {
         this(feed, new BrokerTapeArchive(Path.of("data", "broker-tape")), "BRU6");
@@ -32,7 +46,8 @@ public class MarketDataResearchService {
     public MarketDataResearchService(MarketDataFeed feed, BrokerTapeArchive archive, String defaultInstrument) {
         this.feed = feed;
         this.archive = archive == null ? new BrokerTapeArchive(Path.of("data", "broker-tape")) : archive;
-        this.defaultInstrument = defaultInstrument == null || defaultInstrument.isBlank() ? "BRU6" : defaultInstrument;
+        this.defaultInstrument = defaultInstrument == null || defaultInstrument.isBlank()
+                ? "BRU6" : defaultInstrument.trim().toUpperCase(Locale.ROOT);
     }
 
     public MarketDataFeed feed() {
@@ -47,6 +62,96 @@ public class MarketDataResearchService {
         return defaultInstrument;
     }
 
+    public void setDefaultInstrument(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            return;
+        }
+        this.defaultInstrument = instrumentId.trim().toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * Live FORTS month for this family (cached). Empty DOM on an expired front
+     * rolls to the next month that still has a book.
+     */
+    public String liveFrontTicker(String familyOrSecid) {
+        String hint = familyOrSecid == null || familyOrSecid.isBlank()
+                ? defaultInstrument : familyOrSecid.trim();
+        String fam = TInvestBrokerMarketData.familyOf(hint);
+        String cacheKey = (fam == null ? hint : fam).toUpperCase(Locale.ROOT);
+        long now = System.currentTimeMillis();
+        CachedFront hit = liveFrontCache.get(cacheKey);
+        if (hit != null && now - hit.atMs() < LIVE_FRONT_MS && hit.ticker() != null) {
+            return hit.ticker();
+        }
+        return ensureLiveFront(hint).orElse(hint);
+    }
+
+    /**
+     * Subscribe the stream to the liquid front-month and remember it as default
+     * when the family matches. Safe to call on a schedule after expiry.
+     */
+    public synchronized Optional<String> ensureLiveFront(String familyOrSecid) {
+        String hint = familyOrSecid == null || familyOrSecid.isBlank()
+                ? defaultInstrument : familyOrSecid.trim();
+        String fam = TInvestBrokerMarketData.familyOf(hint);
+        String cacheKey = (fam == null ? hint : fam).toUpperCase(Locale.ROOT);
+        long now = System.currentTimeMillis();
+        Long prevEnsure = lastEnsureMs.get(cacheKey);
+        CachedFront cached = liveFrontCache.get(cacheKey);
+        if (prevEnsure != null && now - prevEnsure < ENSURE_MIN_GAP_MS
+                && cached != null && cached.ticker() != null) {
+            return Optional.of(cached.ticker());
+        }
+        lastEnsureMs.put(cacheKey, now);
+
+        Optional<TInvestBrokerMarketData.FrontMonth> picked = Optional.empty();
+        TInvestCredentials creds = TInvestCredentials.resolve();
+        if (creds.present() && feed instanceof TInvestMarketDataFeed) {
+            try (TInvestBrokerMarketData md = new TInvestBrokerMarketData(creds)) {
+                List<TInvestBrokerMarketData.FrontMonth> months = md.listFrontMonths(hint);
+                picked = TInvestBrokerMarketData.pickLiveMonth(months, this::hasLiveDom);
+                if (picked.isPresent() && !hasLiveDom(picked.get().ticker()) && months.size() > 1) {
+                    TInvestBrokerMarketData.FrontMonth first = picked.get();
+                    Optional<DomBook> rest = refreshBookRest(first.ticker());
+                    if (rest.isEmpty() || isEmpty(rest.get())) {
+                        picked = Optional.of(months.get(1));
+                    }
+                }
+            } catch (Exception ex) {
+                log.debug("ensureLiveFront {}: {}", hint, ex.toString());
+            }
+        }
+        if (picked.isEmpty()) {
+            picked = sameFamilyLiveBook(hint)
+                    .map(b -> new TInvestBrokerMarketData.FrontMonth(b.instrumentId(), "", LocalDate.now(MSK)));
+        }
+        if (picked.isEmpty()) {
+            liveFrontCache.put(cacheKey, new CachedFront(hint.toUpperCase(Locale.ROOT), now));
+            return Optional.of(hint.toUpperCase(Locale.ROOT));
+        }
+
+        TInvestBrokerMarketData.FrontMonth live = picked.get();
+        String ticker = live.ticker().trim().toUpperCase(Locale.ROOT);
+        if (feed instanceof TInvestMarketDataFeed t && live.figi() != null && !live.figi().isBlank()) {
+            Map<String, String> extra = new LinkedHashMap<>();
+            extra.put(ticker, live.figi());
+            t.addInstruments(extra);
+        }
+        String defaultFam = TInvestBrokerMarketData.familyOf(defaultInstrument);
+        if (fam != null && fam.equalsIgnoreCase(defaultFam) && !ticker.equalsIgnoreCase(defaultInstrument)) {
+            log.info("DOM front-month {} → {} (family {})", defaultInstrument, ticker, fam);
+            setDefaultInstrument(ticker);
+        } else if (defaultFam == null || defaultFam.equalsIgnoreCase(fam)) {
+            setDefaultInstrument(ticker);
+        }
+        liveFrontCache.put(cacheKey, new CachedFront(ticker, now));
+        return Optional.of(ticker);
+    }
+
+    private boolean hasLiveDom(String ticker) {
+        return feed.latestBook(ticker).filter(b -> !isEmpty(b)).isPresent();
+    }
+
     public String statusMessage() {
         return feed.statusMessage();
     }
@@ -57,21 +162,34 @@ public class MarketDataResearchService {
 
     /**
      * Live book if streaming; unary REST refresh when stale; else archive tail.
+     * Empty snapshots (expired month) fall through to the same-family live book.
      */
     public Optional<DomBook> resolveBook(String instrumentId) {
         String id = instrumentId == null || instrumentId.isBlank() ? defaultInstrument : instrumentId.trim();
+        String front = liveFrontTicker(id);
+        if (front != null && !front.isBlank()) {
+            id = front;
+        }
         DomBook book = feed.latestBook(id).orElse(null);
-        if (book == null && feed instanceof TInvestMarketDataFeed t) {
-            book = t.anyBook().orElse(null);
+        if (isEmpty(book)) {
+            book = sameFamilyLiveBook(id).orElse(book);
         }
         if (needsRestRefresh(book)) {
             Optional<DomBook> refreshed = refreshBookRest(id);
-            if (refreshed.isPresent()) {
+            if (refreshed.isPresent() && !isEmpty(refreshed.get())) {
                 book = refreshed.get();
+            } else if (isEmpty(book)) {
+                book = sameFamilyLiveBook(id).orElse(book);
             }
         }
-        if (book != null) {
+        if (!isEmpty(book)) {
             return Optional.of(book);
+        }
+        if (book != null) {
+            Optional<DomBook> familyBook = sameFamilyLiveBook(id);
+            if (familyBook.isPresent()) {
+                return familyBook;
+            }
         }
         try {
             List<DomBook> day = archive.loadDomDay(id, LocalDate.now(MSK));
@@ -80,13 +198,15 @@ public class MarketDataResearchService {
             }
             if (!day.isEmpty()) {
                 DomBook archived = day.get(day.size() - 1);
-                if (needsRestRefresh(archived)) {
-                    Optional<DomBook> refreshed = refreshBookRest(id);
-                    if (refreshed.isPresent()) {
-                        return refreshed;
+                if (!isEmpty(archived)) {
+                    if (needsRestRefresh(archived)) {
+                        Optional<DomBook> refreshed = refreshBookRest(id);
+                        if (refreshed.isPresent() && !isEmpty(refreshed.get())) {
+                            return refreshed;
+                        }
                     }
+                    return Optional.of(archived);
                 }
-                return Optional.of(archived);
             }
         } catch (Exception ignored) {
             // empty
@@ -124,7 +244,40 @@ public class MarketDataResearchService {
         if (book.asOf() == null) {
             return true;
         }
+        if (isEmpty(book)) {
+            return true;
+        }
         return Instant.now().toEpochMilli() - book.asOf().toEpochMilli() > BOOK_STALE_MS;
+    }
+
+    private static boolean isEmpty(DomBook book) {
+        return book == null || book.emptyLevels();
+    }
+
+    private Optional<DomBook> sameFamilyLiveBook(String instrumentId) {
+        String family = TInvestBrokerMarketData.familyOf(instrumentId);
+        if (family == null || family.isBlank()) {
+            return Optional.empty();
+        }
+        DomBook exact = null;
+        DomBook newest = null;
+        for (DomBook b : feed.snapshotBooks()) {
+            if (isEmpty(b) || b.instrumentId() == null) {
+                continue;
+            }
+            String fam = TInvestBrokerMarketData.familyOf(b.instrumentId());
+            if (!family.equalsIgnoreCase(fam)) {
+                continue;
+            }
+            if (b.instrumentId().equalsIgnoreCase(instrumentId)) {
+                exact = b;
+            }
+            if (newest == null
+                    || (b.asOf() != null && (newest.asOf() == null || b.asOf().isAfter(newest.asOf())))) {
+                newest = b;
+            }
+        }
+        return Optional.ofNullable(exact != null ? exact : newest);
     }
 
     private Optional<DomBook> refreshBookRest(String instrumentId) {
@@ -162,7 +315,8 @@ public class MarketDataResearchService {
         if (feed instanceof TInvestMarketDataFeed t) {
             liveTape = t.tapeSize();
             depth = t.orderbookDepth();
-            Optional<DomBook> book = t.anyBook().or(() -> t.latestBook(instrument));
+            Optional<DomBook> book = t.latestBook(instrument).filter(b -> !b.emptyLevels())
+                    .or(() -> t.anyBook());
             if (book.isPresent()) {
                 bidLevels = book.get().bids().size();
                 askLevels = book.get().asks().size();

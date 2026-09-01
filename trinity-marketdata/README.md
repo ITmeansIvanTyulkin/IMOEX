@@ -33,7 +33,7 @@ imoex:
     provider: T_INVEST
     orderbook-depth: 50
     sandbox: false
-    auto-resolve-instrument: BRU6
+    auto-resolve-instrument: BR   # family hint; live month re-subscribes after expiry
 ```
 
 Token: `imoex.broker.token` / `T_INVEST_TOKEN` / `data/broker-ui-settings.json`.

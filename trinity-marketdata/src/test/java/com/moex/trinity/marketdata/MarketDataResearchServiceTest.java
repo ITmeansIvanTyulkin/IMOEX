@@ -2,6 +2,13 @@ package com.moex.trinity.marketdata;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,5 +33,60 @@ class MarketDataResearchServiceTest {
         assertEquals(MarketDataProviderId.T_INVEST, svc.feed().providerId());
         assertFalse(svc.liveReady());
         assertTrue(svc.statusMessage().contains("idle") || svc.statusMessage().contains("T-Invest"));
+    }
+
+    @Test
+    void emptyExpiredBookFallsBackToSameFamilyLiveDom() {
+        Instant asOf = Instant.now();
+        DomBook empty = new DomBook("BRU6", 50, List.of(), List.of(), asOf, true);
+        DomBook live = new DomBook("BRV6", 50,
+                List.of(new DomBook.DomLevel(91.36, 10)),
+                List.of(new DomBook.DomLevel(91.38, 4)),
+                asOf, true);
+        MemoryFeed feed = new MemoryFeed(List.of(empty, live));
+        MarketDataResearchService svc = new MarketDataResearchService(feed);
+        Optional<DomBook> book = svc.resolveBook("BRU6");
+        assertTrue(book.isPresent());
+        assertEquals("BRV6", book.get().instrumentId());
+        assertEquals(1, book.get().bids().size());
+        assertEquals(91.36, book.get().bids().get(0).price(), 1e-9);
+    }
+
+    private static final class MemoryFeed implements MarketDataFeed {
+        private final List<DomBook> books;
+
+        MemoryFeed(List<DomBook> books) {
+            this.books = new ArrayList<>(books);
+        }
+
+        @Override
+        public MarketDataProviderId providerId() {
+            return MarketDataProviderId.T_INVEST;
+        }
+
+        @Override
+        public String statusMessage() {
+            return "memory";
+        }
+
+        @Override
+        public boolean streaming() {
+            return true;
+        }
+
+        @Override
+        public Optional<DomBook> latestBook(String instrumentId) {
+            if (instrumentId == null) {
+                return Optional.empty();
+            }
+            return books.stream()
+                    .filter(b -> b.instrumentId() != null && b.instrumentId().equalsIgnoreCase(instrumentId))
+                    .findFirst();
+        }
+
+        @Override
+        public List<DomBook> snapshotBooks() {
+            return List.copyOf(books);
+        }
     }
 }

@@ -86,7 +86,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260831-tvnav5">
+              <link rel="stylesheet" href="/css/operator.css?v=20260901-hover2">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -1656,7 +1656,7 @@ public class AnalysisHtmlRenderer {
                     <li>Дальше обычно достаточно <strong>«Анализ + paper»</strong> — с дашборда или из настроек.</li>
                   </ol>
                   <div class="callout">
-                    GET-страницы <code>/view/*</code> открываются без пароля. Кнопки пульта шлют POST на API —
+                    GET-страницы приложения открываются без пароля. Кнопки пульта шлют POST на API —
                     нужны логин и пароль из <code>application-local.yml</code> (по умолчанию user <code>imoex</code>).
                   </div>
 
@@ -1696,7 +1696,7 @@ public class AnalysisHtmlRenderer {
                     </tbody>
                   </table>
                   <p>
-                    График пары: <code>/view/charts/ТИКЕР_Y/ТИКЕР_X</code> (ссылки есть из таблиц и paper).
+                    График пары открывается из таблиц сигналов и из Statement.
                   </p>
 
                   <h3 id="capital">Капитал и focus-слоты</h3>
@@ -1780,7 +1780,7 @@ public class AnalysisHtmlRenderer {
 
                   <h3 id="alerts">6. Алерты при новой paper-сделке</h3>
                   <p>
-                    Если открыта <em>любая</em> страница <code>/view/*</code>, браузер раз в минуту опрашивает сервер.
+                    Если открыта <em>любая</em> страница приложения, браузер раз в минуту опрашивает сервер.
                     При новом OPEN в paper вы получите:
                   </p>
                   <ul>
@@ -3524,7 +3524,7 @@ public class AnalysisHtmlRenderer {
                 previewTitle = "Доска calendar spread (фьючерсы)";
                 previewBody = "Near/next FORTS, z-спред, paper fills. Котировки только T-Invest (H1 + last), "
                         + "без ISS. Живые двухногие заявки пока выкл.";
-                earlyNote = "Desk: /view/calendar-arb · sandbox fair-paper.";
+                earlyNote = "Календарный арбитраж — пункт в верхнем меню. Песочница по ценам стакана.";
             }
             case "trend" -> {
                 title = "Trend desk";

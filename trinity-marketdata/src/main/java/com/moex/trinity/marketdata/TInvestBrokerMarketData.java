@@ -125,13 +125,12 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
     }
 
     /**
-     * Nearest FORTS front-month by last trade date ≥ today (Moscow).
-     * Accepts family ({@code BR}/{@code RI}/{@code NG}) or a concrete SECID ({@code BRU6}).
+     * Unexpired months of a family, nearest last-trade-date first (Moscow calendar).
      */
-    public Optional<FrontMonth> resolveFrontMonth(String familyOrSecid) {
+    public List<FrontMonth> listFrontMonths(String familyOrSecid) {
         String family = normalizeFamily(familyOrSecid);
         if (family == null) {
-            return Optional.empty();
+            return List.of();
         }
         Instant now = Instant.now();
         List<Future> all;
@@ -139,7 +138,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             all = listedFutures();
         } catch (Exception ex) {
             log.warn("getFutures for front-month {}: {}", family, ex.toString());
-            return Optional.empty();
+            return List.of();
         }
         List<FrontMonth> candidates = new ArrayList<>();
         for (Future f : all) {
@@ -152,7 +151,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
                     : (f.hasExpirationDate()
                     ? Instant.ofEpochSecond(f.getExpirationDate().getSeconds(), f.getExpirationDate().getNanos())
                     : null);
-            if (last == null || last.isBefore(now.minusSeconds(86400))) {
+            if (last == null || !listedOnMskDate(last, now)) {
                 continue;
             }
             candidates.add(new FrontMonth(
@@ -162,7 +161,34 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             ));
         }
         candidates.sort(Comparator.comparing(FrontMonth::lastTradeDate));
-        return candidates.stream().findFirst();
+        return List.copyOf(candidates);
+    }
+
+    /**
+     * Nearest FORTS front-month by last trade date ≥ today (Moscow).
+     * Accepts family ({@code BR}/{@code RI}/{@code NG}) or a concrete SECID ({@code BRU6}).
+     */
+    public Optional<FrontMonth> resolveFrontMonth(String familyOrSecid) {
+        return listFrontMonths(familyOrSecid).stream().findFirst();
+    }
+
+    /**
+     * Prefer a month that still has a live DOM. After expiry / last-trade the listed
+     * front can be empty while the next month is already the liquid book.
+     */
+    static Optional<FrontMonth> pickLiveMonth(List<FrontMonth> months, java.util.function.Predicate<String> hasDom) {
+        if (months == null || months.isEmpty()) {
+            return Optional.empty();
+        }
+        if (hasDom != null) {
+            for (FrontMonth m : months) {
+                if (m != null && m.ticker() != null && !m.ticker().isBlank() && hasDom.test(m.ticker())) {
+                    return Optional.of(m);
+                }
+            }
+        }
+        FrontMonth first = months.get(0);
+        return first == null ? Optional.empty() : Optional.of(first);
     }
 
     /** Convenience: front-month ticker or original if broker unavailable. */
@@ -222,7 +248,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             Instant exp = f.hasExpirationDate()
                     ? Instant.ofEpochSecond(f.getExpirationDate().getSeconds(), f.getExpirationDate().getNanos())
                     : last;
-            if (last == null || last.isBefore(now.minusSeconds(86400))) {
+            if (last == null || !listedOnMskDate(last, now)) {
                 continue;
             }
             out.add(new BrokerListedFuture(
@@ -287,6 +313,21 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             log.warn("GetLastPrices failed: {}", ex.toString());
         }
         return out;
+    }
+
+    /**
+     * Last-trade calendar date in Moscow is still today or later.
+     * A 24h Instant window kept yesterday's expiry as "front" (empty DOM, live tape on next month).
+     */
+    static boolean listedOnMskDate(Instant lastTrade, Instant now) {
+        if (lastTrade == null || now == null) {
+            return false;
+        }
+        return !LocalDate.ofInstant(lastTrade, MSK).isBefore(LocalDate.ofInstant(now, MSK));
+    }
+
+    public static String familyOf(String ticker) {
+        return normalizeFamily(ticker);
     }
 
     private static String normalizeFamily(String raw) {

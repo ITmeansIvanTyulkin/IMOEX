@@ -145,7 +145,38 @@
     chip.title = detail ? (status + " · " + detail) : status;
   }
   function deMark(s) {
-    return String(s == null ? "" : s).replace(/§\s*/g, "").replace(/\s+/g, " ").trim();
+    return String(s == null ? "" : s)
+      .replace(/кроме\s*§\s*8\b/gi, "кроме ретеста")
+      .replace(/сценари[йя]\s*§\s*8\b/gi, "ретест")
+      .replace(/§\s*8\b/gi, "ретест")
+      .replace(/§\s*14\b/gi, "")
+      .replace(/§\s*\d+(?:\s*[\/–-]\s*\d+)*/g, "")
+      .replace(/§\s*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  function ruDeals(n) {
+    const x = Math.abs(Number(n) || 0);
+    const n10 = x % 10;
+    const n100 = x % 100;
+    if (n10 === 1 && n100 !== 11) return x + " сделка";
+    if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return x + " сделки";
+    return x + " сделок";
+  }
+  function userFacingStory(raw) {
+    const src = String(raw == null ? "" : raw).trim();
+    if (!src) return "";
+    const engineLead = /§/.test(src) || looksTechnicalStatus(src)
+      || /\bTREND_HI\b|\bTREND_LO\b|\bwaiting:\s/i.test(src);
+    if (engineLead) {
+      const ru = src.split(/(?<=[.!?])\s+/).filter(function (x) {
+        return /[А-Яа-яЁё]/.test(x) && x.indexOf("§") < 0 && !looksTechnicalStatus(x);
+      });
+      if (ru.length) return ru.join(" ").replace(/\s+/g, " ").trim();
+      return humanizeDeskReason(src);
+    }
+    const out = humanizeDeskReason(src);
+    return looksTechnicalStatus(out) ? "" : out;
   }
   function escHtml(t) {
     return String(t == null ? "" : t)
@@ -201,11 +232,17 @@
         return true;
       }
     }
-    const fam = String(secid).slice(0, 2).toUpperCase();
+    const want = String(secid).toUpperCase();
+    const fam = want.slice(0, 2);
     for (let i = 0; i < sel.options.length; i++) {
       const v = String(sel.options[i].value || "").toUpperCase();
       if (v.indexOf(fam) === 0) {
-        sel.value = sel.options[i].value;
+        if (v !== want) {
+          sel.options[i].value = secid;
+          const label = sel.options[i].textContent || "";
+          sel.options[i].textContent = label.replace(/\s·\s\S+$/, " · " + secid);
+        }
+        sel.value = secid;
         return true;
       }
     }
@@ -270,7 +307,7 @@
   }
   function lastCloseBit(sit, fp, pbId) {
     const lane = fp && fp.lanes && pbId ? fp.lanes[pbId] : null;
-    const lc = (sit && sit.lastClose) || (lane && lane.lastClose) || (fp && fp.lastClose) || null;
+    const lc = (lane && lane.lastClose) || (sit && sit.lastClose) || null;
     if (!lc || !lc.exitReason) return "";
     const t = shortTime(lc.closedAt);
     const pnl = typeof lc.pnlRub === "number" ? (" " + fmtPnl(lc.pnlRub)) : "";
@@ -299,20 +336,22 @@
     const raw = (paper && (paper.todayTrades || paper.recentTrades)) || [];
     const today = mskTodayYmd();
     const wantInst = desk && desk.instrument;
-    const wantPb = desk && desk.playbookId;
+    const wantPb = viewPlaybookId();
     const rows = raw.filter(function (t) {
       if (!isSameMskDay(t && (t.closedAt || t.openedAt), today)) return false;
       if (wantInst && t.instrument && !sameInstrumentFamily(t.instrument, wantInst)) return false;
       if (wantPb && wantPb !== "both") {
         const pb = playbookFromTrade(t);
-        if (pb && pb !== wantPb) return false;
+        if (!pb || pb !== wantPb) return false;
       }
       return true;
     });
     const latest = paper && paper.latestClose;
     if (latest && latest.id && isSameMskDay(latest.closedAt, today)) {
+      const latestPb = playbookFromTrade(latest);
+      const samePb = !wantPb || wantPb === "both" || latestPb === wantPb;
       const has = rows.some(function (t) { return t && t.id === latest.id; });
-      if (!has) {
+      if (samePb && !has) {
         rows.unshift(latest);
       }
     }
@@ -320,12 +359,18 @@
     if (!rows.length) {
       panel.hidden = true;
       body.innerHTML = "";
+      if (meta) meta.textContent = "";
       return;
     }
     panel.hidden = false;
     if (meta) {
-      meta.textContent = "Сегодня · " + rows.length + " сделок · PnL " + fmtPnl(st.todayPnlRub)
-        + " · полный statement → /view/statement#trend";
+      const rowPnl = rows.reduce(function (sum, t) {
+        const n = t && t.pnlRub;
+        return sum + (typeof n === "number" ? n : 0);
+      }, 0);
+      meta.innerHTML = "Сегодня · " + ruDeals(rows.length)
+        + " · PnL " + fmtPnl(rowPnl)
+        + " · <a href=\"/view/statement\">Statement</a>";
     }
     body.innerHTML = rows.map(function (t) {
       const pnl = t.pnlRub;
@@ -423,9 +468,14 @@
     let html = "<div class='signal-narration'>";
     html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Разбор · как видит робот</p>";
     html += "<p class='signal-narration-head'><strong>" + escHtml(c.verdict || "") + "</strong> — "
-      + escHtml(c.headline) + "</p>";
+      + escHtml(userFacingStory(c.headline) || c.headline) + "</p>";
     story.forEach(function (p) {
-      if (p) html += "<p class='signal-narration-p'>" + escHtml(p) + "</p>";
+      if (!p) return;
+      const text = userFacingStory(p);
+      if (!text) return;
+      const u = text.toLowerCase();
+      if (u.indexOf("очк") >= 0 || u.indexOf("чек-лист") >= 0 || u.indexOf("playbook") >= 0) return;
+      html += "<p class='signal-narration-p'>" + escHtml(text) + "</p>";
     });
     if (c.disclaimer) {
       html += "<p class='signal-narration-disc'>" + escHtml(c.disclaimer) + "</p>";
@@ -690,14 +740,14 @@
     marketItems.push(priceLine);
 
     const impulse = sit.impulse || {};
-    if (impulse.active && impulse.headline) {
-      marketItems.push("<strong>" + esc(impulse.headline) + "</strong> — " + esc(impulse.body || ""));
+    if (impulse.active && impulse.headline && !impulse.headline.match(/EIA|API|CL\s/i)) {
+      marketItems.push("<strong>" + esc(impulse.headline) + "</strong>");
     }
 
     const gap = sit.gapFill || {};
     if (gap.present) {
       const gapTitle = gap.title || (gap.filled ? "Ночной гэп — закрыт" : "Ночной (утренний) гэп");
-      const gapNote = gap.note || "";
+      const gapNote = deMark(gap.note || "");
       if (gapNote) {
         marketItems.push("<strong>" + esc(gapTitle) + "</strong>. " + esc(gapNote));
       } else {
@@ -708,8 +758,8 @@
     if (sit.dayMovePoints != null) {
       const dm = sit.dayMovePoints;
       let dayLine = "День " + (dm >= 0 ? "+" : "") + dm + "п от открытия сессии";
-      if (dm <= -80) dayLine += " (dump — macro BEARISH proxy)";
-      else if (dm >= 80) dayLine += " (rally — macro BULLISH proxy)";
+      if (dm <= -80) dayLine += " — сильный слив, день медвежий";
+      else if (dm >= 80) dayLine += " — сильный разгон, день бычий";
       marketItems.push(dayLine);
     }
     const drop1 = (peak1h != null && close != null && peak1h > close + 0.08) ? pts(peak1h, close) : null;
@@ -726,26 +776,25 @@
           + fmtPx(troughS) + "–" + fmtPx(peakS) + ")");
       }
     }
-    marketItems.push("Режим <code>" + esc(mkt) + "</code>, HTF=" + esc(htf)
-      + (htfSource ? "@" + esc(htfSource) : "")
-      + ", bias=" + esc(bias));
-    if (sit.structureNote) {
-      deMark(String(sit.structureNote)).split(/(?<=[.!])\s+/).forEach(function (chunk) {
-        const t = chunk.trim();
-        if (t) marketItems.push(esc(t));
-      });
-    }
-    marketItems.push("Лента " + (tapeLive ? "живая" : "архив/ISS")
-      + ", ~" + (data.barCount || 0) + " M5");
+    let mktRu = "в диапазоне";
+    if (mkt === "TREND_UP") mktRu = "тренд вверх";
+    else if (mkt === "TREND_DOWN") mktRu = "тренд вниз";
+    let htfRu = "Час без явного направления";
+    if (htf === "UP") htfRu = "Час смотрит вверх";
+    else if (htf === "DOWN") htfRu = "Час смотрит вниз";
+    marketItems.push("Рынок " + mktRu + ". " + htfRu
+      + (htfSource === "H1" ? " (по закрытым часовым)" : (htfSource === "M15" ? " (по 15-минуткам)" : ""))
+      + ".");
+    marketItems.push("Лента " + (tapeLive ? "живая" : "из архива")
+      + ", пять минуток с открытия сессии.");
     const oil = sit.usOil || {};
     if (oil.brief) {
-      marketItems.push(esc(oil.brief));
-    }
-    if (oil.waitReason) {
-      marketItems.push(esc(oil.waitReason));
-    }
-    if (oil.exclusiveNote) {
-      marketItems.push(esc(oil.exclusiveNote));
+      marketItems.push(esc(String(oil.brief)
+        .replace(/\bprev close\b/gi, "вчерашнего закрытия")
+        .replace(/\bUP\b/g, "вверх")
+        .replace(/\bDOWN\b/g, "вниз")
+        .replace(/\bExclusive\b/g, "робот")
+        .replace(/\s+/g, " ").trim()));
     }
 
     let marketHtml = "<p class='signal-brief-kicker signal-brief-kicker--gold'>Рынок сейчас</p>"
@@ -766,18 +815,18 @@
           + "<span class='lg-zone-bot'>BOT</span> "
           + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high);
       }
-      marketHtml += ". HI/LO " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow) + ".";
+      marketHtml += ". Хай/лой дня " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow) + ".";
       if (sit.hiAboveTopPts != null && sit.hiAboveTopPts > 0) {
-        marketHtml += " <span class='signal-daylock-gap'>HI выше TOP·день на "
-          + sit.hiAboveTopPts + "п — зона §8 (полка не едет за хаем).</span>";
+        marketHtml += " <span class='signal-daylock-gap'>Хай дня выше верхней полки на "
+          + sit.hiAboveTopPts + "п — полку дня не двигаем за хаем.</span>";
       }
       if (sit.loBelowBotPts != null && sit.loBelowBotPts > 0) {
-        marketHtml += " <span class='signal-daylock-gap'>LO ниже BOT·день на "
+        marketHtml += " <span class='signal-daylock-gap'>Лой дня ниже нижней полки на "
           + sit.loBelowBotPts + "п.</span>";
       }
       if (st.previousZeroPoint != null) {
-        marketHtml += " Zero " + fmtPx(st.previousZeroPoint)
-          + (st.zeroPointBroken ? " (пробита)." : " (держится).");
+        marketHtml += " Ноль дня " + fmtPx(st.previousZeroPoint)
+          + (st.zeroPointBroken ? " — пробит." : " — держится.");
       }
       marketHtml += "</p>";
     }
@@ -800,52 +849,61 @@
     }
 
     // ——— 2. Робот ———
-    const postureRu = ({
-      IN_TRADE: "В СДЕЛКЕ",
-      WAITING_FILL: "ЖДЁТ ИСПОЛНЕНИЯ",
-      WATCHING_ZONE: "СМОТРИТ ЗОНУ",
-      NOT_IN_TRADE: "НЕ В СДЕЛКЕ",
-      SCANNING: "СКАНИРУЕТ"
-    })[posture] || posture;
+    const postureTitle = ({
+      IN_TRADE: "Робот в сделке",
+      WAITING_FILL: "Робот ждёт исполнения",
+      WATCHING_ZONE: "Робот смотрит зону",
+      NOT_IN_TRADE: "Робот вне сделки",
+      SCANNING: "Робот сканирует"
+    })[posture] || "Робот";
     const robotInTrade = posture === "IN_TRADE";
     let robotHtml = "<p class='signal-brief-kicker signal-brief-kicker--robot"
       + (robotInTrade ? " is-in-trade" : "")
-      + "'>Робот · " + esc(postureRu) + "</p>";
+      + "'>" + esc(postureTitle) + "</p>";
 
-    robotHtml += "<p><code>" + esc(state) + "</code>";
-    if (side && side !== "NONE") robotHtml += " · " + esc(side) + (mode ? (" " + esc(mode)) : "");
-    robotHtml += " · канал: "
-      + (liveBroker ? "LIVE (осторожно)"
-        : (autoJ ? "SANDBOX_FAIR · обкатка paper" : "SIGNAL_ONLY"))
-      + ".</p>";
+    const channelRu = liveBroker
+      ? "живой счёт — осторожно"
+      : (autoJ ? "учебный счёт, без реальных денег" : "только подсказки, заявок нет");
+    const stateRu = engineStateRu(state);
+    robotHtml += "<p>" + esc(stateRu);
+    if (side && side !== "NONE") {
+      const sideRu = side === "BUY" ? "покупка" : (side === "SELL" ? "продажа" : side);
+      const modeRu = mode === "BOUNCE" ? "отбой" : (mode === "RETEST" ? "ретест после пробоя" : mode);
+      robotHtml += " · " + esc(sideRu) + (modeRu ? (" (" + esc(modeRu) + ")") : "");
+    }
+    robotHtml += " · " + channelRu + ".</p>";
 
     // Senior TF wind — always visible in robot block
     const srcLabel = htfSource === "H1"
-      ? "H1 из M5 (по закрытым часам)"
+      ? "по закрытым часовым"
       : (htfSource === "M15"
-        ? "M15 из M5"
+        ? "по 15-минуткам"
         : (htfSource === "M5_PROXY"
-          ? "M5-прокси (H1 пока без явного хода)"
-          : (htfSource || "старший ТФ")));
+          ? "час пока без явного хода — смотрим пятиминутки"
+          : (htfSource || "старший таймфрейм")));
     let windLine;
     if (htf === "UP") {
-      windLine = "Ветер: <strong>вверх</strong> · " + esc(srcLabel)
-        + " — лонги с ветром, шорты только осторожный отскок / меньше размер.";
+      windLine = "Ветер часа: <strong>вверх</strong> (" + esc(srcLabel)
+        + ") — покупки с ветром, продажи только после сильного отбоя у верхней полки, меньшим размером.";
     } else if (htf === "DOWN") {
-      windLine = "Ветер: <strong>вниз</strong> · " + esc(srcLabel)
-        + " — шорты с ветром, лонги только осторожный отскок / меньше размер.";
+      windLine = "Ветер часа: <strong>вниз</strong> (" + esc(srcLabel)
+        + ") — продажи с ветром, покупки только после сильного отбоя у нижней полки, меньшим размером.";
     } else {
-      windLine = "Ветер: <strong>боковик</strong> · " + esc(srcLabel)
-        + " — приоритет bounce у TOP/BOT; RETEST после пробоя+закрепления.";
+      windLine = "Ветер часа: <strong>боковик</strong> (" + esc(srcLabel)
+        + ") — приоритет отбоя у верхней и нижней полки дня; ретест — только после пробоя и закрепления.";
     }
     robotHtml += "<p class='signal-brief-note signal-brief-htf'>" + windLine + "</p>";
 
     if (sit.sessionPhaseRu) {
       robotHtml += "<p class='signal-brief-note'>" + esc(sit.sessionPhaseRu);
-      if (sit.shelfLocal) robotHtml += " · фокус сдвинут на ближнюю полку";
-      if (sit.touchQ != null) robotHtml += " · качество касания " + esc(String(sit.touchQ));
-      if (sit.cluster && sit.cluster.points != null) {
-        robotHtml += " · полка +" + sit.cluster.points + "/2 очка (кластер/дельта, не фильтр)";
+      if (sit.shelfLocal) robotHtml += " · смотрим ближнюю полку";
+      if (sit.touchQ != null && Number(sit.touchQ) < 3) {
+        robotHtml += " · касание полки пока слабое — ждём нормальный отбой";
+      } else if (sit.touchQ != null && Number(sit.touchQ) >= 3) {
+        robotHtml += " · касание полки качественное";
+      }
+      if (sit.cluster && sit.cluster.points > 0) {
+        robotHtml += " · у полки виден жирный объём";
       }
       robotHtml += ".</p>";
     }
@@ -853,109 +911,94 @@
     if (sit.fairPaper && sit.fairPaper.enabled) {
       const fp = sit.fairPaper;
       if (fp.open) {
-        robotHtml += "<p class='signal-brief-note'><strong>Fair-paper OPEN</strong> "
-          + esc(fp.open.side) + " " + esc(fp.open.mode || "")
-          + " avg " + fmtPx(fp.open.avg) + " qty " + fp.open.qty
-          + " · SL " + fmtPx(fp.open.sl)
-          + (fp.open.tp1 != null ? (" · TP1 " + fmtPx(fp.open.tp1)) : "")
+        const fpSide = fp.open.side === "BUY" ? "покупка" : (fp.open.side === "SELL" ? "продажа" : fp.open.side);
+        robotHtml += "<p class='signal-brief-note'><strong>Учебная сделка открыта</strong>: "
+          + esc(fpSide)
+          + " по " + fmtPx(fp.open.avg) + ", " + fp.open.qty + " лот."
+          + " Стоп " + fmtPx(fp.open.sl)
+          + (fp.open.tp1 != null ? (", цель " + fmtPx(fp.open.tp1)) : "")
           + ".</p>";
       } else if (fp.pending) {
-        robotHtml += "<p class='signal-brief-note'>Fair-paper PENDING "
-          + esc(fp.pending.side) + " " + esc(fp.pending.mode || "")
-          + ".</p>";
+        const fpSide = fp.pending.side === "BUY" ? "покупка" : (fp.pending.side === "SELL" ? "продажа" : fp.pending.side);
+        robotHtml += "<p class='signal-brief-note'>Лимиты выставлены (" + esc(fpSide)
+          + ") — ждём касание цены.</p>";
       }
       if (fp.lastClose && fp.lastClose.pnlRub != null) {
-        robotHtml += "<p class='signal-brief-note'>Последнее закрытие SANDBOX_FAIR: "
-          + esc(fp.lastClose.exitReason || "")
-          + " · " + (fp.lastClose.pnlRub >= 0 ? "+" : "")
+        robotHtml += "<p class='signal-brief-note'>Последняя учебная сделка: "
+          + (fp.lastClose.pnlRub >= 0 ? "+" : "")
           + Math.round(fp.lastClose.pnlRub) + " ₽.</p>";
       }
     }
 
+    const whyHuman = humanizeDeskReason(reason);
     if (posture === "IN_TRADE") {
-      robotHtml += "<p><strong>Почему в сделке:</strong> " + esc(deMark(reason)) + "</p>";
+      robotHtml += "<p><strong>Почему в сделке:</strong> " + esc(whyHuman) + "</p>";
       if (sit.setupLevels) {
         const lv = sit.setupLevels;
-        robotHtml += "<p class='signal-brief-note'>Уровни: entry "
-          + fmtPx(lv.entry) + " · SL " + fmtPx(lv.stop)
-          + " · TP1 " + fmtPx(lv.tp1) + " · TP2 " + fmtPx(lv.tp2)
-          + (lv.qty != null ? (" · qty " + lv.qty) : "") + ".</p>";
+        robotHtml += "<p class='signal-brief-note'>Вход "
+          + fmtPx(lv.entry) + " · стоп " + fmtPx(lv.stop)
+          + " · цель 1 " + fmtPx(lv.tp1) + " · цель 2 " + fmtPx(lv.tp2)
+          + (lv.qty != null ? (" · " + lv.qty + " лот.") : ".") + "</p>";
       }
       if (manage.note) {
-        robotHtml += "<p class='signal-brief-note'>Manage: " + esc(deMark(manage.note))
-          + (manage.movedToBe ? " · уже BE" : "")
-          + (manage.trailing ? " · trail" : "") + ".</p>";
+        robotHtml += "<p class='signal-brief-note'>" + esc(humanizeDeskReason(manage.note))
+          + (manage.movedToBe ? " · стоп уже в безубыток" : "")
+          + (manage.trailing ? " · стоп тянется за ценой" : "") + ".</p>";
       }
     } else if (posture === "WAITING_FILL") {
-      robotHtml += "<p><strong>Почему ждёт fill:</strong> " + esc(deMark(reason)) + "</p>";
+      robotHtml += "<p><strong>Почему ждёт исполнения:</strong> " + esc(whyHuman) + "</p>";
       if (sit.activeLock) {
         const lk = sit.activeLock;
-        robotHtml += "<p class='signal-brief-note'>Lock зоны "
+        robotHtml += "<p class='signal-brief-note'>Зона "
           + fmtPx(lk.low) + "–" + fmtPx(lk.high)
-          + " · mid " + fmtPx(lk.mid)
-          + " — unlock ≥40п от mid или новый день.</p>";
+          + " — снимем, если цена уйдёт далеко или начнётся новый день.</p>";
       }
       if (sit.setupLevels) {
         const lv = sit.setupLevels;
-        robotHtml += "<p class='signal-brief-note'>Сетка: avg "
-          + fmtPx(lv.entry) + " · SL " + fmtPx(lv.stop)
-          + " · TP1 " + fmtPx(lv.tp1) + ".</p>";
+        robotHtml += "<p class='signal-brief-note'>Сетка: средняя "
+          + fmtPx(lv.entry) + " · стоп " + fmtPx(lv.stop)
+          + " · цель " + fmtPx(lv.tp1) + ".</p>";
       }
-      robotHtml += "<p class='signal-brief-note'>Следующий шаг: дождаться касания лимитов на M5; "
-        + "при уходе цены далеко — unlock и новый поиск.</p>";
+      robotHtml += "<p class='signal-brief-note'>Дальше: дождаться касания лимитов. "
+        + "Если цена уйдёт далеко — снимем заявки и будем искать заново.</p>";
     } else {
-      robotHtml += "<p><strong>Почему не в сделке:</strong> " + esc(deMark(reason)) + "</p>";
+      robotHtml += "<p><strong>Почему не в сделке:</strong> " + esc(whyHuman) + "</p>";
       const r = String(reason).toUpperCase();
-      let next = "Наблюдение: при выполнении 6–8 появится BUY/SELL.";
+      let next = "Наблюдаем. Вход появится, когда цена подойдёт к полке дня и даст закрытый отбой.";
       if (r.indexOf("MAX FILLS") >= 0 || r.indexOf("MAX SETUPS") >= 0) {
-        next = "Дневной лимит сетапов исчерпан — новых входов сегодня не будет.";
+        next = "Дневной лимит сделок исчерпан — новых входов сегодня не будет.";
       } else if (r.indexOf("MAX DAY LOSS") >= 0) {
-        next = "Сработал дневной лимит убытка — робот в паузе до завтра.";
+        next = "Сработал дневной лимит убытка — робот на паузе до завтра.";
       } else if (r.indexOf("EVENT") >= 0) {
-        next = "Календарный blackout вокруг события — ждите окончания окна.";
+        next = "Окно вокруг важного события — ждём, пока пройдёт.";
       } else if (r.indexOf("SESSION") >= 0) {
-        next = "Вне торгового окна playbook — входы откроются в сессии.";
-      } else if (r.indexOf("§6") >= 0 || r.indexOf("PROFILE") >= 0) {
-        next = "Нет валидного профиля на активном уровне — ждите касание TOP/BOT с объёмом или сброс залипания.";
-      } else if (r.indexOf("CLEAR BOT") >= 0 || r.indexOf("PREFER OVER WAIT") >= 0) {
-        next = "Ясный reject у полки — робот предпочитает bounce, а не ожидание чужого ретеста.";
+        next = "Сейчас вне торгового окна — входы откроются в сессии.";
       } else if (r.indexOf("TOUCH") >= 0 || r.indexOf("QUALITY") >= 0) {
-        next = "Касание полки слабое — нужен wick в зону и закрытие обратно (reject). DOM может дать бонус.";
+        next = "Касание полки слабое — нужен фитиль в зону и закрытие обратно. Тогда это отбой, а не прокол.";
+      } else if (r.indexOf("HTF UP") >= 0 && (r.indexOf("ШОРТ") >= 0 || r.indexOf("TOP") >= 0)) {
+        next = "Час вверх — продавать рано. Нужна свеча, которая зашла в верхнюю полку и закрылась обратно ниже неё.";
+      } else if (r.indexOf("HTF DOWN") >= 0 && (r.indexOf("ЛОНГ") >= 0 || r.indexOf("BOT") >= 0)) {
+        next = "Час вниз — покупать рано. Нужна свеча, которая зашла в нижнюю полку и закрылась обратно выше неё.";
       } else if (r.indexOf("MACRO") >= 0 || r.indexOf("KNIFE") >= 0 || r.indexOf("FA/") >= 0) {
-        if (r.indexOf("ТОРМОЗ") >= 0 || r.indexOf("DECEL") >= 0 || r.indexOf("H1") >= 0 || r.indexOf("MID") >= 0) {
-          next = "Dump + HTF DOWN: нужен reject у BOT и торможение H1 или 2 close над mid — тогда bounce можно.";
-        } else if (r.indexOf("BOUNCE") >= 0 && r.indexOf("REJECT") >= 0) {
-          next = "Dump-день: BOT bounce только после закрытого reject. Ждите подтверждение у полки.";
-        } else if (r.indexOf("RETEST") >= 0) {
-          next = "Macro режет RETEST BUY против дампа — ждите отскок с reject или смену фазы.";
-        } else {
-          next = "Macro-proxy: не ловим нож. Подтверждённый BOT bounce (reject + ветер/торможение H1) можно.";
-        }
-      } else if (r.indexOf("HTF") >= 0 && r.indexOf("COUNTER") >= 0) {
-        next = "Против ветра старшего ТФ: RETEST без break+hold закрыт; смотрите bounce у полки или §8 продолжение.";
-      } else if (r.indexOf("HTF") >= 0 || htf === "FLAT") {
-        next = htfSource === "H1"
-          ? "H1 без явного направления — bounce у day-locked TOP/BOT; RETEST после break+hold. Смотрите фазу дня в блоке робота."
-          : "Старший ТФ плоский: приоритет bounce у day-locked TOP/BOT; RETEST после break+hold.";
+        next = "Не ловим нож. Покупка от низа — только после сильного отбоя, не в середине слива.";
       } else if (posture === "WATCHING_ZONE") {
-        next = "Зона размечена — ждите bounce/retest confirm на M5. Учитывайте ветер "
-          + (htfSource || "HTF") + "=" + htf
-          + (sit.sessionPhaseRu ? (" · " + sit.sessionPhaseRu) : "") + ".";
+        next = "Зоны дня на месте. Ждём, пока цена придёт к полке и закроется отбоем.";
       } else if (r.indexOf("COOLDOWN") >= 0) {
-        next = "Cooldown после стопа — пауза до конца таймера.";
+        next = "Пауза после стопа — не мстим рынку сразу.";
       }
       robotHtml += "<p class='signal-brief-note'>Что делать: " + next + "</p>";
     }
 
     if (sit.setupsToday != null) {
-      robotHtml += "<p class='signal-brief-note'>Квота: fills сегодня "
+      robotHtml += "<p class='signal-brief-note'>Сегодня сделок: "
         + sit.setupsToday
-        + (sit.maxSetupsPerDay > 0 ? (" / " + sit.maxSetupsPerDay) : " (без лимита)")
+        + (sit.maxSetupsPerDay > 0 ? (" из " + sit.maxSetupsPerDay) : "")
         + (sit.realizedDayPnlRub != null
-          ? (" · day PnL engine " + (sit.realizedDayPnlRub >= 0 ? "+" : "")
+          ? (" · результат "
+            + (sit.realizedDayPnlRub >= 0 ? "+" : "")
             + Math.round(sit.realizedDayPnlRub) + " ₽")
           : "")
-        + (sit.maxDayLossRub > 0 ? (" · day-loss cap −" + sit.maxDayLossRub + " ₽") : "")
+        + (sit.maxDayLossRub > 0 ? (" · стоп по дню −" + sit.maxDayLossRub + " ₽") : "")
         + ".</p>";
     }
 
@@ -1009,9 +1052,9 @@
     } else if (sit.sessionTradable === false) {
       newsHtml += "<p class='signal-brief-note'>Сессия: вне окна входов.</p>";
     } else {
-      newsHtml += "<p class='signal-brief-note'>Сессия tradable "
+      newsHtml += "<p class='signal-brief-note'>Сессия открыта для входов "
         + esc(sit.sessionOpen || "09:00") + "–" + esc(sit.sessionClose || "23:50")
-        + " (с буферами open/close).</p>";
+        + ".</p>";
     }
 
     // ——— 4. Paper ———
@@ -1111,11 +1154,11 @@
       if (u.indexOf("AGAINST") >= 0 || u.indexOf("NO BUY") >= 0 || u.indexOf("NO SELL") >= 0
           || u.indexOf("ПРОТИВ ЗАПОЛН") >= 0) {
         return "Открыт ночной (утренний) гэп: сделку против его закрытия сейчас не берём. "
-          + "Ждём касание вчерашнего закрытия или сценарий §8 после пробоя и удержания.";
+          + "Ждём касание вчерашнего закрытия или ретест после пробоя и закрепления полки.";
       }
       if (u.indexOf("HTF") >= 0 || u.indexOf("ПРОПУЩЕН") >= 0 || u.indexOf("SKIP") >= 0) {
         return "Ночной гэп ещё открыт, но час смотрит не в сторону закрытия — "
-          + "отдельную сделку «на закрытие гэпа» пропускаем. Полки и §8 живут по своим правилам.";
+          + "отдельную сделку «на закрытие гэпа» пропускаем. Отскок от полок и ретест после пробоя живут по своим правилам.";
       }
       return "Сработал фильтр ночного гэпа — смотри блок «Ночной гэп» в разделе «Рынок сейчас».";
     }
@@ -1186,6 +1229,30 @@
       return "Нужен явный тренд на часе и минимум три полки объёма. Пока этого нет — сетапа нет.";
     }
     const exclusiveDesk = deskScope() !== "positional";
+    if (exclusiveDesk && (u.indexOf("TOP+BOT") >= 0 || u.indexOf("IN PLAY") >= 0)) {
+      if (u.indexOf("TREND_HI") >= 0 || (u.indexOf("FOCUS") >= 0 && u.indexOf("TOP") >= 0) || u.indexOf("TREND_HI") >= 0) {
+        if (u.indexOf("MID-ZONE") >= 0 || u.indexOf("NO BOUNCE") >= 0) {
+          return "Робот смотрит обе полки дня. Сейчас цена у верхней — ждём закрытый отбой, не вход с касания.";
+        }
+        if (u.indexOf("PRICE BELOW TOP") >= 0 || u.indexOf("WAITING RETURN") >= 0) {
+          return "Робот смотрит обе полки. Цена под верхней зоной — продажа только если вернётся и отобьётся закрытой свечой.";
+        }
+        return "Робот смотрит обе полки дня, сейчас внимание на верхней.";
+      }
+      if (u.indexOf("TREND_LO") >= 0 || u.indexOf("BOT") >= 0) {
+        if (u.indexOf("PRICE ABOVE BOT") >= 0 || u.indexOf("WAITING RETURN") >= 0) {
+          return "Робот смотрит обе полки. Цена над нижней зоной — покупка только если вернётся и отобьётся закрытой свечой.";
+        }
+        return "Робот смотрит обе полки дня, сейчас внимание на нижней.";
+      }
+      return "Робот смотрит обе полки дня — верхнюю и нижнюю.";
+    }
+    if (exclusiveDesk && u.indexOf("HTF UP") >= 0 && (u.indexOf("ШОРТ") >= 0 || u.indexOf("ВЫНОСА ИЗ ЗОНЫ") >= 0)) {
+      return "Час смотрит вверх — продавать от верха можно только после сильного отбоя: свеча закрылась обратно ниже зоны.";
+    }
+    if (exclusiveDesk && u.indexOf("HTF DOWN") >= 0 && (u.indexOf("ЛОНГ") >= 0 || u.indexOf("ВЫНОСА ИЗ ЗОНЫ") >= 0)) {
+      return "Час смотрит вниз — покупать от низа можно только после сильного отбоя: свеча закрылась обратно выше зоны.";
+    }
     if (exclusiveDesk && (u.indexOf("WAITING RETEST FROM BELOW") >= 0 || (u.indexOf("TREND_HI") >= 0 && u.indexOf("RETEST") >= 0))) {
       const m = s.match(/(\d+[.,]\d+)\s*[–-]\s*(\d+[.,]\d+)/);
       const zone = m ? ("TOP " + m[1] + "–" + m[2]) : "верхней зоне дня (TOP)";
@@ -1211,7 +1278,7 @@
     if (u.indexOf("MAX DAY LOSS") >= 0) {
       return "Сработал лимит убытка за день — робот на паузе до завтра.";
     }
-    if (u.indexOf("NO VALID PROFILE") >= 0 || u.indexOf("PROFILE") >= 0 && u.indexOf("§6") >= 0) {
+    if (u.indexOf("NO VALID PROFILE") >= 0) {
       return exclusiveDesk
         ? "Нет рабочего объёмного профиля на активном уровне — ждём касание TOP/BOT с объёмом."
         : "Нет трёх полок объёма на часе — позиционный вход без них не ставим.";
@@ -1240,12 +1307,18 @@
     // fallback: strip jargon tokens, keep readable chunk
     if (exclusiveDesk) {
       return s
-        .replace(/\bTREND_HI\b/gi, "TOP")
-        .replace(/\bTREND_LO\b/gi, "BOT")
+        .replace(/\bTREND_HI\b/gi, "верхняя полка")
+        .replace(/\bTREND_LO\b/gi, "нижняя полка")
         .replace(/\bACCUM\b/gi, "накопление")
         .replace(/\bNO_TRADE\b/gi, "без входа")
         .replace(/\bZONE_READY\b/gi, "зона готова")
+        .replace(/\bwaiting:\s*/gi, "ждём: ")
+        .replace(/\bmid-zone\b/gi, "середина зоны")
+        .replace(/\bno bounce confirm yet\b/gi, "отбоя ещё нет")
+        .replace(/\bin play\b/gi, "")
+        .replace(/\bfocus\b/gi, "смотрим")
         .replace(/\s*\|\s*/g, ". ")
+        .replace(/\s+/g, " ")
         .slice(0, 220);
     }
     return s
@@ -1277,12 +1350,7 @@
       core = Number(cc.implemented) || core;
     }
     const lines = [];
-    if (cc && !Array.isArray(cc) && cc.total != null) {
-      lines.push("Правила playbook: в ядре " + core + " из " + cc.total
-        + (ext ? (", доп. " + ext) : "") + ".");
-    } else {
-      lines.push("Правила playbook: в ядре " + core + " из 18, доп. ужесточений " + ext + ".");
-    }
+    lines.push("Правила: вход только от полок дня. Против часа — только после сильного отбоя.");
     const fills = data.setupsToday != null ? data.setupsToday : (data.situation && data.situation.setupsToday);
     if (fills != null) {
       const max = (data.situation && data.situation.maxSetupsPerDay) || 0;
@@ -1294,7 +1362,7 @@
     if (block && data.actionable === false) {
       lines.push("Почему без входа: " + humanizeDeskReason(block));
     } else if (data.actionable) {
-      lines.push("Есть рабочий сигнал — смотрите side/mode выше.");
+      lines.push("Есть рабочий сигнал — смотрите сторону и зону выше.");
     }
     el.innerHTML = lines.map(function (line) {
       return "<span class='signal-compliance-line'>" + escHtml(line) + "</span>";
@@ -3344,7 +3412,8 @@
   }
   function deskInstrumentQuery() {
     const instSel = $("sig-instrument");
-    const inst = (instSel && instSel.value) ? instSel.value.trim() : (lastDeskInstrument || "");
+    const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
+    const inst = lastDeskInstrument || fromSel;
     return inst ? ("?instrument=" + encodeURIComponent(inst)) : "";
   }
   async function loadBook() {
@@ -4046,12 +4115,31 @@
         opt.dataset.playbookIds = (o.playbookIds || []).join(",");
         instSel.appendChild(opt);
       });
+    } else if (instruments.length) {
+      instruments.forEach(function (o) {
+        if (!o || !o.secid) return;
+        const fam = String(o.family || o.secid).slice(0, 2).toUpperCase();
+        for (let i = 0; i < instSel.options.length; i++) {
+          const v = String(instSel.options[i].value || "").toUpperCase();
+          if (v.indexOf(fam) === 0 && v !== String(o.secid).toUpperCase()) {
+            instSel.options[i].value = o.secid;
+            instSel.options[i].textContent = (o.name || o.family) + " · " + o.secid;
+          }
+        }
+      });
     }
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
       if (activePb) pbSel.value = activePb;
       if (deskInstrumentPinned && matchInstrumentOption(instSel, deskInstrumentPinned)) {
-        /* keep user's instrument across reload / server roll */
+        const pinnedFam = String(deskInstrumentPinned).slice(0, 2).toUpperCase();
+        const liveFam = String(activeInst || "").slice(0, 2).toUpperCase();
+        if (activeInst && pinnedFam && pinnedFam === liveFam
+            && String(deskInstrumentPinned).toUpperCase() !== String(activeInst).toUpperCase()) {
+          matchInstrumentOption(instSel, activeInst);
+          deskInstrumentPinned = activeInst;
+          writeStoredInstrument(activeInst);
+        }
       } else if (activeInst) {
         let matched = false;
         for (let i = 0; i < instSel.options.length; i++) {

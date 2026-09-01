@@ -382,7 +382,9 @@ imoex:
     tape-capacity: 50000              # bounded RAM tape; desk/footprint use recent window
     orderbook-depth: 50   # T-Invest max (allowed: 10/20/30/40/50)
     # hist DOM = our archive data/broker-tape/dom-*.jsonl (broker has no hist DOM API)
-    auto-resolve-instrument: BRU6
+    # Family hint (BR / RI / NG) or a concrete SECID. Live month is resolved at
+    # startup and re-subscribed after expiry without restart.
+    auto-resolve-instrument: BR
     # instruments: BRU6=FIGI…   # optional override; else auto-resolve future ticker
 
 # Продуктовый бренд (стратегии 2–3 + marketdata — модули; live пока pairs)

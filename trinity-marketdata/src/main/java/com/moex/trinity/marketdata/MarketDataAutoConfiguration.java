@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Bean;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 @AutoConfiguration
 @ConditionalOnProperty(prefix = "imoex.marketdata", name = "enabled", havingValue = "true")
@@ -23,7 +24,7 @@ public class MarketDataAutoConfiguration {
             @Value("${imoex.marketdata.tape-capacity:200000}") int tapeCapacity,
             @Value("${imoex.marketdata.orderbook-depth:50}") int orderbookDepth,
             @Value("${imoex.marketdata.instruments:}") String instrumentsCsv,
-            @Value("${imoex.marketdata.auto-resolve-instrument:BRU6}") String autoResolveInstrument
+            @Value("${imoex.marketdata.auto-resolve-instrument:BR}") String autoResolveInstrument
     ) {
         if (!"T_INVEST".equalsIgnoreCase(provider != null ? provider.trim() : "")) {
             return new NoopMarketDataFeed();
@@ -42,9 +43,14 @@ public class MarketDataAutoConfiguration {
         if ((figiMap == null || figiMap.isEmpty()) && tok != null && !tok.isBlank()
                 && autoResolveInstrument != null && !autoResolveInstrument.isBlank()) {
             try (TInvestBrokerMarketData md = new TInvestBrokerMarketData(new TInvestCredentials(tok, sb))) {
-                String figi = md.resolveFigi(autoResolveInstrument.trim());
                 figiMap = new LinkedHashMap<>();
-                figiMap.put(autoResolveInstrument.trim().toUpperCase(), figi);
+                Optional<TInvestBrokerMarketData.FrontMonth> fm = md.resolveFrontMonth(autoResolveInstrument.trim());
+                if (fm.isPresent()) {
+                    figiMap.put(fm.get().ticker().toUpperCase(), fm.get().figi());
+                } else {
+                    String figi = md.resolveFigi(autoResolveInstrument.trim());
+                    figiMap.put(autoResolveInstrument.trim().toUpperCase(), figi);
+                }
             } catch (Exception ex) {
                 // stay idle until FIGI mapped
             }
@@ -68,13 +74,32 @@ public class MarketDataAutoConfiguration {
     @ConditionalOnMissingBean(MarketDataResearchService.class)
     MarketDataResearchService marketDataResearchService(
             MarketDataFeed feed,
-            @Value("${imoex.marketdata.auto-resolve-instrument:BRU6}") String instrument
+            @Value("${imoex.marketdata.auto-resolve-instrument:BR}") String instrument
     ) {
+        String live = instrument == null || instrument.isBlank() ? "BRU6" : instrument.trim();
+        TInvestCredentials creds = TInvestCredentials.resolve();
+        if (creds.present()) {
+            try (TInvestBrokerMarketData md = new TInvestBrokerMarketData(creds)) {
+                live = md.resolveFrontMonthTicker(live);
+            } catch (Exception ignored) {
+                // keep yml hint
+            }
+        }
         return new MarketDataResearchService(
                 feed,
                 new com.moex.trinity.marketdata.BrokerTapeArchive(java.nio.file.Path.of("data", "broker-tape")),
-                instrument
+                live
         );
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(FrontMonthBookRoller.class)
+    FrontMonthBookRoller frontMonthBookRoller(
+            MarketDataFeed feed,
+            MarketDataResearchService research,
+            @Value("${imoex.marketdata.auto-resolve-instrument:BR}") String instrument
+    ) {
+        return new FrontMonthBookRoller(feed, research, instrument);
     }
 
     /** Format: {@code BRU6=FIGIxxxx,BRQ6=FIGIyyyy} */

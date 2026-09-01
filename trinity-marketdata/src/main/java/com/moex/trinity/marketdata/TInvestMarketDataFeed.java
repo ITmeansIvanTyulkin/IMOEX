@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -143,7 +144,7 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
                         asOf,
                         true
                 );
-                books.put(e.getKey(), seeded);
+                storeBook(e.getKey(), seeded);
                 if (archive != null) {
                     archive.appendDom(seeded);
                 }
@@ -225,7 +226,7 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
             String figi = md.resolveFigi(instrumentId);
             start(creds.token(), creds.sandbox(), Map.of(instrumentId, figi));
             DomBook book = md.fetchOrderBook(instrumentId, figi, orderbookDepth);
-            books.put(instrumentId, book);
+            storeBook(instrumentId, book);
         }
     }
 
@@ -253,7 +254,7 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
                     asOf,
                     ob.getIsConsistent()
             );
-            books.put(inst, book);
+            storeBook(inst, book);
             maybeArchiveDom(inst, book);
         }
     }
@@ -288,11 +289,13 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
             if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null || e.getValue().isBlank()) {
                 continue;
             }
-            String inst = e.getKey().trim().toUpperCase();
+            String inst = e.getKey().trim().toUpperCase(Locale.ROOT);
             String figi = e.getValue().trim();
-            figiByInstrument.put(inst, figi);
+            String prev = figiByInstrument.put(inst, figi);
             instrumentByFigi.put(figi, inst);
-            newFigis.add(figi);
+            if (prev == null || !prev.equals(figi)) {
+                newFigis.add(figi);
+            }
         }
         if (stream == null || newFigis.isEmpty()) {
             return;
@@ -352,7 +355,18 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     }
 
     public Optional<DomBook> anyBook() {
-        return books.values().stream().findFirst();
+        return snapshotBooks().stream().filter(b -> b != null && !b.emptyLevels()).findFirst()
+                .or(() -> books.values().stream().findFirst());
+    }
+
+    /** Tickers currently mapped on the stream (uppercase). */
+    public java.util.Set<String> subscribedTickers() {
+        return java.util.Set.copyOf(figiByInstrument.keySet());
+    }
+
+    @Override
+    public List<DomBook> snapshotBooks() {
+        return List.copyOf(books.values());
     }
 
     @Override
@@ -369,7 +383,19 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         if (book == null || book.instrumentId() == null || book.instrumentId().isBlank()) {
             return;
         }
-        books.put(book.instrumentId().trim().toUpperCase(), book);
+        storeBook(book.instrumentId(), book);
+    }
+
+    private void storeBook(String instrumentId, DomBook book) {
+        if (book == null || instrumentId == null || instrumentId.isBlank()) {
+            return;
+        }
+        String key = instrumentId.trim().toUpperCase(Locale.ROOT);
+        DomBook existing = books.get(key);
+        if (book.emptyLevels() && existing != null && !existing.emptyLevels()) {
+            return;
+        }
+        books.put(key, book);
     }
 
     @Override
@@ -377,7 +403,12 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
         if (instrumentId == null) {
             return Optional.empty();
         }
-        DomBook b = books.get(instrumentId);
+        String key = instrumentId.trim().toUpperCase(Locale.ROOT);
+        DomBook b = books.get(key);
+        if (b != null) {
+            return Optional.of(b);
+        }
+        b = books.get(instrumentId);
         if (b != null) {
             return Optional.of(b);
         }

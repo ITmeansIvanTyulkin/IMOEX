@@ -238,7 +238,7 @@
         <p>
           Позиционный робот ищет <strong>явный тренд на H1</strong> (HH/HL → только LONG, LH/LL → только SHORT)
           и входит сеткой 1:1:2:4 в <strong>промежуточный объёмный диапазон</strong> последних трёх полок.
-          Семьи: BR, RTS, газ, Si, золото, MIX — ротация §1, не параллельные гриды.
+          Семьи: BR, RTS, газ, Si, золото, MIX — в работу берётся одна семья, не несколько сеток сразу.
           «Сканирует» значит робот <strong>включён</strong>, но чеклист не дал вход.
         </p>
       </article>
@@ -292,11 +292,11 @@
         <ul class="signal-guide-list">
           <li><strong>С ветром</strong> — полный размер.</li>
           <li><strong>Против ветра</strong> — чаще только отскок и/или меньший размер.</li>
-          <li><strong>§8 break+hold (RETEST)</strong> чек-листом не режется hardenings.</li>
+          <li><strong>Пробой и закрепление (ретест)</strong> — вход после того, как полка пробита и цена вернулась проверить её с нужной стороны.</li>
           <li>На dump-дне при HTF DOWN bounce у BOT всё же можно, если есть reject и
             <em>H1 тормозит сброс</em> или цена <em>два раза закрылась над mid BOT</em>.</li>
           <li><strong>Gap-fill</strong>: пока гэп дня открыт — против заполнения не торгуем;
-            с заполнением — только если HTF согласен (FLAT = пропуск). RETEST §8 не блокируется.</li>
+            с заполнением — только если HTF согласен (FLAT = пропуск). Ретест после пробоя не блокируется.</li>
         </ul>
       </article>
 
@@ -309,7 +309,7 @@
             Бычья/медвежья свеча и давление стакана — мягкий бонус.
             MACD-дивергенция на графике — только подсказка глазу.</li>
           <li>Ясный reject у BOT/TOP важнее «ожидания ретеста» на этой же полке
-            (не путать восстановление над BOT с §8 ретестом TOP).</li>
+            (не путать восстановление над BOT с ретестом TOP после пробоя).</li>
         </ul>
         <p class="signal-guide-note">
           Сейчас идёт <strong>обкатка на paper (SANDBOX_FAIR)</strong> по живой ленте T-Invest —
@@ -328,7 +328,7 @@
             </p>
           </div>
           <div class="signal-guide-card">
-            <p class="signal-guide-card-kicker">Ретест (§8)</p>
+            <p class="signal-guide-card-kicker">Ретест после пробоя</p>
             <p>
               Полка пробита и закреплена, цена возвращается «проверить» с правильной стороны.
               Вход в сторону пробоя сеткой у полки — приоритет чек-листа.
@@ -403,5 +403,5 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-chart-kit.js?v=20260831-tvnav4"></script>
-<script src="/js/trend-signal-desk.js?v=20260831-tvnav3"></script>
+<script src="/js/trinity-chart-kit.js?v=20260901-hover2"></script>
+<script src="/js/trend-signal-desk.js?v=20260901-desk5"></script>

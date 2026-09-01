@@ -22,6 +22,11 @@ public interface MarketDataFeed {
      */
     Optional<DomBook> latestBook(String instrumentId);
 
+    /** All cached DOM snapshots (empty for NOOP). */
+    default List<DomBook> snapshotBooks() {
+        return List.of();
+    }
+
     /**
      * Recent tape prints for VAP / zone building. Empty until stream fills a buffer.
      */

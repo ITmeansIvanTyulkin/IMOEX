@@ -18,6 +18,11 @@ public record DomBook(
 ) {
     public record DomLevel(double price, long quantityLots) {}
 
+    /** True when both sides are missing — expired contract or a blank REST snapshot. */
+    public boolean emptyLevels() {
+        return (bids == null || bids.isEmpty()) && (asks == null || asks.isEmpty());
+    }
+
     /** Highest bid — do not assume list order (stream snapshots can be unsorted). */
     public double bestBid() {
         if (bids == null || bids.isEmpty()) {
