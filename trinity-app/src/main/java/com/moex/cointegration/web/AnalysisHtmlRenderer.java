@@ -86,7 +86,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260901-hover2">
+              <link rel="stylesheet" href="/css/operator.css?v=20260901-pos4">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -162,7 +162,7 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260824-pairsdesk-light"></script>
+              <script src="/js/operator.js?v=20260901-pos2"></script>
               <script src="/js/trinity-status-plaques.js?v=20260821-desksplit"></script>
             </body>
             </html>
@@ -395,12 +395,14 @@ public class AnalysisHtmlRenderer {
                   %s
                   %s
                   %s
+                  %s
                 </div>
                 """.formatted(
                 trialBanner(),
                 productEditionPanel(),
                 opsPanel(),
                 trendPlaybookPanel(),
+                positionalPlaybookPanel(),
                 calendarArbPanel(),
                 brokerConsolePanel()
         );
@@ -467,6 +469,39 @@ public class AnalysisHtmlRenderer {
                       </label>
                     </div>
                     <p class="meta" id="trend-delivery-status">Загрузка режима…</p>
+                  </div>
+                </section>
+                """;
+    }
+
+    private String positionalPlaybookPanel() {
+        if (!strategyTrendEnabled) {
+            return "";
+        }
+        return """
+                <section class="dash-section strategy-doc" id="positional-playbook-settings">
+                  <h2>Позиционная торговля · исполнение</h2>
+                  <p class="meta">
+                    Отдельный робот H1 (не нефть M5). Чек-лист задаёт сторону, перед входом —
+                    фундамент, толпа в стакане и охота на крупный объём. Paper в sandbox journal.
+                    Тумблер тот же, что на экране позиционной.
+                  </p>
+                  <div class="callout trend-delivery-card">
+                    <div class="trend-delivery-row">
+                      <div class="trend-delivery-copy">
+                        <strong id="positional-delivery-title">Робот выключен</strong>
+                        <p class="meta" id="positional-delivery-hint">
+                          Смотрим график без paper-входов. Включите авто, чтобы робот ставил сетку в journal.
+                        </p>
+                      </div>
+                      <label class="mode-switch" title="Позиционная: сигнал ↔ авто">
+                        <span class="mode-switch-label" id="positional-mode-left">Выкл</span>
+                        <input type="checkbox" id="settings-positional-auto-execution" role="switch" aria-checked="false">
+                        <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+                        <span class="mode-switch-label" id="positional-mode-right">Авто</span>
+                      </label>
+                    </div>
+                    <p class="meta" id="positional-delivery-status">Загрузка режима…</p>
                   </div>
                 </section>
                 """;
@@ -2022,7 +2057,7 @@ public class AnalysisHtmlRenderer {
                   <div id="chart-z" class="chart tall"></div>
                 </div>
                 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-                <script src="/js/trinity-chart-kit.js?v=20260831-tvnav4"></script>
+                <script src="/js/trinity-chart-kit.js?v=20260902-disk1"></script>
                 <script src="/js/pairs-charts.js?v=20260831-tvnav4"></script>
                 """
                 .replace("{{Y}}", escape(tickerY))

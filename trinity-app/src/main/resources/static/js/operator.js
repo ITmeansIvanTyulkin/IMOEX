@@ -2056,8 +2056,7 @@
   }
 
   async function loadTrendDeliverySettings() {
-    const toggle = $("trend-auto-execution");
-    if (!toggle) return;
+    if (!$("trend-auto-execution") && !$("settings-positional-auto-execution")) return;
     try {
       const res = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -2069,8 +2068,9 @@
   }
 
   function applyTrendDeliveryView(view) {
+    if (!view) return;
     const toggle = $("trend-auto-execution");
-    if (!toggle || !view) return;
+    if (toggle) {
     const auto = !!view.autoExecution;
     toggle.checked = auto;
     toggle.setAttribute("aria-checked", auto ? "true" : "false");
@@ -2092,6 +2092,36 @@
       status.textContent = "Режим: " + (view.delivery || (auto ? "AUTO" : "SIGNAL_ONLY"))
         + (view.updatedAt
           ? " · переключено " + formatOperatorTime(view.updatedAt) + " (не дата торгов)"
+          : "");
+    }
+    }
+    applyPositionalDeliveryView(view);
+  }
+
+  function applyPositionalDeliveryView(view) {
+    const toggle = $("settings-positional-auto-execution");
+    if (!toggle || !view) return;
+    const auto = !!view.positionalAutoExecution;
+    toggle.checked = auto;
+    toggle.setAttribute("aria-checked", auto ? "true" : "false");
+    const wrap = toggle.closest(".mode-switch");
+    if (wrap) {
+      wrap.classList.toggle("is-auto", auto);
+      wrap.classList.toggle("is-signal", !auto);
+    }
+    const title = $("positional-delivery-title");
+    const hint = $("positional-delivery-hint");
+    const status = $("positional-delivery-status");
+    if (title) title.textContent = auto ? "Робот включён · paper" : "Робот выключен";
+    if (hint) {
+      hint.textContent = auto
+        ? "Чек-лист + фундамент/стакан/охота. Сетка уходит в sandbox journal. Не путать с нефтью M5."
+        : "График и разбор есть, paper-входов нет. Включите авто на этом пульте или на экране позиционной.";
+    }
+    if (status) {
+      status.textContent = "Режим: " + (view.positionalDelivery || (auto ? "SANDBOX_FAIR" : "SIGNAL_ONLY"))
+        + (view.updatedAt
+          ? " · переключено " + formatOperatorTime(view.updatedAt)
           : "");
     }
   }
@@ -2183,6 +2213,30 @@
       appendLog(enabled ? "Trend: автоторговля включена." : "Trend: только сигнал.", "ok");
     } catch (err) {
       appendLog("Не удалось переключить trend: " + (err.message || err), "err");
+      await loadTrendDeliverySettings();
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  async function setPositionalAutoExecution(enabled) {
+    const toggle = $("settings-positional-auto-execution");
+    if (!toggle) return;
+    toggle.disabled = true;
+    try {
+      const res = await fetch("/api/trend/settings/positional-auto-execution", {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      applyPositionalDeliveryView(await res.json());
+      appendLog(enabled ? "Позиционная: робот включён (paper)." : "Позиционная: робот выключен.", "ok");
+    } catch (err) {
+      appendLog("Не удалось переключить позиционную: " + (err.message || err), "err");
       await loadTrendDeliverySettings();
     } finally {
       toggle.disabled = false;
@@ -2817,10 +2871,17 @@
     if ($("broker-save-settings")) {
       $("broker-save-settings").addEventListener("click", saveBrokerSettings);
     }
-    if ($("trend-auto-execution")) {
+    if ($("trend-auto-execution") || $("settings-positional-auto-execution")) {
       loadTrendDeliverySettings();
+    }
+    if ($("trend-auto-execution")) {
       $("trend-auto-execution").addEventListener("change", function () {
         setTrendAutoExecution($("trend-auto-execution").checked);
+      });
+    }
+    if ($("settings-positional-auto-execution")) {
+      $("settings-positional-auto-execution").addEventListener("change", function () {
+        setPositionalAutoExecution($("settings-positional-auto-execution").checked);
       });
     }
     if ($("arb-auto-execution")) {

@@ -70,6 +70,18 @@ public class MarketDataResearchService {
     }
 
     /**
+     * Cached live front only — never opens T-Invest. Desk HTTP uses this.
+     */
+    public String peekLiveFrontTicker(String familyOrSecid) {
+        String hint = familyOrSecid == null || familyOrSecid.isBlank()
+                ? defaultInstrument : familyOrSecid.trim();
+        String fam = TInvestBrokerMarketData.familyOf(hint);
+        String cacheKey = (fam == null ? hint : fam).toUpperCase(Locale.ROOT);
+        CachedFront hit = liveFrontCache.get(cacheKey);
+        return hit == null ? null : hit.ticker();
+    }
+
+    /**
      * Live FORTS month for this family (cached). Empty DOM on an expired front
      * rolls to the next month that still has a book.
      */
@@ -165,8 +177,17 @@ public class MarketDataResearchService {
      * Empty snapshots (expired month) fall through to the same-family live book.
      */
     public Optional<DomBook> resolveBook(String instrumentId) {
+        return resolveBook(instrumentId, true);
+    }
+
+    /** Stream + DOM archive. Desk HTTP must not wait on T-Invest REST. */
+    public Optional<DomBook> resolveBookLocal(String instrumentId) {
+        return resolveBook(instrumentId, false);
+    }
+
+    private Optional<DomBook> resolveBook(String instrumentId, boolean allowRest) {
         String id = instrumentId == null || instrumentId.isBlank() ? defaultInstrument : instrumentId.trim();
-        String front = liveFrontTicker(id);
+        String front = allowRest ? liveFrontTicker(id) : peekLiveFrontTicker(id);
         if (front != null && !front.isBlank()) {
             id = front;
         }
@@ -174,7 +195,7 @@ public class MarketDataResearchService {
         if (isEmpty(book)) {
             book = sameFamilyLiveBook(id).orElse(book);
         }
-        if (needsRestRefresh(book)) {
+        if (allowRest && needsRestRefresh(book)) {
             Optional<DomBook> refreshed = refreshBookRest(id);
             if (refreshed.isPresent() && !isEmpty(refreshed.get())) {
                 book = refreshed.get();
@@ -199,7 +220,7 @@ public class MarketDataResearchService {
             if (!day.isEmpty()) {
                 DomBook archived = day.get(day.size() - 1);
                 if (!isEmpty(archived)) {
-                    if (needsRestRefresh(archived)) {
+                    if (allowRest && needsRestRefresh(archived)) {
                         Optional<DomBook> refreshed = refreshBookRest(id);
                         if (refreshed.isPresent() && !isEmpty(refreshed.get())) {
                             return refreshed;
@@ -211,7 +232,30 @@ public class MarketDataResearchService {
         } catch (Exception ignored) {
             // empty
         }
-        return refreshBookRest(id);
+        return allowRest ? refreshBookRest(id) : Optional.empty();
+    }
+
+    /** Recent DOM snapshots for spoof/pull hunt (minute-sampled archive). */
+    public List<DomBook> recentDom(String instrumentId, int max) {
+        int cap = Math.max(2, Math.min(max <= 0 ? 12 : max, 40));
+        String id = instrumentId == null || instrumentId.isBlank() ? defaultInstrument : instrumentId.trim();
+        String front = peekLiveFrontTicker(id);
+        if (front != null && !front.isBlank()) {
+            id = front;
+        }
+        try {
+            List<DomBook> day = archive.loadDomDay(id, LocalDate.now(MSK));
+            if (day.isEmpty()) {
+                day = archive.loadDomDay(id, LocalDate.now(MSK).minusDays(1));
+            }
+            if (day.size() > cap) {
+                return List.copyOf(day.subList(day.size() - cap, day.size()));
+            }
+            return day == null ? List.of() : List.copyOf(day);
+        } catch (Exception ex) {
+            log.debug("recentDom {}: {}", id, ex.toString());
+            return List.of();
+        }
     }
 
     /** Last trade price from broker unary (works when MarketDataStream is down). */

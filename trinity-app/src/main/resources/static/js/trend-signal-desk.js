@@ -52,6 +52,8 @@
   let lastTimelineMarkers = [];
   let lastDivMarkersKey = "";
   let lastDeskInstrument = "";
+  let deskFetchGen = 0;
+  let deskQueuedForceFit = false;
   let chartTools = null;
   let deskLayoutDoc = null;
   let deskLayoutTimer = null;
@@ -113,10 +115,18 @@
     const gtitle = $("signal-guide-title");
     if (pos) {
       if (gtitle) gtitle.textContent = "Как работает позиционная";
-      if (lead) lead.textContent = "Часовой тренд, вход в среднюю полку объёма, сетка 1:1:2:4. «Сканирует» значит робот включён, по правилам входа сейчас нет.";
+      if (lead) lead.textContent = "Часовой тренд, средняя полка объёма, сетка 1:1:2:4, охота до входа и трейл за закрытой свечой. «Сканирует» — робот включён, входа сейчас нет.";
     }
     const kick = $("sig-kick-btn");
     if (kick) kick.hidden = pos;
+    const wrap = $("positional-auto-wrap");
+    if (wrap) wrap.hidden = !pos;
+    const modeLink = $("signal-desk-mode-link");
+    if (modeLink) {
+      modeLink.setAttribute("href", pos
+        ? "/view/settings#positional-playbook-settings"
+        : "/view/settings#trend-playbook-settings");
+    }
     document.querySelectorAll("[data-guide-scope]").forEach(function (el) {
       const want = el.getAttribute("data-guide-scope");
       el.hidden = !!(want && want !== "both" && want !== deskScope());
@@ -128,6 +138,18 @@
     if (!chip || !el) return;
     const sit = (data && data.situation) || {};
     const posture = sit.posture || "";
+    if (deskScope() === "positional" && data && data.positionalAutoExecution === false) {
+      el.textContent = "Пауза";
+      const sub = $("sig-robot-detail");
+      if (sub) {
+        sub.textContent = "Робот выключен тумблером — график смотрим, paper-входов нет";
+        sub.hidden = false;
+      }
+      chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan");
+      chip.classList.add("is-scan");
+      chip.title = "Позиционный робот выключен";
+      return;
+    }
     const copy = buildRobotFabCopy(data);
     const status = (copy && copy.status) ? copy.status : "Сканирует";
     const detail = (copy && copy.detail) ? copy.detail : "";
@@ -143,6 +165,56 @@
     else if (posture === "WATCHING_ZONE") chip.classList.add("is-watch");
     else chip.classList.add("is-scan");
     chip.title = detail ? (status + " · " + detail) : status;
+  }
+  function syncPositionalAutoSwitch(data) {
+    const wrap = $("positional-auto-wrap");
+    const tog = $("desk-positional-auto-execution");
+    const pos = deskScope() === "positional";
+    if (wrap) wrap.hidden = !pos;
+    if (!tog) return;
+    const on = !!(data && data.positionalAutoExecution);
+    tog.checked = on;
+    tog.setAttribute("aria-checked", on ? "true" : "false");
+    const sw = tog.closest(".mode-switch");
+    if (sw) {
+      sw.classList.toggle("is-auto", on);
+      sw.classList.toggle("is-signal", !on);
+    }
+  }
+  function bindPositionalAutoSwitch() {
+    const tog = $("desk-positional-auto-execution");
+    if (!tog || tog.dataset.bound === "1") return;
+    tog.dataset.bound = "1";
+    tog.addEventListener("change", function () {
+      setPositionalAutoFromDesk(tog.checked);
+    });
+  }
+  async function setPositionalAutoFromDesk(enabled) {
+    const tog = $("desk-positional-auto-execution");
+    if (tog) tog.disabled = true;
+    try {
+      const res = await fetch("/api/trend/settings/positional-auto-execution", {
+        method: "POST",
+        headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      const view = await res.json();
+      syncPositionalAutoSwitch({ positionalAutoExecution: !!view.positionalAutoExecution });
+      if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
+        window.TrinityPlaques.refresh();
+      }
+      await loadDesk(true);
+    } catch (e) {
+      alert("Не удалось переключить позиционного робота: " + (e && e.message ? e.message : e)
+        + "\nНужен вход в кабинет.");
+      if (tog) tog.checked = !enabled;
+    } finally {
+      if (tog) tog.disabled = false;
+    }
   }
   function deMark(s) {
     return String(s == null ? "" : s)
@@ -219,6 +291,37 @@
   function readStoredPlaybook() {
     try { return (localStorage.getItem(PB_STORE) || "").trim(); } catch (_) { return ""; }
   }
+  function instrumentFamily(secid) {
+    const u = String(secid || "").trim();
+    if (!u) return "";
+    const up = u.toUpperCase();
+    if (up === "GOLD" || up.indexOf("GD") === 0) return "GD";
+    if (up === "MIX" || up.indexOf("MX") === 0) return "MX";
+    if (up === "SI" || up === "USD" || up.indexOf("SI") === 0
+        || (u.length >= 2 && u.charAt(0) === "S" && u.charAt(1) === "i")) {
+      return "SI";
+    }
+    if (up === "RTS" || up === "RT" || up.indexOf("RI") === 0
+        || (u.length >= 2 && u.charAt(0) === "R" && u.charAt(1) === "i")) {
+      return "RI";
+    }
+    if (up.indexOf("NG") === 0) return "NG";
+    if (up.indexOf("BR") === 0) return "BR";
+    return up.slice(0, 2);
+  }
+  function sameInstrumentFamily(a, b) {
+    const fa = instrumentFamily(a);
+    const fb = instrumentFamily(b);
+    return !!(fa && fb && fa === fb);
+  }
+  function wantedDeskInstrument() {
+    const instSel = $("sig-instrument");
+    const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
+    return (deskInstrumentPinned || fromSel || "").trim();
+  }
+  function invalidateDeskFetch() {
+    deskFetchGen += 1;
+  }
   function writeStoredPlaybook(v) {
     try {
       if (v) localStorage.setItem(PB_STORE, String(v).trim());
@@ -233,10 +336,10 @@
       }
     }
     const want = String(secid).toUpperCase();
-    const fam = want.slice(0, 2);
+    const fam = instrumentFamily(secid);
     for (let i = 0; i < sel.options.length; i++) {
       const v = String(sel.options[i].value || "").toUpperCase();
-      if (v.indexOf(fam) === 0) {
+      if (fam && instrumentFamily(sel.options[i].value) === fam) {
         if (v !== want) {
           sel.options[i].value = secid;
           const label = sel.options[i].textContent || "";
@@ -517,6 +620,7 @@
       SCANNING: "СКАНИРУЕТ"
     })[posture] || posture;
     const reason = humanizeDeskReason(sit.why || data.summary || plan.rationale || "");
+    const hunt = data.positionalHunt || sit.positionalHunt || {};
     const htf = sit.htf || st.htf || "?";
     const range = plan.range || {};
     const grid = plan.grid || {};
@@ -582,6 +686,16 @@
         + " — смените инструмент в селекте, чтобы смотреть его H1.</p>";
     }
 
+    if (hunt.blocksNewArm) {
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · фундамент и охота</p>";
+      html += "<p class='signal-brief-note'>" + esc(hunt.ru
+        || "Новый вход откладываем. Сторону часа не меняем.") + "</p>";
+      html += "<p class='signal-brief-note'><strong>Новый вход отложен</strong> — охота против стороны часа, сторону не переворачиваем.</p>";
+    } else {
+      html += "<p class='signal-brief-note'>" + esc(hunt.ru
+        || "Охота молчит. Если сетап валидный — вход по чек-листу.") + "</p>";
+    }
+
     html += "<p class='signal-brief-kicker signal-brief-kicker--robot"
       + (posture === "IN_TRADE" ? " is-in-trade" : "")
       + "'>Робот · " + esc(postureRu) + "</p>";
@@ -591,7 +705,9 @@
     else if (side === "SELL") html += " · шорт";
     html += " · "
       + (sit.liveExecution || data.liveExecution ? "боевой счёт"
-        : ((sit.autoExecution || data.autoExecution) ? "песочница (бумага на H1)" : "только сигнал"))
+        : ((deskScope() === "positional"
+            ? data.positionalAutoExecution
+            : (sit.autoExecution || data.autoExecution)) ? "песочница (бумага на H1)" : "только сигнал"))
       + ".</p>";
     html += "<p>" + esc(reason || "Робот включён и смотрит час. По чеклисту входа сейчас нет.") + "</p>";
     html += "<p class='signal-brief-note'>" + esc(sit.fillModeRu || "Стоп и тейк — по ходу бара, как у брокера.") + "</p>";
@@ -606,7 +722,12 @@
     if (fp.open) {
       const os = fp.open.side === "BUY" ? "лонг" : (fp.open.side === "SELL" ? "шорт" : (fp.open.side || ""));
       html += "<p class='signal-brief-note'><strong>В бумаге открыто:</strong> "
-        + esc(os) + " по " + fmtPx(fp.open.avg) + ", " + fp.open.qty + " лот.</p>";
+        + esc(os) + " по " + fmtPx(fp.open.avg) + ", " + fp.open.qty + " лот."
+        + (fp.open.sl != null ? (" Стоп " + fmtPx(fp.open.sl) + ".") : "")
+        + (fp.open.candleTrail
+          ? " Стоп за закрытой свечой: с нами подтягиваем, против нас стоит."
+          : " Пока сетка добирается, стоп в полке объёма.")
+        + "</p>";
     } else if (fp.pending) {
       html += "<p class='signal-brief-note'>Лимитки выставлены, ждём исполнение"
         + (fp.pending.side ? (" (" + (fp.pending.side === "BUY" ? "лонг" : "шорт") + ")") : "")
@@ -644,7 +765,7 @@
         + " · " + (paperSt.wins || 0) + "/" + (paperSt.losses || 0)
         + " по этому инструменту / плейбуку.</p>";
     }
-    return commentaryHtml(data) + html;
+    return html;
   }
   function buildOperatorBrief(data) {
     const bars = deskBars(data);
@@ -1164,6 +1285,15 @@
     }
     if (u.indexOf("LATE H1") >= 0 || u.indexOf("OVERNIGHT GAP") >= 0 || u.indexOf("NO NEW ENTRY") >= 0) {
       return "После 16:00 новый вход не ставим — чтобы не ловить гэп на ночь. Если пирамида уже открыта, добор по часовым барам идёт дальше. Свежий вход — завтра до 16:00.";
+    }
+    if (u.indexOf("POSITIONAL HUNT") >= 0 || u.indexOf("HUNT:") >= 0) {
+      if (u.indexOf("СНЯТ") >= 0 || u.indexOf("СТЕН") >= 0 || u.indexOf("СПОФ") >= 0) {
+        return "У полки поставили крупную заявку и сняли — ложная стена. Якорем не считаем, новый вход откладываем. Сторону часа не меняем.";
+      }
+      if (u.indexOf("КИТ") >= 0 || u.indexOf("КРУПНЫЙ ОБЪЁМ") >= 0 || u.indexOf("КРУПНЫЙ ОБЪЕМ") >= 0) {
+        return "В ленте крупный объём против стороны часа — кита не догоняем, ждём. Сторону не переворачиваем.";
+      }
+      return "Перед входом сверили фундамент, толпу в стакане и крупный объём. Сейчас они против стороны часа — новый вход не ставим, сторону не переворачиваем.";
     }
     if (u.indexOf("SIZE=") >= 0 || (u.indexOf("NEED") >= 0 && u.indexOf("4 LOT") >= 0)
         || (u.indexOf("1:1:2:4") >= 0 && u.indexOf("< 4") >= 0)) {
@@ -3411,9 +3541,7 @@
     }
   }
   function deskInstrumentQuery() {
-    const instSel = $("sig-instrument");
-    const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
-    const inst = lastDeskInstrument || fromSel;
+    const inst = wantedDeskInstrument() || lastDeskInstrument;
     return inst ? ("?instrument=" + encodeURIComponent(inst)) : "";
   }
   async function loadBook() {
@@ -3429,19 +3557,27 @@
   async function loadDesk(forceFit) {
     if (deskInFlight) {
       deskReloadQueued = true;
+      deskQueuedForceFit = deskQueuedForceFit || !!forceFit;
       return;
     }
-    if (deskInFlight) return;
     deskInFlight = true;
+    const gen = ++deskFetchGen;
     const meta = $("signal-desk-meta");
+    const wantInst = wantedDeskInstrument();
     try {
-      const instSel = $("sig-instrument");
       const q = [];
-      if (instSel && instSel.value) q.push("instrument=" + encodeURIComponent(instSel.value));
+      if (wantInst) q.push("instrument=" + encodeURIComponent(wantInst));
       q.push("playbook=" + encodeURIComponent(viewPlaybookId()));
       const res = await fetch("/api/trend/desk?" + q.join("&"), { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
+      if (gen !== deskFetchGen) return;
+      const stillWant = wantedDeskInstrument() || wantInst;
+      if (deskScope() === "positional"
+          && stillWant && data.instrument && !sameInstrumentFamily(stillWant, data.instrument)) {
+        deskReloadQueued = true;
+        return;
+      }
       if (meta) {
         meta.textContent = (data.playbookName || data.playbookId || "playbook")
           + " · " + (data.instrument || "BR")
@@ -3454,6 +3590,7 @@
       }
       fillDeskSelects(data);
       paintRobotChip(data);
+      syncPositionalAutoSwitch(data);
       const oilBanWrap = $("us-oil-banner");
       if (oilBanWrap) oilBanWrap.hidden = deskScope() === "positional";
       const oilBan = $("us-oil-banner-text");
@@ -3635,12 +3772,15 @@
       deskInFlight = false;
       if (deskReloadQueued) {
         deskReloadQueued = false;
-        loadDesk(!!forceFit);
+        const again = deskQueuedForceFit;
+        deskQueuedForceFit = false;
+        loadDesk(!!forceFit || again);
       }
     }
   }
   const btn = $("signal-desk-refresh");
   if (btn) btn.addEventListener("click", function () { loadDesk(false); });
+  bindPositionalAutoSwitch();
   const kickBtn = $("sig-kick-btn");
   if (kickBtn) kickBtn.addEventListener("click", kickRobot);
   const fitBtn = $("signal-desk-fit");
@@ -3755,7 +3895,8 @@
     }
   });
   let guideLastFocus = null;
-  function openStrategyGuide() {
+    function openStrategyGuide() {
+    applyDeskChrome();
     const gate = $("signal-guide-modal");
     const dialog = gate && gate.querySelector(".signal-guide-modal");
     if (!gate || !dialog) return;
@@ -4131,33 +4272,16 @@
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
       if (activePb) pbSel.value = activePb;
-      if (deskInstrumentPinned && matchInstrumentOption(instSel, deskInstrumentPinned)) {
-        const pinnedFam = String(deskInstrumentPinned).slice(0, 2).toUpperCase();
-        const liveFam = String(activeInst || "").slice(0, 2).toUpperCase();
-        if (activeInst && pinnedFam && pinnedFam === liveFam
+      if (deskInstrumentPinned) {
+        matchInstrumentOption(instSel, deskInstrumentPinned);
+        if (activeInst && sameInstrumentFamily(deskInstrumentPinned, activeInst)
             && String(deskInstrumentPinned).toUpperCase() !== String(activeInst).toUpperCase()) {
           matchInstrumentOption(instSel, activeInst);
           deskInstrumentPinned = activeInst;
           writeStoredInstrument(activeInst);
         }
       } else if (activeInst) {
-        let matched = false;
-        for (let i = 0; i < instSel.options.length; i++) {
-          if (instSel.options[i].value === activeInst) {
-            instSel.value = activeInst;
-            matched = true;
-            break;
-          }
-        }
-        if (!matched) {
-          const fam = String(activeInst).slice(0, 2).toUpperCase();
-          for (let i = 0; i < instSel.options.length; i++) {
-            if (String(instSel.options[i].value).toUpperCase().indexOf(fam) === 0) {
-              instSel.value = instSel.options[i].value;
-              break;
-            }
-          }
-        }
+        matchInstrumentOption(instSel, activeInst);
       }
     }
     const wantPb = viewPlaybookId();
@@ -4169,21 +4293,31 @@
     }
     const cur = instSel.options[instSel.selectedIndex];
     if (cur && (cur.hidden || cur.disabled)) {
-      for (let i = 0; i < instSel.options.length; i++) {
-        if (!instSel.options[i].hidden && !instSel.options[i].disabled) {
-          instSel.value = instSel.options[i].value;
-          break;
+      if (deskInstrumentPinned) {
+        matchInstrumentOption(instSel, deskInstrumentPinned);
+      } else {
+        for (let i = 0; i < instSel.options.length; i++) {
+          if (!instSel.options[i].hidden && !instSel.options[i].disabled) {
+            instSel.value = instSel.options[i].value;
+            break;
+          }
         }
       }
     }
     if (!deskSelectsWired) {
       deskSelectsWired = true;
       instSel.addEventListener("change", function () {
+        invalidateDeskFetch();
         lastDeskInstrument = "";
         lastOverlayKey = "";
         deskInstrumentPinned = instSel.value;
         writeStoredInstrument(instSel.value);
         scheduleSaveDeskLayout();
+        try { if (candleSeries) candleSeries.setData([]); } catch (_) {}
+        const tfHint = deskScope() === "positional" ? "H1" : "M5";
+        setChartLegendSymbol(instSel.value, tfHint);
+        const lab = $("signal-chart-label");
+        if (lab) lab.textContent = "График · " + instSel.value + " · загрузка…";
         const persist = saveDeskSelection({ instrumentId: instSel.value }, { quiet: true });
         Promise.resolve(persist).finally(function () {
           loadDesk(true);
@@ -4217,7 +4351,8 @@
         autoExecution: view.autoExecution,
         liveExecution: view.liveExecution,
         playbookId: patch.playbookId || view.playbookId,
-        instrumentId: patch.instrumentId || view.instrumentId
+        instrumentId: patch.instrumentId || view.instrumentId,
+        positionalAutoExecution: view.positionalAutoExecution
       };
       const res = await fetch("/api/trend/settings", {
         method: "POST",
@@ -4231,7 +4366,6 @@
       if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
         window.TrinityPlaques.refresh();
       }
-      await loadDesk(true);
       return true;
     } catch (e) {
       console.warn("saveDeskSelection failed", e);
@@ -4350,13 +4484,16 @@
   }
 
   async function paintCachedChart() {
-    if (deskScope() === "positional") return false;
     if (!window.TrinityChartKit || typeof TrinityChartKit.barCacheGet !== "function") return false;
     const instSel = $("sig-instrument");
     const want = (instSel && instSel.value) || deskInstrumentPinned || readStoredInstrument() || "";
-    const row = await TrinityChartKit.barCacheGet(want || "_last", "M5");
+    const tf = deskScope() === "positional" ? "H1" : "M5";
+    const row = await TrinityChartKit.barCacheGet(want || "_last", tf);
     if (!row || !row.bars || !row.bars.length) return false;
     const inst = row.instrument || want || "BR";
+    if (want && inst && typeof sameInstrumentFamily === "function" && !sameInstrumentFamily(want, inst)) {
+      return false;
+    }
     ensureChart(inst, row.pointSize);
     const candles = row.bars.map(function (b) {
       if (!b || b.time == null) return null;
@@ -4372,7 +4509,7 @@
       lastDeskInstrument = inst;
       adoptSavedScale(inst);
     }
-    lastChartTf = row.tf || "M5";
+    lastChartTf = row.tf || tf || "M5";
     setChartLegendSymbol(inst, lastChartTf);
     if (row.raw && row.raw.length) lastBarsRaw = row.raw;
     lastCandlesLen = 0;

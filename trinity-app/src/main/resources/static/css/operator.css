@@ -3221,6 +3221,28 @@ body[data-upsell="off"] .full-core-badge {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-items: center;
+}
+.signal-pos-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0.35rem 0.15rem 0.55rem;
+  border: 1px solid rgba(30, 42, 50, 0.12);
+  border-radius: 10px;
+  background: rgba(30, 42, 50, 0.04);
+}
+.signal-pos-switch[hidden] {
+  display: none !important;
+}
+.signal-pos-switch .k {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #6a7580);
+}
+.signal-pos-switch .mode-switch {
+  margin: 0;
 }
 .signal-desk-strip {
   display: flex;
@@ -4515,6 +4537,10 @@ body[data-upsell="off"] .full-core-badge {
   top: 0;
   background: linear-gradient(180deg, #f7f9fa 70%, rgba(247, 249, 250, 0));
   z-index: 2;
+}
+.signal-guide-toc[hidden],
+.signal-guide-section[hidden] {
+  display: none !important;
 }
 .signal-guide-toc a {
   font-size: 0.75rem;

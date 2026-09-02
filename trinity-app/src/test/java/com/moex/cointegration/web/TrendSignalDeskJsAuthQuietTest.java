@@ -37,6 +37,13 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("function buildPositionalBrief"), "positional brief missing");
         assertTrue(src.contains("function familyRu"), "positional family labels missing");
         assertTrue(src.contains("После 16:00 новый вход не ставим"), "late-arm copy must be Russian");
+        assertTrue(src.contains("desk-positional-auto-execution"), "positional desk switcher missing");
+        assertTrue(src.contains("/api/trend/settings/positional-auto-execution"), "positional auto API missing");
+        assertTrue(src.contains("Перед входом · фундамент и охота"), "hunt brief heading missing");
+        assertTrue(src.contains("function wantedDeskInstrument"), "desk must request pinned instrument");
+        assertTrue(src.contains("invalidateDeskFetch"), "stale oil payload must be dropped on instrument change");
         assertTrue(src.contains("deskReloadQueued"), "instrument change must queue desk reload");
+        assertTrue(src.contains("deskScope() === \"positional\" ? \"H1\" : \"M5\""),
+                "positional boot must paint local H1 archive, not skip cache");
     }
 }

@@ -105,6 +105,17 @@ public class TrendRobotController {
         return trendSettings.setAutoExecution(next);
     }
 
+    /** Independent positional paper switch — does not change Exclusive playbookId. */
+    @PostMapping("/settings/positional-auto-execution")
+    public TrendSettingsService.View togglePositionalAutoExecution(
+            @RequestBody(required = false) ToggleBody body
+    ) {
+        boolean next = body != null && body.enabled() != null
+                ? body.enabled()
+                : !trendSettings.positionalAutoExecution();
+        return trendSettings.setPositionalAutoExecution(next);
+    }
+
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();

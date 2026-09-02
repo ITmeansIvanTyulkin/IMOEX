@@ -1,4 +1,5 @@
 <section class="signal-desk" id="trend-signal-desk" data-desk-scope="range">
+  <style>#positional-auto-wrap[hidden]{display:none!important}</style>
   <div class="signal-desk-head">
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
@@ -24,7 +25,16 @@
               aria-pressed="true">Автоотступ</button>
       <button type="button" class="btn btn-ghost" id="signal-desk-fit">Весь график</button>
       <button type="button" class="btn btn-ghost" id="signal-desk-refresh">Обновить</button>
-      <a class="btn btn-ghost" href="/view/settings#trend-playbook-settings">Режим</a>
+      <div class="signal-pos-switch" id="positional-auto-wrap" hidden>
+        <span class="k">Робот</span>
+        <label class="mode-switch" title="Включить или выключить позиционного робота">
+          <span class="mode-switch-label">Выкл</span>
+          <input type="checkbox" id="desk-positional-auto-execution" role="switch" aria-checked="false">
+          <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+          <span class="mode-switch-label">Авто</span>
+        </label>
+      </div>
+      <a class="btn btn-ghost" href="/view/settings#trend-playbook-settings" id="signal-desk-mode-link">Режим</a>
     </div>
   </div>
   <div class="signal-desk-strip" id="signal-desk-strip">
@@ -209,7 +219,7 @@
               data-guide-close aria-label="Закрыть">×</button>
     </header>
     <div class="signal-guide-body">
-      <nav class="signal-guide-toc" aria-label="Разделы">
+      <nav class="signal-guide-toc" data-guide-scope="range" aria-label="Разделы">
         <a href="#guide-idea">Идея</a>
         <a href="#guide-why-oil">Почему нефть</a>
         <a href="#guide-map">Карта дня</a>
@@ -220,6 +230,17 @@
         <a href="#guide-manual">Без автоторгов</a>
         <a href="#guide-skip">Когда молчит</a>
         <a href="#guide-risk">Риск</a>
+      </nav>
+      <nav class="signal-guide-toc" data-guide-scope="positional" hidden aria-label="Разделы">
+        <a href="#guide-idea-pos">Идея</a>
+        <a href="#guide-looks-pos">На что смотрит</a>
+        <a href="#guide-side-pos">Сторона и вход</a>
+        <a href="#guide-grid-pos">Сетка и стоп</a>
+        <a href="#guide-hunt-pos">Перед входом</a>
+        <a href="#guide-manage-pos">В сделке</a>
+        <a href="#guide-robot-pos">Робот</a>
+        <a href="#guide-skip-pos">Когда молчит</a>
+        <a href="#guide-risk-pos">Риск</a>
       </nav>
 
       <article class="signal-guide-section" id="guide-idea" data-guide-scope="range">
@@ -236,10 +257,125 @@
       <article class="signal-guide-section" id="guide-idea-pos" data-guide-scope="positional" hidden>
         <h4>Идея в одном абзаце</h4>
         <p>
-          Позиционный робот ищет <strong>явный тренд на H1</strong> (HH/HL → только LONG, LH/LL → только SHORT)
-          и входит сеткой 1:1:2:4 в <strong>промежуточный объёмный диапазон</strong> последних трёх полок.
-          Семьи: BR, RTS, газ, Si, золото, MIX — в работу берётся одна семья, не несколько сеток сразу.
-          «Сканирует» значит робот <strong>включён</strong>, но чеклист не дал вход.
+          Это <strong>другой робот</strong>, не диапазонная нефть на M5.
+          Позиционный ищет <strong>явный тренд на часовом графике</strong> за последние 1–2 месяца
+          и входит <strong>сеткой в среднюю полку объёма</strong> — не в край тренда и не в пустоту.
+          Семьи: нефть, RTS, газ, Si, золото, MIX. В работу берётся <strong>одна семья</strong>,
+          не несколько сеток сразу. Тумблер «Авто» на этом экране включает paper.
+          «Сканирует» значит робот включён, но по правилам входа сейчас нет.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-looks-pos" data-guide-scope="positional" hidden>
+        <h4>На что смотрит</h4>
+        <ul class="signal-guide-list">
+          <li><strong>Часовой тренд</strong> — нужны понятные максимумы/минимумы (выше-выше или ниже-ниже).
+            Боковик без структуры — входа нет.</li>
+          <li><strong>Профиль объёма на отрезок тренда</strong> — где рынок реально стоял, не «красивая линия».</li>
+          <li><strong>Три последних объёмных диапазона</strong> по касаниям. Вход — в <em>средний</em>,
+            не в самый дальний и не в ближайший край.</li>
+          <li><strong>Ширина этой полки</strong> — слишком узкая или слишком широкая зона не торгуется.</li>
+          <li><strong>Стакан у полки</strong> — где толпа, не сняли ли только что крупную заявку.</li>
+          <li><strong>Лента и кластеры</strong> — крупный объём у полки с нами или против нас.</li>
+          <li><strong>По нефти</strong> ещё WTI, запасы EIA и COT. Нет данных — робот не выдумывает, чек-лист торгует как есть.</li>
+        </ul>
+        <p class="signal-guide-note">
+          MACD на графике — подсказка глазу, робот по нему сторону не меняет и вход не открывает.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-side-pos" data-guide-scope="positional" hidden>
+        <h4>Сторона и зона входа</h4>
+        <div class="signal-guide-cards">
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">Час вверх</p>
+            <p>Только покупка. Вход в промежуточную полку объёма по ходу тренда, не шорт «на перекупленности».</p>
+          </div>
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">Час вниз</p>
+            <p>Только продажа. Та же полка, та же сетка, зеркально. Фундамент и стакан могут <em>подождать</em> вход — не перевернуть сторону.</p>
+          </div>
+        </div>
+        <p>
+          На графике зона входа — средняя полка. HI/LO на позиционной — не дневные TOP/BOT диапазонного робота,
+          а ориентиры хода на видимом отрезке часа.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-grid-pos" data-guide-scope="positional" hidden>
+        <h4>Сетка, стоп, цель</h4>
+        <ul class="signal-guide-list">
+          <li>Четыре лимитки в зоне, шаг равномерный, объёмы <strong>1 : 1 : 2 : 4</strong> (не меньше четырёх лотов).</li>
+          <li>Стоп — в ближайшем объёмном диапазоне за зоной, не в пустоте.</li>
+          <li>Цель — следующий экстремум по тренду. Если цели нет — после пробоя стоп в безубыток, хвост сетки снимаем.</li>
+          <li>Частичный набор нормален: добираем по часовым барам, не одним рывком.</li>
+        </ul>
+      </article>
+
+      <article class="signal-guide-section" id="guide-hunt-pos" data-guide-scope="positional" hidden>
+        <h4>Перед новым входом</h4>
+        <p>Чек-лист уже выбрал сторону часа. Дополнительно робот может <strong>подождать</strong>:</p>
+        <ul class="signal-guide-list">
+          <li>Фундамент по нефти <em>и</em> толпа в стакане оба против стороны часа.</li>
+          <li>Крупный объём в ленте / кластерах против часа — «кита» не догоняем.</li>
+          <li>У полки стояла крупная заявка и её сняли без опоры — стену якорем не считаем.</li>
+        </ul>
+        <p class="signal-guide-note">
+          Эти проверки не делают из покупки продажу. Нет стакана или новостей — вход по чек-листу не ломаем.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-manage-pos" data-guide-scope="positional" hidden>
+        <h4>Пока позиция жива</h4>
+        <ul class="signal-guide-list">
+          <li>Пока сетка ещё набирается — стоп стоит на полке, не подтягиваем.</li>
+          <li>Когда сетка набрана или стоп уже в безубытке: закрытый час <em>с нами</em> — стоп за эту свечу
+            (лонг: под минимум минус пункт; шорт: над максимум плюс пункт). Двигается со следующего часа,
+            чтобы фитиль той же свечи нас не выбил.</li>
+          <li>Час против нас — стоп не отпускаем назад.</li>
+          <li>Пробой сформированного экстремума — стоп в безубыток, незаполненный хвост снимаем, уже набранное держим.</li>
+        </ul>
+        <p class="signal-guide-note">
+          Стоп и тейк считаются по ходу часа, как у брокера, а не «подождать закрытие и потом решить».
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-robot-pos" data-guide-scope="positional" hidden>
+        <h4>Если автоторги включены</h4>
+        <ol class="signal-guide-steps">
+          <li>Тумблер «Авто» на этом экране (и тот же выключатель в настройках) — независимо от диапазонной нефти.</li>
+          <li>Раз в закрытый час: выбирает одну семью, строит сетку, пишет план в историю для обучения.</li>
+          <li>Paper исполняет лимиты, стоп и трейл. Реальные ордера выключены.</li>
+          <li>В «Робот» на полоске: пауза / сканирует / ждёт набор / в сделке.</li>
+        </ol>
+        <p>Если тумблер выключен — график, стакан и план видны, paper-входов нет. Решение входить — за вами.</p>
+        <p class="signal-guide-note">
+          Режим: <a href="/view/settings#positional-playbook-settings">Настройки</a>.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-skip-pos" data-guide-scope="positional" hidden>
+        <h4>Когда робот сознательно молчит</h4>
+        <ul class="signal-guide-list">
+          <li>Нет явного часового тренда или нет трёх объёмных полок.</li>
+          <li>Средняя полка слишком узкая / широкая, или стоп некуда поставить в объёме.</li>
+          <li>Не хватает лотов на сетку 1:1:2:4 под риск счёта.</li>
+          <li>После 16:00 МСК новых входов нет (анти-овернайт); уже открытая сетка живёт.</li>
+          <li>Охота / лимит убытка по книге — ждут, сторону не крутят.</li>
+        </ul>
+        <p>Тишина чаще значит «фильтр сработал», а не «робот сломался».</p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-risk-pos" data-guide-scope="positional" hidden>
+        <h4>Риск</h4>
+        <ul class="signal-guide-list">
+          <li>Риск считается от стопа в объёме, не от «красивой круглой» цены.</li>
+          <li>Серия убытков и просадка по позиционной книге могут временно закрыть новые входы.</li>
+          <li>Гэп через стоп на ночи учитывается в размере, сам стоп из-за этого не двигаем.</li>
+        </ul>
+        <p class="signal-guide-foot">
+          Это операторская памятка по позиционной H1, не офер и не гарантия прибыли.
+          Paper / sandbox — не живой FORTS.
         </p>
       </article>
 
@@ -266,7 +402,7 @@
         </p>
       </article>
 
-      <article class="signal-guide-section" id="guide-map">
+      <article class="signal-guide-section" id="guide-map" data-guide-scope="range">
         <h4>Карта дня на графике</h4>
         <ul class="signal-guide-list">
           <li><span class="lg-hi">HI / LO</span> — максимум и минимум текущего дня.</li>
@@ -283,7 +419,7 @@
         </p>
       </article>
 
-      <article class="signal-guide-section" id="guide-wind">
+      <article class="signal-guide-section" id="guide-wind" data-guide-scope="range">
         <h4>Зачем старший таймфрейм</h4>
         <p>
           Робот собирает <strong>H1 из ваших же M5</strong> и обновляет «ветер» на закрытии часа.
@@ -300,7 +436,7 @@
         </ul>
       </article>
 
-      <article class="signal-guide-section" id="guide-phase">
+      <article class="signal-guide-section" id="guide-phase" data-guide-scope="range">
         <h4>Фаза дня и качество касания</h4>
         <ul class="signal-guide-list">
           <li><strong>После дампа / ралли</strong> — приоритет отскока у противоположной полки (BOT / TOP).</li>
@@ -317,7 +453,7 @@
         </p>
       </article>
 
-      <article class="signal-guide-section" id="guide-entries">
+      <article class="signal-guide-section" id="guide-entries" data-guide-scope="range">
         <h4>Два сценария входа</h4>
         <div class="signal-guide-cards">
           <div class="signal-guide-card">
@@ -341,7 +477,7 @@
         </p>
       </article>
 
-      <article class="signal-guide-section" id="guide-robot">
+      <article class="signal-guide-section" id="guide-robot" data-guide-scope="range">
         <h4>Если автоторги включены</h4>
         <ol class="signal-guide-steps">
           <li>Сверяет ветер H1, фазу дня, полки M5, gap-fill и стакан.</li>
@@ -357,7 +493,7 @@
         </p>
       </article>
 
-      <article class="signal-guide-section" id="guide-manual">
+      <article class="signal-guide-section" id="guide-manual" data-guide-scope="range">
         <h4>Если автоторги выключены</h4>
         <p>Робот — <strong>сигнальный ассистент</strong>:</p>
         <ol class="signal-guide-steps">
@@ -372,7 +508,7 @@
         </p>
       </article>
 
-      <article class="signal-guide-section" id="guide-skip">
+      <article class="signal-guide-section" id="guide-skip" data-guide-scope="range">
         <h4>Когда робот сознательно молчит</h4>
         <ul class="signal-guide-list">
           <li>Против ветра без сильного сценария; RETEST long в дамп.</li>
@@ -385,7 +521,7 @@
         <p>Тишина чаще значит «фильтр сработал», а не «робот сломался».</p>
       </article>
 
-      <article class="signal-guide-section" id="guide-risk">
+      <article class="signal-guide-section" id="guide-risk" data-guide-scope="range">
         <h4>Риск и цели (BR)</h4>
         <ul class="signal-guide-list">
           <li>Ширина торговой полки обычно <strong>15–20 пунктов</strong> — калибровка под нефть.</li>
@@ -403,5 +539,5 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-chart-kit.js?v=20260901-hover2"></script>
-<script src="/js/trend-signal-desk.js?v=20260901-desk5"></script>
+<script src="/js/trinity-chart-kit.js?v=20260902-disk1"></script>
+<script src="/js/trend-signal-desk.js?v=20260902-disk1"></script>
