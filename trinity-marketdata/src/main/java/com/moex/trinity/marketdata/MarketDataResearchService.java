@@ -148,8 +148,12 @@ public class MarketDataResearchService {
             }
         }
         if (picked.isEmpty()) {
-            picked = sameFamilyLiveBook(hint)
-                    .map(b -> new TInvestBrokerMarketData.FrontMonth(b.instrumentId(), "", LocalDate.now(MSK)));
+            // Only family aliases may borrow another month's live book. Concrete BRV6 must not
+            // become BRX6 when getFutures fails but November DOM is streaming (2026-09-10).
+            if (!looksLikeConcreteSecid(hint)) {
+                picked = sameFamilyLiveBook(hint)
+                        .map(b -> new TInvestBrokerMarketData.FrontMonth(b.instrumentId(), "", LocalDate.now(MSK)));
+            }
         }
         if (picked.isEmpty()) {
             liveFrontCache.put(cacheKey, new CachedFront(hint.toUpperCase(Locale.ROOT), now));
@@ -289,9 +293,12 @@ public class MarketDataResearchService {
     public List<DomBook> recentDom(String instrumentId, int max) {
         int cap = Math.max(2, Math.min(max <= 0 ? 12 : max, 40));
         String id = instrumentId == null || instrumentId.isBlank() ? defaultInstrument : instrumentId.trim();
-        String front = peekLiveFrontTicker(id);
-        if (front != null && !front.isBlank()) {
-            id = front;
+        // Concrete SECID keeps its own DOM history — do not remap to peeked next month.
+        if (!looksLikeConcreteSecid(id)) {
+            String front = peekLiveFrontTicker(id);
+            if (front != null && !front.isBlank()) {
+                id = front;
+            }
         }
         try {
             List<DomBook> day = archive.loadDomDay(id, LocalDate.now(MSK));

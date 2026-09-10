@@ -52,6 +52,14 @@ class MarketDataResearchServiceTest {
     }
 
     @Test
+    void concreteSecidIsRecognizedForDomPin() {
+        assertTrue(MarketDataResearchService.looksLikeConcreteSecid("BRV6"));
+        assertTrue(MarketDataResearchService.looksLikeConcreteSecid("SiZ6"));
+        assertFalse(MarketDataResearchService.looksLikeConcreteSecid("BR"));
+        assertFalse(MarketDataResearchService.looksLikeConcreteSecid(""));
+    }
+
+    @Test
     void resolveBookLocalDoesNotNeedRestWhenFamilyBookExists() {
         Instant asOf = Instant.now();
         DomBook live = new DomBook("SIU6", 1,
