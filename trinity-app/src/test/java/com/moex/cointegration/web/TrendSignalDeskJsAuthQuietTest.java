@@ -45,5 +45,10 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("deskReloadQueued"), "instrument change must queue desk reload");
         assertTrue(src.contains("deskScope() === \"positional\" ? \"H1\" : \"M5\""),
                 "positional boot must paint local H1 archive, not skip cache");
+        assertTrue(src.contains("function isRangeDesk"), "range desk helper missing");
+        assertTrue(src.contains("INST_STORE + \".range\""),
+                "range must not share positional instrument pin");
+        assertTrue(src.contains("isRangeDesk() && want && !isOilInstrument(want)"),
+                "range wanted instrument must ignore Si/Ri pin");
     }
 }

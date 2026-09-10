@@ -85,6 +85,12 @@
     const s = root && root.getAttribute("data-desk-scope");
     return s === "positional" ? "positional" : "range";
   }
+  function isRangeDesk() {
+    return deskScope() !== "positional";
+  }
+  function isOilInstrument(secid) {
+    return instrumentFamily(secid) === "BR";
+  }
   function viewPlaybookId() {
     return deskScope() === "positional" ? "positional-volume-h1" : "levels-profile-br-m5";
   }
@@ -281,11 +287,15 @@
     }
   }
   function readStoredInstrument() {
-    try { return (localStorage.getItem(INST_STORE) || "").trim(); } catch (_) { return ""; }
+    try {
+      const key = isRangeDesk() ? INST_STORE + ".range" : INST_STORE;
+      return (localStorage.getItem(key) || "").trim();
+    } catch (_) { return ""; }
   }
   function writeStoredInstrument(v) {
     try {
-      if (v) localStorage.setItem(INST_STORE, String(v).trim());
+      const key = isRangeDesk() ? INST_STORE + ".range" : INST_STORE;
+      if (v) localStorage.setItem(key, String(v).trim());
     } catch (_) {}
   }
   function readStoredPlaybook() {
@@ -317,7 +327,9 @@
   function wantedDeskInstrument() {
     const instSel = $("sig-instrument");
     const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
-    return (deskInstrumentPinned || fromSel || "").trim();
+    const want = (deskInstrumentPinned || fromSel || "").trim();
+    if (isRangeDesk() && want && !isOilInstrument(want)) return "";
+    return want;
   }
   function invalidateDeskFetch() {
     deskFetchGen += 1;
@@ -355,7 +367,8 @@
     const instSel = $("sig-instrument");
     if (!instSel || instSel.options.length === 0) return;
     const fromLayout = deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.instrument;
-    const pick = deskInstrumentPinned || fromLayout || readStoredInstrument();
+    let pick = deskInstrumentPinned || fromLayout || readStoredInstrument();
+    if (isRangeDesk() && pick && !isOilInstrument(pick)) pick = "";
     if (pick && matchInstrumentOption(instSel, pick)) {
       deskInstrumentPinned = instSel.value;
     }
@@ -375,6 +388,7 @@
     try {
       const inst = (new URLSearchParams(location.search).get("instrument") || "").trim();
       if (!inst) return;
+      if (isRangeDesk() && !isOilInstrument(inst)) return;
       const instSel = $("sig-instrument");
       if (instSel && matchInstrumentOption(instSel, inst)) {
         deskInstrumentPinned = instSel.value;
@@ -928,20 +942,22 @@
     if (st.zoneTop || st.zoneBottom) {
       marketHtml += "<p class='signal-brief-note'>Зоны дня: ";
       if (st.zoneTop) {
-        marketHtml += "<span class='lg-zone'>TOP</span> "
-          + fmtPx(st.zoneTop.low) + "–" + fmtPx(st.zoneTop.high);
+        marketHtml += "<span class='lg-zone" + (isSoftZone(st.zoneTop) ? " is-soft-zone" : "") + "'>TOP</span> "
+          + fmtPx(st.zoneTop.low) + "–" + fmtPx(st.zoneTop.high)
+          + (isSoftZone(st.zoneTop) ? " <em>(ещё не полка)</em>" : " <em>(полка дня)</em>");
       }
       if (st.zoneBottom) {
         marketHtml += (st.zoneTop ? ", " : "")
-          + "<span class='lg-zone-bot'>BOT</span> "
-          + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high);
+          + "<span class='lg-zone-bot" + (isSoftZone(st.zoneBottom) ? " is-soft-zone" : "") + "'>BOT</span> "
+          + fmtPx(st.zoneBottom.low) + "–" + fmtPx(st.zoneBottom.high)
+          + (isSoftZone(st.zoneBottom) ? " <em>(ещё не полка)</em>" : " <em>(полка дня)</em>");
       }
       marketHtml += ". Хай/лой дня " + fmtPx(st.lookbackHigh) + " / " + fmtPx(st.lookbackLow) + ".";
-      if (sit.hiAboveTopPts != null && sit.hiAboveTopPts > 0) {
+      if (sit.hiAboveTopPts != null && sit.hiAboveTopPts > 0 && !isSoftZone(st.zoneTop)) {
         marketHtml += " <span class='signal-daylock-gap'>Хай дня выше верхней полки на "
           + sit.hiAboveTopPts + "п — полку дня не двигаем за хаем.</span>";
       }
-      if (sit.loBelowBotPts != null && sit.loBelowBotPts > 0) {
+      if (sit.loBelowBotPts != null && sit.loBelowBotPts > 0 && !isSoftZone(st.zoneBottom)) {
         marketHtml += " <span class='signal-daylock-gap'>Лой дня ниже нижней полки на "
           + sit.loBelowBotPts + "п.</span>";
       }
@@ -950,6 +966,20 @@
           + (st.zeroPointBroken ? " — пробит." : " — держится.");
       }
       marketHtml += "</p>";
+      if (isSoftZone(st.zoneTop)) {
+        marketHtml += "<p class='signal-brief-note signal-soft-shelf-explain'>"
+          + "<span class='lg-zone is-soft-zone'>Верхняя зона</span> на графике бледно-розовая: "
+          + "объёмная полка у хая <strong>ещё не успела сформироваться</strong> "
+          + "(цена не отстояла край, нет 2–3 касаний с профилем). "
+          + "Фиксировать нечего — это только ориентир у максимума. "
+          + "Входов сверху нет, пока не появится настоящая полка и её не зафиксируют на день.</p>";
+      }
+      if (isSoftZone(st.zoneBottom)) {
+        marketHtml += "<p class='signal-brief-note signal-soft-shelf-explain'>"
+          + "<span class='lg-zone-bot is-soft-zone'>Нижняя зона</span> на графике бледно-розовая: "
+          + "объёмная полка у лоя ещё не собралась. Фиксировать нечего — входов снизу нет, "
+          + "пока не будет настоящей полки дня.</p>";
+      }
     }
 
     if (sit.domBidLots5 != null) {
@@ -1598,11 +1628,15 @@
     } catch (_) {}
   }
   /** Desk band title: day-lock vs soft map-only (must match engine shelves, not HI/HIST). */
+  function isSoftZone(z) {
+    if (!z) return false;
+    const src = String(z.source || "");
+    return z.validForEntry === false || /SOFT/i.test(src);
+  }
   function zoneBandTitle(role, z) {
     if (!z) return role;
+    if (isSoftZone(z)) return role + "·ждём объём";
     const src = String(z.source || "");
-    const soft = z.validForEntry === false || /SOFT/i.test(src);
-    if (soft) return role + "·карта";
     if (/\+DAY|\bDAY\b|PRIOR/i.test(src)) return role + "·день";
     return role;
   }
@@ -1646,6 +1680,7 @@
           z: st.zoneTop,
           role: "top",
           kind: "top",
+          soft: isSoftZone(st.zoneTop),
           title: zoneBandTitle("TOP", st.zoneTop)
         });
       }
@@ -1654,6 +1689,7 @@
           z: st.zoneBottom,
           role: "bot",
           kind: "bot",
+          soft: isSoftZone(st.zoneBottom),
           title: zoneBandTitle("BOT", st.zoneBottom)
         });
       }
@@ -1698,6 +1734,8 @@
         band.appendChild(label);
         ov.appendChild(band);
       }
+      band.className = "signal-zone-band is-" + (item.kind || item.role)
+        + (item.soft ? " is-soft" : "");
       band.style.top = top + "px";
       band.style.height = height + "px";
       const labelEl = band.querySelector(".signal-zone-label");
@@ -3541,7 +3579,12 @@
     }
   }
   function deskInstrumentQuery() {
-    const inst = wantedDeskInstrument() || lastDeskInstrument;
+    let inst = wantedDeskInstrument() || lastDeskInstrument;
+    if (isRangeDesk()) {
+      if (!inst || !isOilInstrument(inst)) {
+        inst = (lastDeskSnapshot && lastDeskSnapshot.instrument) || "BRV6";
+      }
+    }
     return inst ? ("?instrument=" + encodeURIComponent(inst)) : "";
   }
   async function loadBook() {
@@ -4272,7 +4315,12 @@
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
       if (activePb) pbSel.value = activePb;
-      if (deskInstrumentPinned) {
+      if (isRangeDesk()) {
+        if (activeInst) {
+          matchInstrumentOption(instSel, activeInst);
+          deskInstrumentPinned = instSel.value || activeInst;
+        }
+      } else if (deskInstrumentPinned) {
         matchInstrumentOption(instSel, deskInstrumentPinned);
         if (activeInst && sameInstrumentFamily(deskInstrumentPinned, activeInst)
             && String(deskInstrumentPinned).toUpperCase() !== String(activeInst).toUpperCase()) {
@@ -4293,12 +4341,15 @@
     }
     const cur = instSel.options[instSel.selectedIndex];
     if (cur && (cur.hidden || cur.disabled)) {
-      if (deskInstrumentPinned) {
+      if (!isRangeDesk() && deskInstrumentPinned) {
         matchInstrumentOption(instSel, deskInstrumentPinned);
-      } else {
+      }
+      const still = instSel.options[instSel.selectedIndex];
+      if (still && (still.hidden || still.disabled)) {
         for (let i = 0; i < instSel.options.length; i++) {
           if (!instSel.options[i].hidden && !instSel.options[i].disabled) {
             instSel.value = instSel.options[i].value;
+            if (isRangeDesk()) deskInstrumentPinned = instSel.value;
             break;
           }
         }
@@ -4390,7 +4441,11 @@
     try {
       deskLayoutDoc = await TrinityChartKit.loadLayouts();
       const desk = deskLayoutDoc.desk || {};
-      if (desk.instrument) deskInstrumentPinned = desk.instrument;
+      if (desk.instrument) {
+        if (!isRangeDesk() || isOilInstrument(desk.instrument)) {
+          deskInstrumentPinned = desk.instrument;
+        }
+      }
       const st = desk.tools || null;
       if (chartTools && st) chartTools.setState(st);
       const sc = desk.scale;
@@ -4411,8 +4466,10 @@
       const cur = deskLayoutDoc || await TrinityChartKit.loadLayouts();
       cur.desk = cur.desk || {};
       cur.desk.tools = chartTools.getState();
-      cur.desk.instrument = ($("sig-instrument") && $("sig-instrument").value) || null;
-      cur.desk.playbookId = ($("sig-playbook") && $("sig-playbook").value) || null;
+      if (!isRangeDesk()) {
+        cur.desk.instrument = ($("sig-instrument") && $("sig-instrument").value) || null;
+        cur.desk.playbookId = ($("sig-playbook") && $("sig-playbook").value) || null;
+      }
       if (scaleLocked && lockedBarSpacing > 0) {
         cur.desk.scale = {
           instrument: lastDeskInstrument || null,
@@ -4491,6 +4548,7 @@
     const row = await TrinityChartKit.barCacheGet(want || "_last", tf);
     if (!row || !row.bars || !row.bars.length) return false;
     const inst = row.instrument || want || "BR";
+    if (isRangeDesk() && inst && !isOilInstrument(inst)) return false;
     if (want && inst && typeof sameInstrumentFamily === "function" && !sameInstrumentFamily(want, inst)) {
       return false;
     }
@@ -4558,6 +4616,9 @@
     if (!deskInstrumentPinned) {
       const ls = readStoredInstrument();
       if (ls) deskInstrumentPinned = ls;
+    }
+    if (isRangeDesk() && deskInstrumentPinned && !isOilInstrument(deskInstrumentPinned)) {
+      deskInstrumentPinned = null;
     }
     applyUrlInstrumentOnce();
     const hadCache = await paintCachedChart();

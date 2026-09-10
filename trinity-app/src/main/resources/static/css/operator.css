@@ -3559,6 +3559,26 @@ body[data-upsell="off"] .full-core-badge {
 .signal-zone-band.is-bot {
   background: rgba(196, 181, 253, 0.26);
 }
+/* Soft map-only shelf (no §6 volume yet) — pale pink, not a tradable day-lock */
+.signal-zone-band.is-soft,
+.signal-zone-band.is-top.is-soft,
+.signal-zone-band.is-bot.is-soft {
+  border-top-color: rgba(244, 114, 182, 0.55);
+  border-bottom-color: rgba(244, 114, 182, 0.55);
+  border-left-color: rgba(236, 72, 153, 0.65);
+  background: rgba(251, 207, 232, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+.signal-zone-band.is-soft .signal-zone-label {
+  color: rgba(157, 23, 77, 0.88);
+}
+.signal-soft-shelf-explain {
+  color: #9d174d;
+}
+.lg-zone.is-soft-zone,
+.lg-zone-bot.is-soft-zone {
+  color: #be185d;
+}
 .signal-zone-label {
   position: absolute;
   top: 2px;
