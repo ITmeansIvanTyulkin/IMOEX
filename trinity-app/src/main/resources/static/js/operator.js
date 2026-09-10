@@ -23,14 +23,17 @@
     "/view/settings": "Настройки",
     "/view/recommendations": "Рекомендации",
     "/view/signals": "Сигналы",
-    "/view/final": "Итог + новости",
+    "/view/final": "Пульт пар",
     "/view/paper": "Statement",
     "/view/statement": "Statement",
     "/view/trend-signal": "Диапазонная торговля",
     "/view/trend-positional": "Позиционная торговля",
     "/view/trend-charts": "Терминал графиков",
+    "/view/trend-strategy": "Описание тренда",
     "/view/walk-forward": "Walk-forward",
     "/view/strategy": "Описание стратегии",
+    "/view/calendar-arb": "Календарный арбитраж",
+    "/view/calendar-arb-strategy": "Описание арбитража",
     "/view/full-core": "Full Core",
     "/view/guide": "Как пользоваться системой"
   };
@@ -1967,7 +1970,9 @@
       sandbox: $("broker-sandbox") ? $("broker-sandbox").checked : true,
       token: $("broker-token") ? $("broker-token").value : "",
       accountId: $("broker-account-id") ? $("broker-account-id").value : "",
-      autoExecuteAfterAnalysis: $("broker-auto-execute") ? $("broker-auto-execute").checked : true,
+      autoExecuteAfterAnalysis: $("settings-pairs-auto-execution")
+        ? $("settings-pairs-auto-execution").checked
+        : ($("broker-auto-execute") ? $("broker-auto-execute").checked : true),
       preferLimitOrders: $("broker-prefer-limit") ? $("broker-prefer-limit").checked : true,
       allowMarketFallback: $("broker-allow-market") ? $("broker-allow-market").checked : false,
       emergencyMarketExitEnabled: $("broker-emergency-exit") ? $("broker-emergency-exit").checked : false,
@@ -1986,7 +1991,10 @@
     $("broker-sandbox").checked = !!view.sandbox;
     $("broker-account-id").value = view.accountId || "";
     $("broker-token").value = "";
-    $("broker-auto-execute").checked = !!view.autoExecuteAfterAnalysis;
+    if ($("broker-auto-execute")) {
+      $("broker-auto-execute").checked = !!view.autoExecuteAfterAnalysis;
+    }
+    applyPairsDeliveryView(view);
     $("broker-prefer-limit").checked = !!view.preferLimitOrders;
     $("broker-allow-market").checked = !!view.allowMarketFallback;
     $("broker-emergency-exit").checked = !!view.emergencyMarketExitEnabled;
@@ -2056,8 +2064,7 @@
   }
 
   async function loadTrendDeliverySettings() {
-    const toggle = $("trend-auto-execution");
-    if (!toggle) return;
+    if (!$("trend-auto-execution") && !$("settings-positional-auto-execution")) return;
     try {
       const res = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -2069,8 +2076,9 @@
   }
 
   function applyTrendDeliveryView(view) {
+    if (!view) return;
     const toggle = $("trend-auto-execution");
-    if (!toggle || !view) return;
+    if (toggle) {
     const auto = !!view.autoExecution;
     toggle.checked = auto;
     toggle.setAttribute("aria-checked", auto ? "true" : "false");
@@ -2082,37 +2090,25 @@
     const title = $("trend-delivery-title");
     const hint = $("trend-delivery-hint");
     const status = $("trend-delivery-status");
-    if (title) title.textContent = auto ? "Автоторговля" : "Только сигнал";
+    if (title) title.textContent = auto ? "Авто · журнал" : "Наблюдение";
     if (hint) {
       hint.textContent = auto
-        ? "Планы уходят в sandbox journal (submit). Live FORTS — только с live-execution."
-        : "Тикер + BUY/SELL без заявок. Включите автоторговлю для journal/ордеров.";
+        ? "Планы уходят в журнал песочницы. Живые заявки на срочном — только отдельным флагом."
+        : "Смотрим график без заявок. Включите авто, чтобы робот вёл журнал.";
     }
     if (status) {
-      status.textContent = "Режим: " + (view.delivery || (auto ? "AUTO" : "SIGNAL_ONLY"))
-        + (view.updatedAt
-          ? " · переключено " + formatOperatorTime(view.updatedAt) + " (не дата торгов)"
-          : "");
+      status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
     }
+    const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
+    if (card) card.classList.toggle("is-auto", auto);
+    }
+    applyPositionalDeliveryView(view);
   }
 
-  async function loadArbDeliverySettings() {
-    const toggle = $("arb-auto-execution");
-    if (!toggle) return;
-    try {
-      const res = await fetch("/api/calendar-arb/settings", { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      applyArbDeliveryView(await res.json());
-    } catch (err) {
-      const status = $("arb-delivery-status");
-      if (status) status.textContent = "Не удалось загрузить режим arb: " + (err.message || err);
-    }
-  }
-
-  function applyArbDeliveryView(view) {
-    const toggle = $("arb-auto-execution");
+  function applyPositionalDeliveryView(view) {
+    const toggle = $("settings-positional-auto-execution");
     if (!toggle || !view) return;
-    const auto = !!view.autoExecution;
+    const auto = !!view.positionalAutoExecution;
     toggle.checked = auto;
     toggle.setAttribute("aria-checked", auto ? "true" : "false");
     const wrap = toggle.closest(".mode-switch");
@@ -2120,31 +2116,89 @@
       wrap.classList.toggle("is-auto", auto);
       wrap.classList.toggle("is-signal", !auto);
     }
+    const title = $("positional-delivery-title");
+    const hint = $("positional-delivery-hint");
+    const status = $("positional-delivery-status");
+    if (title) title.textContent = auto ? "Авто · журнал" : "Наблюдение";
+    if (hint) {
+      hint.textContent = auto
+        ? "Чек-лист задаёт сторону. Сетка уходит в журнал. Не путать с нефтью на пяти минутах."
+        : "График и разбор есть, входов нет. Включите авто на этом пульте или на экране позиционной.";
+    }
+    if (status) {
+      status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
+    }
+    const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
+    if (card) card.classList.toggle("is-auto", auto);
+  }
+
+  async function loadArbDeliverySettings() {
+    if (!$("arb-auto-execution") && !$("desk-arb-auto-execution")) return;
+    try {
+      const res = await fetch("/api/calendar-arb/settings", { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyArbDeliveryView(await res.json());
+    } catch (err) {
+      const status = $("arb-delivery-status");
+      if (status) status.textContent = "Не удалось загрузить режим арбитража: " + (err.message || err);
+    }
+  }
+
+  function arbAutoToggles() {
+    return ["arb-auto-execution", "desk-arb-auto-execution"].map($).filter(Boolean);
+  }
+
+  function applyArbDeliveryView(view) {
+    if (!view) return;
+    const auto = !!view.autoExecution;
+    arbAutoToggles().forEach(function (toggle) {
+      toggle.checked = auto;
+      toggle.setAttribute("aria-checked", auto ? "true" : "false");
+      const wrap = toggle.closest(".mode-switch");
+      if (wrap) {
+        wrap.classList.toggle("is-auto", auto);
+        wrap.classList.toggle("is-signal", !auto);
+        const labels = wrap.querySelectorAll(".mode-switch-label");
+        if (labels[0]) labels[0].textContent = "Наблюдение";
+        if (labels[1]) labels[1].textContent = "Авто";
+      }
+    });
     const title = $("arb-delivery-title");
     const hint = $("arb-delivery-hint");
     const status = $("arb-delivery-status");
     if (title) {
       title.textContent = auto
-        ? (view.liveExecution ? "Авто · LIVE FORTS" : "Авто (paper)")
-        : "Только сигнал";
+        ? (view.liveExecution ? "Авто · живые заявки" : "Авто · журнал")
+        : "Наблюдение";
     }
     if (hint) {
       hint.textContent = auto
         ? (view.liveExecution
-          ? "Две ноги market у T-Invest при сигнале (брокер armed). Fly — всё ещё paper."
-          : "Филлы по H1 T-Invest в sandbox journal. Live: live-execution=true + брокер armed.")
-        : "Z-спред без paper. Включите авто для journal по свечам брокера.";
+          ? "По правилам робот открывает две ноги на срочном рынке. Бабочка из трёх месяцев — только в журнал."
+          : "По закрытию часа робот пишет вход и выход в журнал. График тот же, что на экране арбитража.")
+        : "График, стаканы и паузы видны. Сделок робот не открывает. Включите авто на этом пульте или на экране арбитража.";
     }
     if (status) {
-      status.textContent = "Режим: " + (view.delivery || (auto ? "SANDBOX_FAIR" : "SIGNAL_ONLY"))
-        + " · данные " + (view.dataSource || "T_INVEST");
+      const mode = auto
+        ? (view.liveExecution ? "авто · живые заявки" : "авто · журнал")
+        : "наблюдение";
+      status.textContent = "Режим: " + mode;
+    }
+    const arbToggle = $("arb-auto-execution");
+    const arbCard = arbToggle && arbToggle.closest(".robot-mode-card");
+    if (arbCard) arbCard.classList.toggle("is-auto", auto);
+    const deskChip = $("arb-delivery");
+    if (deskChip && !$("arb-delivery-title")) {
+      deskChip.textContent = auto
+        ? (view.liveExecution ? "авто · живые заявки" : "авто · журнал")
+        : "наблюдение";
     }
   }
 
   async function setArbAutoExecution(enabled) {
-    const toggle = $("arb-auto-execution");
-    if (!toggle) return;
-    toggle.disabled = true;
+    const toggles = arbAutoToggles();
+    if (!toggles.length) return;
+    toggles.forEach(function (toggle) { toggle.disabled = true; });
     try {
       const res = await fetch("/api/calendar-arb/settings/auto-execution", {
         method: "POST",
@@ -2157,11 +2211,11 @@
       }
       applyArbDeliveryView(await res.json());
     } catch (err) {
-      toggle.checked = !enabled;
+      toggles.forEach(function (toggle) { toggle.checked = !enabled; });
       const status = $("arb-delivery-status");
       if (status) status.textContent = "Не удалось переключить: " + (err.message || err);
     } finally {
-      toggle.disabled = false;
+      toggles.forEach(function (toggle) { toggle.disabled = false; });
     }
   }
 
@@ -2180,10 +2234,100 @@
         throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
       }
       applyTrendDeliveryView(await res.json());
-      appendLog(enabled ? "Trend: автоторговля включена." : "Trend: только сигнал.", "ok");
+      appendLog(enabled ? "Диапазонная: авто." : "Диапазонная: наблюдение.", "ok");
     } catch (err) {
       appendLog("Не удалось переключить trend: " + (err.message || err), "err");
       await loadTrendDeliverySettings();
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  async function setPositionalAutoExecution(enabled) {
+    const toggle = $("settings-positional-auto-execution");
+    if (!toggle) return;
+    toggle.disabled = true;
+    try {
+      const res = await fetch("/api/trend/settings/positional-auto-execution", {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      applyPositionalDeliveryView(await res.json());
+      appendLog(enabled ? "Позиционная: авто." : "Позиционная: наблюдение.", "ok");
+    } catch (err) {
+      appendLog("Не удалось переключить позиционную: " + (err.message || err), "err");
+      await loadTrendDeliverySettings();
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  function applyPairsDeliveryView(view) {
+    if (!view) return;
+    const auto = !!view.autoExecuteAfterAnalysis;
+    const toggle = $("settings-pairs-auto-execution");
+    if (toggle) {
+      toggle.checked = auto;
+      toggle.setAttribute("aria-checked", auto ? "true" : "false");
+      const wrap = toggle.closest(".mode-switch");
+      if (wrap) {
+        wrap.classList.toggle("is-auto", auto);
+        wrap.classList.toggle("is-signal", !auto);
+      }
+      const card = toggle.closest(".robot-mode-card");
+      if (card) card.classList.toggle("is-auto", auto);
+    }
+    if ($("broker-auto-execute")) {
+      $("broker-auto-execute").checked = auto;
+    }
+    const title = $("pairs-delivery-title");
+    const hint = $("pairs-delivery-hint");
+    const status = $("pairs-delivery-status");
+    if (title) title.textContent = auto ? "Авто · журнал" : "Наблюдение";
+    if (hint && $("settings-pairs-auto-execution")) {
+      hint.textContent = auto
+        ? "После анализа журнал плюс заявки, если брокер готов."
+        : "Парный спред на дневках. Журнал пишется, заявок нет.";
+    }
+    if (status) status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
+  }
+
+  async function loadPairsDeliverySettings() {
+    if (!$("settings-pairs-auto-execution")) return;
+    try {
+      const res = await fetch("/api/broker/settings", { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyPairsDeliveryView(await res.json());
+    } catch (err) {
+      const status = $("pairs-delivery-status");
+      if (status) status.textContent = "Не удалось загрузить режим: " + (err.message || err);
+    }
+  }
+
+  async function setPairsAutoExecution(enabled) {
+    const toggle = $("settings-pairs-auto-execution");
+    if (!toggle) return;
+    toggle.disabled = true;
+    try {
+      const res = await fetch("/api/broker/settings", {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ autoExecuteAfterAnalysis: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      applyPairsDeliveryView(await res.json());
+      appendLog(enabled ? "Коинтеграция: авто." : "Коинтеграция: наблюдение.", "ok");
+    } catch (err) {
+      appendLog("Не удалось переключить коинтеграцию: " + (err.message || err), "err");
+      await loadPairsDeliverySettings();
     } finally {
       toggle.disabled = false;
     }
@@ -2539,7 +2683,10 @@
           location.href = "/view/trend-signal";
         } else if (s === "arb") {
           location.href = "/view/calendar-arb";
-        } else if (s === "pairs" && location.pathname.indexOf("/view/trend") === 0) {
+        } else if (s === "pairs" && (
+          location.pathname.indexOf("/view/trend") === 0
+          || location.pathname.indexOf("/view/calendar-arb") === 0
+        )) {
           location.href = "/view/final";
         }
       });
@@ -2817,16 +2964,33 @@
     if ($("broker-save-settings")) {
       $("broker-save-settings").addEventListener("click", saveBrokerSettings);
     }
-    if ($("trend-auto-execution")) {
+    if ($("trend-auto-execution") || $("settings-positional-auto-execution")) {
       loadTrendDeliverySettings();
+    }
+    if ($("trend-auto-execution")) {
       $("trend-auto-execution").addEventListener("change", function () {
         setTrendAutoExecution($("trend-auto-execution").checked);
       });
     }
-    if ($("arb-auto-execution")) {
+    if ($("settings-positional-auto-execution")) {
+      $("settings-positional-auto-execution").addEventListener("change", function () {
+        setPositionalAutoExecution($("settings-positional-auto-execution").checked);
+      });
+    }
+    if ($("settings-pairs-auto-execution")) {
+      loadPairsDeliverySettings();
+      $("settings-pairs-auto-execution").addEventListener("change", function () {
+        setPairsAutoExecution($("settings-pairs-auto-execution").checked);
+      });
+    }
+    if ($("arb-auto-execution") || $("desk-arb-auto-execution")) {
       loadArbDeliverySettings();
-      $("arb-auto-execution").addEventListener("change", function () {
-        setArbAutoExecution($("arb-auto-execution").checked);
+      arbAutoToggles().forEach(function (toggle) {
+        if (toggle.dataset.bound === "1") return;
+        toggle.dataset.bound = "1";
+        toggle.addEventListener("change", function () {
+          setArbAutoExecution(toggle.checked);
+        });
       });
     }
     if ($("broker-sandbox-account")) {
@@ -2866,7 +3030,7 @@
   const TOUR_KEY = "trinity.tour.v1";
   const TOUR_STEPS = [
     { path: "/view", title: "Дашборд", body: "Обзор: режим рынка, KPI, «что сделать сейчас». Отсюда же можно снова запустить обучение." },
-    { path: "/view/final", title: "Итог + новости", body: "Главный экран pairs DAILY после FA: ENTER / REDUCE / WATCH / BLOCK." },
+    { path: "/view/final", title: "Пульт пар", body: "Рабочий стол коинтеграции: графики, фаворит отрасли, вход после фундамента." },
     { path: "/view/statement", title: "Statement", body: "Paper track-record по стратегиям. Сделки trend тегируются playbookId." },
     { path: "/view/trend-signal", title: "Диапазонная торговля", body: "Exclusive BR M5: полки TOP/BOT, bounce/retest. Робот #2 при этом не выключается — у него свой раздел." },
     { path: "/view/trend-positional", title: "Позиционная торговля", body: "H1: тренд HH/HL, промежуточный HVN, сетка 1:1:2:4. «Сканирует» = робот включён, входа по чеклисту нет." },

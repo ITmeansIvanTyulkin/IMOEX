@@ -1,7 +1,7 @@
 # Handoff prompt: TRINITY operator (Exclusive observe + desk/playbook)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-09-01 ~19:20 MSK · `dev` запушен: IMOEX `7fe9a8a`, IMOEX-core `e2fdb9a`.  
+> **Обновлено:** 2026-09-07 ~18:30 MSK · seals до 07.09; Phase C NO_GO; collect corpus; overnight SELL open.  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
@@ -36,24 +36,19 @@ Pairs DAILY и calendar-arb оператор смотрит сам, пока н�
 
 **Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
 
-### Состояние на 2026-09-01 EOD (~18:09 MSK)
+### Состояние на 2026-09-10 EOD (~18:03 MSK)
 
 | Метрика | Значение |
 |--------|----------|
-| **Phase A** | **done** 4 полных дня 25–28.08 (baseline 24.08 не считается). 01.09 = extra paper day 6 |
-| **OOS cumulative (path-log)** | **14** сделок, **+2 180 ₽**, expectancy **~156 ₽/trade**, WR **64%**, labeled SL 100% |
-| **01.09** | 2 TP: overnight **BRU6** BUY RETEST TP2 **+434 ₽** @10:15 (89.33→89.64, 2/4); intraday **BRV6** BUY RETEST TP2 **+301 ₽** @16:40. gateHits=0 |
-| **Front month** | **BRV6** (roll после экспирации BRU6 31.08). Last trade BRV6 **2026-10-01** |
-| **FORMING_BAR** | вкл. SL/TP по ходу бара (как брокер) |
-| **liveExecution** | **false** |
-| **playbook (yml + ui-settings)** | `levels-profile-br-m5`, **`parallel-playbooks: false`** (positional H1 hvnHills OOM — **не restore `both`**) |
-| **Phase C** | deferred — human OOS + нет single-leg FORTS PostStop |
-| **8080** | операторский desk `http://127.0.0.1:8080/view/trend-signal` |
+| **Phase A** | **done** 25–28.08. Extra sealed: 01–04.09, 07–10.09 |
+| **OOS cumulative** | **30** сделок, **+4 138 ₽**, expectancy **~138 ₽/trade**, WR **67%**, labeled SL 100% |
+| **10.09** | **0 сделок** · HI над TOP весь день · training obs confirmed (повтор 09.09) |
+| **09.09** | −94.5 ₽ SELL BOUNCE THROUGH · затем над TOP без входов |
+| **Front** | **BRV6** · exp 2026-10-01 (21 день) |
+| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect |
+| **Training** | `priceAboveTopNoChase`: 08–10.09 · `data/trend-training-observations.json` |
 
-**Авторитетный лог (не в git):** `IMOEX/data/trend-observe-path-log.json`  
-**UI settings (не в git):** `IMOEX/data/trend-ui-settings.json` → instrumentId **BRV6**, live=false.
-
-**Завтра (2026-09-02):** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-02` ~09:55; evening `python3 scripts/trend_observe_evening.py` ~18:02. Не live, не крутить гейты.
+**Завтра:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-11` ~09:55; evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
 
 ---
 
@@ -110,15 +105,17 @@ HTF UP **не запрещает** шорт от TOP; HTF DOWN **не запре
 
 **Фаза дня:** dump ≥80 пт → приоритет отскока BOT; rally → TOP; иначе continuation по HTF или баланс.
 
-**Gap-fill:** ночной/утренний гэп к prior close. Против заполнения не торгуем, пока гэп открыт; «сделку на закрытие гэпа» без согласия HTF пропускаем. **§8 после пробоя и удержания не блокируется.** В UI не писать `§8`.
+**Gap-fill (Exclusive M5):** ночной/утренний гэп к prior close. Против заполнения не торгуем, пока гэп открыт; «сделку на закрытие гэпа» без согласия HTF пропускаем. **§8 после пробоя и удержания не блокируется.** В UI не писать `§8`.
+
+**Gap-fill (Positional H1, отдельно):** `TrendTradeMode.GAP_FILL` / `PositionalH1GapStrategy` — не HVN bounce. Arm только &lt;10:00 при classify+micro (DOM fail-closed); against confirm = SKIP (не fade). Bounce спит пока overnight gap openUnfilled — и после 10:00 — до touch priorClose.
 
 **Сессия Exclusive:** основная ~10:20–18:30 (open+20 / close−30). Вечерка 19–23:50 — новых сетапов нет. `max-setups-per-day: 4`, `max-day-loss-rub: 1500`.
 
 **Макро / CL:** smart knife на dump; CL — контекст открытия, **сторону Exclusive не крутит**. UsOilGate может задержать вход после гэпа CL.
 
-**Экспирация FORTS (с 31.08):** last trade day — **новые** сетапы block (M5 и H1). Открытое — SL/TP дальше. Fail-closed, если ISS не знает last trade date. Overnight через roll: бары/SL по **secid позиции**, не новый front (`barsForLiveClockExact`). Front-month: `auto-resolve-instrument: BR` + `FrontMonthBookRoller` / `TrendFrontMonthSettingsSync` — переподписка без рестарта.
+**Экспирация FORTS:** last trade day — **новые** сетапы block (M5 и H1). Открытое — SL/TP на **том же secid** до закрытия. LTD: ISS → T-Invest `getFutureByTicker` / list → month-code estimate (BRV6→1-е число месяца поставки). Fail-closed только если concrete SECID нельзя разобрать. Стол / paper / settings / DOM переезжают на новый front-month **только в день last trade / после** (`pickLiveMonth` + `TrendFrontMonthSettingsSync`); пустой DOM/REST mid-life **не** roll (баг 10.09: BRV6→BRX6). Pending на старом месяце сбрасывается. Пример: BRU6 → BRV6. Overnight через roll: бары/SL по secid позиции (`barsForLiveClockExact`).
 
-**Fair-paper:** SANDBOX_FAIR, `auto-execution: true`, `broker-sim-max: true`. Qty в statement = **filled/planned** (1/3 норма, если залита одна нога).
+**Скорость desk (навсегда, все стратегии):** `trinity-fast-boot.js` — cache-first paint, параллельный DOM/status, AbortController ≤25s. Не возвращать sequential cold boot на charts-terminal и не убирать таймауты fetch.
 
 ### Позиционная #2 (если трогаешь desk)
 
@@ -140,11 +137,11 @@ HTF UP **не запрещает** шорт от TOP; HTF DOWN **не запре
 | Фаза | Статус | Что делать |
 |------|--------|------------|
 | **A** | ✅ 25–28.08 | FORMING_BAR + evening journal, gateHits=0, labeled SL |
-| **B** | 📊 metrics ready, **human OOS обязателен** | expectancy >0; оператор ещё не дал go на код FORTS SL |
-| **C** | ⛔ blocked | 1 лот FORTS SL в стакане: `TrendExecutionBridge` journal-only; BrokerClient pairs-oriented; T-Invest **sandbox** кидает `SandboxModeViolationException` на PostStopOrder |
-| **D** | ⏳ | Scale только если live fills/SL = journal |
+| **B** | ✅ metrics + **NO_GO 04.09** | копим историю; FORTS не включаем |
+| **C** | ⛔ NO_GO | код live PostStop не начинать, пока оператор не скажет иначе |
+| **D** | ⏳ | Scale после Phase C |
 
-Operator 27.08: «go → затем стой, пока на бумаге». Код Phase C **не начинать** без human OOS go.
+Режим сейчас: **observe + corpus** (Exclusive FORMING_BAR, evening seals, operator labels). ML/обучение — только по явному go. Не крутить buffer/knife/smash.
 
 ---
 
@@ -168,6 +165,7 @@ bash IMOEX/scripts/trend_observe_resume.sh YYYY-MM-DD
 ```bash
 cd IMOEX && python3 scripts/trend_observe_evening.py [YYYY-MM-DD]
 python3 scripts/trend_observe_expectancy.py
+python3 scripts/trend_corpus_inventory.py   # объём corpus → data/trend-corpus-inventory.json
 ```
 
 **Desk poll (skip-гейты в сессию):** `python3 scripts/trend_observe_desk_poll.py`
@@ -187,6 +185,7 @@ curl -s 'http://127.0.0.1:8080/api/trend/desk?instrument=BRV6&playbook=levels-pr
 | Файл | Зачем |
 |------|--------|
 | `data/trend-observe-path-log.json` | дни, EOD, phase A/B/C, candidates |
+| `data/trend-corpus-inventory.json` | объём exclusive/positional corpus + readiness (не ML) |
 | `data/trend-fair-paper-state.json` | open, lastProcessedBar, lanes |
 | `data/trend-paper-journal.json` | SANDBOX_FAIR |
 | `data/trend-gate-observe.jsonl` | skip hits с desk poll |

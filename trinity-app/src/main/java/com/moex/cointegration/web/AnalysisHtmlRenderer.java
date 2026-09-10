@@ -86,7 +86,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260901-hover2">
+              <link rel="stylesheet" href="/css/operator.css?v=20260910-soft001">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -162,7 +162,7 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260824-pairsdesk-light"></script>
+              <script src="/js/operator.js?v=20260902-desc2"></script>
               <script src="/js/trinity-status-plaques.js?v=20260821-desksplit"></script>
             </body>
             </html>
@@ -274,7 +274,7 @@ public class AnalysisHtmlRenderer {
         body.append(dashboardQuietCta());
         body.append("""
                 <nav class="dash-foot-links" aria-label="Ещё">
-                  <a href="/view/recommendations">Рекомендации</a>
+                  <a href="/view/final">Пульт пар</a>
                   <a href="/view/statement">Statement</a>
                   <a href="/view/guide">Справка</a>
                   <button type="button" class="btn btn-ghost btn-xs" id="trinity-tour-start" data-tour-start>
@@ -394,14 +394,12 @@ public class AnalysisHtmlRenderer {
                   %s
                   %s
                   %s
-                  %s
                 </div>
                 """.formatted(
                 trialBanner(),
+                robotsDeliveryStrip(),
                 productEditionPanel(),
                 opsPanel(),
-                trendPlaybookPanel(),
-                calendarArbPanel(),
                 brokerConsolePanel()
         );
         return page("TRINITY — настройки", body, nav("settings"), OpsMode.NONE);
@@ -440,71 +438,110 @@ public class AnalysisHtmlRenderer {
         );
     }
 
-    private String trendPlaybookPanel() {
-        if (!strategyTrendEnabled) {
-            return "";
-        }
+    private String robotsDeliveryStrip() {
         return """
-                <section class="dash-section strategy-doc" id="trend-playbook-settings">
-                  <h2>Trend playbook · исполнение</h2>
-                  <p class="meta">
-                    Робот «Уровни + профиль» (BR M5) — один из playbook’ов: сигнал или авто
-                    (sandbox journal / live по флагам). Выбор режима — переключателем ниже.
-                  </p>
-                  <div class="callout trend-delivery-card">
-                    <div class="trend-delivery-row">
-                      <div class="trend-delivery-copy">
-                        <strong id="trend-delivery-title">Только сигнал</strong>
-                        <p class="meta" id="trend-delivery-hint">
-                          Тикер + BUY/SELL без заявок. Переключите для автоторговли.
-                        </p>
-                      </div>
-                      <label class="mode-switch" title="Сигнал ↔ Автоторговля">
-                        <span class="mode-switch-label" id="trend-mode-left">Сигнал</span>
-                        <input type="checkbox" id="trend-auto-execution" role="switch" aria-checked="false">
-                        <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
-                        <span class="mode-switch-label" id="trend-mode-right">Авто</span>
-                      </label>
-                    </div>
-                    <p class="meta" id="trend-delivery-status">Загрузка режима…</p>
+                <section class="dash-section robots-delivery" id="robots-delivery">
+                  <header class="robots-delivery-head">
+                    <p class="settings-eyebrow">Роботы</p>
+                    <h2>Наблюдение и авто</h2>
+                    <p class="meta">
+                      Четыре независимых тумблера в один ряд. Наблюдение — смотрим. Авто — робот сам
+                      ведёт журнал и заявки по своим правилам.
+                    </p>
+                  </header>
+                  <div class="robots-delivery-grid">
+                    %s
+                    %s
+                    %s
+                    %s
                   </div>
                 </section>
-                """;
+                """.formatted(
+                robotModeCard(
+                        "pairs-playbook-settings",
+                        "Акции индекса",
+                        "Коинтеграция",
+                        "pairs-delivery-title",
+                        "pairs-delivery-hint",
+                        "pairs-delivery-status",
+                        "settings-pairs-auto-execution",
+                        strategyPairsEnabled,
+                        "Парный спред на дневках. Наблюдение пишет разбор в журнал, заявок нет."
+                ),
+                robotModeCard(
+                        "positional-playbook-settings",
+                        "Тренд",
+                        "Позиционная торговля",
+                        "positional-delivery-title",
+                        "positional-delivery-hint",
+                        "positional-delivery-status",
+                        "settings-positional-auto-execution",
+                        strategyTrendEnabled,
+                        "Часовой робот, сетка по полкам. Не путать с нефтью на пяти минутах."
+                ),
+                robotModeCard(
+                        "trend-playbook-settings",
+                        "Тренд",
+                        "Диапазонная торговля",
+                        "trend-delivery-title",
+                        "trend-delivery-hint",
+                        "trend-delivery-status",
+                        "trend-auto-execution",
+                        strategyTrendEnabled,
+                        "Нефть BR на пяти минутах, полки дня. Тумблер тот же, что на экране диапазонной."
+                ),
+                robotModeCard(
+                        "calendar-arb-settings",
+                        "Срочный рынок",
+                        "Арбитраж",
+                        "arb-delivery-title",
+                        "arb-delivery-hint",
+                        "arb-delivery-status",
+                        "arb-auto-execution",
+                        strategyCalendarArbEnabled,
+                        "Разница ближнего и дальнего месяца. Тумблер тот же, что на экране арбитража."
+                )
+        );
     }
 
-    private String calendarArbPanel() {
-        if (!strategyCalendarArbEnabled) {
-            return "";
-        }
+    private String robotModeCard(
+            String sectionId,
+            String kicker,
+            String heading,
+            String titleId,
+            String hintId,
+            String statusId,
+            String toggleId,
+            boolean enabled,
+            String idleHint
+    ) {
         return """
-                <section class="dash-section strategy-doc" id="calendar-arb-settings">
-                  <h2>Календарный арбитраж · исполнение</h2>
-                  <p class="meta">
-                    Near/next и бабочка 1:-2:1. Котировки, H1 и стаканы — <strong>только T-Invest</strong>.
-                    Семьи BR/NG/SI/RI/GD — разные шаблоны, не общий z. Два стакана, скидка ГО,
-                    EIA/COT/crack только на BR. Replay OOS без hist DOM; journal sandbox — со стаканом.
-                    Research, не обещание доходности. Авто = fair-paper.
-                    Live две ноги: <code>live-execution=true</code> + брокер armed (по умолчанию выкл).
-                  </p>
-                  <div class="callout trend-delivery-card">
-                    <div class="trend-delivery-row">
-                      <div class="trend-delivery-copy">
-                        <strong id="arb-delivery-title">Только сигнал</strong>
-                        <p class="meta" id="arb-delivery-hint">
-                          Z-спред без paper-филлов. Включите авто для sandbox journal.
-                        </p>
-                      </div>
-                      <label class="mode-switch" title="Сигнал ↔ Автоторговля">
-                        <span class="mode-switch-label">Сигнал</span>
-                        <input type="checkbox" id="arb-auto-execution" role="switch" aria-checked="false">
-                        <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
-                        <span class="mode-switch-label">Авто</span>
-                      </label>
-                    </div>
-                    <p class="meta" id="arb-delivery-status">Загрузка режима…</p>
-                  </div>
-                </section>
-                """;
+                <article class="robot-mode-card%s" id="%s">
+                  <p class="robot-mode-kicker">%s</p>
+                  <h3>%s</h3>
+                  <strong id="%s">Наблюдение</strong>
+                  <p class="meta" id="%s">%s</p>
+                  <label class="mode-switch is-signal" title="Наблюдение: смотрим. Авто: робот ведёт журнал и заявки.">
+                    <span class="mode-switch-label">Наблюдение</span>
+                    <input type="checkbox" id="%s" role="switch" aria-checked="false"%s>
+                    <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+                    <span class="mode-switch-label">Авто</span>
+                  </label>
+                  <p class="meta robot-mode-status" id="%s">%s</p>
+                </article>
+                """.formatted(
+                enabled ? "" : " is-off",
+                escape(sectionId),
+                escape(kicker),
+                escape(heading),
+                escape(titleId),
+                escape(hintId),
+                escape(idleHint),
+                escape(toggleId),
+                enabled ? "" : " disabled",
+                escape(statusId),
+                enabled ? "Загрузка режима…" : "Стратегия выключена в конфиге"
+        );
     }
 
     private String dashboardWidgetGrid(
@@ -629,7 +666,7 @@ public class AnalysisHtmlRenderer {
                         """
                         <p class="widget-back-lead" id="widget-final-back-lead">Загрузка итога…</p>
                         <div class="widget-back-stats" id="widget-final-back-stats"></div>
-                        <a class="widget-back-link" href="/view/final">Итог + новости →</a>
+                        <a class="widget-back-link" href="/view/final">Пульт пар →</a>
                         """
                 ),
                 flipCard(
@@ -706,7 +743,7 @@ public class AnalysisHtmlRenderer {
                         """
                         <p class="widget-back-lead" id="widget-signals-back-lead">Технические LONG/SHORT до FA-гейта.</p>
                         <div class="widget-back-stats" id="widget-signals-back-stats"></div>
-                        <a class="widget-back-link" href="/view/signals">Все сигналы →</a>
+                        <a class="widget-back-link" href="/view/final">Пульт пар →</a>
                         """
                 ),
                 flipCard(
@@ -773,7 +810,7 @@ public class AnalysisHtmlRenderer {
                           <div class="widget-stat"><span class="k">Коинтегрированы</span><span class="v">%d</span></div>
                           <div class="widget-stat"><span class="k">В топе UI</span><span class="v">%d</span></div>
                         </div>
-                        <a class="widget-back-link" href="/view/recommendations">Рекомендации →</a>
+                        <a class="widget-back-link" href="/view/final">Пульт пар →</a>
                         """.formatted(escape(analysisDate), tickers, pairs, coint, topN)
                 )
         );
@@ -1194,406 +1231,9 @@ public class AnalysisHtmlRenderer {
      * Описание торговой стратегии простым языком.
      */
     public String renderStrategy() {
-        String arbBadge = fullCoreBadge("calendar-arb");
-        String trendBadge = fullCoreBadge("trend");
-        String researchBadge = ""; // working local replay — no fake lock
-        String roadmapBlock = coreRoadmapBlock();
-        String body = """
-                <article class="strategy-doc">
-                  <h2>Описание торговой стратегии</h2>
-                  <p class="lead">
-                    TRINITY сейчас в live paper ведёт <strong>DAILY</strong> pairs mean-reversion в боковике
-                    (фокус — металлы / mining; нефть в equities-парах отложена на фьючерсы/опционы).
-                    <strong>INTRADAY pairs</strong> выведены из операторского цикла (код research остаётся, без автозапуска и UI).
-                    Мы не угадываем направление рынка: ищем временный разрыв связанной пары и ставим на сжатие.
-                    Календарный арбитраж %s и опционы — следующие стратегии бренда, пока в дорожной карте.
-                  </p>
-
-                  %s
-
-                  <aside class="atas-plaque" id="atas" aria-labelledby="atas-title">
-                    <span class="atas-badge">Встроено в TRINITY</span>
-                    <h3 id="atas-title">Функционал ATAS внутри TRINITY</h3>
-                    <p>
-                      Отдельный терминал ATAS не нужен: ключевые идеи order-flow и volume profile
-                      встроены в пайплайн как <strong>execution-слой</strong> поверх Z-score.
-                      Это не «ещё один индикатор», а проверка: можно ли <em>реально</em> набрать обе ноги
-                      пары на 1H без ложного входа на тонком рынке.
-                    </p>
-                    <ul>
-                      <li><strong>Relative volume</strong> — бар не «мёртвый», объём сопоставим с медианой.</li>
-                      <li><strong>Spread proxy</strong> — ширина H–L относительно цены (bps): отсев illiquid часов.</li>
-                      <li><strong>Delta proxy ног</strong> — направление закрытия бара; согласованность с LONG/SHORT spread.</li>
-                      <li><strong>Volume profile (POC / value area)</strong> — цена ноги в зоне справедливого объёма; <strong>partial TP у POC</strong> на INTRADAY.</li>
-                      <li><strong>Footprint proxy</strong> — buy/sell imbalance внутри бара (volume-weighted).</li>
-                      <li><strong>Volume clusters</strong> — аномальный объём на краю VA → WATCH, риск ложного входа.</li>
-                      <li><strong>DOM</strong> — snapshot стакана MOEX ISS: глубина bid/ask, spread bps, imbalance ноги.</li>
-                      <li><strong>Iceberg proxy</strong> — скрытая ликвидность: высокий объём при узком диапазоне.</li>
-                      <li><strong>Session edges</strong> — блок первых/последних минут сессии (тонкий рынок MOEX).</li>
-                      <li><strong>INTRADAY tier-1</strong> — только ~30 ликвиднейших голубых фишек (SBER, LKOH, GAZP…).</li>
-                    </ul>
-                    <p class="atas-why">
-                      <strong>Зачем это добавлено.</strong>
-                      Классический pairs-backtest часто красив на бумаге, но ломается в live из‑за проскальзывания
-                      и асимметрии ног. TRINITY отсекает сигналы, где Z «есть», а исполнение на MOEX — сомнительное.
-                      Для оператора — меньше ложных входов; для продукта — честнее paper и ближе к live.
-                      Задел под трендовую стратегию (breakout VA, delta momentum, absorption) уже в коде
-                      (<code>quant/trend</code>, <code>imoex.microstructure.trend</code>), включается на roadmap #2 %s.
-                    </p>
-                  </aside>
-
-                  <aside class="atas-plaque" id="tiger" aria-labelledby="tiger-title">
-                    <span class="atas-badge">Встроено в TRINITY</span>
-                    <h3 id="tiger-title">Функционал Tiger.trade внутри TRINITY</h3>
-                    <p>
-                      Отдельный терминал Tiger.trade не нужен: live DOM, лента сделок и depth-профиль
-                      входят в продукт как <strong>market-data контур</strong> маркетплейса —
-                      рядом с ATAS-слоем, но отдельно от исполнения ордеров у брокера.
-                      Это не «ещё один график», а поток рынка: что реально стоит в стакане
-                      и как идут сделки в момент сигнала.
-                    </p>
-                    <ul>
-                      <li><strong>Live DOM</strong> — глубина bid/ask с провайдера (не только snapshot ISS).</li>
-                      <li><strong>Trades tape</strong> — поток сделок для delta / footprint на desk.</li>
-                      <li><strong>Depth / candle profile</strong> — профиль объёма внутри бара для ручного входа.</li>
-                      <li><strong>Session liquidity map</strong> — где рынок тонкий, где набор ног реалистичен.</li>
-                      <li><strong>Модуль <code>trinity-marketdata</code></strong> — SPI feed (<code>MarketDataFeed</code>,
-                        провайдер <code>T_INVEST</code> → MarketDataStream).</li>
-                      <li><strong>Флаг <code>imoex.marketdata.*</code></strong> — контур включается отдельно от pairs/paper.</li>
-                    </ul>
-                    <p class="atas-why">
-                      <strong>Зачем это добавлено.</strong>
-                      ATAS-слой отвечает на вопрос «можно ли входить по объёму/профилю»;
-                      Tiger-слой — «что видит рынок прямо сейчас» (стакан + лента).
-                      Вместе это замена внешней связки ATAS + Tiger.trade в одной подписке TRINITY:
-                      сигнал → объяснение → ручной ордер у брокера.
-                      Сейчас контур в коде как foundation (SPI + stub); live-stream подключается по мере валидации paper/OOS.
-                      Roadmap #4 — volume desk поверх этого feed.
-                    </p>
-                  </aside>
-
-                  <aside class="atas-plaque" id="trend-robot" aria-labelledby="trend-robot-title">
-                    <span class="atas-badge">Робот · sandbox</span>
-                    <h3 id="trend-robot-title">Playbook #1 — Уровни + профиль (BR M5)</h3>
-                    <p>
-                      Торговый робот стратегии #2: чек-лист «Уровни + Объемы» + усиления риска.
-                      На М5 нефтяного фьючерса строит <strong>market profile</strong> на отбоях,
-                      сливает HVN в диапазон <strong>15–20 пунктов</strong>, выбирает bounce или break+retest,
-                      ставит сетку из 3 лимиток (2-2-2 / 3-1-1), SL от средней позиции, TP1 → Б/У → runner.
-                    </p>
-                    <ul>
-                      <li><strong>Модуль</strong> <code>trinity-trend</code> · id <code>levels-profile-br-m5</code></li>
-                      <li><strong>Профиль обязателен</strong> — VAP-прокси по H–L бара; tick VAP — через marketdata позже</li>
-                      <li><strong>Риск</strong> — <code>min(ГО, maxRiskPct equity)</code>, не «весь депозит / ГО»</li>
-                      <li><strong>Одна зона / один сетап</strong> — после ARMED не прыгаем на новый уровень,
-                        пока цена не уйдёт ≥ <code>unlock-distance-points</code> (default 40) от mid зоны или новый день</li>
-                      <li><strong>Исполнение</strong> — сигнал (<code>auto-execution=false</code>)
-                        или авто/journal (<code>auto-execution=true</code>); live FORTS — ещё
-                        <code>live-execution=true</code> когда single-leg брокер готов</li>
-                      <li><strong>API</strong> — <code>GET/POST /api/trend/*</code> (status, signal, evaluate, submit, journal)</li>
-                    </ul>
-                    <p class="atas-why">
-                      <strong>Зачем.</strong>
-                      Нефть уходит из equities-пар в фьючерсный trend-контур. Sandbox-first —
-                      тот же мозг робота, без обещания live до OOS.
-                    </p>
-                  </aside>
-
-                  <nav class="strategy-toc" aria-label="Содержание">
-                    <strong>Содержание</strong>
-                    <ol>
-                      <li><a href="#core-roadmap">Roadmap TRINITY / Full Core</a></li>
-                      <li><a href="#atas">Функционал ATAS внутри TRINITY</a></li>
-                      <li><a href="#tiger">Функционал Tiger.trade внутри TRINITY</a></li>
-                      <li><a href="#trend-robot">Playbook #1 — Уровни + профиль (BR M5)</a></li>
-                      <li><a href="#idea">Идея простыми словами</a></li>
-                      <li><a href="#pipeline">Что за чем происходит</a></li>
-                      <li><a href="#universe">Как отбираются акции</a></li>
-                      <li><a href="#pairs">Как пары попадают в анализ</a></li>
-                      <li><a href="#clusters">Чемпион сектора</a></li>
-                      <li><a href="#regime">Режим рынка: только боковик</a></li>
-                      <li><a href="#signals">Как появляется сигнал</a></li>
-                      <li><a href="#news">Новостной фильтр</a></li>
-                      <li><a href="#size">Размер позиции и лимиты</a></li>
-                      <li><a href="#exits">Как выходим</a></li>
-                      <li><a href="#paper">Paper и проверка на истории</a></li>
-                      <li><a href="#validation">Валидация: replay и издержки</a></li>
-                      <li><a href="#intraday-events">Research: INTRADAY / календарь (не в ops)</a></li>
-                      <li><a href="#limits">Честные ограничения</a></li>
-                    </ol>
-                  </nav>
-
-                  <h3 id="idea">1. Идея простыми словами</h3>
-                  <p>
-                    Берём пару акций, например банк A и банк B. Если исторически их цены связаны,
-                    можно собрать <em>спред</em> — разницу с учётом «коэффициента хеджа» β:
-                    сколько бумаги X нужно против одной единицы Y.
-                  </p>
-                  <p>
-                    Дальше смотрим на <strong>Z-score</strong>: насколько спред сейчас ушёл от своей нормы.
-                    Если Z очень высокий — спред «раздут», ждём сжатия вниз.
-                    Если очень низкий — ждём отскока вверх.
-                  </p>
-                  <ul>
-                    <li><strong>LONG спред</strong> (Z слишком низкий): купить Y и одновременно продать X.</li>
-                    <li><strong>SHORT спред</strong> (Z слишком высокий): продать Y и купить X.</li>
-                  </ul>
-                  <div class="callout">
-                    Прибыль (или убыток) идёт от <strong>схождения ног</strong>, а не от того,
-                    что весь рынок вырос. Поэтому важны обе ноги сразу.
-                  </div>
-
-                  <h3 id="pipeline">2. Что за чем происходит в одном прогоне</h3>
-                  <div class="flow" aria-hidden="true">
-                    <span>MOEX daily</span><i>→</i>
-                    <span>Capital → DAILY</span><i>→</i>
-                    <span>EG/FDR + чемпион</span><i>→</i>
-                    <span>FA → paper</span>
-                  </div>
-                  <ol class="pipeline">
-                    <li><strong>Капитал.</strong> Equity → слоты DAILY (100%% gross). Без плеча до 1M.</li>
-                    <li><strong>DAILY.</strong> Дневные свечи → EG/FDR/Z → чемпион сектора → фундамент (MOEX+RSS) → paper-journal.json.</li>
-                    <li><strong>Режим.</strong> ADX индекса блокирует <em>новые</em> входы DAILY при TREND.</li>
-                  </ol>
-                  <div class="callout">
-                    Операторский цикл («Анализ + paper», вечерний cron) — только DAILY metals.
-                    INTRADAY pairs-код остаётся для research (`runIntradayOnly`), без автозапуска и без UI.
-                    Источник свечей — только MOEX ISS.
-                  </div>
-                """.formatted(arbBadge, roadmapBlock, trendBadge);
-        // Continue with rest of strategy page — read original and splice carefully.
-        // The original method had one big string; we split: first part formatted above,
-        // then append the remainder that starts at universe section.
-        body = body + strategyDocRemainder(researchBadge);
+        String body = loadClasspathUtf8("pairs-strategy.html")
+                .replace("{{ROADMAP}}", coreRoadmapBlock().replace("id=\"core-roadmap\"", "id=\"core-roadmap-teaser\""));
         return page("TRINITY — описание стратегии", body, nav("strategy"));
-    }
-
-    /** Remainder of strategy doc after the pipeline callout. */
-    private String strategyDocRemainder(String researchBadge) {
-        return """
-                  <h3 id="universe">3. Как отбираются акции в анализ</h3>
-                  <p>До любых статистических тестов тикер должен пройти простой «рыночный» фильтр:</p>
-                  <ul>
-                    <li>состав индекса <strong>IMOEX</strong>, режим TQBR;</li>
-                    <li>медианный дневной оборот за ~60 дней не ниже порога (по умолчанию ~50 млн ₽);</li>
-                    <li>цена закрытия не ниже минимума (по умолчанию 5 ₽);</li>
-                    <li>мало дней с нулевым объёмом;</li>
-                    <li>привилегированные акции (<code>*P</code>) обычно исключены;</li>
-                    <li>тикер должен быть в секторном каталоге, если включён секторный режим.</li>
-                  </ul>
-                  <p>
-                    Смысл: не тестировать illiquid «мусор», где спред нельзя нормально набрать и закрыть.
-                  </p>
-
-                  <h3 id="pairs">4. Как пары попадают в анализ и проходят фильтры</h3>
-                  <ol class="pipeline">
-                    <li>
-                      <strong>Кандидаты.</strong> Из отфильтрованного списка строим пары.
-                      По умолчанию — только один сектор или «родственная» группа
-                      (например нефть ↔ электроэнергетика, ритейл ↔ телеком).
-                    </li>
-                    <li>
-                      <strong>Ликвидность пары.</strong> Обе ноги должны иметь достаточный ADV,
-                      и обороты не должны различаться в десятки раз (иначе хедж на бумаге, а в жизни — нет).
-                    </li>
-                    <li>
-                      <strong>Общая история.</strong> Нужно достаточно общих торговых дней (порядка 100+).
-                    </li>
-                    <li>
-                      <strong>Коинтеграция Engle–Granger.</strong>
-                      Проверяем, что остатки регрессии log-цен стационарны — то есть «связь» не случайная на коротком куске.
-                    </li>
-                    <li>
-                      <strong>FDR (q ≈ 0.20).</strong>
-                      Когда пар тысячи, часть «значимых» p-value — ложные. FDR оставляет только те,
-                      кто проходит контроль множественных сравнений.
-                    </li>
-                    <li>
-                      <strong>Data coverage.</strong> Для каждой пары считаем долю общих баров
-                      (<code>coveragePercent</code> в <code>analysis-report.json</code>).
-                      Ниже порога (<code>imoex.risk.min-coverage-percent</code>, по умолчанию 85%) — пара отсекается:
-                      слишком много пропусков истории (делистинг, дырявые котировки).
-                    </li>
-                    <li>
-                      <strong>Качество серии.</strong>
-                      Считаем спред, Z, half-life, Sharpe симуляции. Слишком медленный возврат к среднему
-                      или слабые метрики не дают входной сигнал.
-                    </li>
-                  </ol>
-                  <div class="callout">
-                    На дашборде «Топ-пары по Sharpe» — это уже прошедшие статистику и отобранные для обзора.
-                    Сырой сигнал LONG/SHORT ещё не равен разрешению торговать: дальше режим рынка, новости и лимиты книги.
-                  </div>
-
-                  <h3 id="clusters">4a. Чемпион сектора (research всегда)</h3>
-                  <p>
-                    Каждый daily-прогон (cron 09:55 МСК) <strong>сканирует все кандидаты</strong>
-                    — нефть, металлы, банки, ритейл — по EG/FDR/quality.
-                    В торговые слоты идёт <strong>только один фаворит</strong>, не «все, кто не провалился».
-                  </p>
-                  <ul>
-                    <li>если по сектору уже есть ≥ N закрытых paper-сделок — чемпион по rolling <strong>net &gt; 0</strong> и <strong>PF ≥ 1.1</strong>;</li>
-                    <li>если журнала мало — смотрим research: сколько quality-пар сейчас (R² / half-life / coverage). Больше quality-пар у нефти в одном году, у металлов в другом — торгуем того;</li>
-                    <li>нет доказанного фаворита — <strong>sit-out</strong>, слоты пустые (не provisional-allow холодных секторов);</li>
-                    <li>пара с двумя убытками подряд или rolling PF ниже порога — вне слотов, даже если сектор чемпион.</li>
-                  </ul>
-                  <p>
-                    Нулевой убыток на каждой сделке статистика не обещает: стоп по Z и time-stop остаются.
-                    Усиление — не входить без фаворита и не размазывать слоты по слабым секторам.
-                    Сводка: <code>GET /api/analysis/cluster-review</code>, файл <code>data/cluster-review.json</code>.
-                  </p>
-
-                  <h3 id="regime">5. Режим рынка: стратегия только боковик</h3>
-                  <p>
-                    Mean-reversion плохо работает в сильном тренде: спред может «уехать» вместе с рынком
-                    и не вернуться к среднему. Поэтому перед входами смотрим <strong>ADX индекса IMOEX</strong>
-                    (виджет «Режим рынка» на дашборде):
-                  </p>
-                  <ul>
-                    <li><strong>SIDEWAYS</strong> (ADX низкий) — боковик, mean-reversion активна;</li>
-                    <li><strong>NEUTRAL</strong> — переходная зона: входы разрешены, размер уменьшен;</li>
-                    <li><strong>TREND</strong> (ADX высокий) — <em>не торговать</em>: новые входы блокируются,
-                      в рекомендациях будет явная формулировка про тренд и боковик.</li>
-                  </ul>
-                  <p>
-                    Трендовой стратегии в модуле cointegration нет — только ставка на сжатие спреда в боковике.
-                  </p>
-
-                  <h3 id="signals">6. Как появляется торговый сигнал</h3>
-                  <p>
-                    Пороги по умолчанию: вход при |Z| ≥ <strong>2.0</strong>, цель возврата около <strong>Z ≈ 0</strong>.
-                    Z считается в скользящем окне (~60 дней), хедж может подстраиваться фильтром Калмана.
-                  </p>
-                  <p>
-                    Важная деталь: <strong>вход не на первом касании</strong> порога ±2.
-                    Ждём, пока Z уже был за порогом и развернулся к нулю — меньше ложных входов
-                    «в расширяющийся» дисбаланс.
-                  </p>
-                  <ul>
-                    <li><strong>LONG / SHORT</strong> — есть подтверждённый вход.</li>
-                    <li><strong>WATCH</strong> — спред экстремальный, но разворота ещё нет (или зона внимания).</li>
-                    <li><strong>HOLD / NO_SIGNAL</strong> — сейчас не входим.</li>
-                  </ul>
-                  <p>
-                    Смотреть картинку удобнее на странице пары: стрелки входа, зона «ждём разворот»,
-                    линия KAMA / спреда.
-                  </p>
-
-                  <h3 id="news">7. Новостной / фундаментальный фильтр (после техники)</h3>
-                  <p>
-                    Порядок жёсткий: <strong>сначала техника</strong>, затем фундамент,
-                    и только потом итоговая рекомендация и paper.
-                    Фильтр работает в режиме <strong>DAILY / multi-day</strong> (удержание несколько дней).
-                  </p>
-                  <p>
-                    Источники: MOEX sitenews и RSS (<code>imoex.news.rss-feeds</code> — Interfax / RBC / Vedomosti и др.).
-                    Те же правила-триггеры (earnings miss, guidance down, SPO, M&amp;A, санкции…).
-                    При расхождении с LONG/SHORT в «Итоге» будет явный
-                    <strong>CONFLICT: техника vs фундамент</strong>.
-                    На <a href="/view/final">Итог + новости</a> лента RSS показана как <em>контекст FA</em>, не как сигнал.
-                  </p>
-                  <table class="params">
-                    <thead><tr><th>Итог</th><th>Что это значит</th></tr></thead>
-                    <tbody>
-                      <tr><td><strong>ENTER</strong></td><td>Техника ок, фундаментальных блокеров нет — можно открывать paper.</td></tr>
-                      <tr><td><strong>REDUCE</strong></td><td>CONFLICT средней силы — размер меньше.</td></tr>
-                      <tr><td><strong>WATCH</strong></td><td>Следим, но не открываем как полноценный вход.</td></tr>
-                      <tr><td><strong>BLOCK</strong></td><td>CONFLICT / жёсткий стоп: halt, делистинг, earnings miss, SPO, санкции…</td></tr>
-                    </tbody>
-                  </table>
-                  <p>Именно страница <a href="/view/final">Итог + новости</a> — операторский «разрешено / нет» после FA:
-                    развёрнутый explain (пайплайн, причины пустой таблицы, словарь ENTER/REDUCE/WATCH/BLOCK),
-                    сводка «почему такие», expandable-разбор по строкам и RSS-контекст.
-                    В JSON и UI у каждой строки поле <strong><code>rationale</code></strong> — краткое «почему»:
-                    Z, фундамент, режим ADX, решение и слоты.</p>
-
-                  <h3 id="size">8. Размер позиции и лимиты портфеля</h3>
-                  <p>
-                    Профиль оператора: счёт <strong>от ~100 000 ₽</strong>, узкая книга
-                    <strong>1–2 пары</strong> (не широкий портфель). Базовый notional на ногу Y
-                    считается как <strong>доля equity</strong> (<code>notional-per-leg-pct</code>, по умолчанию 30%):
-                    при 100k ≈ 30k на ногу, при 200k ≈ 60k. Дальше размер уменьшается или увеличивается
-                    через dynamic sizing: волатильность спреда, расстояние до стопа по Z, REDUCE и режим NEUTRAL.
-                    Плечо в модели не используется, пока equity ниже порога (~1 млн ₽).
-                  </p>
-                  <ul>
-                    <li>капитал 100% на DAILY; слоты от equity (~100k → 1–2 пары);</li>
-                    <li>без плеча при equity &lt; 1M;</li>
-                    <li>не больше 1 открытой пары на сектор;</li>
-                    <li>DAILY: удержание несколько дней + FA;</li>
-                    <li>качество пары для входа: R², half-life в разумных границах, минимум сделок в бэктесте;</li>
-                    <li>не открываем, если |Z| уже слишком близко к стоп-уровню.</li>
-                  </ul>
-
-                  <h3 id="exits">9. Как выходим из позиции</h3>
-                  <p>Выход — не только «дождались Z≈0». В paper работают несколько правил:</p>
-                  <ul>
-                    <li><strong>Mean-reversion</strong> — спред вернулся к цели около нуля;</li>
-                    <li><strong>Partial take-profit</strong> — на полпути к нулю по Z;</li>
-                    <li><strong>Trailing по Z</strong> — отдали от лучшей точки — закрываем;</li>
-                    <li><strong>Stop по |Z|</strong> (в т.ч. адаптивный) — спред ушёл ещё дальше против нас;</li>
-                    <li><strong>Time-stop</strong> — слишком долго в позиции без результата;</li>
-                    <li><strong>CUSUM / слом связи</strong> — структурный сдвиг спреда, сильный сдвиг β или коинтеграция «развалилась»;</li>
-                    <li><strong>Смена сигнала</strong> — логика пары перевернулась.</li>
-                  </ul>
-
-                  <h3 id="paper">10. Paper trading и walk-forward</h3>
-                  <p>
-                    <a href="/view/statement">Statement</a> — paper / research PnL по стратегиям.
-                    На каждом анализе система сама открывает ENTER/REDUCE, ведёт mark-to-market
-                    и закрывает по правилам выше. PnL считается по количествам и ценам ног
-                    (с учётом slippage и borrow), а не как «1 Z = 1%».
-                    Slippage DAILY ~20 bps.
-                    На закрытых сделках — колонка <strong>«Комментарий к закрытию»</strong>:
-                    <code>mean-reversion</code>, <code>stop</code>, <code>time-stop</code>, <code>flatten</code>, <code>partial-tp</code>
-                    (полный текст причины остаётся в Notes).
-                  </p>
-                  <p>
-                    <a href="/view/walk-forward">Walk-forward</a> режет историю на train/test окна:
-                    на обучении проверяем коинтеграцию, на тесте гоняем правила без подглядывания вперёд.
-                    Это проверка «не подогнали ли мы всё под прошлый год», а не гарантия прибыли.
-                  </p>
-
-                  <h3 id="validation">11. Валидация на истории (historical replay)</h3>
-                  <p>
-                    Дополнительно к walk-forward есть <strong>bar-by-bar replay</strong> всего paper-пайплайна
-                    на сохранённых свечах: на каждом баре система «видит» только историю ≤ as-of,
-                    строит Z/сигнал и синхронизирует paper — как если бы вы торговали день за днём.
-                    {{RESEARCH_BADGE}}
-                  </p>
-                  <p>Запуск через API (нужны локальные свечи в <code>data/candles/</code>):</p>
-                  <pre class="code-block">POST /api/analysis/historical-replay?tickerY=SBER&amp;tickerX=LKOH&amp;from=2023-01-01&amp;to=2025-12-31&amp;book=DAILY</pre>
-                  <p>
-                    Ответ: сделки, net/realized PnL ₽, win rate, max drawdown.
-                    Подробнее в <a href="/view/guide">Как пользоваться системой</a>.
-                    Долгий локальный candle-архив и deep research replay — профиль Full Core (roadmap).
-                  </p>
-
-                  <h3 id="intraday-events">12. Research: INTRADAY / календарь (не в ops)</h3>
-                  <p>
-                    Код INTRADAY pairs и event-overlay сохранён для research
-                    (<code>runIntradayOnly</code>, <code>data/event-calendar.json</code>),
-                    но <strong>не входит</strong> в операторский UX и автозапуски.
-                    При будущем включении: блок входов за ~45 мин до события, flatten затронутых тикеров.
-                  </p>
-
-                  <h3 id="limits">13. Честные ограничения</h3>
-                  <ul>
-                    <li>Стратегия классическая (textbook pairs) — только боковик, без трендового модуля.</li>
-                    <li>Коинтеграция на истории не обещает коинтеграцию завтра.</li>
-                    <li>Новости по ISS — эвристика, не полный fundamental research.</li>
-                    <li>Slippage в paper — модельный (bps), не стакан MOEX.</li>
-                    <li>ATAS-слой в TRINITY — прокси по OHLCV ISS, не полная лента сделок; с T-Invest sandbox точность исполнения вырастет.</li>
-                    <li>Historical replay не заменяет брокерский demo (T-Invest sandbox) — следующий шаг к live.</li>
-                    <li>Нужны месяцы чистого paper track-record, прежде чем судить об alpha.</li>
-                  </ul>
-                  <div class="callout">
-                    Это research / decision-support, не индивидуальная инвестиционная рекомендация.
-                    Параметры порогов живут в <code>application.yml</code> (<code>imoex.cointegration</code>,
-                    <code>universe</code>, <code>microstructure</code>, <code>risk</code>, <code>regime</code>, <code>news</code>, <code>paper</code>).
-                  </div>
-                </article>
-                """.replace("{{RESEARCH_BADGE}}", researchBadge);
     }
 
     /**
@@ -1687,16 +1327,15 @@ public class AnalysisHtmlRenderer {
                     <tbody>
                       <tr><td><a href="/view">Дашборд</a></td><td>Спокойный обзор: KPI (Paper / Брокер / Final / Режим), сигналы и топ-пары.</td></tr>
                       <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера (токен, песочница, сверка).</td></tr>
-                      <tr><td><a href="/view/final">Итог + новости</a></td><td><strong>Главный операторский экран</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента (DAILY), развёрнутый explain-panel, словарь действий и RSS-контекст для FA (не сигнал).</td></tr>
-                      <tr><td><a href="/view/signals">Сигналы</a></td><td>Сырые LONG / SHORT до новостного фильтра.</td></tr>
-                      <tr><td><a href="/view/recommendations">Все рекомендации</a></td><td>Полная таблица технических рекомендаций.</td></tr>
+                      <tr><td><a href="/view/final">Пульт пар</a></td><td><strong>Пульт пар</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента, графики, разбор. Сырые сигналы и walk-forward отдельно не вынесены: это шум, решение уже здесь.</td></tr>
                       <tr><td><a href="/view/statement">Statement</a></td><td>Депозит + стейтменты стратегий (pairs / trend / arb).</td></tr>
-                      <tr><td><a href="/view/walk-forward">Walk-forward</a></td><td>Out-of-sample проверка на истории (не гарантия будущего).</td></tr>
-                      <tr><td><a href="/view/strategy">Описание стратегии</a></td><td>Теория: коинтеграция, Z-score, режим боковика, выходы.</td></tr>
+                      <tr><td><a href="/view/strategy">Описание (пары)</a></td><td>Как сейчас торгует парный робот: фаворит отрасли, боковик, окно дивидендов, наблюдение/авто.</td></tr>
+                      <tr><td><a href="/view/trend-strategy">Описание (тренд)</a></td><td>Два разных робота: диапазонная нефть M5 и позиционная сетка на часе. Не путать с парами и календарным спредом.</td></tr>
+                      <tr><td><a href="/view/calendar-arb-strategy">Описание (арбитраж)</a></td><td>Разница месяцев, не ставка на товар. Нефть только в «скучной» кривой, газ — в своём сезоне.</td></tr>
                     </tbody>
                   </table>
                   <p>
-                    График пары открывается из таблиц сигналов и из Statement.
+                    График пары открывается с пульта пар и из Statement.
                   </p>
 
                   <h3 id="capital">Капитал и focus-слоты</h3>
@@ -1711,20 +1350,19 @@ public class AnalysisHtmlRenderer {
                     DAILY pairs — единственная live paper-книга коинтеграции. Цепочка жёсткая и намеренная:
                   </p>
                   <ol class="pipeline">
-                    <li><strong>Техника</strong> — Engle–Granger / Z / half-life / Sharpe / coverage → сырой LONG/SHORT/WATCH на
-                      <a href="/view/signals">Сигналах</a> и в «Всех рекомендациях».</li>
+                    <li><strong>Техника</strong> — Engle–Granger / Z / half-life / Sharpe / coverage → сырой LONG/SHORT/WATCH, на пульте пар уже после FA.</li>
                     <li><strong>Режим</strong> — ADX: TREND блокирует новые mean-reversion входы (боковик — зона pairs).</li>
                     <li><strong>Кластер</strong> — месячная eligibility сектора (net&gt;0, PF≥1.1); OIL_GAS вне pairs.</li>
                     <li><strong>FA (фундамент)</strong> — новости MOEX + RSS на горизонте ~10 дней. Итог:
                       <strong>ENTER</strong> / <strong>REDUCE</strong> / <strong>WATCH</strong> / <strong>BLOCK</strong>.
                       CONFLICT с техникой снижает размер или блокирует. RSS на
-                      <a href="/view/final">Итог + новости</a> — <em>контекст FA</em>, не отдельный сигнал.</li>
+                      <a href="/view/final">Пульт пар</a> — <em>контекст FA</em>, не отдельный сигнал.</li>
                     <li><strong>Paper</strong> — только после FA. Пустой journal при пустом итоге — нормальная дисциплина.</li>
                   </ol>
                   <p>
                     Почему так: техника без новостей часто ловит «красивый Z» перед отчётом/санкцией/дивидендом.
-                    FA не обещает прибыль — она режет очевидный риск. Walk-forward на
-                    <a href="/view/walk-forward">Walk-forward</a> проверяет, что in-sample лидеры держатся OOS.
+                    FA не обещает прибыль — она режет очевидный риск. Walk-forward в
+                    <a href="/view/settings">Настройках</a> проверяет, что in-sample лидеры держатся OOS.
                   </p>
                   <div class="callout">
                     INTRADAY pairs сейчас <strong>research-only</strong> (доля капитала 0). Не путать с Trend M5 / H1.
@@ -1740,7 +1378,8 @@ public class AnalysisHtmlRenderer {
                     <li><code>levels-profile-br-m5</code> — BR M5, bounce/retest по TOP/BOT (playbook #1).</li>
                     <li><code>positional-volume-h1</code> — H1 позиционка: 3 HVN → промежуточный → сетка 1:1:2:4;
                       инструменты RTS / нефть / газ. H1 берём у брокера (T-Invest hour candles), ISS M5→H1 — только fallback.
-                      SECID front-month роллится по брокеру (BR/Ri/NG).</li>
+                      SECID front-month роллится только в день last trade / после
+                      (пустой DOM mid-life не переключает месяц).</li>
                   </ul>
                   <p>
                     Переключение пишется в <code>data/trend-ui-settings.json</code> и в config
@@ -1754,7 +1393,7 @@ public class AnalysisHtmlRenderer {
                   <ol class="pipeline">
                     <li>Убедиться, что приложение запущено (<code>mvn -pl trinity-app -am spring-boot:run</code>).</li>
                     <li>Нажать «Анализ + paper» (или дождаться вечернего cron — см. ниже).</li>
-                    <li>Открыть <a href="/view/final">Итог + новости</a> — что разрешено по DAILY после FA.</li>
+                    <li>Открыть <a href="/view/final">Пульт пар</a> — что разрешено по DAILY после FA.</li>
                     <li>Открыть <a href="/view/statement">Statement</a> — что реально открылось в DAILY / Trend.</li>
                     <li>При сомнениях — график пары и виджет «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
                   </ol>
@@ -1829,7 +1468,7 @@ public class AnalysisHtmlRenderer {
                     <li>В логе терминала: <code>Started TrinityApplication</code></li>
                     <li>Кнопка «Анализ + paper» завершается без 401 (логин/пароль верные)</li>
                     <li>В <code>data/candles/</code> есть JSON тикеров (после первого refresh)</li>
-                    <li><a href="/view/final">Итог + новости</a> — таблица и explain-panel (пустая таблица нормальна: нет LONG/SHORT/WATCH после техники или всё отфильтровано до FA; читайте блоки «почему 0 строк»)</li>
+                    <li><a href="/view/final">Пульт пар</a> — таблица и explain-panel (пустая таблица нормальна: нет LONG/SHORT/WATCH после техники или всё отфильтровано до FA; читайте блоки «почему 0 строк»)</li>
                     <li>На дашборде видны виджеты режима рынка (SIDEWAYS / NEUTRAL / TREND)</li>
                     <li>При тестовом OPEN — баннер и звук в браузере (алерты включены)</li>
                   </ul>
@@ -1989,7 +1628,7 @@ public class AnalysisHtmlRenderer {
     public String renderChartPage(String tickerY, String tickerX) {
         String body = """
                 <div class="chart-head" id="pairs-charts-root" data-y="{{Y}}" data-x="{{X}}">
-                  <a class="back" href="/view/signals">← к сигналам</a>
+                  <a class="back" href="/view/final">← к пульту пар</a>
                   <h2>График пары {{Y}} / {{X}}</h2>
                   <p class="meta" id="chart-meta">Загрузка данных…</p>
                   <p class="meta">Колесо — зум под курсором · Shift+колесо — сдвиг · линейка на графике или Shift+тяни · двойной клик — авто-цена · End — к последней свече</p>
@@ -2022,7 +1661,7 @@ public class AnalysisHtmlRenderer {
                   <div id="chart-z" class="chart tall"></div>
                 </div>
                 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-                <script src="/js/trinity-chart-kit.js?v=20260831-tvnav4"></script>
+                <script src="/js/trinity-chart-kit.js?v=20260902-disk1"></script>
                 <script src="/js/pairs-charts.js?v=20260831-tvnav4"></script>
                 """
                 .replace("{{Y}}", escape(tickerY))
@@ -2063,6 +1702,14 @@ public class AnalysisHtmlRenderer {
         return page("TRINITY — терминал графиков", loadClasspathUtf8("trend-charts-terminal.html"), nav("trend-charts"), OpsMode.NONE);
     }
 
+    /** Полное описание трендовых роботов (диапазонная + позиционная). */
+    public String renderTrendStrategyPage() {
+        if (!productEdition.hasTrend()) {
+            return renderStrategyLockedPage("TREND", "trend-strategy");
+        }
+        return page("TRINITY — описание тренда", loadClasspathUtf8("trend-strategy.html"), nav("trend-strategy"), OpsMode.NONE);
+    }
+
     public String renderCalendarArbPage() {
         if (!productEdition.hasArb()) {
             return renderStrategyLockedPage("ARB", "calendar-arb");
@@ -2071,6 +1718,17 @@ public class AnalysisHtmlRenderer {
             return renderStrategyLockedPage("ARB", "calendar-arb");
         }
         return page("TRINITY — календарный арбитраж", loadClasspathUtf8("calendar-arb-desk.html"), nav("calendar-arb"), OpsMode.NONE);
+    }
+
+    /** Полное описание календарного арбитража. */
+    public String renderCalendarArbStrategyPage() {
+        if (!productEdition.hasArb()) {
+            return renderStrategyLockedPage("ARB", "calendar-arb-strategy");
+        }
+        if (!strategyCalendarArbEnabled) {
+            return renderStrategyLockedPage("ARB", "calendar-arb-strategy");
+        }
+        return page("TRINITY — описание арбитража", loadClasspathUtf8("calendar-arb-strategy.html"), nav("calendar-arb-strategy"), OpsMode.NONE);
     }
 
     private String renderStrategyLockedPage(String strategy, String activeNav) {
@@ -2147,6 +1805,7 @@ public class AnalysisHtmlRenderer {
 
         StringBuilder body = new StringBuilder();
         body.append(renderPairsDesk(cluster, regime, report, rows, technical));
+        body.append(loadClasspathUtf8("pairs-desk-guide.html"));
         if (!rows.isEmpty()) {
             body.append(renderFinalSummaryStrip(rows));
         }
@@ -2161,8 +1820,9 @@ public class AnalysisHtmlRenderer {
 
         body.append(renderFinalExplainPanel(rows, technical, regime, report, cluster));
         body.append(renderFinalNewsSection(rss));
-        body.append("<script src=\"/js/pairs-final-desk.js?v=20260824-desk-zauth\"></script>");
-        return page("TRINITY — итог", body.toString(), nav("final"), OpsMode.NONE);
+        body.append("<script src=\"/js/trinity-fast-boot.js?v=20260910-fast1\"></script>");
+        body.append("<script src=\"/js/pairs-final-desk.js?v=20260910-fast1\"></script>");
+        return page("TRINITY — пульт пар", body.toString(), nav("final"), OpsMode.NONE);
     }
 
     private String renderFinalDecisionTable(List<FinalTradeRecommendation> rows) {
@@ -2305,13 +1965,13 @@ public class AnalysisHtmlRenderer {
                   </div>
 
                   <div class="pairs-desk-toolbar">
-                    <label class="mode-switch is-signal" title="Сигнал: только paper-журнал. Авто: ещё ордера брокера после анализа, если брокер armed.">
-                      <span class="mode-switch-label">Сигнал</span>
+                    <label class="mode-switch is-signal" title="Наблюдение: журнал без заявок. Авто: ещё ордера брокера после анализа, если брокер готов.">
+                      <span class="mode-switch-label">Наблюдение</span>
                       <input type="checkbox" id="pairs-auto-execution" role="switch" aria-checked="false">
                       <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
                       <span class="mode-switch-label">Авто</span>
                     </label>
-                    <p class="pairs-desk-delivery" id="pairs-delivery-hint">Paper всегда пишется. Авто = ордера брокера после анализа.</p>
+                    <p class="pairs-desk-delivery" id="pairs-delivery-hint">Наблюдение пишет журнал. Авто = ещё заявки брокера после анализа.</p>
                     <div class="pairs-filter" role="group" aria-label="Фильтр итога">
                       <button type="button" class="pairs-chip is-on" data-filter="ALL">Все</button>
                       <button type="button" class="pairs-chip" data-filter="ENTER">Вход</button>
@@ -2319,6 +1979,10 @@ public class AnalysisHtmlRenderer {
                       <button type="button" class="pairs-chip" data-filter="BLOCK">Блок</button>
                     </div>
                     <div class="pairs-desk-actions">
+                      <button type="button" class="btn btn-ghost signal-guide-btn" id="pairs-guide-open"
+                              aria-haspopup="dialog" aria-controls="pairs-guide-modal">
+                        Как торгует робот
+                      </button>
                       <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
                       <a class="btn btn-ghost" href="/view/settings">Настройки</a>
                     </div>
@@ -2550,7 +2214,7 @@ public class AnalysisHtmlRenderer {
         if (empty) {
             sb.append("<li>Если анализ давно не гоняли — на <a href=\"/view/settings\">Настройках</a> «Анализ + paper».</li>");
             sb.append("<li>Проверить виджет <strong>режима рынка</strong> на <a href=\"/view\">дашборде</a>: TREND (высокий ADX) блокирует новые входы.</li>");
-            sb.append("<li>Открыть <a href=\"/view/signals\">Сигналы</a> и <a href=\"/view/recommendations\">Все рекомендации</a> — есть ли сырой LONG/SHORT до FA.</li>");
+            sb.append("<li>На пульте пар смотрите график и разбор по ногам — отдельная таблица сырых сигналов не нужна.</li>");
             sb.append("<li>Если техника есть, а итог пуст — пересчитать «Только новости / paper» или полный цикл (FA мог не сохраниться).</li>");
             sb.append("<li>Смотреть <a href=\"/view/statement\">Statement</a>: пустой journal при пустом итоге — нормальная дисциплина, не «баг».</li>");
         } else {
@@ -3356,19 +3020,18 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </nav>
                 <nav class="topnav-secondary" data-for="pairs" hidden>
-                  <a href="/view/final" class="%s">Итог + новости</a>
-                  <a href="/view/signals" class="%s">Сигналы</a>
-                  <a href="/view/recommendations" class="%s">Рекомендации</a>
-                  <a href="/view/walk-forward" class="%s">Walk-forward</a>
+                  <a href="/view/final" class="%s">Пульт пар</a>
                   <a href="/view/strategy" class="%s">Описание</a>
                 </nav>
                 <nav class="topnav-secondary" data-for="trend" hidden>
                   <a href="/view/trend-signal" class="%s" data-requires="trend">Диапазонная торговля</a>
                   <a href="/view/trend-positional" class="%s" data-requires="trend">Позиционная торговля</a>
                   <a href="/view/trend-charts" class="%s" data-requires="trend">Терминал графиков</a>
+                  <a href="/view/trend-strategy" class="%s" data-requires="trend">Описание</a>
                 </nav>
                 <nav class="topnav-secondary" data-for="arb" hidden>
                   <a href="/view/calendar-arb" class="%s" data-requires="arb">Календарный arb</a>
+                  <a href="/view/calendar-arb-strategy" class="%s" data-requires="arb">Описание</a>
                   <a href="/view/full-core" class="%s">Full Core</a>
                 </nav>
                 """.formatted(
@@ -3384,14 +3047,13 @@ public class AnalysisHtmlRenderer {
                 arbActive, arbLock, hasArb ? "false" : "true",
                 arbActive.isEmpty() ? "false" : "true",
                 a.equals("final") ? "active" : "",
-                a.equals("signals") ? "active" : "",
-                a.equals("recommendations") ? "active" : "",
-                a.equals("walkforward") ? "active" : "",
                 a.equals("strategy") ? "active" : "",
                 a.equals("trend-signal") ? "active" : "",
                 a.equals("trend-positional") ? "active" : "",
                 a.equals("trend-charts") ? "active" : "",
+                a.equals("trend-strategy") ? "active" : "",
                 a.equals("calendar-arb") ? "active" : "",
+                a.equals("calendar-arb-strategy") ? "active" : "",
                 a.equals("fullcore") ? "active" : ""
         );
     }
@@ -3402,11 +3064,12 @@ public class AnalysisHtmlRenderer {
     }
 
     private static boolean isTrendNav(String a) {
-        return a.equals("trend-signal") || a.equals("trend-positional") || a.equals("trend-charts");
+        return a.equals("trend-signal") || a.equals("trend-positional")
+                || a.equals("trend-charts") || a.equals("trend-strategy");
     }
 
     private static boolean isArbNav(String a) {
-        return a.equals("fullcore") || a.equals("calendar-arb");
+        return a.equals("fullcore") || a.equals("calendar-arb") || a.equals("calendar-arb-strategy");
     }
 
     private String navStrategyHint(String active) {

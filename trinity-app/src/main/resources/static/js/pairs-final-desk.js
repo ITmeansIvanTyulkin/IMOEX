@@ -56,13 +56,33 @@
   }
 
   async function getJson(path) {
-    let res = await fetch(path, { headers: headers() });
-    // Неверный Basic/Bearer на permitAll GET даёт 401 — повторяем без Authorization.
-    if (res.status === 401 || res.status === 403) {
-      res = await fetch(path, { headers: { Accept: "application/json" } });
+    const ms = (window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000;
+    try {
+      if (window.TrinityFastBoot && typeof TrinityFastBoot.fetchAbort === "function") {
+        let res = await TrinityFastBoot.fetchAbort(path, {
+          ms: ms,
+          headers: headers(),
+          credentials: "same-origin"
+        });
+        if (res.status === 401 || res.status === 403) {
+          res = await TrinityFastBoot.fetchAbort(path, {
+            ms: ms,
+            headers: { Accept: "application/json" },
+            credentials: "same-origin"
+          });
+        }
+        if (!res.ok) return null;
+        return res.json();
+      }
+      let res = await fetch(path, { headers: headers() });
+      if (res.status === 401 || res.status === 403) {
+        res = await fetch(path, { headers: { Accept: "application/json" } });
+      }
+      if (!res.ok) return null;
+      return res.json();
+    } catch (_) {
+      return null;
     }
-    if (!res.ok) return null;
-    return res.json();
   }
 
   function parseAdx(v) {
@@ -519,8 +539,8 @@
     const hint = $("pairs-delivery-hint");
     if (hint) {
       hint.textContent = toggle.checked
-        ? "Авто: после анализа paper + ордера, если брокер armed."
-        : "Сигнал: paper-журнал пишется, ордера брокера не шлём.";
+        ? "Авто: после анализа журнал + заявки, если брокер готов."
+        : "Наблюдение: журнал пишется, заявок брокеру нет.";
     }
   }
 
@@ -535,8 +555,8 @@
       });
       if (!res.ok) throw new Error("settings " + res.status);
       if (hint) hint.textContent = on
-        ? "Авто включён. Live-ордера всё равно требуют armed брокера."
-        : "Сигнал: только paper, без авто-ордеров.";
+        ? "Авто включён. Живые заявки всё равно требуют готового брокера."
+        : "Наблюдение: только журнал, без авто-заявок.";
     } catch (e) {
       syncModeSwitch(!on);
       if (hint) hint.textContent = "Не удалось сохранить режим: " + e.message;
@@ -630,6 +650,60 @@
     });
   }
 
+  function bindPairsGuide() {
+    let lastFocus = null;
+    function openGuide() {
+      const gate = $("pairs-guide-modal");
+      const dialog = gate && gate.querySelector(".signal-guide-modal");
+      if (!gate || !dialog) return;
+      lastFocus = document.activeElement;
+      gate.hidden = false;
+      gate.setAttribute("aria-hidden", "false");
+      requestAnimationFrame(function () {
+        gate.classList.add("is-open");
+        dialog.focus();
+      });
+    }
+    function closeGuide() {
+      const gate = $("pairs-guide-modal");
+      if (!gate || gate.hidden) return;
+      gate.classList.remove("is-open");
+      gate.setAttribute("aria-hidden", "true");
+      window.setTimeout(function () {
+        gate.hidden = true;
+        if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+        lastFocus = null;
+      }, 220);
+    }
+    const openBtn = $("pairs-guide-open");
+    if (openBtn) openBtn.addEventListener("click", openGuide);
+    const gate = $("pairs-guide-modal");
+    if (gate) {
+      gate.querySelectorAll("[data-pairs-guide-close]").forEach(function (el) {
+        el.addEventListener("click", closeGuide);
+      });
+      gate.querySelectorAll(".signal-guide-toc a").forEach(function (a) {
+        a.addEventListener("click", function (ev) {
+          const id = (a.getAttribute("href") || "").replace(/^#/, "");
+          const target = id && document.getElementById(id);
+          const body = gate.querySelector(".signal-guide-body");
+          if (!target || !body) return;
+          ev.preventDefault();
+          body.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior: "smooth" });
+        });
+      });
+    }
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      const g = $("pairs-guide-modal");
+      if (g && !g.hidden) {
+        closeGuide();
+        ev.preventDefault();
+      }
+    });
+  }
+
+  bindPairsGuide();
   tickClock();
   setInterval(tickClock, 1000);
 

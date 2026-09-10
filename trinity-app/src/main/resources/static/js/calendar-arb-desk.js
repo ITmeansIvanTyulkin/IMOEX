@@ -1,6 +1,7 @@
 (function () {
   const POLL_MS = 12000;
-  const DESK_TIMEOUT_MS = 12000;
+  /** Align with TrinityFastBoot: abort hung desk, keep cache paint snappy. */
+  const DESK_TIMEOUT_MS = (window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000;
   const DEFAULT_FAMS = [
     { code: "BR", name: "Нефть (BR)" },
     { code: "SI", name: "Si (USD/RUB)" },
@@ -197,19 +198,22 @@
     }
     if ($("arb-chart-label")) {
       $("arb-chart-label").textContent = (sel.structure === "FLY"
-        ? "Fly near − 2·mid + far"
-        : "Спред far − near") + " · локальный архив";
+        ? "Бабочка: ближний − 2×середина + дальний"
+        : "Разница дальнего и ближнего месяца") + " · локальный архив";
     }
     if ($("arb-legs-chart-label") && (sel.near || sel.next)) {
-      $("arb-legs-chart-label").textContent = "Ноги H1 · "
-        + (sel.near || "near") + " / " + (sel.next || "next")
-        + (sel.structure === "FLY" ? " (mid)" : "")
+      $("arb-legs-chart-label").textContent = "Ноги · "
+        + (sel.near || "ближний") + " / " + (sel.next || "дальний")
+        + (sel.structure === "FLY" ? " (середина)" : "")
         + " · локальный архив";
     }
     return true;
   }
 
   async function fetchJson(url, ms) {
+    if (window.TrinityFastBoot && typeof TrinityFastBoot.fetchJson === "function") {
+      return TrinityFastBoot.fetchJson(url, { ms: ms || DESK_TIMEOUT_MS });
+    }
     const ac = new AbortController();
     const t = setTimeout(function () { ac.abort(); }, ms || DESK_TIMEOUT_MS);
     try {
@@ -223,32 +227,116 @@
 
   function liveBrokerNote(fp) {
     if (!fp || !fp.liveBroker) return "";
-    if (fp.open) return " · broker " + fp.liveBroker + " · в сделке";
+    if (fp.open) return " · брокер · в сделке";
     if (fp.liveArmed) {
       const pause = String(fp.lastAction || "").indexOf("SKIP_") === 0;
-      return " · broker " + fp.liveBroker + (pause ? " · live включён, ордеров нет" : " · live готов");
+      return pause ? " · живые заявки включены, ордеров нет" : " · живые заявки готовы";
     }
-    return " · broker " + fp.liveBroker;
+    return "";
+  }
+
+  function autoOn(data) {
+    const settings = (data && data.settings) || data || {};
+    const fp = (data && data.fairPaper) || {};
+    if (settings.autoExecution != null) return !!settings.autoExecution;
+    if (data && data.autoExecution != null) return !!data.autoExecution;
+    if (fp.autoExecution != null) return !!fp.autoExecution;
+    return true;
+  }
+
+  function deliveryRu(code, data) {
+    if (!autoOn(data)) return "наблюдение";
+    const c = String(code || "");
+    if (c === "LIVE_FORTS") return "авто · живые заявки";
+    if (c === "SANDBOX_FAIR" || c === "AUTO") return "авто · журнал";
+    if (c === "SIGNAL_ONLY") return "наблюдение";
+    return c || "авто";
+  }
+
+  function syncArbAutoSwitch(data) {
+    const tog = $("desk-arb-auto-execution");
+    if (!tog || tog.disabled) return;
+    const on = autoOn(data);
+    tog.checked = on;
+    tog.setAttribute("aria-checked", on ? "true" : "false");
+    const sw = tog.closest(".mode-switch");
+    if (sw) {
+      sw.classList.toggle("is-auto", on);
+      sw.classList.toggle("is-signal", !on);
+    }
+  }
+
+  function deskAuthHeaders(extra) {
+    const headers = Object.assign({ Accept: "application/json" }, extra || {});
+    try {
+      const token = localStorage.getItem("trinity.supabase.access_token");
+      if (token) {
+        headers.Authorization = "Bearer " + token;
+        return headers;
+      }
+      const user = (localStorage.getItem("imoex.ops.user") || "").trim();
+      const pass = localStorage.getItem("imoex.ops.pass") || "";
+      if (user && pass && user.indexOf("@") < 0) {
+        headers.Authorization = "Basic " + btoa(unescape(encodeURIComponent(user + ":" + pass)));
+      }
+    } catch (_) {}
+    return headers;
+  }
+
+  function bindArbAutoSwitch() {
+    const tog = $("desk-arb-auto-execution");
+    if (!tog || tog.dataset.bound === "1") return;
+    tog.dataset.bound = "1";
+    tog.addEventListener("change", function () {
+      setArbAutoFromDesk(tog.checked);
+    });
+  }
+
+  async function setArbAutoFromDesk(enabled) {
+    const tog = $("desk-arb-auto-execution");
+    if (tog) tog.disabled = true;
+    try {
+      const res = await fetch("/api/calendar-arb/settings/auto-execution", {
+        method: "POST",
+        headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      const view = await res.json();
+      syncArbAutoSwitch(view);
+      if ($("arb-delivery")) $("arb-delivery").textContent = deliveryRu(view.delivery, view);
+      if ($("arb-robot") && !autoOn(view)) $("arb-robot").textContent = "Наблюдение";
+      refreshStatus().catch(function () {});
+    } catch (err) {
+      if (tog) tog.checked = !enabled;
+      if ($("arb-desk-meta")) {
+        $("arb-desk-meta").textContent = "Не удалось переключить: " + (err.message || err);
+      }
+    } finally {
+      if (tog) tog.disabled = false;
+    }
   }
 
   function robotLine(data) {
     const fp = (data && data.fairPaper) || {};
-    const settings = (data && data.settings) || data || {};
     if (fp.open) {
-      return "В СДЕЛКЕ " + fp.open.side + " " + fp.open.pair;
+      return "В сделке " + (fp.open.pair || "");
     }
-    if (settings.autoExecution === false || data.autoExecution === false) {
-      return "ВЫКЛ";
+    if (!autoOn(data)) {
+      return "Наблюдение";
     }
     const act = fp.lastAction || "";
-    const live = fp.liveArmed ? "live включён" : "paper";
+    const live = fp.liveArmed ? "живые заявки" : "журнал";
     if (act.indexOf("SKIP_") === 0) {
-      return "Не торгует · " + skipActionRu(act) + " · " + live + ", ордеров нет";
+      return "Не торгует · " + skipActionRu(act);
     }
     if (act === "NONE" || act === "") {
-      return live + " · ждёт вход по z";
+      return "Ждёт перекос · " + live;
     }
-    return act + " · " + live;
+    return skipActionRu(act) || (act + " · " + live);
   }
 
   function paintStatus(data) {
@@ -257,8 +345,9 @@
     const fp = data.fairPaper || {};
     const st = data.statement || {};
     if ($("arb-robot")) $("arb-robot").textContent = robotLine(data);
-    if ($("arb-source")) $("arb-source").textContent = data.dataSource || settings.dataSource || "T_INVEST";
-    if ($("arb-delivery") && settings.delivery) $("arb-delivery").textContent = settings.delivery;
+    if ($("arb-source")) $("arb-source").textContent = data.dataSource || settings.dataSource || "брокер";
+    if ($("arb-delivery")) $("arb-delivery").textContent = deliveryRu(settings.delivery, data);
+    syncArbAutoSwitch(data);
     if ($("arb-action") && ($("arb-action").textContent === "—" || $("arb-action").textContent === "…")) {
       $("arb-action").textContent = fp.open ? "OPEN" : (fp.lastAction || "—");
     }
@@ -281,8 +370,10 @@
     if ($("arb-desk-meta")) {
       const armed = fp.open
         ? "есть позиция"
-        : (fp.liveArmed ? "live включён, ордеров нет" : "paper, ордеров нет");
-      $("arb-desk-meta").textContent = "Котировки T-Invest · " + armed;
+        : (!autoOn(data)
+          ? "наблюдение"
+          : (fp.liveArmed ? "авто · живые заявки, ордеров нет" : "авто · журнал, ордеров нет"));
+      $("arb-desk-meta").textContent = "Котировки брокера · " + armed;
     }
   }
 
@@ -326,8 +417,9 @@
 
     const sel = data.selected || {};
     const settings = data.settings || {};
-    $("arb-source").textContent = data.dataSource || "T_INVEST";
-    $("arb-delivery").textContent = settings.delivery || "—";
+    $("arb-source").textContent = data.dataSource || "брокер";
+    $("arb-delivery").textContent = deliveryRu(settings.delivery, data);
+    syncArbAutoSwitch(data);
     $("arb-pair").textContent = sel.pair || (warming ? "…" : "—");
     if ($("arb-structure")) {
       $("arb-structure").textContent = sel.structure === "FLY"
@@ -411,15 +503,15 @@
     }
     if ($("arb-chart-label")) {
       $("arb-chart-label").textContent = sel.structure === "FLY"
-        ? "Fly near − 2·mid + far (H1 брокера)"
-        : "Спред far − near (H1 брокера)";
+        ? "Бабочка: ближний − 2×середина + дальний (час брокера)"
+        : "Разница дальнего и ближнего месяца (час брокера)";
     }
     if ($("arb-legs-chart-label")) {
       const nearName = sel.near || "near";
       const nextName = sel.next || "next";
       $("arb-legs-chart-label").textContent = sel.structure === "FLY"
-        ? ("Ноги H1 · " + nearName + " / " + nextName + " (mid)")
-        : ("Ноги H1 · " + nearName + " / " + nextName);
+        ? ("Ноги · " + nearName + " / " + nextName + " (середина)")
+        : ("Ноги · " + nearName + " / " + nextName);
     }
     window.__arbStructure = sel.structure || window.__arbStructure || "";
     $("arb-spread").textContent = warming && sel.spread == null ? "…" : fmt(sel.spread, 3);
@@ -428,9 +520,9 @@
       ? "загрузка"
       : (String(sel.action || "").indexOf("SKIP_") === 0
         ? skipActionRu(sel.action)
-        : (sel.action === "NONE" ? "ждёт z" : (sel.action || "—")));
+        : (sel.action === "NONE" ? "ждёт перекос" : (sel.action || "—")));
     $("arb-reason").textContent = warming
-      ? "Загрузка near/next у T-Invest (первый запрос часто пустой, пока прогреется gRPC)…"
+      ? "Загрузка ближнего/дальнего контракта у T-Invest (первый запрос часто пустой, пока прогреется gRPC)…"
       : (data.stale
         ? ((sel.reason || "—") + " · снимок чуть устарел")
         : (sel.reason || "—"));
@@ -470,12 +562,14 @@
       drawCharts(series, sel);
     }
     $("arb-desk-meta").textContent =
-      "Котировки " + (data.dataSource || "T-Invest") +
-      (data.tokenPresent === false ? " · нет токена" : " · H1 брокера") +
+      "Котировки брокера" +
+      (data.tokenPresent === false ? " · нет токена" : " · час") +
       (series.length ? (" · баров " + series.length) : (sel.bars ? (" · баров " + sel.bars) : "")) +
       (warming ? " · загрузка…" : "") +
       (data.stale ? " · локальный снимок" : "") +
-      (fp.open ? " · есть позиция" : (fp.liveArmed ? " · live включён, ордеров нет" : " · paper, ордеров нет"));
+      (fp.open ? " · есть позиция"
+        : (!autoOn(data) ? " · наблюдение"
+          : (fp.liveArmed ? " · авто · живые заявки, ордеров нет" : " · авто · журнал, ордеров нет")));
   }
 
   function fmtPx(p, pointSize) {
@@ -833,8 +927,63 @@
     paintNav($("arb-legs-chart"));
   }
 
+  function bindArbGuide() {
+    let lastFocus = null;
+    function openGuide() {
+      const gate = $("arb-guide-modal");
+      const dialog = gate && gate.querySelector(".signal-guide-modal");
+      if (!gate || !dialog) return;
+      lastFocus = document.activeElement;
+      gate.hidden = false;
+      gate.setAttribute("aria-hidden", "false");
+      requestAnimationFrame(function () {
+        gate.classList.add("is-open");
+        dialog.focus();
+      });
+    }
+    function closeGuide() {
+      const gate = $("arb-guide-modal");
+      if (!gate || gate.hidden) return;
+      gate.classList.remove("is-open");
+      gate.setAttribute("aria-hidden", "true");
+      window.setTimeout(function () {
+        gate.hidden = true;
+        if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+        lastFocus = null;
+      }, 220);
+    }
+    const openBtn = $("arb-guide-open");
+    if (openBtn) openBtn.addEventListener("click", openGuide);
+    const gate = $("arb-guide-modal");
+    if (gate) {
+      gate.querySelectorAll("[data-arb-guide-close]").forEach(function (el) {
+        el.addEventListener("click", closeGuide);
+      });
+      gate.querySelectorAll(".signal-guide-toc a").forEach(function (a) {
+        a.addEventListener("click", function (ev) {
+          const id = (a.getAttribute("href") || "").replace(/^#/, "");
+          const target = id && document.getElementById(id);
+          const body = gate.querySelector(".signal-guide-body");
+          if (!target || !body) return;
+          ev.preventDefault();
+          body.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior: "smooth" });
+        });
+      });
+    }
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      const g = $("arb-guide-modal");
+      if (g && !g.hidden) {
+        closeGuide();
+        ev.preventDefault();
+      }
+    });
+  }
+
   function bind() {
     fillFamilySelect(DEFAULT_FAMS, loadFamilyFromUrl());
+    bindArbAutoSwitch();
+    bindArbGuide();
     if ($("arb-desk-refresh")) {
       $("arb-desk-refresh").addEventListener("click", function () {
         refreshStatus().catch(function () {});

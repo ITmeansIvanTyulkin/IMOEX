@@ -185,8 +185,18 @@ public class AnalysisViewController {
         return htmlRenderer.renderTrendChartsPage();
     }
 
+    @GetMapping(value = "/trend-strategy", produces = MediaType.TEXT_HTML_VALUE)
+    public String trendStrategy() {
+        return htmlRenderer.renderTrendStrategyPage();
+    }
+
     @GetMapping(value = "/calendar-arb", produces = MediaType.TEXT_HTML_VALUE)
     public String calendarArb() {
         return htmlRenderer.renderCalendarArbPage();
+    }
+
+    @GetMapping(value = "/calendar-arb-strategy", produces = MediaType.TEXT_HTML_VALUE)
+    public String calendarArbStrategy() {
+        return htmlRenderer.renderCalendarArbStrategyPage();
     }
 }

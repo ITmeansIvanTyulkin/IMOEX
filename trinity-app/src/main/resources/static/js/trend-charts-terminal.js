@@ -15,12 +15,23 @@
     const headers = (window.TrinityChartKit
       ? TrinityChartKit.authHeaders(opts.headers || {})
       : Object.assign({ Accept: "application/json" }, opts.headers || {}));
+    const ms = opts.ms != null ? opts.ms
+      : ((window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000);
     const base = { credentials: "include" };
-    let res = await fetch(url, Object.assign({}, base, opts, { headers: headers }));
+    let res;
+    if (window.TrinityFastBoot && typeof TrinityFastBoot.fetchAbort === "function") {
+      res = await TrinityFastBoot.fetchAbort(url, Object.assign({}, base, opts, { headers: headers, ms: ms }));
+    } else {
+      res = await fetch(url, Object.assign({}, base, opts, { headers: headers }));
+    }
     if (res.status === 401 || res.status === 403) {
       const cookieHeaders = Object.assign({}, headers);
       delete cookieHeaders.Authorization;
-      res = await fetch(url, Object.assign({}, base, opts, { headers: cookieHeaders }));
+      if (window.TrinityFastBoot && typeof TrinityFastBoot.fetchAbort === "function") {
+        res = await TrinityFastBoot.fetchAbort(url, Object.assign({}, base, opts, { headers: cookieHeaders, ms: ms }));
+      } else {
+        res = await fetch(url, Object.assign({}, base, opts, { headers: cookieHeaders }));
+      }
     }
     return res;
   }
@@ -568,16 +579,23 @@
   }
 
   async function bootstrap() {
-    const deskRes = await authFetch("/api/trend/desk");
-    const desk = deskRes.ok ? await deskRes.json() : {};
-    instruments = desk.instruments || [
-      { secid: "BRU6", name: "Нефть (BR)", family: "BR" },
-      { secid: "RiU6", name: "RTS (Ri)", family: "RI" },
-      { secid: "NGU6", name: "Газ (NG)", family: "NG" },
-      { secid: "SiU6", name: "Si (USD/RUB)", family: "SI" },
-      { secid: "GDU6", name: "GOLD (GD)", family: "GD" },
-      { secid: "MXU6", name: "MIX (IMOEX/MX)", family: "MX" }
+    // Fast path: catalog first — never block grid paint on a slow /api/trend/desk.
+    const FALLBACK = [
+      { secid: "BRV6", name: "Нефть (BR)", family: "BR" },
+      { secid: "RIZ6", name: "RTS (Ri)", family: "RI" },
+      { secid: "NGV6", name: "Газ (NG)", family: "NG" },
+      { secid: "SiZ6", name: "Si (USD/RUB)", family: "SI" },
+      { secid: "GDZ6", name: "GOLD (GD)", family: "GD" },
+      { secid: "MXZ6", name: "MIX (IMOEX/MX)", family: "MX" }
     ];
+    instruments = FALLBACK.slice();
+    try {
+      const deskRes = await authFetch("/api/trend/desk?playbook=levels-profile-br-m5", { ms: 8000 });
+      const desk = deskRes.ok ? await deskRes.json() : {};
+      if (desk.instruments && desk.instruments.length) {
+        instruments = desk.instruments;
+      }
+    } catch (_) {}
     try {
       layoutDoc = await TrinityChartKit.loadLayouts();
     } catch (_) {
@@ -603,29 +621,27 @@
     activeId = (layoutDoc.terminal && layoutDoc.terminal.active) || list[0].secid;
     setActive(activeId);
 
-    for (let i = 0; i < list.length; i++) {
-      await paintPaneFromCache(list[i].secid);
-    }
+    await Promise.all(list.map(function (o) { return paintPaneFromCache(o.secid); }));
 
-    // Sequential load to avoid instrument thrash
-    for (let i = 0; i < list.length; i++) {
-      await refreshPane(list[i].secid);
+    // Parallel live refresh (TrinityFastBoot) — sequential was multi-minute cold boots.
+    await Promise.allSettled(list.map(async function (o) {
+      await refreshPane(o.secid);
       const by = (layoutDoc.terminal && layoutDoc.terminal.byInstrument) || {};
-      if (by[list[i].secid] && panes[list[i].secid]) {
-        panes[list[i].secid].tools.setState(by[list[i].secid]);
-        if (by[list[i].secid].flow && panes[list[i].secid].flow) {
-          panes[list[i].secid].flow.setState(by[list[i].secid].flow);
+      if (by[o.secid] && panes[o.secid]) {
+        panes[o.secid].tools.setState(by[o.secid]);
+        if (by[o.secid].flow && panes[o.secid].flow) {
+          panes[o.secid].flow.setState(by[o.secid].flow);
         }
       }
-      const sc = ((layoutDoc.terminal && layoutDoc.terminal.scaleByInstrument) || {})[list[i].secid];
-      const pane = panes[list[i].secid];
+      const sc = ((layoutDoc.terminal && layoutDoc.terminal.scaleByInstrument) || {})[o.secid];
+      const pane = panes[o.secid];
       if (sc && sc.barSpacing > 0 && pane) {
         pane.scaleLocked = true;
         pane.barSpacing = sc.barSpacing;
         pane.logical = sc.logical || null;
         restorePaneScale(pane);
       }
-    }
+    }));
     resizeAll();
     syncToolButtons();
     syncFsChrome();

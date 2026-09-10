@@ -290,11 +290,9 @@ def main():
                 break
     else:
         # Evening seal for optional/extra days (expiry, day 5+) — not in observeDaysTarget.
+        # Always refresh phaseA at EOD (do not keep morning "intraday/morning" stub).
         gh = sum(gates["counts"].values())
-        phase = (
-            eod.get("phaseA")
-            or f"EOD · trades={len(trades)} pnl={pnl:.1f} gateHits={gh}"
-        )
+        phase = f"EOD optional · trades={len(trades)} pnl={pnl:.1f} gateHits={gh}"
         eod_block = {
             **eod,
             "at": entry["checkedAt"],
@@ -334,30 +332,52 @@ def main():
         "doNotTuneOnSight": True,
         "updatedAt": entry["checkedAt"],
     }
-    log["phaseC_blocker"] = (
-        "TrendExecutionBridge: live-execution journals only; "
-        "BrokerClient pairs-oriented — FORTS single-leg SL not placed yet"
-    )
-    log["phaseB_gate"] = (
-        "2–3+ полных FORMING_BAR дней + положительная fair-paper expectancy + labeled SL "
-        "до малого FORTS SL (human OOS review обязателен)"
-    )
-    nxt = log["phaseA_progress"]["next"]
-    log["nextCheck"] = (
-        f"{nxt} ~18:02 — python3 scripts/trend_observe_evening.py"
-        if nxt.startswith("20")
-        else nxt
-    )
+    # Prefer explicit operator decision if present
+    phase_c = log.get("phaseCDecision") if isinstance(log.get("phaseCDecision"), dict) else {}
+    if str(phase_c.get("decision") or "").upper() == "NO_GO":
+        log["phaseC_blocker"] = "NO_GO — копим историю/corpus; FORTS SL и код Phase C не начинать"
+        log["phaseB_gate"] = "NO_GO 04.09: observe + research-corpus до явного go на ML или Phase C"
+        log["nextCheck"] = "collect corpus — resume next session; ML/Phase C only on explicit go"
+    else:
+        log["phaseC_blocker"] = (
+            "TrendExecutionBridge: live-execution journals only; "
+            "BrokerClient pairs-oriented — FORTS single-leg SL not placed yet"
+        )
+        log["phaseB_gate"] = (
+            "2–3+ полных FORMING_BAR дней + положительная fair-paper expectancy + labeled SL "
+            "до малого FORTS SL (human OOS review обязателен)"
+        )
+        nxt = log["phaseA_progress"]["next"]
+        log["nextCheck"] = (
+            f"{nxt} ~18:02 — python3 scripts/trend_observe_evening.py"
+            if nxt.startswith("20")
+            else nxt
+        )
     LOG.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(entry, ensure_ascii=False, indent=2))
     print("wrote", LOG)
     print("phaseA_full_days", full_days)
-    # phase B rollup (read-only; no Exclusive knobs)
+    # phase B rollup + corpus inventory (read-only; no Exclusive knobs)
     try:
         import subprocess
 
         subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "trend_observe_expectancy.py")],
+            check=False,
+            cwd=str(ROOT),
+        )
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "trend_corpus_inventory.py")],
+            check=False,
+            cwd=str(ROOT),
+        )
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "trend_label_candidates.py")],
+            check=False,
+            cwd=str(ROOT),
+        )
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "trend_training_obs_scan.py")],
             check=False,
             cwd=str(ROOT),
         )

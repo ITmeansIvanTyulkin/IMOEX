@@ -36,7 +36,7 @@ class MarketDataResearchServiceTest {
     }
 
     @Test
-    void emptyExpiredBookFallsBackToSameFamilyLiveDom() {
+    void emptyConcreteBookDoesNotStealNextMonthDom() {
         Instant asOf = Instant.now();
         DomBook empty = new DomBook("BRU6", 50, List.of(), List.of(), asOf, true);
         DomBook live = new DomBook("BRV6", 50,
@@ -45,11 +45,32 @@ class MarketDataResearchServiceTest {
                 asOf, true);
         MemoryFeed feed = new MemoryFeed(List.of(empty, live));
         MarketDataResearchService svc = new MarketDataResearchService(feed);
-        Optional<DomBook> book = svc.resolveBook("BRU6");
+        Optional<DomBook> book = svc.resolveBookLocal("BRU6");
+        // Concrete SECID must not silently show the next month's book (false-front bug 2026-09-10).
+        assertTrue(book.isEmpty() || "BRU6".equalsIgnoreCase(book.get().instrumentId()));
+        assertTrue(book.isEmpty() || book.get().bids().isEmpty());
+    }
+
+    @Test
+    void concreteSecidIsRecognizedForDomPin() {
+        assertTrue(MarketDataResearchService.looksLikeConcreteSecid("BRV6"));
+        assertTrue(MarketDataResearchService.looksLikeConcreteSecid("SiZ6"));
+        assertFalse(MarketDataResearchService.looksLikeConcreteSecid("BR"));
+        assertFalse(MarketDataResearchService.looksLikeConcreteSecid(""));
+    }
+
+    @Test
+    void resolveBookLocalDoesNotNeedRestWhenFamilyBookExists() {
+        Instant asOf = Instant.now();
+        DomBook live = new DomBook("SIU6", 1,
+                List.of(new DomBook.DomLevel(80.10, 2)),
+                List.of(new DomBook.DomLevel(80.12, 2)),
+                asOf, true);
+        MemoryFeed feed = new MemoryFeed(List.of(live));
+        MarketDataResearchService svc = new MarketDataResearchService(feed);
+        Optional<DomBook> book = svc.resolveBookLocal("SIU6");
         assertTrue(book.isPresent());
-        assertEquals("BRV6", book.get().instrumentId());
-        assertEquals(1, book.get().bids().size());
-        assertEquals(91.36, book.get().bids().get(0).price(), 1e-9);
+        assertEquals("SIU6", book.get().instrumentId());
     }
 
     private static final class MemoryFeed implements MarketDataFeed {

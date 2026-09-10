@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,28 +37,53 @@ class TInvestBrokerMarketDataListedDateTest {
     }
 
     @Test
-    void pickLiveMonthSkipsEmptyFrontWhenNextHasDom() {
-        var u = new TInvestBrokerMarketData.FrontMonth("BRU6", "figi-u", LocalDate.of(2026, 9, 1));
-        var v = new TInvestBrokerMarketData.FrontMonth("BRV6", "figi-v", LocalDate.of(2026, 10, 15));
-        var picked = TInvestBrokerMarketData.pickLiveMonth(List.of(u, v), t -> "BRV6".equals(t));
+    void midLifeEmptyDomKeepsCalendarFront() {
+        // 2026-09-10: BRV6 still listed (LTD Oct), empty DOM must NOT jump to BRX6
+        var v = new TInvestBrokerMarketData.FrontMonth("BRV6", "figi-v", LocalDate.of(2026, 10, 1));
+        var x = new TInvestBrokerMarketData.FrontMonth("BRX6", "figi-x", LocalDate.of(2026, 11, 2));
+        LocalDate today = LocalDate.of(2026, 9, 10);
+        var picked = TInvestBrokerMarketData.pickLiveMonth(List.of(v, x), t -> "BRX6".equals(t), today);
         assertTrue(picked.isPresent());
-        assertTrue(picked.get().ticker().equals("BRV6"));
+        assertEquals("BRV6", picked.get().ticker());
     }
 
     @Test
     void pickLiveMonthKeepsFrontWhenItHasDom() {
-        var u = new TInvestBrokerMarketData.FrontMonth("BRU6", "figi-u", LocalDate.of(2026, 9, 1));
+        var u = new TInvestBrokerMarketData.FrontMonth("BRU6", "figi-u", LocalDate.of(2026, 9, 15));
         var v = new TInvestBrokerMarketData.FrontMonth("BRV6", "figi-v", LocalDate.of(2026, 10, 15));
-        var picked = TInvestBrokerMarketData.pickLiveMonth(List.of(u, v), t -> true);
+        var picked = TInvestBrokerMarketData.pickLiveMonth(
+                List.of(u, v), t -> true, LocalDate.of(2026, 9, 1));
         assertTrue(picked.isPresent());
-        assertTrue(picked.get().ticker().equals("BRU6"));
+        assertEquals("BRU6", picked.get().ticker());
     }
 
     @Test
     void pickLiveMonthFallsBackToFirstWhenAllEmpty() {
-        var u = new TInvestBrokerMarketData.FrontMonth("BRU6", "figi-u", LocalDate.of(2026, 9, 1));
-        var picked = TInvestBrokerMarketData.pickLiveMonth(List.of(u), t -> false);
+        var u = new TInvestBrokerMarketData.FrontMonth("BRU6", "figi-u", LocalDate.of(2026, 9, 15));
+        var picked = TInvestBrokerMarketData.pickLiveMonth(
+                List.of(u), t -> false, LocalDate.of(2026, 9, 1));
         assertTrue(picked.isPresent());
-        assertTrue(picked.get().ticker().equals("BRU6"));
+        assertEquals("BRU6", picked.get().ticker());
+    }
+
+    @Test
+    void lastTradeDayRollsToNextMonth() {
+        var v = new TInvestBrokerMarketData.FrontMonth("BRV6", "figi-v", LocalDate.of(2026, 10, 1));
+        var x = new TInvestBrokerMarketData.FrontMonth("BRX6", "figi-x", LocalDate.of(2026, 11, 2));
+        var picked = TInvestBrokerMarketData.pickLiveMonth(
+                List.of(v, x), t -> false, LocalDate.of(2026, 10, 1));
+        assertTrue(picked.isPresent());
+        assertEquals("BRX6", picked.get().ticker());
+    }
+
+    @Test
+    void resolveFrontMonthUsesPickLiveMonthOnLtdDay() {
+        var v = new TInvestBrokerMarketData.FrontMonth("BRV6", "figi-v", LocalDate.of(2026, 10, 1));
+        var x = new TInvestBrokerMarketData.FrontMonth("BRX6", "figi-x", LocalDate.of(2026, 11, 2));
+        // pickLiveMonth is what resolveFrontMonth now delegates to
+        var picked = TInvestBrokerMarketData.pickLiveMonth(
+                List.of(v, x), t -> true, LocalDate.of(2026, 10, 1));
+        assertTrue(picked.isPresent());
+        assertEquals("BRX6", picked.get().ticker());
     }
 }

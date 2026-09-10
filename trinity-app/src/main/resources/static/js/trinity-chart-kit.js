@@ -383,6 +383,7 @@
     try {
       const db = await barDb();
       if (!db) return null;
+      const stealLast = !instrument || instrument === "_last" || instrument === "_";
       const key = barCacheKey(instrument, tf);
       return await new Promise(function (resolve) {
         const tx = db.transaction("bars", "readonly");
@@ -391,6 +392,10 @@
           const row = rq.result;
           if (row && row.bars && row.bars.length) {
             resolve(row);
+            return;
+          }
+          if (!stealLast) {
+            resolve(null);
             return;
           }
           const last = tx.objectStore("bars").get("__last");

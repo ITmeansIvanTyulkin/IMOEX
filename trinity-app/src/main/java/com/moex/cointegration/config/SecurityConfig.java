@@ -48,6 +48,7 @@ public class SecurityConfig {
     @ConditionalOnProperty(prefix = "imoex.auth", name = "enabled", havingValue = "false", matchIfMissing = true)
     SecurityFilterChain openSecurity(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
+                .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         return http.build();
     }
@@ -58,6 +59,7 @@ public class SecurityConfig {
     SecurityFilterChain securedSecurity(HttpSecurity http, ImoexProperties properties) throws Exception {
         boolean supabaseJwt = properties.auth().supabase().jwtConfigured();
         http.csrf(AbstractHttpConfigurer::disable)
+                .cors(Customizer.withDefaults())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(EndpointRequest.to("health", "info")).permitAll()

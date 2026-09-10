@@ -42,6 +42,11 @@ imoex:
     # legacy fallbacks, если rss-feeds пуст
     rss-interfax-url: https://www.interfax.ru/rss.asp
     rss-rbc-url: https://rssexport.rbc.ru/rbcnews/news/30/full.rss
+    # Пары: блок новых входов вокруг закрытия реестра одной ноги (не всю весну).
+    dividend-calendar-enabled: true
+    dividend-days-before: 5
+    dividend-days-after: 2
+    dividend-calendar-file: data/dividend-calendar.json
   risk:
     stop-z: 3.5
     max-hold-bars: 40
@@ -261,6 +266,9 @@ imoex:
       enabled: true
       auto-execution: true    # fair-paper live → SANDBOX_FAIR append to trend-paper-journal
       live-execution: false   # paper only — боевой FORTS SL позже
+      # Day-lock health: check+fix orphan TOP/BOT vs same-day HI/LO (Exclusive watchdog)
+      day-lock-reconcile-initial-ms: 180000   # 3m after boot
+      day-lock-reconcile-ms: 1800000          # every 30m thereafter
       # Max broker imitation on paper (FORMING_BAR + sim journal limits/PostStop; no live orders)
       broker-sim-max: true
       sandbox-broker-stop: true
