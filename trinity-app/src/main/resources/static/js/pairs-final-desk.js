@@ -56,13 +56,33 @@
   }
 
   async function getJson(path) {
-    let res = await fetch(path, { headers: headers() });
-    // Неверный Basic/Bearer на permitAll GET даёт 401 — повторяем без Authorization.
-    if (res.status === 401 || res.status === 403) {
-      res = await fetch(path, { headers: { Accept: "application/json" } });
+    const ms = (window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000;
+    try {
+      if (window.TrinityFastBoot && typeof TrinityFastBoot.fetchAbort === "function") {
+        let res = await TrinityFastBoot.fetchAbort(path, {
+          ms: ms,
+          headers: headers(),
+          credentials: "same-origin"
+        });
+        if (res.status === 401 || res.status === 403) {
+          res = await TrinityFastBoot.fetchAbort(path, {
+            ms: ms,
+            headers: { Accept: "application/json" },
+            credentials: "same-origin"
+          });
+        }
+        if (!res.ok) return null;
+        return res.json();
+      }
+      let res = await fetch(path, { headers: headers() });
+      if (res.status === 401 || res.status === 403) {
+        res = await fetch(path, { headers: { Accept: "application/json" } });
+      }
+      if (!res.ok) return null;
+      return res.json();
+    } catch (_) {
+      return null;
     }
-    if (!res.ok) return null;
-    return res.json();
   }
 
   function parseAdx(v) {

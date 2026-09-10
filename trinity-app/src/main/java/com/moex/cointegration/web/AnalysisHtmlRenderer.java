@@ -1378,7 +1378,8 @@ public class AnalysisHtmlRenderer {
                     <li><code>levels-profile-br-m5</code> — BR M5, bounce/retest по TOP/BOT (playbook #1).</li>
                     <li><code>positional-volume-h1</code> — H1 позиционка: 3 HVN → промежуточный → сетка 1:1:2:4;
                       инструменты RTS / нефть / газ. H1 берём у брокера (T-Invest hour candles), ISS M5→H1 — только fallback.
-                      SECID front-month роллится по брокеру (BR/Ri/NG).</li>
+                      SECID front-month роллится только в день last trade / после
+                      (пустой DOM mid-life не переключает месяц).</li>
                   </ul>
                   <p>
                     Переключение пишется в <code>data/trend-ui-settings.json</code> и в config
@@ -1819,7 +1820,8 @@ public class AnalysisHtmlRenderer {
 
         body.append(renderFinalExplainPanel(rows, technical, regime, report, cluster));
         body.append(renderFinalNewsSection(rss));
-        body.append("<script src=\"/js/pairs-final-desk.js?v=20260902-guide2\"></script>");
+        body.append("<script src=\"/js/trinity-fast-boot.js?v=20260910-fast1\"></script>");
+        body.append("<script src=\"/js/pairs-final-desk.js?v=20260910-fast1\"></script>");
         return page("TRINITY — пульт пар", body.toString(), nav("final"), OpsMode.NONE);
     }
 

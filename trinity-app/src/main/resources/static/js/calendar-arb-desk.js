@@ -1,6 +1,7 @@
 (function () {
   const POLL_MS = 12000;
-  const DESK_TIMEOUT_MS = 12000;
+  /** Align with TrinityFastBoot: abort hung desk, keep cache paint snappy. */
+  const DESK_TIMEOUT_MS = (window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000;
   const DEFAULT_FAMS = [
     { code: "BR", name: "Нефть (BR)" },
     { code: "SI", name: "Si (USD/RUB)" },
@@ -210,6 +211,9 @@
   }
 
   async function fetchJson(url, ms) {
+    if (window.TrinityFastBoot && typeof TrinityFastBoot.fetchJson === "function") {
+      return TrinityFastBoot.fetchJson(url, { ms: ms || DESK_TIMEOUT_MS });
+    }
     const ac = new AbortController();
     const t = setTimeout(function () { ac.abort(); }, ms || DESK_TIMEOUT_MS);
     try {
@@ -518,7 +522,7 @@
         ? skipActionRu(sel.action)
         : (sel.action === "NONE" ? "ждёт перекос" : (sel.action || "—")));
     $("arb-reason").textContent = warming
-      ? "Загрузка near/next у T-Invest (первый запрос часто пустой, пока прогреется gRPC)…"
+      ? "Загрузка ближнего/дальнего контракта у T-Invest (первый запрос часто пустой, пока прогреется gRPC)…"
       : (data.stale
         ? ((sel.reason || "—") + " · снимок чуть устарел")
         : (sel.reason || "—"));

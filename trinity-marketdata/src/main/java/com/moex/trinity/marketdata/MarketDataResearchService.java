@@ -133,12 +133,14 @@ public class MarketDataResearchService {
         if (creds.present() && feed instanceof TInvestMarketDataFeed) {
             try (TInvestBrokerMarketData md = new TInvestBrokerMarketData(creds)) {
                 List<TInvestBrokerMarketData.FrontMonth> months = md.listFrontMonths(hint);
+                // Calendar front wins. Do NOT advance on empty DOM / REST — that falsely
+                // rolled BRV6→BRX6 and painted November shelves on the October desk.
                 picked = TInvestBrokerMarketData.pickLiveMonth(months, this::hasLiveDom);
-                if (picked.isPresent() && !hasLiveDom(picked.get().ticker()) && months.size() > 1) {
-                    TInvestBrokerMarketData.FrontMonth first = picked.get();
-                    Optional<DomBook> rest = refreshBookRest(first.ticker());
+                if (picked.isPresent() && !hasLiveDom(picked.get().ticker())) {
+                    Optional<DomBook> rest = refreshBookRest(picked.get().ticker());
                     if (rest.isEmpty() || isEmpty(rest.get())) {
-                        picked = Optional.of(months.get(1));
+                        log.warn("front-month {} has empty DOM/REST — keeping calendar front (no skip to next)",
+                                picked.get().ticker());
                     }
                 }
             } catch (Exception ex) {
@@ -230,26 +232,31 @@ public class MarketDataResearchService {
 
     private Optional<DomBook> resolveBook(String instrumentId, boolean allowRest) {
         String id = instrumentId == null || instrumentId.isBlank() ? defaultInstrument : instrumentId.trim();
-        String front = allowRest ? liveFrontTicker(id) : peekLiveFrontTicker(id);
-        if (front != null && !front.isBlank()) {
-            id = front;
+        // Family alias (BR) may resolve to live front. Concrete SECID (BRV6) must keep its own book —
+        // remapping to a peeked next month showed the wrong DOM on the desk (2026-09-10).
+        if (!looksLikeConcreteSecid(id)) {
+            String front = allowRest ? liveFrontTicker(id) : peekLiveFrontTicker(id);
+            if (front != null && !front.isBlank()) {
+                id = front;
+            }
         }
         DomBook book = feed.latestBook(id).orElse(null);
-        if (isEmpty(book)) {
+        boolean concrete = looksLikeConcreteSecid(id);
+        if (isEmpty(book) && !concrete) {
             book = sameFamilyLiveBook(id).orElse(book);
         }
         if (allowRest && needsRestRefresh(book)) {
             Optional<DomBook> refreshed = refreshBookRest(id);
             if (refreshed.isPresent() && !isEmpty(refreshed.get())) {
                 book = refreshed.get();
-            } else if (isEmpty(book)) {
+            } else if (isEmpty(book) && !concrete) {
                 book = sameFamilyLiveBook(id).orElse(book);
             }
         }
         if (!isEmpty(book)) {
             return Optional.of(book);
         }
-        if (book != null) {
+        if (book != null && !concrete) {
             Optional<DomBook> familyBook = sameFamilyLiveBook(id);
             if (familyBook.isPresent()) {
                 return familyBook;
@@ -339,6 +346,15 @@ public class MarketDataResearchService {
 
     private static boolean isEmpty(DomBook book) {
         return book == null || book.emptyLevels();
+    }
+
+    /** Concrete FORTS ticker (BRV6), not family alias (BR). */
+    static boolean looksLikeConcreteSecid(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            return false;
+        }
+        String u = instrumentId.trim().toUpperCase(Locale.ROOT);
+        return u.length() >= 4 && u.length() <= 6 && Character.isDigit(u.charAt(u.length() - 1));
     }
 
     private Optional<DomBook> sameFamilyLiveBook(String instrumentId) {

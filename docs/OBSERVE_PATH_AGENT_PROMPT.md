@@ -113,9 +113,9 @@ HTF UP **не запрещает** шорт от TOP; HTF DOWN **не запре
 
 **Макро / CL:** smart knife на dump; CL — контекст открытия, **сторону Exclusive не крутит**. UsOilGate может задержать вход после гэпа CL.
 
-**Экспирация FORTS:** last trade day — **новые** сетапы block (M5 и H1). Открытое — SL/TP на **том же secid** до закрытия. Fail-closed, если ISS не знает last trade date. Стол / paper / settings / DOM **всегда** переезжают на новый front-month (`oilInstrument`/`resolveInstrument`/`instrumentsDto` + `TrendFrontMonthSettingsSync`); pending на старом месяце сбрасывается. Пример: BRU6 → BRV6. Overnight через roll: бары/SL по secid позиции (`barsForLiveClockExact`).
+**Экспирация FORTS:** last trade day — **новые** сетапы block (M5 и H1). Открытое — SL/TP на **том же secid** до закрытия. LTD: ISS → T-Invest `getFutureByTicker` / list → month-code estimate (BRV6→1-е число месяца поставки). Fail-closed только если concrete SECID нельзя разобрать. Стол / paper / settings / DOM переезжают на новый front-month **только в день last trade / после** (`pickLiveMonth` + `TrendFrontMonthSettingsSync`); пустой DOM/REST mid-life **не** roll (баг 10.09: BRV6→BRX6). Pending на старом месяце сбрасывается. Пример: BRU6 → BRV6. Overnight через roll: бары/SL по secid позиции (`barsForLiveClockExact`).
 
-**Fair-paper:** SANDBOX_FAIR, `auto-execution: true`, `broker-sim-max: true`. Qty в statement = **filled/planned** (1/3 норма, если залита одна нога).
+**Скорость desk (навсегда, все стратегии):** `trinity-fast-boot.js` — cache-first paint, параллельный DOM/status, AbortController ≤25s. Не возвращать sequential cold boot на charts-terminal и не убирать таймауты fetch.
 
 ### Позиционная #2 (если трогаешь desk)
 

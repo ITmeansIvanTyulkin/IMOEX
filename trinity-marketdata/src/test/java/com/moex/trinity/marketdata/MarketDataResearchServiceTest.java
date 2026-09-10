@@ -36,7 +36,7 @@ class MarketDataResearchServiceTest {
     }
 
     @Test
-    void emptyExpiredBookFallsBackToSameFamilyLiveDom() {
+    void emptyConcreteBookDoesNotStealNextMonthDom() {
         Instant asOf = Instant.now();
         DomBook empty = new DomBook("BRU6", 50, List.of(), List.of(), asOf, true);
         DomBook live = new DomBook("BRV6", 50,
@@ -46,10 +46,9 @@ class MarketDataResearchServiceTest {
         MemoryFeed feed = new MemoryFeed(List.of(empty, live));
         MarketDataResearchService svc = new MarketDataResearchService(feed);
         Optional<DomBook> book = svc.resolveBookLocal("BRU6");
-        assertTrue(book.isPresent());
-        assertEquals("BRV6", book.get().instrumentId());
-        assertEquals(1, book.get().bids().size());
-        assertEquals(91.36, book.get().bids().get(0).price(), 1e-9);
+        // Concrete SECID must not silently show the next month's book (false-front bug 2026-09-10).
+        assertTrue(book.isEmpty() || "BRU6".equalsIgnoreCase(book.get().instrumentId()));
+        assertTrue(book.isEmpty() || book.get().bids().isEmpty());
     }
 
     @Test

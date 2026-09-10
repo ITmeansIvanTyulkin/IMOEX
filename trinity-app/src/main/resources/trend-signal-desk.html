@@ -5,7 +5,7 @@
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
       <h2 id="signal-desk-title">Диапазонная торговля</h2>
-      <p class="meta" id="signal-desk-meta">Загрузка desk…</p>
+      <p class="meta" id="signal-desk-meta">грузим desk…</p>
       <div class="us-oil-banner" id="us-oil-banner" role="status">
         <strong>Американская нефть (CL / WTI)</strong>
         <p id="us-oil-banner-text">Ночной ход CL часто уже сидит в утреннем гэпе BR.
@@ -191,7 +191,7 @@
           <span title="Проторговано: buy × sell">Tape</span>
         </div>
         <div class="signal-dom-ladder" id="signal-dom-body" role="table" aria-label="Биржевой стакан">
-          <div class="signal-dom-empty">Загрузка DOM…</div>
+          <div class="signal-dom-empty">грузим стакан…</div>
         </div>
       </div>
       <p class="meta signal-dom-legend">
@@ -248,9 +248,10 @@
       <article class="signal-guide-section" id="guide-idea" data-guide-scope="range">
         <h4>Идея в одном абзаце</h4>
         <p>
-          Робот торгует <strong>только нефтяной фьючерс BR на M5</strong> у дневных полок объёма
-          (playbook «Уровни + объёмы»). Сначала смотрит <strong>ветер H1</strong> и
-          <strong>фазу дня</strong> (отскок после дампа/ралли или продолжение тренда),
+          Робот торгует <strong>только нефтяной фьючерс BR на M5</strong> — текущий
+          <strong>front-month</strong> (сейчас октябрьский BRV6, даже если на календаре сентябрь;
+          месяц в тикере = поставка/экспирация). Полки TOP/BOT по объёму.
+          Сначала смотрит <strong>ветер H1</strong> и <strong>фазу дня</strong>,
           затем ищет вход у полки с качественным касанием.
           Не ловит середину канала и не гонится за каждым касанием цены.
         </p>
@@ -587,5 +588,6 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/js/trinity-fast-boot.js?v=20260910-fast1"></script>
 <script src="/js/trinity-chart-kit.js?v=20260902-disk1"></script>
-<script src="/js/trend-signal-desk.js?v=20260910-soft1"></script>
+<script src="/js/trend-signal-desk.js?v=20260910-fast1"></script>

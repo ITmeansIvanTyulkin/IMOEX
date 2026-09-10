@@ -86,15 +86,9 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         if (t.isEmpty()) {
             throw new IllegalArgumentException("empty ticker");
         }
-        for (String cc : FUTURE_CLASS_CODES) {
-            try {
-                Future f = api.getInstrumentsService().getFutureByTickerSync(t, cc);
-                if (f != null && f.getFigi() != null && !f.getFigi().isBlank()) {
-                    return f.getFigi();
-                }
-            } catch (Exception ex) {
-                log.debug("getFutureByTicker {}/{}: {}", t, cc, ex.toString());
-            }
+        Optional<Future> exact = findFutureByTicker(t);
+        if (exact.isPresent() && exact.get().getFigi() != null && !exact.get().getFigi().isBlank()) {
+            return exact.get().getFigi();
         }
         List<Future> all = listedFutures();
         for (Future f : all) {
@@ -102,19 +96,12 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
                 return f.getFigi();
             }
         }
-        // front BR by open interest / last trade activity among BR*
-        Future best = null;
-        for (Future f : all) {
-            if (f.getTicker() != null && f.getTicker().toUpperCase(Locale.ROOT).startsWith("BR")
-                    && f.getTicker().length() <= 5) {
-                if (best == null || f.getTicker().compareToIgnoreCase(best.getTicker()) > 0) {
-                    best = f;
-                }
-            }
-        }
-        if (best != null && t.startsWith("BR")) {
-            log.warn("Exact FIGI for {} not found; using {}", t, best.getTicker());
-            return best.getFigi();
+        // Prefer calendar / LTD-aware front among BR* — never lexicographic max (BRX6 > BRV6).
+        List<FrontMonth> brMonths = listFrontMonths("BR");
+        Optional<FrontMonth> liveBr = pickLiveMonth(brMonths, sec -> true);
+        if (liveBr.isPresent() && t.startsWith("BR")) {
+            log.warn("Exact FIGI for {} not found; using live front {}", t, liveBr.get().ticker());
+            return liveBr.get().figi();
         }
         // Family-only (BR / RI / NG) → nearest open front-month
         Optional<FrontMonth> fm = resolveFrontMonth(t);
@@ -123,6 +110,41 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             return fm.get().figi();
         }
         throw new IllegalStateException("FIGI not found for ticker " + t);
+    }
+
+    /**
+     * Last trade date for one concrete ticker via getFutureByTicker (works when getFutures list fails).
+     */
+    public Optional<LocalDate> lastTradeDateOf(String ticker) {
+        String t = ticker == null ? "" : ticker.trim().toUpperCase(Locale.ROOT);
+        if (t.isEmpty()) {
+            return Optional.empty();
+        }
+        return findFutureByTicker(t).flatMap(f -> {
+            Instant last = f.hasLastTradeDate()
+                    ? Instant.ofEpochSecond(f.getLastTradeDate().getSeconds(), f.getLastTradeDate().getNanos())
+                    : (f.hasExpirationDate()
+                    ? Instant.ofEpochSecond(f.getExpirationDate().getSeconds(), f.getExpirationDate().getNanos())
+                    : null);
+            if (last == null) {
+                return Optional.empty();
+            }
+            return Optional.of(LocalDate.ofInstant(last, MSK));
+        });
+    }
+
+    private Optional<Future> findFutureByTicker(String t) {
+        for (String cc : FUTURE_CLASS_CODES) {
+            try {
+                Future f = api.getInstrumentsService().getFutureByTickerSync(t, cc);
+                if (f != null && f.getFigi() != null && !f.getFigi().isBlank()) {
+                    return Optional.of(f);
+                }
+            } catch (Exception ex) {
+                log.debug("getFutureByTicker {}/{}: {}", t, cc, ex.toString());
+            }
+        }
+        return Optional.empty();
     }
 
     /**
@@ -168,28 +190,49 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
     /**
      * Nearest FORTS front-month by last trade date ≥ today (Moscow).
      * Accepts family ({@code BR}/{@code RI}/{@code NG}) or a concrete SECID ({@code BRU6}).
+     * Uses {@link #pickLiveMonth} so LTD-day roll matches {@code ensureLiveFront}.
      */
     public Optional<FrontMonth> resolveFrontMonth(String familyOrSecid) {
-        return listFrontMonths(familyOrSecid).stream().findFirst();
+        return pickLiveMonth(listFrontMonths(familyOrSecid), t -> true);
     }
 
     /**
-     * Prefer a month that still has a live DOM. After expiry / last-trade the listed
-     * front can be empty while the next month is already the liquid book.
+     * Calendar front = nearest listed last-trade date. Empty DOM mid-life is a feed
+     * failure, not a roll — jumping to the next month misled the desk onto BRX6 while
+     * BRV6 was still the liquid front (2026-09-10). Roll only on last-trade day / past.
      */
     static Optional<FrontMonth> pickLiveMonth(List<FrontMonth> months, java.util.function.Predicate<String> hasDom) {
+        return pickLiveMonth(months, hasDom, LocalDate.now(MSK));
+    }
+
+    static Optional<FrontMonth> pickLiveMonth(
+            List<FrontMonth> months,
+            java.util.function.Predicate<String> hasDom,
+            LocalDate today
+    ) {
         if (months == null || months.isEmpty()) {
             return Optional.empty();
         }
-        if (hasDom != null) {
-            for (FrontMonth m : months) {
-                if (m != null && m.ticker() != null && !m.ticker().isBlank() && hasDom.test(m.ticker())) {
-                    return Optional.of(m);
+        FrontMonth first = months.get(0);
+        if (first == null) {
+            return Optional.empty();
+        }
+        LocalDate day = today == null ? LocalDate.now(MSK) : today;
+        LocalDate ltd = first.lastTradeDate();
+        boolean mustRoll = ltd != null && !day.isBefore(ltd);
+        if (mustRoll && months.size() > 1) {
+            if (hasDom != null) {
+                for (int i = 1; i < months.size(); i++) {
+                    FrontMonth m = months.get(i);
+                    if (m != null && m.ticker() != null && !m.ticker().isBlank() && hasDom.test(m.ticker())) {
+                        return Optional.of(m);
+                    }
                 }
             }
+            FrontMonth next = months.get(1);
+            return next == null ? Optional.of(first) : Optional.of(next);
         }
-        FrontMonth first = months.get(0);
-        return first == null ? Optional.empty() : Optional.of(first);
+        return Optional.of(first);
     }
 
     /** Convenience: front-month ticker or original if broker unavailable. */

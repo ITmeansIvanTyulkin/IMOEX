@@ -50,5 +50,10 @@ class TrendSignalDeskJsAuthQuietTest {
                 "range must not share positional instrument pin");
         assertTrue(src.contains("isRangeDesk() && want && !isOilInstrument(want)"),
                 "range wanted instrument must ignore Si/Ri pin");
+        assertTrue(src.contains("function formatSecidWithMonth"), "chart must show FORTS month next to SECID");
+        assertTrue(src.contains("FORTS_MONTH_RU"), "FORTS month map missing");
+        assertTrue(src.contains("октябрь"), "October month label missing");
+        assertTrue(src.contains("DESK_FETCH_MS"), "desk fetch timeout missing");
+        assertTrue(src.contains("AbortController"), "desk/book must abort hung fetches");
     }
 }
