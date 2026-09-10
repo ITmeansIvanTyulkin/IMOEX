@@ -53,6 +53,9 @@ class AnalysisHtmlRendererFinalPageTest {
         assertTrue(html.contains("Что значит «Итог»"));
         assertTrue(html.contains("Чемпион"));
         assertTrue(html.contains("pairs-desk"));
+        assertTrue(html.contains("Как торгует робот"));
+        assertTrue(html.contains("id=\"pairs-guide-open\""));
+        assertTrue(html.contains("id=\"pairs-guide-modal\""));
         assertTrue(html.contains("Почему сейчас 0 строк"));
         assertTrue(html.contains("TREND"));
         assertTrue(html.contains("ENTER / REDUCE / WATCH / BLOCK")
@@ -62,6 +65,13 @@ class AnalysisHtmlRendererFinalPageTest {
         assertFalse(html.contains("Итоговых рекомендаций нет."));
         assertFalse(html.contains("Строк: 0"));
         assertFalse(html.contains("OIL_GAS вне pairs"));
+        assertFalse(html.contains("href=\"/view/signals\""), "raw signals tab should be off the pairs chrome");
+        assertFalse(html.contains("href=\"/view/recommendations\""), "recommendations tab should be off the pairs chrome");
+        assertFalse(html.contains("href=\"/view/walk-forward\""), "walk-forward tab should be off the pairs chrome");
+        assertTrue(html.contains("href=\"/view/final\""));
+        assertTrue(html.contains("href=\"/view/strategy\""));
+        assertTrue(html.contains(">Пульт пар<") || html.contains("Пульт пар</a>"), html);
+        assertFalse(html.contains("Итог + новости"), html);
     }
 
     @Test

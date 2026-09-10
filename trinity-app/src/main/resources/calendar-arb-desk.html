@@ -3,10 +3,19 @@
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
       <h2>Календарный арбитраж</h2>
-      <p class="meta" id="arb-desk-meta">Котировки T-Invest · calendar + fly · live включён отдельно от сделок</p>
+      <p class="meta" id="arb-desk-meta">Котировки брокера · два или три месяца · сделки только в режиме «Авто»</p>
     </div>
     <div class="signal-desk-actions">
       <button type="button" class="btn btn-ghost" id="arb-desk-refresh">Обновить</button>
+      <div class="signal-pos-switch" id="arb-auto-wrap">
+        <span class="k">Робот</span>
+        <label class="mode-switch" title="Наблюдение: график без сделок. Авто: робот сам открывает и закрывает по правилам.">
+          <span class="mode-switch-label">Наблюдение</span>
+          <input type="checkbox" id="desk-arb-auto-execution" role="switch" aria-checked="false">
+          <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+          <span class="mode-switch-label">Авто</span>
+        </label>
+      </div>
       <a class="btn btn-ghost" href="/view/settings#calendar-arb-settings">Режим</a>
     </div>
   </div>
@@ -19,7 +28,7 @@
     </div>
     <div class="signal-chip"><span class="k">Робот</span><strong id="arb-robot">…</strong></div>
     <div class="signal-chip"><span class="k">Данные</span><strong id="arb-source">T-Invest</strong></div>
-    <div class="signal-chip"><span class="k">Delivery</span><strong id="arb-delivery">—</strong></div>
+    <div class="signal-chip"><span class="k">Режим</span><strong id="arb-delivery">—</strong></div>
     <div class="signal-chip"><span class="k">Структура</span><strong id="arb-structure">—</strong></div>
     <div class="signal-chip"><span class="k">Пара</span><strong id="arb-pair">—</strong></div>
     <div class="signal-chip"><span class="k">DV01</span><strong id="arb-hedge">—</strong></div>
@@ -27,12 +36,12 @@
     <div class="signal-chip"><span class="k">DOM архив</span><strong id="arb-dom-arch">—</strong></div>
     <div class="signal-chip"><span class="k">Стакан</span><strong id="arb-book">—</strong></div>
     <div class="signal-chip"><span class="k">EIA</span><strong id="arb-eia-chip">—</strong></div>
-    <div class="signal-chip"><span class="k">Journal</span><strong id="arb-journal">—</strong></div>
-    <div class="signal-chip"><span class="k">Replay</span><strong id="arb-oos">—</strong></div>
+    <div class="signal-chip"><span class="k">Журнал</span><strong id="arb-journal">—</strong></div>
+    <div class="signal-chip"><span class="k">Прогон</span><strong id="arb-oos">—</strong></div>
     <div class="signal-chip"><span class="k">Спред</span><strong id="arb-spread">—</strong></div>
-    <div class="signal-chip"><span class="k">Z</span><strong id="arb-z">—</strong></div>
-    <div class="signal-chip"><span class="k">Сигнал</span><strong id="arb-action">—</strong></div>
-    <div class="signal-chip"><span class="k">Paper сегодня</span>
+    <div class="signal-chip"><span class="k">Отклонение</span><strong id="arb-z">—</strong></div>
+    <div class="signal-chip"><span class="k">Состояние</span><strong id="arb-action">—</strong></div>
+    <div class="signal-chip"><span class="k">Сделки сегодня</span>
       <strong><a id="arb-paper-today" href="/view/statement#arb">—</a></strong>
     </div>
   </div>
@@ -53,12 +62,18 @@
   <div class="arb-workspace">
     <div class="arb-charts">
       <div class="signal-chart-wrap">
-        <p class="signal-chart-bar-label" id="arb-chart-label">Спред far − near (H1 брокера)</p>
+        <div class="signal-chart-bar">
+          <p class="signal-chart-bar-label" id="arb-chart-label">Разница дальнего и ближнего месяца (час брокера)</p>
+          <button type="button" class="btn btn-ghost signal-guide-btn" id="arb-guide-open"
+                  aria-haspopup="dialog" aria-controls="arb-guide-modal">
+            Как торгует робот
+          </button>
+        </div>
         <div id="arb-chart" class="signal-chart arb-chart-spread"></div>
         <p class="meta">Колесо — зум под курсором · Shift+колесо — сдвиг · линейка на графике или Shift+тяни · двойной клик — авто-цена</p>
       </div>
       <div class="signal-chart-wrap">
-        <p class="signal-chart-bar-label" id="arb-legs-chart-label">Ноги H1 · near / next</p>
+        <p class="signal-chart-bar-label" id="arb-legs-chart-label">Ноги · ближний / дальний, час</p>
         <div id="arb-legs-chart" class="signal-chart arb-chart-legs"></div>
         <p class="meta">Тот же масштаб времени, что у спреда. Колесо зумит оба графика.</p>
       </div>
@@ -122,6 +137,151 @@
     </aside>
   </div>
 </section>
+
+<div class="signal-guide-gate" id="arb-guide-modal" hidden aria-hidden="true">
+  <div class="signal-guide-backdrop" data-arb-guide-close tabindex="-1" aria-hidden="true"></div>
+  <div class="signal-guide-modal" role="dialog" aria-modal="true"
+       aria-labelledby="arb-guide-title" tabindex="-1">
+    <header class="signal-guide-head">
+      <div>
+        <p class="signal-guide-kicker">TRINITY · Календарный арбитраж</p>
+        <h3 id="arb-guide-title">Как торгует робот</h3>
+        <p class="signal-guide-lead">Не ставка на рост нефти или курса. Ставка на то, что разница цен двух месяцев одного товара вернётся к привычной.</p>
+      </div>
+      <button type="button" class="signal-guide-close" id="arb-guide-close"
+              data-arb-guide-close aria-label="Закрыть">×</button>
+    </header>
+    <div class="signal-guide-body">
+      <nav class="signal-guide-toc" aria-label="Разделы">
+        <a href="#arb-guide-idea">Идея</a>
+        <a href="#arb-guide-looks">На что смотрит</a>
+        <a href="#arb-guide-entry">Когда входит</a>
+        <a href="#arb-guide-legs">Как собирает</a>
+        <a href="#arb-guide-pause">Когда молчит</a>
+        <a href="#arb-guide-oil">Нефть</a>
+        <a href="#arb-guide-robot">Наблюдение и авто</a>
+        <a href="#arb-guide-risk">Риск</a>
+      </nav>
+
+      <article class="signal-guide-section" id="arb-guide-idea">
+        <h4>Идея в одном абзаце</h4>
+        <p>
+          На срочном рынке у одного товара всегда живут <strong>несколько месяцев поставки</strong>:
+          ближний и следующий, иногда ещё третий. Робот не угадывает, пойдёт ли цена вверх.
+          Он смотрит <strong>календарный спред</strong> — разницу между дальним и ближним месяцем.
+          Если эта разница резко уехала от своей обычной величины и рынок спокойный,
+          робот покупает «дешёвую» ногу и продаёт «дорогую», ждёт возврата к привычному
+          и закрывает обе ноги вместе.
+        </p>
+        <p class="signal-guide-note">
+          Бабочка из трёх месяцев — та же идея: перекос «крыльев» относительно середины.
+          Это не прогноз нефти, доллара, индекса или золота.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-looks">
+        <h4>На что смотрит</h4>
+        <ul class="signal-guide-list">
+          <li><strong>Часовой график</strong> разницы месяцев у брокера — не минутный скальп.</li>
+          <li><strong>Насколько разница уехала от среднего</strong> за последние недели.
+            Вход только когда уехало заметно, не из середины коридора.</li>
+          <li><strong>Наклон кривой</strong> — едет ли разница уверенно в одну сторону.
+            Если это тренд структуры, а не временный перекос — против него не встаём.</li>
+          <li><strong>Скорость возврата</strong> — если к среднему тащиться неделями, капитал зря заморожен.</li>
+          <li><strong>Оба стакана</strong> — хватит ли лотов на обеих ногах и не съест ли крест цен весь ход.</li>
+          <li><strong>Гарантийка</strong> двух ног, дни до окончания ближнего контракта, новости из календаря.</li>
+        </ul>
+        <p>
+          Нефть, доллар, индекс, золото и газ — <strong>разные шаблоны</strong>, не одна линейка на всех.
+          В работу берётся <strong>один спред</strong>, не пять сразу.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-entry">
+        <h4>Когда входит</h4>
+        <div class="signal-guide-cards">
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">Разница слишком дешёвая</p>
+            <p>Покупаем спред: продаём ближний месяц, покупаем дальний. Ждём, пока разница подтянется к обычной.</p>
+          </div>
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">Разница слишком дорогая</p>
+            <p>Продаём спред: покупаем ближний, продаём дальний. Зеркально. Не «шорт нефти».</p>
+          </div>
+        </div>
+        <ul class="signal-guide-list">
+          <li>Нужен <strong>разворот к среднему</strong>, а не догон хвоста: если перекос ещё разгоняется — ждём.</li>
+          <li>Если уже уехали почти до стопа — поздно, не входим.</li>
+          <li>Основная сессия срочного рынка, не открытие и не последние полчаса.</li>
+          <li>Выход — когда разница вернулась к среднему, упёрлась в стоп, вышло время без возврата,
+            или ближний месяц пора снимать перед экспирацией.</li>
+        </ul>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-legs">
+        <h4>Как собирает сделку</h4>
+        <ol class="signal-guide-steps">
+          <li>Две ноги всегда вместе: ближний и дальний (бабочка — три). Одна нога без второй — это уже ставка на цену, её робот не держит.</li>
+          <li>Цена входа — по <strong>живому стакану</strong>, с запасом на проскальзывание, не по «красивой» середине графика.</li>
+          <li>Если второй ноги нет в стакане — сделку не оставляем висеть: закрываем то, что успели.</li>
+          <li>Размер ног подгоняется под стоимость пункта, чтобы спред не разъезжался от разного лота.</li>
+        </ol>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-pause">
+        <h4>Когда робот сознательно молчит</h4>
+        <ul class="signal-guide-list">
+          <li>Разница месяцев <strong>едет трендом</strong> — фадить такую кривую опасно.</li>
+          <li>Ход к среднему <strong>не окупит стакан</strong> и две комиссии.</li>
+          <li>Тонкий стакан, мало сделок в ногах, слишком большая гарантийка.</li>
+          <li>Ближний месяц на исходе: не открываем новое, открытое снимаем.</li>
+          <li>Не шортим ближний месяц в окне поставки — там легко «выжать» шорт.</li>
+          <li>День отчёта по запасам, решения ЦБ, дивидендов, золота — из того же календаря, что у тренда.</li>
+        </ul>
+        <p>Дни и недели без сделок для этого робота — норма, не поломка. Он зарабатывает редко и только в спокойной кривой.</p>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-oil">
+        <h4>Нефть — отдельная пауза</h4>
+        <p>
+          На нефти стратегия работает только когда рынок «скучный». Если нефтезаводы зарабатывают
+          с барреля очень много, крупные спекулянты сильно перекошены или вышел крупный сюрприз
+          по запасам — разница месяцев часто <em>едет своим ходом</em>, а не возвращается.
+          Тогда нефть на паузе, остальные семьи робот всё ещё может смотреть.
+        </p>
+        <p class="signal-guide-note">
+          Цифры прибыли заводов и отчёта спекулянтов — с публичных лент, не со стакана американской биржи.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-robot">
+        <h4>Наблюдение и авто</h4>
+        <ol class="signal-guide-steps">
+          <li><strong>Наблюдение</strong> — график, стаканы и паузы видны. Сделок робот не открывает.</li>
+          <li><strong>Авто</strong> — тот же тумблер, что в настройках. По закрытию часа робот пишет вход и выход в журнал.</li>
+          <li>Живые заявки на срочном рынке — отдельный контур и только если брокер к ним готов. Бабочка из трёх месяцев в живые заявки не ходит.</li>
+        </ol>
+        <p>Если тумблер на наблюдении — решение входить за вами. Плашка «не торгует» при включённом авто значит: правила входа сейчас не выполнены.</p>
+        <p class="signal-guide-note">
+          Режим: <a href="/view/settings#calendar-arb-settings">Настройки · календарный арбитраж</a>.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-risk">
+        <h4>Риск</h4>
+        <ul class="signal-guide-list">
+          <li>Календарный спред всё равно может уехать дальше среднего — стоп по отклонению и выход по времени.</li>
+          <li>Одна нога без второй — почти фьючерс на весь ход. Поэтому частичный набор быстро закрываем.</li>
+          <li>Крест стакана и гарантийка могут съесть идею, даже если график «красивый».</li>
+          <li>Это разбор и журнал для обучения, не обещание прибыли и не офер.</li>
+        </ul>
+        <p class="signal-guide-foot">
+          Памятка оператора по календарному спреду на срочном рынке. Журнал в песочнице брокера — не замена живой заявке.
+        </p>
+      </article>
+    </div>
+  </div>
+</div>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-chart-kit.js?v=20260831-tvnav4"></script>
-<script src="/js/calendar-arb-desk.js?v=20260831-tvnav4"></script>
+<script src="/js/calendar-arb-desk.js?v=20260902-guide1"></script>
