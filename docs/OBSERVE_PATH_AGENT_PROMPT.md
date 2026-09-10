@@ -36,21 +36,19 @@ Pairs DAILY и calendar-arb оператор смотрит сам, пока н�
 
 **Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
 
-### Состояние на 2026-09-09 EOD (~18:04 MSK)
+### Состояние на 2026-09-10 EOD (~18:03 MSK)
 
 | Метрика | Значение |
 |--------|----------|
-| **Phase A** | **done** 25–28.08. Extra sealed: 01–04.09, 07–09.09 |
-| **OOS cumulative** | **30** сделок, **+4 138 ₽**, expectancy **~138 ₽/trade**, WR **~67%**, labeled SL 100% |
-| **09.09** | **−94.5 ₽** SELL BOUNCE SL THROUGH @11:50 · HTF UP · gateHits=0 · flat EOD |
-| **08.09** | +140 ₽ BUY RETEST BE SWEEP |
-| **07.09** | −551 ₽ (2× THROUGH) |
-| **Front** | **BRV6** · exp 2026-10-01 (22 дня) |
-| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect corpus |
-| **ML** | `SL=*` + `contextAtEnter`; operator labels по нужде |
-| **Training obs** | 09–10.09: HI обновляется, цена над TOP — входов нет (повтор; `data/trend-training-observations.json`) |
+| **Phase A** | **done** 25–28.08. Extra sealed: 01–04.09, 07–10.09 |
+| **OOS cumulative** | **30** сделок, **+4 138 ₽**, expectancy **~138 ₽/trade**, WR **67%**, labeled SL 100% |
+| **10.09** | **0 сделок** · HI над TOP весь день · training obs confirmed (повтор 09.09) |
+| **09.09** | −94.5 ₽ SELL BOUNCE THROUGH · затем над TOP без входов |
+| **Front** | **BRV6** · exp 2026-10-01 (21 день) |
+| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect |
+| **Training** | `priceAboveTopNoChase`: 08–10.09 · `data/trend-training-observations.json` |
 
-**Завтра:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-10` ~09:55; evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
+**Завтра:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-11` ~09:55; evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
 
 ---
 
