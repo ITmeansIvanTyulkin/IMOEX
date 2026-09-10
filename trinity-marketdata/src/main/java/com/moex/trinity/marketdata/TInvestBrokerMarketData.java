@@ -64,7 +64,8 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             throw new IllegalArgumentException("T-Invest credentials required");
         }
         this.sandbox = creds.sandbox();
-        this.api = TInvestApiFactory.create(creds.token(), creds.sandbox());
+        // Unary-only client with short RPC deadline — never share stream channel.
+        this.api = TInvestApiFactory.createUnary(creds.token(), creds.sandbox());
     }
 
     public boolean sandbox() {
@@ -209,12 +210,22 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             if (hit != null && now - futuresListAtMs < FUTURES_LIST_CACHE_MS) {
                 return hit;
             }
-            List<Future> all = api.getInstrumentsService().getFuturesSync(InstrumentStatus.INSTRUMENT_STATUS_BASE);
-            List<Future> copy = List.copyOf(all);
-            futuresListCache = copy;
-            futuresListAtMs = now;
-            return copy;
+            // Do not hold the lock across a slow RPC — other desk threads pile up behind it.
         }
+        List<Future> all;
+        try {
+            all = api.getInstrumentsService().getFuturesSync(InstrumentStatus.INSTRUMENT_STATUS_BASE);
+        } catch (Exception ex) {
+            log.warn("getFutures list failed: {}", ex.toString());
+            hit = futuresListCache;
+            return hit == null ? List.of() : hit;
+        }
+        List<Future> copy = List.copyOf(all);
+        synchronized (FUTURES_LIST_LOCK) {
+            futuresListCache = copy;
+            futuresListAtMs = System.currentTimeMillis();
+        }
+        return copy;
     }
 
     /**
@@ -460,6 +471,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         List<BrokerCandle> out = new ArrayList<>();
         LocalDate d = fromDay;
         int step = Math.max(1, chunkDays);
+        int consecutiveFails = 0;
         while (!d.isAfter(tillDay)) {
             LocalDate chunkEnd = d.plusDays(step - 1);
             if (chunkEnd.isAfter(tillDay)) {
@@ -474,6 +486,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
                 try {
                     List<HistoricCandle> candles = api.getMarketDataService()
                             .getCandlesSync(figi, a, b, interval);
+                    consecutiveFails = 0;
                     for (HistoricCandle c : candles) {
                         Instant ts = Instant.ofEpochSecond(c.getTime().getSeconds(), c.getTime().getNanos());
                         LocalDateTime ldt = LocalDateTime.ofInstant(ts, MSK);
@@ -487,7 +500,12 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
                         ));
                     }
                 } catch (Exception ex) {
+                    consecutiveFails++;
                     log.warn("GetCandles {} {}..{} {}: {}", figi, d, chunkEnd, interval, ex.toString());
+                    // API down: do not burn 7–20× deadline on every day chunk (desk hung ~50s).
+                    if (consecutiveFails >= 2) {
+                        break;
+                    }
                     try {
                         Thread.sleep(150);
                     } catch (InterruptedException ie) {

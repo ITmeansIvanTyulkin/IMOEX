@@ -59,7 +59,8 @@ public class MarketDataController {
             ));
         }
         String id = instrument == null || instrument.isBlank() ? svc.defaultInstrument() : instrument.trim();
-        Optional<DomBook> book = svc.resolveBook(id);
+        // Never block UI on unary GetOrderBook — stream/archive now, REST async.
+        Optional<DomBook> book = svc.resolveBookForHttp(id);
         if (book.isEmpty()) {
             Map<String, Object> empty = new LinkedHashMap<>();
             empty.put("instrumentId", id);

@@ -13,6 +13,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Facade for marketplace market-data contour.
@@ -25,6 +28,8 @@ public class MarketDataResearchService {
     private static final long BOOK_STALE_MS = 20_000L;
     /** Min gap between unary book refreshes per instrument (desk + DOM poll). */
     private static final long BOOK_REST_MIN_GAP_MS = 5_000L;
+    /** After REST book failures, skip unary for a while (T-Invest "unknown error" storms). */
+    private static final long BOOK_REST_COOLDOWN_MS = 45_000L;
     /** Reuse resolved live front-month (desk polls the book every few seconds). */
     private static final long LIVE_FRONT_MS = 60_000L;
     private static final long ENSURE_MIN_GAP_MS = 30_000L;
@@ -35,6 +40,13 @@ public class MarketDataResearchService {
     private final ConcurrentHashMap<String, Long> lastBookRestMs = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CachedFront> liveFrontCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastEnsureMs = new ConcurrentHashMap<>();
+    private final AtomicLong bookRestCooldownUntilMs = new AtomicLong(0);
+    private final ConcurrentHashMap<String, Boolean> bookRefreshQueued = new ConcurrentHashMap<>();
+    private final ExecutorService bookRefreshExec = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "md-book-rest");
+        t.setDaemon(true);
+        return t;
+    });
 
     private record CachedFront(String ticker, long atMs) {
     }
@@ -185,6 +197,37 @@ public class MarketDataResearchService {
         return resolveBook(instrumentId, false);
     }
 
+    /**
+     * Operator DOM poll: return stream/archive immediately; refresh unary REST in background
+     * when stale. Never blocks the HTTP thread on GetOrderBook.
+     */
+    public Optional<DomBook> resolveBookForHttp(String instrumentId) {
+        Optional<DomBook> local = resolveBookLocal(instrumentId);
+        if (local.isEmpty() || needsRestRefresh(local.orElse(null))) {
+            requestBookRefreshAsync(instrumentId);
+        }
+        return local;
+    }
+
+    /** Fire-and-forget unary GetOrderBook (deduped per instrument). */
+    public void requestBookRefreshAsync(String instrumentId) {
+        String id = instrumentId == null || instrumentId.isBlank() ? defaultInstrument : instrumentId.trim();
+        String key = id.toUpperCase(Locale.ROOT);
+        if (System.currentTimeMillis() < bookRestCooldownUntilMs.get()) {
+            return;
+        }
+        if (bookRefreshQueued.putIfAbsent(key, Boolean.TRUE) != null) {
+            return;
+        }
+        bookRefreshExec.execute(() -> {
+            try {
+                refreshBookRest(id);
+            } finally {
+                bookRefreshQueued.remove(key);
+            }
+        });
+    }
+
     private Optional<DomBook> resolveBook(String instrumentId, boolean allowRest) {
         String id = instrumentId == null || instrumentId.isBlank() ? defaultInstrument : instrumentId.trim();
         String front = allowRest ? liveFrontTicker(id) : peekLiveFrontTicker(id);
@@ -326,11 +369,16 @@ public class MarketDataResearchService {
 
     private Optional<DomBook> refreshBookRest(String instrumentId) {
         long now = System.currentTimeMillis();
+        if (now < bookRestCooldownUntilMs.get()) {
+            return Optional.empty();
+        }
         String key = instrumentId == null ? "" : instrumentId.trim().toUpperCase();
         Long prev = lastBookRestMs.get(key);
         if (prev != null && now - prev < BOOK_REST_MIN_GAP_MS) {
             return Optional.empty();
         }
+        // Claim the gap even before the call so concurrent HTTP polls don't stampede.
+        lastBookRestMs.put(key, now);
         TInvestCredentials creds = TInvestCredentials.resolve();
         if (!creds.present()) {
             return Optional.empty();
@@ -339,12 +387,14 @@ public class MarketDataResearchService {
             String figi = md.resolveFigi(instrumentId);
             int depth = feed instanceof TInvestMarketDataFeed t ? t.orderbookDepth() : 50;
             DomBook book = md.fetchOrderBook(instrumentId, figi, depth);
-            lastBookRestMs.put(key, now);
+            bookRestCooldownUntilMs.set(0);
             if (feed instanceof TInvestMarketDataFeed t) {
                 t.putBook(book);
             }
             return Optional.of(book);
-        } catch (Exception ignored) {
+        } catch (Exception ex) {
+            bookRestCooldownUntilMs.set(System.currentTimeMillis() + BOOK_REST_COOLDOWN_MS);
+            log.debug("refreshBookRest {}: {}", key, ex.toString());
             return Optional.empty();
         }
     }
