@@ -83,12 +83,53 @@ print("settings:", want["playbookId"], "instr=", want["instrumentId"], "live=", 
 PY
 
 if ! curl -sf -m 5 http://127.0.0.1:8080/actuator/health >/dev/null 2>&1; then
-  echo "8080 down — start Exclusive-only spring-boot in another terminal:"
-  echo "  cd \"$ROOT\" && mvn -Poperator -pl trinity-app -am spring-boot:run -DskipTests \\"
-  echo "    -Dspring-boot.run.jvmArguments='-Xms256m -Xmx1536m'"
-  echo "(application.yml already: playbook=levels-profile-br-m5, parallel-playbooks=false)"
-  echo "Then re-run: bash scripts/trend_observe_resume.sh"
-  exit 2
+  echo "8080 down — daemon-starting Exclusive-only spring-boot (double-fork, survives agent shell)…"
+  APP_LOG="${TMPDIR:-/tmp}/trinity-app-${DAY}.log"
+  : >"$APP_LOG"
+  python3 - <<PY
+import os, sys
+from pathlib import Path
+root = Path("$ROOT")
+log = Path("$APP_LOG")
+if os.fork() > 0:
+    raise SystemExit(0)
+os.setsid()
+if os.fork() > 0:
+    os._exit(0)
+os.chdir(root)
+fd = os.open(str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+os.dup2(fd, 1)
+os.dup2(fd, 2)
+os.close(fd)
+dn = os.open(os.devnull, os.O_RDONLY)
+os.dup2(dn, 0)
+os.close(dn)
+os.execvp("mvn", [
+    "mvn", "-Poperator", "-pl", "trinity-app", "-am", "spring-boot:run", "-DskipTests",
+    "-Dspring-boot.run.optimizedLaunch=false",
+    "-Dspring-boot.run.jvmArguments=-Xms512m -Xmx1536m -XX:+UseG1GC",
+])
+PY
+  ok=0
+  for i in $(seq 1 90); do
+    if curl -sf -m 3 http://127.0.0.1:8080/actuator/health >/dev/null 2>&1; then
+      echo "JVM UP after ${i} tries (log $APP_LOG)"
+      ok=1
+      break
+    fi
+    if grep -q 'BUILD FAILURE' "$APP_LOG" 2>/dev/null && ! pgrep -f 'com.moex.trinity.TrinityApplication' >/dev/null; then
+      echo "BUILD FAILURE — see $APP_LOG"
+      break
+    fi
+    sleep 2
+  done
+  if [ "$ok" != 1 ]; then
+    echo "8080 still down. Manual:"
+    echo "  cd \"$ROOT\" && mvn -Poperator -pl trinity-app -am spring-boot:run -DskipTests \\"
+    echo "    -Dspring-boot.run.jvmArguments='-Xms256m -Xmx1536m'"
+    echo "(application.yml: playbook=levels-profile-br-m5, parallel-playbooks=false)"
+    exit 2
+  fi
 fi
 
 python3 "$ROOT/scripts/trend_observe_evening.py" "$DAY"
@@ -126,7 +167,29 @@ print(int((t - now).total_seconds()))
 PY
 )"
 echo "Arm evening loop in ${SEC}s (~18:02). Keep this terminal open or run from Cursor agent."
+
+# Durable desk poll → gate-observe JSONL (skips). --daemon double-forks so Cursor
+# agent shell teardown cannot kill it. Journal/corpus still from JVM.
+POLL_LOG="$ROOT/data/trend-desk-poll-$DAY.log"
+pkill -f 'trend_observe_desk_poll.py' >/dev/null 2>&1 || true
+sleep 0.3
+python3 "$ROOT/scripts/trend_observe_desk_poll.py" \
+  --daemon --log "$POLL_LOG" --seconds "$SEC" --interval 120
+sleep 0.4
+POLL_PID="$(pgrep -f 'trend_observe_desk_poll.py' | head -1 || true)"
+echo "desk_poll_pid=${POLL_PID:-?} log=$POLL_LOG seconds=$SEC (until ~18:02)"
+
+# JVM thrash/down watchdog → /tmp/trend-observe-agent-wake.log
+WATCH_LOG="$ROOT/data/trend-jvm-watch-$DAY.log"
+pkill -f 'trend_observe_jvm_watch.py' >/dev/null 2>&1 || true
+sleep 0.2
+python3 "$ROOT/scripts/trend_observe_jvm_watch.py" \
+  --daemon --log "$WATCH_LOG" --seconds "$SEC" --interval 60
+sleep 0.3
+WATCH_PID="$(pgrep -f 'trend_observe_jvm_watch.py' | head -1 || true)"
+echo "jvm_watch_pid=${WATCH_PID:-?} log=$WATCH_LOG"
+
 echo "LOG: $ROOT/data/trend-observe-path-log.json"
-echo "DONE snapshot for $DAY — loop arm is agent's job if Mac was off overnight."
+echo "DONE snapshot for $DAY — evening seal ~18:02: python3 scripts/trend_observe_evening.py"
 echo "НЕ крутить пад/knife. Режим: collect corpus (Phase C NO_GO). ML/FORTS — только по явному go."
 python3 "$ROOT/scripts/trend_corpus_inventory.py" || true

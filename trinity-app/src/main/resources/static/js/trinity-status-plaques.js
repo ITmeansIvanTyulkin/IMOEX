@@ -54,7 +54,8 @@
     if (pathIsCharts()) {
       const list = chartInstruments();
       if (list && list.length) return list.join(",");
-      return "all";
+      // Never default to "all" — that loads every family H1 every poll and storms YGC.
+      return "active";
     }
     const sel = $("sig-instrument");
     if (sel && sel.value) return sel.value;

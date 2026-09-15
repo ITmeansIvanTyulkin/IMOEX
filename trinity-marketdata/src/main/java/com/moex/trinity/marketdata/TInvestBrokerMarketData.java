@@ -50,10 +50,13 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
     private static final String[] FUTURE_CLASS_CODES = {"SPBFUT", "FUT"};
     private static final long MARGIN_CACHE_MS = 30 * 60_000L;
     private static final long FUTURES_LIST_CACHE_MS = 5 * 60_000L;
+    /** After getFutures fails, skip RPC this long — stop calendar/desk retry storms. */
+    private static final long FUTURES_LIST_FAIL_BACKOFF_MS = 60_000L;
     private static final int MARGIN_MONTHS = 4;
     private static final ConcurrentHashMap<String, CachedMargin> MARGIN_CACHE = new ConcurrentHashMap<>();
     private static final Object FUTURES_LIST_LOCK = new Object();
     private static volatile long futuresListAtMs;
+    private static volatile long futuresListFailAtMs;
     private static volatile List<Future> futuresListCache;
 
     private final InvestApi api;
@@ -247,11 +250,17 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         if (hit != null && now - futuresListAtMs < FUTURES_LIST_CACHE_MS) {
             return hit;
         }
+        if (now - futuresListFailAtMs < FUTURES_LIST_FAIL_BACKOFF_MS) {
+            return hit == null ? List.of() : hit;
+        }
         synchronized (FUTURES_LIST_LOCK) {
             now = System.currentTimeMillis();
             hit = futuresListCache;
             if (hit != null && now - futuresListAtMs < FUTURES_LIST_CACHE_MS) {
                 return hit;
+            }
+            if (now - futuresListFailAtMs < FUTURES_LIST_FAIL_BACKOFF_MS) {
+                return hit == null ? List.of() : hit;
             }
             // Do not hold the lock across a slow RPC — other desk threads pile up behind it.
         }
@@ -260,6 +269,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
             all = api.getInstrumentsService().getFuturesSync(InstrumentStatus.INSTRUMENT_STATUS_BASE);
         } catch (Exception ex) {
             log.warn("getFutures list failed: {}", ex.toString());
+            futuresListFailAtMs = System.currentTimeMillis();
             hit = futuresListCache;
             return hit == null ? List.of() : hit;
         }
@@ -267,6 +277,7 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         synchronized (FUTURES_LIST_LOCK) {
             futuresListCache = copy;
             futuresListAtMs = System.currentTimeMillis();
+            futuresListFailAtMs = 0L;
         }
         return copy;
     }
