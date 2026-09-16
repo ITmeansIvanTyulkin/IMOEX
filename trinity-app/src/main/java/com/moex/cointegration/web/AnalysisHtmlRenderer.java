@@ -86,7 +86,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260910-soft001">
+              <link rel="stylesheet" href="/css/operator.css?v=20260916-tv5">
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
@@ -1661,8 +1661,8 @@ public class AnalysisHtmlRenderer {
                   <div id="chart-z" class="chart tall"></div>
                 </div>
                 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-                <script src="/js/trinity-chart-kit.js?v=20260902-disk1"></script>
-                <script src="/js/pairs-charts.js?v=20260831-tvnav4"></script>
+                <script src="/js/trinity-chart-kit.js?v=20260916-tv5"></script>
+                <script src="/js/pairs-charts.js?v=20260916-tv5"></script>
                 """
                 .replace("{{Y}}", escape(tickerY))
                 .replace("{{X}}", escape(tickerX));

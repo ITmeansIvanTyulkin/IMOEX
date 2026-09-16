@@ -1,7 +1,7 @@
 # Handoff prompt: TRINITY operator (Exclusive observe + desk/playbook)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-09-14 ~18:05 MSK · seals до 14.09; Phase C NO_GO; collect corpus; resume now arms durable desk poll.  
+> **Обновлено:** 2026-09-15 ~17:42 MSK · seals до 15.09; Phase C NO_GO; collect corpus; durable resume/JVM thrash mitigations.  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
@@ -36,20 +36,19 @@ Pairs DAILY и calendar-arb оператор смотрит сам, пока н�
 
 **Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
 
-### Состояние на 2026-09-14 EOD (~18:01 MSK)
+### Состояние на 2026-09-15 EOD (~17:42 MSK)
 
 | Метрика | Значение |
 |--------|----------|
-| **Phase A** | **done** 25–28.08. Extra sealed: 01–04.09, 07–11.09, **14.09** |
-| **OOS cumulative** | **~33** Exclusive, **~+5 636 ₽**, expectancy **~171 ₽/trade**, WR **~70%**, labeled SL 100% |
-| **14.09** | **+1 498 ₽** · 3× BUY RETEST TP2 (with-trend HTF UP); gateHits=0 |
-| **11.09** | Exclusive 0; positional NGV6 −371 |
-| **10.09** | 0 · HI над TOP (training confirmed) |
+| **Phase A** | **done** 25–28.08. Extra sealed: 01–04.09, 07–11.09, 14–**15.09** |
+| **OOS cumulative** | **~40** Exclusive, **~+12 286 ₽**, expectancy **~307 ₽/trade**, WR **~70%**, labeled SL 100% |
+| **15.09** | **+7 021 ₽** · 6 сделок: 1×SL SWEEP + 5×TP2; gateHits=0; wins+loss с `contextAtEnter` + corpus ARM/FILL/CLOSE |
+| **14.09** | **+1 498 ₽** · 3× BUY RETEST TP2 |
 | **Front** | **BRV6** · exp 2026-10-01 |
 | **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect |
-| **Ops** | `trend_observe_resume.sh` → при down сам **daemon-start** JVM (`-pl trinity-app -am`, double-fork) + **daemon desk poll** до ~18:02. Poll/JVM abort ≠ потеря journal/corpus (их пишет app). |
+| **Ops** | `trend_observe_resume.sh` → daemon JVM + desk poll + jvm-watch; plaques/warmup thrash mitigations (commits 15.09) |
 
-**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-15` ~09:55; evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
+**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-16` ~09:55; evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
 
 ---
 

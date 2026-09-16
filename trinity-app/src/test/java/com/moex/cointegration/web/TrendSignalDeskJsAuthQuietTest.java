@@ -55,5 +55,7 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("октябрь"), "October month label missing");
         assertTrue(src.contains("DESK_FETCH_MS"), "desk fetch timeout missing");
         assertTrue(src.contains("AbortController"), "desk/book must abort hung fetches");
+        assertTrue(src.contains("tool-clusters"), "positional/range desk must wire clusters tool");
+        assertTrue(src.contains("attachFlowOverlays"), "desk must attach flow overlays for clusters");
     }
 }

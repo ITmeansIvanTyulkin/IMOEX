@@ -65,6 +65,9 @@
       cur.terminal.active = activeId;
       cur.terminal.instruments = instruments.map(function (o) { return o.secid; });
       cur.terminal.byInstrument = cur.terminal.byInstrument || {};
+      cur.templates = Array.isArray(layoutDoc && layoutDoc.templates)
+        ? layoutDoc.templates
+        : (Array.isArray(cur.templates) ? cur.templates : []);
       Object.keys(panes).forEach(function (id) {
         const p = panes[id];
         if (p && p.tools) {
@@ -220,6 +223,7 @@
       legendEl: hud.legendEl || null
     });
     panes[secid] = { wrap: wrap, el: el, chart: chart, series: series, tools: tools, bars: [],
+      m5Bars: [], ticks: [], tf: "M5",
       scaleLocked: false, barSpacing: null, logical: null, nav: null, flow: null };
     if (kit && typeof kit.attachFlowOverlays === "function") {
       panes[secid].flow = kit.attachFlowOverlays({
@@ -330,6 +334,12 @@
     const sel = $("charts-instrument");
     if (sel) sel.value = secid;
     applyToolbar();
+    const pane = panes[secid];
+    if (pane && pane.tf) {
+      document.querySelectorAll(".charts-tf-btn").forEach(function (b) {
+        b.classList.toggle("is-on", b.getAttribute("data-tf") === pane.tf);
+      });
+    }
     scheduleSave();
   }
 
@@ -548,6 +558,7 @@
         });
       });
       p.bars = toolBars;
+      p.m5Bars = toolBars.slice();
       const kit = window.TrinityChartKit;
       if (kit && typeof kit.barCachePut === "function") {
         kit.barCachePut(secid, "M5", { instrument: secid, tf: "M5", bars: candles, raw: toolBars });
@@ -573,6 +584,7 @@
       }
       if (p.tools) p.tools.refreshOverlays();
       if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
+      if (p.tf && p.tf !== "M5") applyTf(p.tf, secid);
     } catch (e) {
       console.warn("refreshPane", secid, e);
     }
@@ -646,14 +658,246 @@
     syncToolButtons();
     syncFsChrome();
     hydrating = false;
+    bindTerminalTape(list);
     if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
       window.TrinityPlaques.refresh();
     }
   }
 
+  function bindTerminalTape(list) {
+    const kit = window.TrinityChartKit;
+    if (!kit || !kit.tape) return;
+    const ids = (list || []).map(function (o) { return o.secid; }).filter(Boolean);
+    kit.tape.subscribe(ids, { all: true });
+    kit.tape.onTrade(function (msg) {
+      const px = Number(msg.px);
+      if (!(px > 0)) return;
+      noteWatch(msg);
+      checkAlerts(msg);
+      Object.keys(panes).forEach(function (id) {
+        if (!kit.sameTapeInstrument(id, msg.instrument)) return;
+        const p = panes[id];
+        if (!p || !p.series) return;
+        if (!p.ticks) p.ticks = [];
+        p.ticks.push({ time: Math.floor(Date.now() / 1000), value: px });
+        if (p.ticks.length > 400) p.ticks = p.ticks.slice(-400);
+        const tf = p.tf || "M5";
+        if (p.m5Bars && p.m5Bars.length) {
+          kit.applyTradeToCandle({ update: function () {} }, p.m5Bars, px, 5);
+        }
+        if (tf === "M5" || tf === "M15" || tf === "H1") {
+          kit.applyTradeToCandle(p.series, p.bars, px, tf === "H1" ? 60 : (tf === "M15" ? 15 : 5));
+        } else if (tf === "TICK" && p.line) {
+          try { p.line.update(p.ticks[p.ticks.length - 1]); } catch (_) {}
+        } else if (tf === "RENKO" || tf === "RANGE") {
+          applyTf(tf, id);
+        }
+        if (p.flow && typeof p.flow.ingestPrint === "function") {
+          p.flow.ingestPrint(px, msg.qty || 1, msg.side, Math.floor(Date.now() / 1000));
+        }
+        if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
+      });
+      if (kit.sameTapeInstrument(activeId, msg.instrument)) appendTermTape(msg);
+    });
+    kit.tape.onBook(function (book) {
+      if (!kit.sameTapeInstrument(activeId, book.instrument)) return;
+      renderTermDom(book);
+    });
+    renderWatchlist();
+    renderAlerts();
+    renderTemplates();
+  }
+
+  const quotes = Object.create(null);
+  function noteWatch(msg) {
+    const fam = (window.TrinityChartKit && TrinityChartKit.familyOf(msg.instrument)) || msg.instrument;
+    let row = quotes[fam];
+    if (!row) row = quotes[fam] = { px: 0, prev: 0, inst: msg.instrument };
+    if (row.px > 0) row.prev = row.px;
+    row.px = Number(msg.px);
+    row.inst = msg.instrument;
+    renderWatchlist();
+  }
+  function renderWatchlist() {
+    const el = $("charts-watchlist");
+    if (!el) return;
+    const ids = Object.keys(panes);
+    el.innerHTML = ids.map(function (id) {
+      const fam = (window.TrinityChartKit && TrinityChartKit.familyOf(id)) || id;
+      const q = quotes[fam];
+      const px = q ? q.px : 0;
+      const up = q && q.prev && px >= q.prev;
+      return "<div class=\"charts-watch-row" + (id === activeId ? " is-on" : "") + "\" data-id=\"" + id + "\">"
+        + "<span>" + id + "</span><span class=\"charts-watch-px " + (up ? "is-up" : "is-down") + "\">"
+        + (px > 0 ? px.toFixed(2) : "—") + "</span></div>";
+    }).join("");
+    el.querySelectorAll(".charts-watch-row").forEach(function (row) {
+      row.addEventListener("click", function () { showInstrument(row.getAttribute("data-id")); renderWatchlist(); });
+    });
+  }
+  function appendTermTape(msg) {
+    const el = $("charts-tape");
+    if (!el) return;
+    const row = document.createElement("div");
+    const sell = String(msg.side || "").toUpperCase() === "SELL";
+    row.className = "charts-tape-row " + (sell ? "is-sell" : "is-buy");
+    row.textContent = Number(msg.px).toFixed(2) + " ×" + (msg.qty || "");
+    el.insertBefore(row, el.firstChild);
+    while (el.childNodes.length > 80) el.removeChild(el.lastChild);
+  }
+  function renderTermDom(book) {
+    const el = $("charts-dom");
+    if (!el) return;
+    const asks = (book.asks || []).slice(0, 8).reverse();
+    const bids = (book.bids || []).slice(0, 8);
+    function row(lv, cls) {
+      return "<div class=\"charts-dom-row " + cls + "\"><span>" + (lv.q || "") + "</span><span>"
+        + Number(lv.p).toFixed(2) + "</span><span></span></div>";
+    }
+    el.innerHTML = asks.map(function (lv) { return row(lv, "is-ask"); }).join("")
+      + bids.map(function (lv) { return row(lv, "is-bid"); }).join("");
+  }
+  function alertKey() { return "trinity.chart.alerts"; }
+  function loadAlerts() {
+    try { return JSON.parse(localStorage.getItem(alertKey()) || "[]"); } catch (_) { return []; }
+  }
+  function saveAlerts(list) {
+    try { localStorage.setItem(alertKey(), JSON.stringify(list || [])); } catch (_) {}
+  }
+  function renderAlerts() {
+    const el = $("charts-alerts");
+    if (!el) return;
+    const list = loadAlerts();
+    el.innerHTML = list.map(function (a, i) {
+      return "<div class=\"charts-alert-item\" data-i=\"" + i + "\">" + (a.instrument || "") + " "
+        + (a.dir === "below" ? "≤" : "≥") + " " + a.price + " <span data-del=\"" + i + "\">×</span></div>";
+    }).join("");
+    el.querySelectorAll("[data-del]").forEach(function (x) {
+      x.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        const list2 = loadAlerts();
+        list2.splice(Number(x.getAttribute("data-del")), 1);
+        saveAlerts(list2);
+        renderAlerts();
+      });
+    });
+  }
+  function checkAlerts(msg) {
+    const px = Number(msg.px);
+    const list = loadAlerts();
+    let changed = false;
+    list.forEach(function (a) {
+      if (!a || a.fired) return;
+      if (!window.TrinityChartKit.sameTapeInstrument(a.instrument, msg.instrument)) return;
+      const hit = a.dir === "below" ? px <= a.price : px >= a.price;
+      if (!hit) return;
+      a.fired = true;
+      changed = true;
+      try { window.alert("Алерт " + a.instrument + " " + px); } catch (_) {}
+    });
+    if (changed) saveAlerts(list.filter(function (a) { return !a.fired; }));
+    if (changed) renderAlerts();
+  }
+  function applyTf(tf, paneId) {
+    const target = paneId || activeId;
+    if (!paneId || target === activeId) {
+      document.querySelectorAll(".charts-tf-btn").forEach(function (b) {
+        b.classList.toggle("is-on", b.getAttribute("data-tf") === tf);
+      });
+    }
+    const kit = window.TrinityChartKit;
+    const p = panes[target];
+    if (!p || !kit) return;
+    p.tf = tf;
+    const src = p.m5Bars || p.bars || [];
+    const pt = kit.pointSizeFor ? kit.pointSizeFor(target) : 0.01;
+    let candles = src;
+    if (tf === "M15") candles = kit.aggregateBars(src, 15);
+    else if (tf === "H1") candles = kit.aggregateBars(src, 60);
+    else if (tf === "RENKO") candles = kit.buildRenko(src, Math.max(pt * 4, 0.04));
+    else if (tf === "RANGE") candles = kit.buildRangeBars(src, Math.max(pt * 8, 0.08));
+    if (tf === "TICK") {
+      if (!p.line) {
+        p.line = p.chart.addLineSeries({ color: "#0f766e", lineWidth: 1 });
+      }
+      try { p.series.applyOptions({ visible: false }); } catch (_) {}
+      try { p.line.applyOptions({ visible: true }); } catch (_) {}
+      try { p.line.setData(p.ticks || []); } catch (_) {}
+      return;
+    }
+    if (p.line) {
+      try { p.line.applyOptions({ visible: false }); } catch (_) {}
+    }
+    try { p.series.applyOptions({ visible: true }); } catch (_) {}
+    p.bars = candles;
+    try { p.series.setData(candles); } catch (_) {}
+  }
+  function renderTemplates() {
+    const sel = $("charts-templates");
+    if (!sel) return;
+    const tpls = (layoutDoc && layoutDoc.templates) || [];
+    sel.innerHTML = tpls.map(function (t, i) {
+      return "<option value=\"" + i + "\">" + (t.name || ("шаблон " + (i + 1))) + "</option>";
+    }).join("") || "<option value=\"\">нет шаблонов</option>";
+  }
+
   $("charts-instrument").addEventListener("change", function () {
     showInstrument($("charts-instrument").value);
   });
+  document.querySelectorAll(".charts-tf-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      applyTf(b.getAttribute("data-tf") || "M5");
+    });
+  });
+  const alertAdd = $("charts-alert-add");
+  if (alertAdd) {
+    alertAdd.addEventListener("click", function () {
+      const pxEl = $("charts-alert-px");
+      const dirEl = $("charts-alert-dir");
+      const px = Number(pxEl && pxEl.value);
+      if (!(px > 0) || !activeId) return;
+      const dir = (dirEl && dirEl.value) || "above";
+      const list = loadAlerts();
+      list.push({ instrument: activeId, price: px, dir: dir === "below" ? "below" : "above" });
+      saveAlerts(list);
+      if (pxEl) pxEl.value = "";
+      renderAlerts();
+    });
+  }
+  const tplSave = $("charts-tpl-save");
+  if (tplSave) {
+    tplSave.addEventListener("click", function () {
+      const p = panes[activeId];
+      if (!p || !p.tools) return;
+      const name = window.prompt("Имя шаблона", "шаблон");
+      if (!name) return;
+      layoutDoc = layoutDoc || {};
+      layoutDoc.templates = layoutDoc.templates || [];
+      layoutDoc.templates.push({
+        name: String(name).slice(0, 64),
+        drawings: p.tools.getState(),
+        flow: (p.flow && typeof p.flow.getState === "function") ? p.flow.getState() : null,
+        tf: p.tf || "M5"
+      });
+      persist();
+      renderTemplates();
+    });
+  }
+  const tplApply = $("charts-tpl-apply");
+  if (tplApply) {
+    tplApply.addEventListener("click", function () {
+      const sel = $("charts-templates");
+      const tpls = (layoutDoc && layoutDoc.templates) || [];
+      const t = tpls[Number(sel && sel.value)];
+      const p = panes[activeId];
+      if (!t || !p) return;
+      if (t.drawings && p.tools && typeof p.tools.setState === "function") p.tools.setState(t.drawings);
+      if (t.flow && p.flow && typeof p.flow.setState === "function") p.flow.setState(t.flow);
+      if (t.tf) applyTf(t.tf);
+      if (p) p.layoutDirty = true;
+      scheduleSave();
+    });
+  }
   document.querySelectorAll(".charts-tv-btn[data-tool]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       const tool = btn.getAttribute("data-tool") || "";

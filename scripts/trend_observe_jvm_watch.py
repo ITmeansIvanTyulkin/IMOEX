@@ -20,7 +20,7 @@ HEALTH = "http://127.0.0.1:8080/actuator/health"
 CPU_THRASH = 300.0  # percent; multi-core OK until sustained
 CPU_SAMPLES = 3
 CPU_INTERVAL = 5
-WAKE_COOLDOWN_SEC = 900  # don't spam agent on same kind
+WAKE_COOLDOWN_SEC = 2700  # 45m — thrash can persist; avoid agent spam  # don't spam agent on same kind
 
 
 def daemonize(log_path: Path) -> None:

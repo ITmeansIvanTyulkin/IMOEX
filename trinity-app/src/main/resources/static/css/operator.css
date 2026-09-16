@@ -3626,6 +3626,22 @@ body[data-upsell="off"] .full-core-badge {
 .signal-fp-cell .b { color: #15803d; font-weight: 600; }
 .signal-fp-cell .s { color: #b91c1c; font-weight: 600; }
 .signal-fp-cell .x { color: #94a3b8; margin: 0 1px; }
+.charts-cluster-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+}
+.charts-cluster-tick {
+  position: absolute;
+  height: 6px;
+  border-radius: 1px;
+  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.35);
+}
+.charts-cluster-tick.is-buy { background: rgba(22, 163, 74, 0.92); }
+.charts-cluster-tick.is-sell { background: rgba(220, 38, 38, 0.92); }
+.charts-cluster-tick.is-ohlc { opacity: 0.72; }
 .signal-zone-band {
   position: absolute;
   left: 8px;

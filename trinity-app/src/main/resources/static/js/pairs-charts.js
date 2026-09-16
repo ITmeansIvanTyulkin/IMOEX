@@ -143,6 +143,50 @@
     }));
     bindNav(zChart, zSeries, zEl, function () { return zPts; }, 86400, 0.01);
 
+    (function bindPairsTape() {
+      const kit = window.TrinityChartKit;
+      function fortsSecid(s) {
+        return /^[A-Za-z]{2,3}[FGHJKMNQUVXZ]\d$/.test(String(s || "").trim());
+      }
+      const ids = [];
+      if (fortsSecid(tickerY)) ids.push(tickerY);
+      if (fortsSecid(tickerX)) ids.push(tickerX);
+      if (kit && kit.tape && ids.length) {
+        kit.tape.subscribe(ids);
+        kit.tape.onTrade(function (msg) {
+          const px = Number(msg.px);
+          if (!(px > 0)) return;
+          if (kit.sameTapeInstrument(tickerY, msg.instrument)) {
+            kit.applyTradeToCandle(candles, candlesY, px, 0);
+          }
+          if (kit.sameTapeInstrument(tickerX, msg.instrument)) {
+            kit.applyTradeToCandle(candlesXs, candlesX, px, 0);
+          }
+        });
+      }
+      function pollIssLast(secid, series, bars) {
+        if (!kit || typeof kit.applyTradeToCandle !== "function") return;
+        let timer = 0;
+        async function tick() {
+          try {
+            const res = await fetch("/api/marketdata/iss-last?secid=" + encodeURIComponent(secid), {
+              credentials: "include",
+              headers: { Accept: "application/json" }
+            });
+            if (!res.ok) return;
+            const j = await res.json();
+            const px = Number(j && j.px);
+            if (j && j.ok && px > 0) kit.applyTradeToCandle(series, bars, px, 0);
+          } catch (_) {}
+        }
+        tick();
+        timer = window.setInterval(tick, 4000);
+        window.addEventListener("pagehide", function () { clearInterval(timer); });
+      }
+      if (!fortsSecid(tickerY)) pollIssLast(tickerY, candles, candlesY);
+      if (!fortsSecid(tickerX)) pollIssLast(tickerX, candlesXs, candlesX);
+    })();
+
     [priceChart, priceXChart, divChart, spChart, zChart].forEach(function (c) {
       try { c.timeScale().fitContent(); } catch (_) {}
     });

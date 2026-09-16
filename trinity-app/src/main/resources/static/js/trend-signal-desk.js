@@ -55,12 +55,13 @@
   let deskFetchGen = 0;
   let deskQueuedForceFit = false;
   let chartTools = null;
+  let chartFlow = null;
   let deskLayoutDoc = null;
   let deskLayoutTimer = null;
   let domFollowMid = true;
   let domScrollBound = false;
   const DESK_MS = 12000;
-  const BOOK_MS = 8000;
+  const BOOK_MS = 1500;
   /** Hard ceiling — prefer TrinityFastBoot contract (all strategies). */
   const DESK_FETCH_MS = (window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000;
   const BOOK_FETCH_MS = (window.TrinityFastBoot && TrinityFastBoot.BOOK_MS) || 12000;
@@ -2454,6 +2455,7 @@
       chartTools.layoutStretchedVap();
       if (typeof chartTools.layoutTrendLines === "function") chartTools.layoutTrendLines();
     }
+    if (chartFlow && typeof chartFlow.layout === "function") chartFlow.layout();
     if (fpToolActive || fpPinned.length || fpRangeFrom != null || fpAnchor != null) {
       layoutFootprint();
     }
@@ -3075,6 +3077,31 @@
         freezePrice: false,
         legendEl: $("signal-chart-legend")
       });
+      if (typeof TrinityChartKit.attachFlowOverlays === "function" && !chartFlow) {
+        chartFlow = TrinityChartKit.attachFlowOverlays({
+          chart: chart,
+          series: candleSeries,
+          hostEl: el,
+          barSec: function () { return lastChartTf === "H1" ? 3600 : 300; },
+          pointSize: deskPointSize(secid, pointSize),
+          timeOf: toChartTime,
+          getBars: function () {
+            return (lastBarsRaw || []).map(function (b) {
+              return {
+                time: toChartTime(b.time),
+                open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume
+              };
+            }).filter(function (b) { return b.time != null; });
+          },
+          isDrawing: function () {
+            return !!(chartTools && chartTools.getMode()) || !!fpToolActive;
+          },
+          onChange: function () {
+            setToolPressed("tool-clusters", !!(chartFlow && chartFlow.getShowClusters && chartFlow.getShowClusters()));
+            scheduleSaveDeskLayout();
+          }
+        });
+      }
       loadDeskLayoutOnce();
     }
     chart.subscribeCrosshairMove(function (param) {
@@ -3268,13 +3295,30 @@
       applyCombinedMarkers();
     });
   }
+  function sameSanitizedBar(a, b) {
+    return !!a && !!b && a.time === b.time
+      && a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close;
+  }
+  /** True when only the forming last (or a newly rolled bar) changed — TV-style update(). */
+  function canIncrementalUpdate(prev, next) {
+    if (!prev || !next || prev.length < 1 || next.length < 1) return false;
+    if (next.length < prev.length || next.length - prev.length > 1) return false;
+    const closed = next.length === prev.length ? next.length - 1 : next.length - 2;
+    for (let i = 0; i < closed; i++) {
+      if (!sameSanitizedBar(prev[i], next[i])) return false;
+    }
+    if (next.length === prev.length + 1) {
+      return prev[prev.length - 1].time === next[next.length - 2].time;
+    }
+    return next[next.length - 1].time === prev[prev.length - 1].time;
+  }
   /**
    * @param {boolean} forceFit fit content / unlock
-   * @param {boolean} [fromServer] full series replace (desk poll) — incremental update alone
-   *   leaves fake wicks on older bars after IndexedDB/live DOM corruption
+   * @param {boolean} [fromServer] desk poll — rewrite only when older bars actually changed
    */
   function updateCandles(candles, forceFit, fromServer) {
     candles = sanitizeCandles(candles);
+    const prevSanitized = lastSanitizedCandles;
     lastSanitizedCandles = candles;
     if (!candleSeries || !candles.length) return;
     resizeChartToHost();
@@ -3283,9 +3327,10 @@
     const firstPaint = lastCandleTime == null;
     const sameLast = !firstPaint && last.time === lastCandleTime;
     const newBar = !firstPaint && prevBar && prevBar.time === lastCandleTime;
+    const incremental = !firstPaint && (sameLast || newBar)
+      && (!fromServer || canIncrementalUpdate(prevSanitized, candles));
 
-    // Server desk payload: always rewrite series (keeps zoom). Live book only updates last bar.
-    if (fromServer && !forceFit && !firstPaint) {
+    if (fromServer && !forceFit && !firstPaint && !incremental) {
       replaceDataKeepView(candles);
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
@@ -3371,10 +3416,103 @@
     if (ba > 0) return ba;
     return null;
   }
+  let lastTapePx = 0;
+  let lastTapeAt = 0;
+  let tapeWsWant = "";
+  let tapeBound = false;
+  function liveCandlePx(book) {
+    if (lastTapePx > 0 && (Date.now() - lastTapeAt) < 4000) return lastTapePx;
+    return livePxFromBook(book);
+  }
+  function appendDeskTape(msg) {
+    const el = $("signal-tape");
+    if (!el) return;
+    const row = document.createElement("div");
+    const sell = String(msg.side || "").toUpperCase() === "SELL";
+    row.className = "signal-tape-row " + (sell ? "is-sell" : "is-buy");
+    const px = Number(msg.px);
+    row.innerHTML = "<span>" + (px > 0 ? px.toFixed(2) : "—") + "</span><span>×"
+      + (msg.qty || "") + "</span>";
+    el.insertBefore(row, el.firstChild);
+    while (el.childNodes.length > 80) el.removeChild(el.lastChild);
+  }
+  function tapeSubscribe(inst) {
+    tapeWsWant = String(inst || wantedDeskInstrument() || lastDeskInstrument || "").trim().toUpperCase();
+    const kit = window.TrinityChartKit;
+    if (kit && kit.tape) kit.tape.subscribe(tapeWsWant ? [tapeWsWant] : []);
+  }
+  function ingestDeskFootprint(px, qty, side) {
+    const price = Number(px);
+    const lots = Number(qty);
+    if (!(price > 0) || !(lots > 0) || !lastCandleTime) return;
+    const t = lastCandleTime;
+    let fb = footprintByTime[t];
+    if (!fb) {
+      fb = { time: t, levels: [] };
+      footprintByTime[t] = fb;
+    }
+    const step = deskPointSize(lastDeskInstrument, null) || 0.01;
+    const rounded = Math.round(price / step) * step;
+    let lv = null;
+    for (let i = 0; i < fb.levels.length; i++) {
+      if (Math.abs(Number(fb.levels[i].price) - rounded) < step * 0.51) {
+        lv = fb.levels[i];
+        break;
+      }
+    }
+    if (!lv) {
+      lv = { price: rounded, buy: 0, sell: 0 };
+      fb.levels.push(lv);
+    }
+    if (String(side || "").toUpperCase() === "SELL") lv.sell += lots;
+    else lv.buy += lots;
+    if (fpToolActive || fpPinned.length || fpRangeFrom != null) layoutFootprint();
+  }
+  function bindTape() {
+    const kit = window.TrinityChartKit;
+    if (!kit || !kit.tape || tapeBound) return;
+    tapeBound = true;
+    kit.tape.onTrade(function (msg) {
+      const inst = String(msg.instrument || "");
+      if (tapeWsWant && inst && kit.sameTapeInstrument
+          && !kit.sameTapeInstrument(tapeWsWant, inst)) return;
+      const px = Number(msg.px);
+      if (!(px > 0)) return;
+      lastTapePx = px;
+      lastTapeAt = Date.now();
+      paintLastCandle(px, null);
+      appendDeskTape(msg);
+      if (chartFlow && typeof chartFlow.ingestPrint === "function") {
+        chartFlow.ingestPrint(px, msg.qty || 1, msg.side, Math.floor(Date.now() / 1000));
+      }
+      ingestDeskFootprint(px, msg.qty || 1, msg.side);
+    });
+    kit.tape.onBook(function (book) {
+      const inst = String(book.instrument || "");
+      if (tapeWsWant && inst && kit.sameTapeInstrument
+          && !kit.sameTapeInstrument(tapeWsWant, inst)) return;
+      renderDom(book);
+    });
+    kit.tape.connect();
+  }
+  function currentBucketUnix(minutes) {
+    const step = Math.max(1, minutes || 5) * 60 * 1000;
+    const msk = Date.now() + 3 * 3600 * 1000;
+    return Math.floor((msk - (msk % step) - 3 * 3600 * 1000) / 1000);
+  }
+  function lastRawIsCurrentBucket(raw) {
+    const t = raw && raw.time != null
+      ? (typeof raw.time === "number" ? raw.time : toChartTime(raw.time))
+      : lastCandleTime;
+    if (t == null) return false;
+    return t === currentBucketUnix(lastChartTf === "H1" ? 60 : 5);
+  }
   function paintLastCandle(px, book) {
     if (!candleSeries || !(px > 0) || lastCandleTime == null) return;
     const raw = lastBarsRaw && lastBarsRaw.length ? lastBarsRaw[lastBarsRaw.length - 1] : null;
     if (!raw) return;
+    // Instant IDB paint is kept; do not glue live last onto a closed cached bar.
+    if (!lastRawIsCurrentBucket(raw)) return;
     const o = Number(raw.open);
     let h = Number(raw.high);
     let l = Number(raw.low);
@@ -3394,6 +3532,7 @@
     applyingScale = false;
     if (priceScaleLocked) freezePriceScale();
     applyLiveManage(px, book);
+    paintChartOhlc();
   }
   function bookTouchPx(open, book, mid) {
     const bb = book && book.bids && book.bids[0] ? Number(book.bids[0].p) : NaN;
@@ -3507,7 +3646,7 @@
       imb.hidden = true;
     }
     if (meta) {
-      const age = book.asOf ? (" · " + new Date(book.asOf).toLocaleTimeString("ru-RU")) : "";
+      const age = book.asOf ? " · live" : "";
       const spr = (bestBid != null && bestAsk != null)
         ? (" · spr " + (bestAsk - bestBid).toFixed(2))
         : "";
@@ -3582,7 +3721,7 @@
         + "</div>";
     }
     body.innerHTML = html;
-    paintLastCandle(livePxFromBook(book), book);
+    paintLastCandle(liveCandlePx(book), book);
     // Center mid only on first paint; never scrollIntoView (it jumps the whole page)
     if (!hadRows || domFollowMid) {
       const bestEl = body.querySelector(".dom-spread") || body.querySelector(".is-best");
@@ -3769,6 +3908,7 @@
       }
       lastChartTf = chartTf;
       setChartLegendSymbol(chartInst, chartTf);
+      if (chartInst && chartInst !== "—") tapeSubscribe(chartInst);
       if (chartLabel) {
         chartLabel.textContent = "График · " + formatSecidWithMonth(chartInst) + " "
           + (chartTf === "H1" ? "час" : chartTf)
@@ -3799,15 +3939,6 @@
         return { time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
       }).filter(Boolean);
       const livePx = livePxFromBook(data.book);
-      if (livePx > 0 && candles.length) {
-        const last = candles[candles.length - 1];
-        const ref = Number(last.close);
-        if (plausibleLivePx(ref, livePx)) {
-          last.close = livePx;
-          if (livePx > last.high) last.high = livePx;
-          if (livePx < last.low) last.low = livePx;
-        }
-      }
       if (meta && rawBars.length && !candles.length) {
         meta.textContent = (meta.textContent || "") + " · chart: bad bar times";
       } else if (meta && candles.length) {
@@ -3860,6 +3991,10 @@
       lastProfile = data.profile || [];
       lastFootprint = data.footprint || [];
       indexFootprints(lastFootprint);
+      if (chartFlow) {
+        if (typeof chartFlow.setProfile === "function") chartFlow.setProfile(lastProfile);
+        if (typeof chartFlow.setFootprints === "function") chartFlow.setFootprints(lastFootprint);
+      }
       updateVolume(lastBarsRaw);
       updateMacd(lastBarsRaw);
       // setData on desk poll clears LW markers unless we re-apply every refresh.
@@ -3969,6 +4104,14 @@
   }
   const toolFp = $("tool-footprint");
   if (toolFp) toolFp.addEventListener("click", toggleFpTool);
+  const toolClusters = $("tool-clusters");
+  if (toolClusters) {
+    toolClusters.addEventListener("click", function () {
+      if (!chartFlow || typeof chartFlow.setShowClusters !== "function") return;
+      chartFlow.setShowClusters(!chartFlow.getShowClusters());
+      setToolPressed("tool-clusters", chartFlow.getShowClusters());
+    });
+  }
   const toolMacd = $("tool-macd");
   if (toolMacd) {
     toolMacd.addEventListener("click", function () {
@@ -4553,6 +4696,13 @@
       }
       const st = desk.tools || null;
       if (chartTools && st) chartTools.setState(st);
+      if (chartFlow && desk.flow && typeof chartFlow.setState === "function") {
+        chartFlow.setState(desk.flow);
+      } else if (chartFlow && deskScope() === "positional"
+          && !(desk.flow && desk.flow.showClusters === false)) {
+        chartFlow.setShowClusters(true);
+      }
+      setToolPressed("tool-clusters", !!(chartFlow && chartFlow.getShowClusters && chartFlow.getShowClusters()));
       const sc = desk.scale;
       if (!scaleLocked && lastCandleTime == null && sc && sc.barSpacing > 0
           && (!sc.instrument || sc.instrument === lastDeskInstrument)) {
@@ -4571,6 +4721,9 @@
       const cur = deskLayoutDoc || await TrinityChartKit.loadLayouts();
       cur.desk = cur.desk || {};
       cur.desk.tools = chartTools.getState();
+      if (chartFlow && typeof chartFlow.getState === "function") {
+        cur.desk.flow = chartFlow.getState();
+      }
       if (!isRangeDesk()) {
         cur.desk.instrument = ($("sig-instrument") && $("sig-instrument").value) || null;
         cur.desk.playbookId = ($("sig-playbook") && $("sig-playbook").value) || null;
@@ -4734,6 +4887,8 @@
       deskInstrumentPinned = null;
     }
     applyUrlInstrumentOnce();
+    bindTape();
+    tapeSubscribe(wantedDeskInstrument() || lastDeskInstrument);
     const hadCache = await paintCachedChart();
     try {
       await applyUrlPlaybookOnce();

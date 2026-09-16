@@ -112,4 +112,45 @@ public class MarketDataController {
             return Map.of();
         }
     }
+
+    /** Last TQBR print for equity pairs (ISS has no operator websocket). */
+    @GetMapping("/iss-last")
+    public ResponseEntity<?> issLast(@RequestParam("secid") String secid) {
+        String id = secid == null ? "" : secid.trim();
+        if (id.isEmpty() || !id.matches("[A-Za-z0-9._-]{1,20}")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "bad secid"));
+        }
+        String url = "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/"
+                + id + ".json?iss.meta=off&iss.only=marketdata"
+                + "&marketdata.columns=SECID,LAST,LASTCHANGE,LASTTOPREVPRICE,UPDATETIME";
+        try {
+            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofMillis(1200))
+                    .build();
+            var req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+                    .timeout(java.time.Duration.ofMillis(1800))
+                    .GET()
+                    .build();
+            var res = http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() < 200 || res.statusCode() >= 300) {
+                return ResponseEntity.ok(Map.of("secid", id, "px", 0, "ok", false));
+            }
+            com.fasterxml.jackson.databind.JsonNode root =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(res.body());
+            var data = root.path("marketdata").path("data");
+            if (!data.isArray() || data.isEmpty()) {
+                return ResponseEntity.ok(Map.of("secid", id, "px", 0, "ok", false));
+            }
+            var row = data.get(0);
+            double px = row.path(1).asDouble(0);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("secid", id);
+            out.put("px", px);
+            out.put("change", row.path(2).asDouble(0));
+            out.put("ok", px > 0);
+            return ResponseEntity.ok(out);
+        } catch (Exception ex) {
+            return ResponseEntity.ok(Map.of("secid", id, "px", 0, "ok", false));
+        }
+    }
 }

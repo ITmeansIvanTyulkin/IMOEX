@@ -20,6 +20,10 @@
   let lastSeriesKey = "";
   let lastSpreadData = [];
   let lastNearData = [];
+  let lastFarData = [];
+  let lastLegs = { near: "", next: "", structure: "", wing: "" };
+  let lastPx = { near: 0, mid: 0, wing: 0 };
+  let arbTapeBound = false;
   let arbScaleLocked = false;
   let syncingRange = false;
   let resizeBound = false;
@@ -911,6 +915,14 @@
     const next = toLine(points, "far");
     lastSpreadData = spread;
     lastNearData = near;
+    lastFarData = next;
+    lastLegs = { near: sel.near || "", next: sel.next || "", structure: sel.structure || "", wing: sel.wing || "" };
+    lastPx = {
+      near: Number(sel.nearLast) || 0,
+      mid: Number(sel.nextLast) || 0,
+      wing: Number(sel.wingLast) || 0
+    };
+    subscribeArbTape();
     if (series) setLineDataKeep(chart, series, spread);
     if (nearSeries) setLineDataKeep(legsChart, nearSeries, near);
     if (nextSeries) setLineDataKeep(legsChart, nextSeries, next);
@@ -925,6 +937,38 @@
     }
     paintNav($("arb-chart"));
     paintNav($("arb-legs-chart"));
+  }
+
+  function subscribeArbTape() {
+    const kit = window.TrinityChartKit;
+    if (!kit || !kit.tape) return;
+    if (!arbTapeBound) {
+      arbTapeBound = true;
+      kit.tape.onTrade(function (msg) {
+        const px = Number(msg.px);
+        if (!(px > 0)) return;
+        const inst = msg.instrument;
+        if (lastLegs.near && kit.sameTapeInstrument(lastLegs.near, inst)) {
+          lastPx.near = px;
+          kit.applyTradeToLine(nearSeries, lastNearData, px);
+        }
+        if (lastLegs.next && kit.sameTapeInstrument(lastLegs.next, inst)) {
+          lastPx.mid = px;
+          kit.applyTradeToLine(nextSeries, lastFarData, px);
+        }
+        if (lastLegs.wing && kit.sameTapeInstrument(lastLegs.wing, inst)) {
+          lastPx.wing = px;
+        }
+        if (lastLegs.structure === "FLY") {
+          if (lastPx.near > 0 && lastPx.mid > 0 && lastPx.wing > 0) {
+            kit.applyTradeToLine(series, lastSpreadData, lastPx.near - 2 * lastPx.mid + lastPx.wing);
+          }
+        } else if (lastPx.near > 0 && lastPx.mid > 0) {
+          kit.applyTradeToLine(series, lastSpreadData, lastPx.mid - lastPx.near);
+        }
+      });
+    }
+    kit.tape.subscribe([lastLegs.near, lastLegs.next, lastLegs.wing].filter(Boolean));
   }
 
   function bindArbGuide() {

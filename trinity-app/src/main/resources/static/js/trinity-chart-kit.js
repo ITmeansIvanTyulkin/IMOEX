@@ -3033,7 +3033,13 @@
     };
     const onChange = typeof opts.onChange === "function" ? opts.onChange : function () {};
     const isBusy = typeof opts.isDrawing === "function" ? opts.isDrawing : function () { return false; };
-    const barSec = opts.barSec > 0 ? opts.barSec : 300;
+    function barSecNow() {
+      if (typeof opts.barSec === "function") {
+        const v = Number(opts.barSec());
+        return v > 0 ? v : 300;
+      }
+      return opts.barSec > 0 ? opts.barSec : 300;
+    }
     const pointSize = opts.pointSize > 0 ? opts.pointSize : 0.01;
     const CLUSTER_MAX = 40;
     if (!chart || !series || !host) {
@@ -3052,7 +3058,9 @@
     let fpPinned = [];
     const FP_PIN_MAX = 24;
     let layoutRaf = 0;
-    const fpSnapTol = Math.max(barSec, 300);
+    function fpSnapTolNow() {
+      return Math.max(barSecNow(), 300);
+    }
 
     function ensureOv(cls) {
       let ov = host.querySelector("." + cls.split(" ").join("."));
@@ -3100,7 +3108,7 @@
           best = fpByTime[k];
         }
       });
-      return bestD <= fpSnapTol ? best : null;
+      return bestD <= fpSnapTolNow() ? best : null;
     }
 
     function timesInRange(a, b) {
@@ -3145,7 +3153,7 @@
               best = times[i];
             }
           }
-          if (bestD <= fpSnapTol) t = best;
+          if (bestD <= fpSnapTolNow()) t = best;
         }
         fpByTime[t] = fb;
       });
@@ -3260,7 +3268,7 @@
           best = bars[i];
         }
       }
-      return bestD <= fpSnapTol ? best : null;
+      return bestD <= fpSnapTolNow() ? best : null;
     }
 
     function levelsFromCandle(bar) {
@@ -3565,6 +3573,41 @@
         onChange();
       },
       layout: layout,
+      ingestPrint: function (px, qty, side, tsSec) {
+        const price = Number(px);
+        const lots = Number(qty);
+        if (!(price > 0) || !(lots > 0)) return;
+        const bars = getBars() || [];
+        if (!bars.length) return;
+        const last = bars[bars.length - 1];
+        let t = last.time;
+        if (typeof tsSec === "number" && isFinite(tsSec)) {
+          const bucket = tsSec - (tsSec % Math.max(1, barSecNow()));
+          if (Math.abs(bucket - t) <= fpSnapTolNow()) t = last.time;
+        }
+        let fb = fpByTime[t];
+        if (!fb) {
+          fb = { time: t, levels: [] };
+          fpByTime[t] = fb;
+        }
+        const step = pointSize > 0 ? pointSize : 0.01;
+        const rounded = Math.round(price / step) * step;
+        let lv = null;
+        for (let i = 0; i < fb.levels.length; i++) {
+          if (Math.abs(Number(fb.levels[i].price) - rounded) < step * 0.51) {
+            lv = fb.levels[i];
+            break;
+          }
+        }
+        if (!lv) {
+          lv = { price: rounded, buy: 0, sell: 0 };
+          fb.levels.push(lv);
+        }
+        const sell = String(side || "").toUpperCase() === "SELL";
+        if (sell) lv.sell += lots;
+        else lv.buy += lots;
+        layout();
+      },
       getState: function () {
         return {
           showProfile: !!showProfile,
@@ -3603,6 +3646,249 @@
     return { type: String(type).toUpperCase() === "EMA" ? "EMA" : "SMA", period: period };
   }
 
+  function familyOf(secid) {
+    const u = String(secid || "").trim().toUpperCase();
+    if (!u) return "";
+    if (u.indexOf("RI") === 0 || u.indexOf("RT") === 0) return "RI";
+    if (u.indexOf("BR") === 0) return "BR";
+    if (u.indexOf("NG") === 0) return "NG";
+    if (u.indexOf("GOLD") === 0) return "GD";
+    return u.slice(0, 2);
+  }
+  function sameTapeInstrument(a, b) {
+    if (!a || !b) return false;
+    const A = String(a).trim().toUpperCase();
+    const B = String(b).trim().toUpperCase();
+    if (A === B || A === "*") return true;
+    const fa = familyOf(A);
+    const fb = familyOf(B);
+    return !!(fa && fa === fb);
+  }
+  function currentBucketUnix(minutes) {
+    const step = Math.max(1, minutes || 5) * 60 * 1000;
+    const msk = Date.now() + 3 * 3600 * 1000;
+    return Math.floor((msk - (msk % step) - 3 * 3600 * 1000) / 1000);
+  }
+  function applyTradeToCandle(series, bars, px, bucketMin) {
+    if (!series || !bars || !bars.length || !(px > 0)) return false;
+    const last = bars[bars.length - 1];
+    const t = typeof last.time === "number" ? last.time : null;
+    if (t == null) return false;
+    if (bucketMin > 0 && t !== currentBucketUnix(bucketMin)) return false;
+    const o = Number(last.open);
+    let h = Number(last.high);
+    let l = Number(last.low);
+    if (![o, h, l].every(Number.isFinite)) return false;
+    if (px > h) h = px;
+    if (px < l) l = px;
+    last.close = px;
+    last.high = h;
+    last.low = l;
+    try { series.update({ time: t, open: o, high: h, low: l, close: px }); } catch (_) { return false; }
+    return true;
+  }
+  function applyTradeToLine(series, data, px) {
+    if (!series || !data || !data.length || !Number.isFinite(px)) return false;
+    const last = data[data.length - 1];
+    if (!last || last.time == null) return false;
+    last.value = px;
+    try { series.update({ time: last.time, value: px }); } catch (_) { return false; }
+    return true;
+  }
+  function aggregateBars(bars, bucketMin) {
+    const step = Math.max(1, bucketMin || 5) * 60;
+    const out = [];
+    let cur = null;
+    (bars || []).forEach(function (b) {
+      if (!b || b.time == null) return;
+      const bucket = b.time - (b.time % step);
+      if (!cur || cur.time !== bucket) {
+        if (cur) out.push(cur);
+        cur = {
+          time: bucket, open: b.open, high: b.high, low: b.low, close: b.close,
+          volume: b.volume || 0
+        };
+      } else {
+        if (b.high > cur.high) cur.high = b.high;
+        if (b.low < cur.low) cur.low = b.low;
+        cur.close = b.close;
+        cur.volume += Number(b.volume) || 0;
+      }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+  function buildRenko(bars, brick) {
+    const size = brick > 0 ? brick : 0.1;
+    const out = [];
+    let last = null;
+    (bars || []).forEach(function (b) {
+      const px = Number(b && b.close);
+      if (!(px > 0)) return;
+      if (last == null) {
+        last = px;
+        return;
+      }
+      while (px - last >= size) {
+        const o = last;
+        last = last + size;
+        out.push({ time: (b.time || 0) + out.length, open: o, high: last, low: o, close: last });
+      }
+      while (last - px >= size) {
+        const o = last;
+        last = last - size;
+        out.push({ time: (b.time || 0) + out.length, open: o, high: o, low: last, close: last });
+      }
+    });
+    return out;
+  }
+  function buildRangeBars(bars, range) {
+    const size = range > 0 ? range : 0.2;
+    const out = [];
+    let cur = null;
+    (bars || []).forEach(function (b) {
+      if (!b) return;
+      if (!cur) {
+        cur = { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+        return;
+      }
+      if (b.high > cur.high) cur.high = b.high;
+      if (b.low < cur.low) cur.low = b.low;
+      cur.close = b.close;
+      if (cur.high - cur.low >= size) {
+        out.push(cur);
+        cur = { time: b.time, open: b.close, high: b.close, low: b.close, close: b.close };
+      }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+  function createTapeClient() {
+    let ws = null;
+    let want = [];
+    let all = false;
+    let retryMs = 1000;
+    let timer = null;
+    const tradeFn = [];
+    const bookFn = [];
+    let raf = 0;
+    const tapeQueue = [];
+    const latestBook = Object.create(null);
+    const lastBookFp = Object.create(null);
+    let bookTimer = 0;
+    const BOOK_UI_MS = 6000;
+    function bookFingerprint(msg) {
+      const bids = msg && msg.bids ? msg.bids : [];
+      const asks = msg && msg.asks ? msg.asks : [];
+      let s = String((msg && msg.instrument) || "");
+      const n = Math.max(bids.length, asks.length);
+      for (let i = 0; i < n; i++) {
+        const b = bids[i];
+        const a = asks[i];
+        s += "|" + (b ? (b.p + ":" + b.q) : "") + "/" + (a ? (a.p + ":" + a.q) : "");
+      }
+      return s;
+    }
+    function flushBooks() {
+      bookTimer = 0;
+      Object.keys(latestBook).forEach(function (id) {
+        const msg = latestBook[id];
+        delete latestBook[id];
+        const fp = bookFingerprint(msg);
+        if (lastBookFp[id] === fp) return;
+        lastBookFp[id] = fp;
+        for (let i = 0; i < bookFn.length; i++) {
+          try { bookFn[i](msg); } catch (_) {}
+        }
+      });
+    }
+    function url() {
+      const proto = (typeof location !== "undefined" && location.protocol === "https:") ? "wss:" : "ws:";
+      const host = (typeof location !== "undefined" && location.host) ? location.host : "localhost";
+      return proto + "//" + host + "/api/trend/ws/tape";
+    }
+    function sendSub() {
+      if (!ws || ws.readyState !== 1) return;
+      try {
+        ws.send(JSON.stringify(all ? { all: true } : { instruments: want }));
+      } catch (_) {}
+    }
+    function emitTrade(msg) {
+      tapeQueue.push(msg);
+      if (tapeQueue.length > 400) tapeQueue.splice(0, tapeQueue.length - 400);
+      if (raf) return;
+      raf = (typeof requestAnimationFrame === "function")
+        ? requestAnimationFrame(flushTrades)
+        : (setTimeout(flushTrades, 16), 1);
+    }
+    function flushTrades() {
+      raf = 0;
+      const batch = tapeQueue.splice(0);
+      for (let b = 0; b < batch.length; b++) {
+        const msg = batch[b];
+        for (let i = 0; i < tradeFn.length; i++) {
+          try { tradeFn[i](msg); } catch (_) {}
+        }
+      }
+    }
+    function schedule() {
+      if (timer) return;
+      const wait = retryMs;
+      retryMs = Math.min(15000, Math.floor(retryMs * 1.6));
+      timer = setTimeout(function () {
+        timer = null;
+        connect();
+      }, wait);
+    }
+    function connect() {
+      if (typeof WebSocket === "undefined") return;
+      if (ws && (ws.readyState === 0 || ws.readyState === 1)) {
+        sendSub();
+        return;
+      }
+      try { if (ws) ws.close(); } catch (_) {}
+      let sock;
+      try { sock = new WebSocket(url()); } catch (_) { schedule(); return; }
+      ws = sock;
+      sock.onopen = function () {
+        retryMs = 1000;
+        sendSub();
+      };
+      sock.onmessage = function (ev) {
+        let msg = null;
+        try { msg = JSON.parse(ev.data); } catch (_) { return; }
+        if (!msg || !msg.t) return;
+        if (msg.t === "trade") emitTrade(msg);
+        else if (msg.t === "book") {
+          latestBook[msg.instrument || "*"] = msg;
+          if (!bookTimer) bookTimer = setTimeout(flushBooks, BOOK_UI_MS);
+        }
+      };
+      sock.onclose = function () {
+        if (ws === sock) ws = null;
+        schedule();
+      };
+      sock.onerror = function () {
+        try { sock.close(); } catch (_) {}
+      };
+    }
+    return {
+      connect: connect,
+      subscribe: function (list, opts) {
+        all = !!(opts && opts.all);
+        want = (list || []).map(function (s) { return String(s || "").trim().toUpperCase(); }).filter(Boolean);
+        connect();
+        sendSub();
+      },
+      onTrade: function (fn) {
+        if (typeof fn === "function") tradeFn.push(fn);
+      },
+      onBook: function (fn) {
+        if (typeof fn === "function") bookFn.push(fn);
+      }
+    };
+  }
+
   global.TrinityChartKit = {
     authHeaders: authHeaders,
     currentUserKey: currentUserKey,
@@ -3629,6 +3915,14 @@
     barCacheGet: barCacheGet,
     barCachePut: barCachePut,
     promptMaConfig: promptMaConfig,
-    esc: esc
+    esc: esc,
+    tape: createTapeClient(),
+    familyOf: familyOf,
+    sameTapeInstrument: sameTapeInstrument,
+    applyTradeToCandle: applyTradeToCandle,
+    applyTradeToLine: applyTradeToLine,
+    aggregateBars: aggregateBars,
+    buildRenko: buildRenko,
+    buildRangeBars: buildRangeBars
   };
 })(typeof window !== "undefined" ? window : globalThis);

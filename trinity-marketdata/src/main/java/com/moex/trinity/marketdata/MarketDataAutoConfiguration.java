@@ -16,8 +16,15 @@ import java.util.Optional;
 public class MarketDataAutoConfiguration {
 
     @Bean
+    @ConditionalOnMissingBean(TapeTickBus.class)
+    TapeTickBus tapeTickBus() {
+        return new TapeTickBus();
+    }
+
+    @Bean
     @ConditionalOnMissingBean(MarketDataFeed.class)
     MarketDataFeed marketDataFeed(
+            TapeTickBus tapeTickBus,
             @Value("${imoex.marketdata.provider:T_INVEST}") String provider,
             @Value("${imoex.marketdata.token:${imoex.broker.token:}}") String token,
             @Value("${imoex.marketdata.sandbox:false}") boolean sandbox,
@@ -30,6 +37,7 @@ public class MarketDataAutoConfiguration {
             return new NoopMarketDataFeed();
         }
         TInvestMarketDataFeed feed = new TInvestMarketDataFeed(tapeCapacity, orderbookDepth);
+        feed.setTickBus(tapeTickBus);
         Map<String, String> figiMap = parseInstrumentFigiMap(instrumentsCsv);
         String tok = token;
         boolean sb = sandbox;

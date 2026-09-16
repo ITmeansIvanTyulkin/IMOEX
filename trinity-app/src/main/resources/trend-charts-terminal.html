@@ -105,9 +105,108 @@
       <button type="button" class="btn btn-ghost btn-xs" id="charts-fullscreen">Полный экран</button>
     </div>
   </div>
+  <div class="charts-workbench">
+  <aside class="charts-dock" id="charts-dock">
+    <div class="charts-dock-block">
+      <div class="charts-dock-h">Вотчлист</div>
+      <div id="charts-watchlist"></div>
+    </div>
+    <div class="charts-dock-block">
+      <div class="charts-dock-h">ТФ</div>
+      <div class="charts-tf" id="charts-tf" role="group">
+        <button type="button" class="charts-tf-btn is-on" data-tf="M5">M5</button>
+        <button type="button" class="charts-tf-btn" data-tf="M15">M15</button>
+        <button type="button" class="charts-tf-btn" data-tf="H1">H1</button>
+        <button type="button" class="charts-tf-btn" data-tf="TICK">Tick</button>
+        <button type="button" class="charts-tf-btn" data-tf="RENKO">Renko</button>
+        <button type="button" class="charts-tf-btn" data-tf="RANGE">Range</button>
+      </div>
+    </div>
+    <div class="charts-dock-block">
+      <div class="charts-dock-h">Стакан</div>
+      <div class="charts-dom" id="charts-dom"><div class="charts-dock-empty">ждём ленту…</div></div>
+    </div>
+    <div class="charts-dock-block">
+      <div class="charts-dock-h">Лента</div>
+      <div class="charts-tape" id="charts-tape"></div>
+    </div>
+    <div class="charts-dock-block">
+      <div class="charts-dock-h">Алерты</div>
+      <div class="charts-alert-row">
+        <select id="charts-alert-dir" title="направление">
+          <option value="above">≥</option>
+          <option value="below">≤</option>
+        </select>
+        <input id="charts-alert-px" type="number" step="0.01" placeholder="цена">
+        <button type="button" class="btn btn-ghost btn-xs" id="charts-alert-add">+</button>
+      </div>
+      <div id="charts-alerts"></div>
+    </div>
+    <div class="charts-dock-block">
+      <div class="charts-dock-h">Шаблоны</div>
+      <select id="charts-templates"></select>
+      <div class="charts-alert-row">
+        <button type="button" class="btn btn-ghost btn-xs" id="charts-tpl-save">Сохранить</button>
+        <button type="button" class="btn btn-ghost btn-xs" id="charts-tpl-apply">Открыть</button>
+      </div>
+    </div>
+  </aside>
   <div class="charts-terminal-grid" id="charts-terminal-grid" aria-label="Графики инструментов"></div>
+  </div>
 </section>
 <style>
+.charts-workbench {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+.charts-dock {
+  position: sticky;
+  top: 0.5rem;
+  max-height: calc(100vh - 8rem);
+  overflow: auto;
+  background: #f7f8f9;
+  border: 1px solid #e2e8ed;
+  border-radius: 12px;
+  padding: 0.55rem 0.65rem;
+}
+.charts-dock-h {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 0.3rem;
+}
+.charts-dock-block { margin-bottom: 0.75rem; }
+.charts-dock-empty { font-size: 0.78rem; color: #94a3b8; }
+.charts-tf { display: flex; flex-wrap: wrap; gap: 4px; }
+.charts-tf-btn {
+  border: 1px solid #d5dde2; background: #fff; border-radius: 6px;
+  font-size: 0.72rem; padding: 0.15rem 0.4rem; cursor: pointer;
+}
+.charts-tf-btn.is-on { background: #1a2228; color: #fff; border-color: #1a2228; }
+.charts-watch-row, .charts-alert-item {
+  display: flex; justify-content: space-between; gap: 0.4rem;
+  font: 12px/1.4 ui-monospace, Menlo, monospace; cursor: pointer;
+}
+.charts-watch-row.is-on { background: #e8eef2; }
+.charts-watch-px.is-up { color: #15803d; }
+.charts-watch-px.is-down { color: #b91c1c; }
+.charts-dom, .charts-tape { max-height: 12rem; overflow: auto; font: 11px/1.3 ui-monospace, Menlo, monospace; }
+.charts-dom-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+.charts-dom-row.is-ask { color: #b91c1c; }
+.charts-dom-row.is-bid { color: #15803d; }
+.charts-tape-row { display: flex; justify-content: space-between; }
+.charts-tape-row.is-buy { color: #15803d; }
+.charts-tape-row.is-sell { color: #b91c1c; }
+.charts-alert-row { display: flex; gap: 4px; margin-bottom: 4px; }
+.charts-alert-row input, #charts-templates { flex: 1; min-width: 0; font-size: 0.78rem; }
+.charts-alert-row select { width: 3.4rem; font-size: 0.78rem; }
+@media (max-width: 980px) {
+  .charts-workbench { grid-template-columns: 1fr; }
+  .charts-dock { position: static; max-height: none; }
+}
 .charts-tv-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -312,5 +411,5 @@
 </style>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260910-fast1"></script>
-<script src="/js/trinity-chart-kit.js?v=20260902-disk1"></script>
-<script src="/js/trend-charts-terminal.js?v=20260910-fast1"></script>
+<script src="/js/trinity-chart-kit.js?v=20260916-tv5"></script>
+<script src="/js/trend-charts-terminal.js?v=20260916-tv5"></script>

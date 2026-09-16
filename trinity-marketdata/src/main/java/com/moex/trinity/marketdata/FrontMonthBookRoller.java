@@ -29,9 +29,15 @@ public final class FrontMonthBookRoller {
         this.autoResolve = autoResolve == null || autoResolve.isBlank() ? "BR" : autoResolve.trim();
     }
 
-    @Scheduled(fixedDelayString = "${imoex.marketdata.front-month-roll-ms:300000}", initialDelay = 20_000L)
+    @Scheduled(fixedDelayString = "${imoex.marketdata.front-month-roll-ms:300000}", initialDelay = 5_000L)
     public void rollSubscribedFamilies() {
         Set<String> families = new LinkedHashSet<>();
+        families.add("BR");
+        families.add("RI");
+        families.add("NG");
+        families.add("SI");
+        families.add("GD");
+        families.add("MX");
         String autoFam = TInvestBrokerMarketData.familyOf(autoResolve);
         if (autoFam != null) {
             families.add(autoFam);

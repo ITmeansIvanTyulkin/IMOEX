@@ -37,6 +37,7 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     private final TradeTapeBuffer tape;
     private final int orderbookDepth;
     private final BrokerTapeArchive archive;
+    private volatile TapeTickBus tickBus;
     private final AtomicBoolean streaming = new AtomicBoolean(false);
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicReference<String> status = new AtomicReference<>("T-Invest feed idle (no token / not started)");
@@ -85,6 +86,10 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     /** Append-only DOM/tape archive used for hist replay (may be empty until stream runs). */
     public BrokerTapeArchive archive() {
         return archive;
+    }
+
+    public void setTickBus(TapeTickBus tickBus) {
+        this.tickBus = tickBus;
     }
 
     /**
@@ -236,6 +241,10 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
             String inst = instrumentByFigi.getOrDefault(t.getFigi(), t.getFigi());
             TradePrint print = TInvestBrokerMarketData.toPrint(inst, t);
             tape.add(print);
+            TapeTickBus bus = tickBus;
+            if (bus != null) {
+                bus.publish(print);
+            }
             if (archive != null) {
                 archive.append(print);
             }
@@ -396,6 +405,10 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
             return;
         }
         books.put(key, book);
+        TapeTickBus bus = tickBus;
+        if (bus != null) {
+            bus.publishBook(book);
+        }
     }
 
     @Override
