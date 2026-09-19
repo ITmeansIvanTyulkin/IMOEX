@@ -60,8 +60,10 @@
   let deskLayoutTimer = null;
   let domFollowMid = true;
   let domScrollBound = false;
+  let lastDomBook = null;
+  const DOM_DEPTH = 50;
   const DESK_MS = 12000;
-  const BOOK_MS = 1500;
+  const BOOK_MS = 6000;
   /** Hard ceiling — prefer TrinityFastBoot contract (all strategies). */
   const DESK_FETCH_MS = (window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000;
   const BOOK_FETCH_MS = (window.TrinityFastBoot && TrinityFastBoot.BOOK_MS) || 12000;
@@ -74,7 +76,7 @@
   const HI_LO_COLOR = "#b91c1c";
   const ZONE_EDGE = "#6d28d9";
   const DESK_LIVE_MS = 2000;
-  const BOOK_LIVE_MS = 1500;
+  const BOOK_LIVE_MS = 6000;
   let lastWorkingOpen = null;
   let lastOverlayPlan = {};
   let lastOverlaySig = {};
@@ -3605,6 +3607,16 @@
       try { syncStatusRail(snap); } catch (_) {}
     }
   }
+  function centerDomOnSpread(body) {
+    if (!body) return false;
+    const mid = body.querySelector(".dom-spread");
+    if (!mid || !(body.clientHeight > 0)) return false;
+    const bodyBox = body.getBoundingClientRect();
+    const midBox = mid.getBoundingClientRect();
+    const y = midBox.top - bodyBox.top + body.scrollTop;
+    body.scrollTop = Math.max(0, y - body.clientHeight / 2 + midBox.height / 2);
+    return true;
+  }
   function renderDom(book) {
     const body = $("signal-dom-body");
     const meta = $("signal-dom-meta");
@@ -3618,40 +3630,46 @@
         domFollowMid = false;
       }, { passive: true });
     }
+    const kit = window.TrinityChartKit;
+    const instOf = function (b) {
+      return (b && (b.instrumentId || b.instrument)) || "";
+    };
+    if (lastDomBook && book && kit && typeof kit.sameTapeInstrument === "function"
+        && instOf(book) && instOf(lastDomBook)
+        && !kit.sameTapeInstrument(instOf(book), instOf(lastDomBook))) {
+      lastDomBook = null;
+    }
+    if (kit && typeof kit.mergeDomBook === "function") {
+      book = kit.mergeDomBook(lastDomBook, book);
+    }
     if (!book || ((!book.bids || !book.bids.length) && (!book.asks || !book.asks.length))) {
       body.innerHTML = "<div class=\"signal-dom-empty\">Нет DOM</div>";
       if (meta) meta.textContent = book && book.summary ? book.summary : "—";
       if (imb) imb.hidden = true;
       return;
     }
+    lastDomBook = book;
     const prevScroll = body.scrollTop;
-    const hadRows = !!body.querySelector(".dom-row");
-    const bids = (book.bids || []).slice(0, 50);
-    const asks = (book.asks || []).slice(0, 50);
+    const firstPaint = !body.querySelector(".dom-row");
+    const bids = (book.bids || []).filter(function (lv) { return lv && Number(lv.p) > 0; }).slice(0, DOM_DEPTH);
+    const asks = (book.asks || []).filter(function (lv) { return lv && Number(lv.p) > 0; }).slice(0, DOM_DEPTH);
     const tape = book.tapeByPrice || {};
     const bestBid = bids.length ? Number(bids[0].p) : null;
     const bestAsk = asks.length ? Number(asks[0].p) : null;
-    let bidLots = 0, askLots = 0;
-    bids.forEach(function (b) { bidLots += Number(b.q) || 0; });
-    asks.forEach(function (a) { askLots += Number(a.q) || 0; });
-    const totLots = bidLots + askLots;
-    if (imb && imbBid && imbAsk && totLots > 0) {
+    if (imb && imbBid && imbAsk) {
       imb.hidden = false;
-      const bp = Math.round(100 * bidLots / totLots);
-      imbBid.style.width = bp + "%";
-      imbAsk.style.width = (100 - bp) + "%";
-      imbBid.title = "Bid " + Math.round(bidLots) + " лотов (" + bp + "%)";
-      imbAsk.title = "Ask " + Math.round(askLots) + " лотов (" + (100 - bp) + "%)";
-    } else if (imb) {
-      imb.hidden = true;
+      imbBid.style.width = "50%";
+      imbAsk.style.width = "50%";
+      imbBid.title = "Bid";
+      imbAsk.title = "Ask";
     }
     if (meta) {
       const age = book.asOf ? " · live" : "";
       const spr = (bestBid != null && bestAsk != null)
         ? (" · spr " + (bestAsk - bestBid).toFixed(2))
         : "";
-      meta.textContent = (book.instrumentId || "BR")
-        + " · depth " + Math.max(bids.length, asks.length)
+      meta.textContent = (book.instrumentId || book.instrument || "BR")
+        + " · bid " + bids.length + " · ask " + asks.length
         + spr + age;
     }
     let maxQ = 1;
@@ -3668,7 +3686,6 @@
       return Math.max(4, Math.round(100 * (Number(q) || 0) / maxQ));
     };
     let html = "";
-    // Asks: reverse so highest at top, best ask at bottom of ask zone
     for (let i = asks.length - 1; i >= 0; i--) {
       const a = asks[i];
       const p = Number(a.p);
@@ -3722,13 +3739,12 @@
     }
     body.innerHTML = html;
     paintLastCandle(liveCandlePx(book), book);
-    // Center mid only on first paint; never scrollIntoView (it jumps the whole page)
-    if (!hadRows || domFollowMid) {
-      const bestEl = body.querySelector(".dom-spread") || body.querySelector(".is-best");
-      if (bestEl) {
-        const target = bestEl.offsetTop - (body.clientHeight / 2) + (bestEl.offsetHeight / 2);
-        body.scrollTop = Math.max(0, target);
-      }
+    if (firstPaint) {
+      centerDomOnSpread(body);
+      requestAnimationFrame(function () {
+        centerDomOnSpread(body);
+        requestAnimationFrame(function () { centerDomOnSpread(body); });
+      });
     } else {
       body.scrollTop = prevScroll;
     }
@@ -4608,6 +4624,7 @@
       instSel.addEventListener("change", function () {
         invalidateDeskFetch();
         lastDeskInstrument = "";
+        lastDomBook = null;
         lastOverlayKey = "";
         deskInstrumentPinned = instSel.value;
         writeStoredInstrument(instSel.value);

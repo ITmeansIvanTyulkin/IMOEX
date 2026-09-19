@@ -57,5 +57,9 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("AbortController"), "desk/book must abort hung fetches");
         assertTrue(src.contains("tool-clusters"), "positional/range desk must wire clusters tool");
         assertTrue(src.contains("attachFlowOverlays"), "desk must attach flow overlays for clusters");
+        assertTrue(src.contains("mergeDomBook"), "DOM must keep both bid and ask shelves");
+        assertTrue(src.contains("const DOM_DEPTH = 50"), "DOM must keep max bid and ask depth");
+        assertTrue(src.contains("overflow-y: scroll") || src.contains("body.scrollTop"), "DOM ladder must scroll");
+        assertTrue(src.contains("function centerDomOnSpread"), "DOM must pin the view on spread, not last tick");
     }
 }

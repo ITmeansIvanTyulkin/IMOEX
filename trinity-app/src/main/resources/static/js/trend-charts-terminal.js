@@ -748,11 +748,29 @@
   function renderTermDom(book) {
     const el = $("charts-dom");
     if (!el) return;
-    const asks = (book.asks || []).slice(0, 8).reverse();
-    const bids = (book.bids || []).slice(0, 8);
+    const kit = window.TrinityChartKit;
+    if (renderTermDom._last && book && kit && typeof kit.sameTapeInstrument === "function"
+        && book.instrument && renderTermDom._last.instrument
+        && !kit.sameTapeInstrument(renderTermDom._last.instrument, book.instrument)) {
+      renderTermDom._last = null;
+    }
+    if (kit && typeof kit.mergeDomBook === "function") {
+      book = kit.mergeDomBook(renderTermDom._last, book);
+    }
+    if (book && book.instrument) renderTermDom._last = book;
+    const SIDE = 8;
+    function pad(rows) {
+      const out = (rows || []).slice(0, SIDE);
+      while (out.length < SIDE) out.push({ p: NaN, q: 0 });
+      return out;
+    }
+    const asks = pad(book && book.asks).reverse();
+    const bids = pad(book && book.bids);
     function row(lv, cls) {
-      return "<div class=\"charts-dom-row " + cls + "\"><span>" + (lv.q || "") + "</span><span>"
-        + Number(lv.p).toFixed(2) + "</span><span></span></div>";
+      const empty = !(Number(lv.p) > 0);
+      return "<div class=\"charts-dom-row " + cls + (empty ? " is-pad" : "") + "\"><span>"
+        + (empty ? "" : (lv.q || "")) + "</span><span>"
+        + (empty ? "" : Number(lv.p).toFixed(2)) + "</span><span></span></div>";
     }
     el.innerHTML = asks.map(function (lv) { return row(lv, "is-ask"); }).join("")
       + bids.map(function (lv) { return row(lv, "is-bid"); }).join("");

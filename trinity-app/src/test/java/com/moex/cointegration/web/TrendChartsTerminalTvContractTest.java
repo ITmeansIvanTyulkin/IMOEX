@@ -44,6 +44,15 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(js.contains("buildRenko"), "renko missing");
         assertTrue(js.contains("buildRangeBars"), "range missing");
         assertTrue(js.contains("ingestPrint"), "footprint ingest missing");
+        assertTrue(js.contains("mergeDomBook"), "terminal DOM must keep both shelves");
+    }
+
+    @Test
+    void kitMergesOneSidedBooks() throws Exception {
+        String js = read("src/main/resources/static/js/trinity-chart-kit.js");
+        assertTrue(js.contains("function mergeDomBook"), "mergeDomBook helper missing");
+        assertTrue(js.contains("n.length >= p.length ? n : p"),
+                "shallower WS book must not drop DOM depth");
     }
 
     @Test

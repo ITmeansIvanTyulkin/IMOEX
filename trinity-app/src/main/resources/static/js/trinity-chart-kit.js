@@ -3763,6 +3763,25 @@
     if (cur) out.push(cur);
     return out;
   }
+  /**
+   * Keep both bid and ask shelves. A one-sided stream snapshot must not
+   * repaint the whole ladder red or green from the last trade.
+   */
+  function mergeDomBook(prev, next) {
+    if (!next) return prev || null;
+    if (!prev) return next;
+    function pick(nextSide, prevSide) {
+      const n = nextSide && nextSide.length ? nextSide : null;
+      const p = prevSide && prevSide.length ? prevSide : null;
+      if (!n) return p || [];
+      if (!p) return n;
+      return n.length >= p.length ? n : p;
+    }
+    return Object.assign({}, next, {
+      bids: pick(next.bids, prev.bids),
+      asks: pick(next.asks, prev.asks)
+    });
+  }
   function createTapeClient() {
     let ws = null;
     let want = [];
@@ -3775,6 +3794,7 @@
     const tapeQueue = [];
     const latestBook = Object.create(null);
     const lastBookFp = Object.create(null);
+    const lastMerged = Object.create(null);
     let bookTimer = 0;
     const BOOK_UI_MS = 6000;
     function bookFingerprint(msg) {
@@ -3792,8 +3812,11 @@
     function flushBooks() {
       bookTimer = 0;
       Object.keys(latestBook).forEach(function (id) {
-        const msg = latestBook[id];
+        const incoming = latestBook[id];
         delete latestBook[id];
+        const msg = mergeDomBook(lastMerged[id], incoming);
+        if (!msg) return;
+        lastMerged[id] = msg;
         const fp = bookFingerprint(msg);
         if (lastBookFp[id] === fp) return;
         lastBookFp[id] = fp;
@@ -3860,7 +3883,8 @@
         if (!msg || !msg.t) return;
         if (msg.t === "trade") emitTrade(msg);
         else if (msg.t === "book") {
-          latestBook[msg.instrument || "*"] = msg;
+          const id = familyOf(msg.instrument) || (msg.instrument || "*");
+          latestBook[id] = mergeDomBook(latestBook[id] || lastMerged[id], msg);
           if (!bookTimer) bookTimer = setTimeout(flushBooks, BOOK_UI_MS);
         }
       };
@@ -3917,6 +3941,7 @@
     promptMaConfig: promptMaConfig,
     esc: esc,
     tape: createTapeClient(),
+    mergeDomBook: mergeDomBook,
     familyOf: familyOf,
     sameTapeInstrument: sameTapeInstrument,
     applyTradeToCandle: applyTradeToCandle,

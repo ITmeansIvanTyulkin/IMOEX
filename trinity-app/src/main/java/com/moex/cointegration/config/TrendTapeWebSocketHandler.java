@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit;
 public class TrendTapeWebSocketHandler extends TextWebSocketHandler implements TapeTickBus.Listener {
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int BOOK_LEVELS = 25;
+    private static final int BOOK_LEVELS = 50;
 
     private final TapeTickBus bus;
     private final Optional<MarketDataFeed> feed;

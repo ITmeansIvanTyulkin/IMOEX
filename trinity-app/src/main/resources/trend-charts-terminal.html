@@ -195,8 +195,9 @@
 .charts-watch-px.is-down { color: #b91c1c; }
 .charts-dom, .charts-tape { max-height: 12rem; overflow: auto; font: 11px/1.3 ui-monospace, Menlo, monospace; }
 .charts-dom-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
-.charts-dom-row.is-ask { color: #b91c1c; }
-.charts-dom-row.is-bid { color: #15803d; }
+.charts-dom-row.is-ask { color: #b91c1c; background: rgba(220, 38, 38, 0.10); }
+.charts-dom-row.is-bid { color: #15803d; background: rgba(22, 163, 74, 0.10); }
+.charts-dom-row.is-pad { opacity: 0.35; }
 .charts-tape-row { display: flex; justify-content: space-between; }
 .charts-tape-row.is-buy { color: #15803d; }
 .charts-tape-row.is-sell { color: #b91c1c; }
@@ -411,5 +412,5 @@
 </style>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260910-fast1"></script>
-<script src="/js/trinity-chart-kit.js?v=20260916-tv5"></script>
-<script src="/js/trend-charts-terminal.js?v=20260916-tv5"></script>
+<script src="/js/trinity-chart-kit.js?v=20260919-dom1"></script>
+<script src="/js/trend-charts-terminal.js?v=20260919-dom1"></script>
