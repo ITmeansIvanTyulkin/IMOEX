@@ -1,7 +1,7 @@
 # Handoff prompt: TRINITY operator (Exclusive observe + desk/playbook)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-09-15 ~17:42 MSK · seals до 15.09; Phase C NO_GO; collect corpus; durable resume/JVM thrash mitigations.  
+> **Обновлено:** 2026-09-17 ~18:03 MSK · seals до 17.09; Phase C NO_GO; collect corpus; durable resume/JVM thrash mitigations.  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
@@ -36,19 +36,25 @@ Pairs DAILY и calendar-arb оператор смотрит сам, пока н�
 
 **Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
 
-### Состояние на 2026-09-15 EOD (~17:42 MSK)
+### Состояние на 2026-09-17 EOD (~18:03 MSK)
 
 | Метрика | Значение |
 |--------|----------|
-| **Phase A** | **done** 25–28.08. Extra sealed: 01–04.09, 07–11.09, 14–**15.09** |
-| **OOS cumulative** | **~40** Exclusive, **~+12 286 ₽**, expectancy **~307 ₽/trade**, WR **~70%**, labeled SL 100% |
-| **15.09** | **+7 021 ₽** · 6 сделок: 1×SL SWEEP + 5×TP2; gateHits=0; wins+loss с `contextAtEnter` + corpus ARM/FILL/CLOSE |
+| **Phase A** | **done** 25–28.08 + full **15.09**. Extra sealed: 01–04.09, 07–11.09, 14/16/**17.09** |
+| **OOS cumulative** | **44** Exclusive, **+15 351 ₽**, expectancy **~349 ₽/trade**, WR **75%**, labeled SL 100% |
+| **17.09** | **+2 554 ₽** · 4/0: 3×TP2 + 1×SWEEP BE_STOP; gateHits=0; EOD optional |
+| **16.09** | **+140 ₽** · 1× SWEEP BE_STOP; thin day |
+| **15.09** | **+7 021 ₽** · 6 сделок: 1×SL SWEEP + 5×TP2; full observe |
 | **14.09** | **+1 498 ₽** · 3× BUY RETEST TP2 |
-| **Front** | **BRV6** · exp 2026-10-01 |
-| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect |
-| **Ops** | `trend_observe_resume.sh` → daemon JVM + desk poll + jvm-watch; plaques/warmup thrash mitigations (commits 15.09) |
+| **Corpus** | Exclusive ~6526 events · 24 decision days · armFill ~97 · ML collecting |
+| **Front** | **BRV6** · exp 2026-10-01 (~14d) |
+| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect · doNotTuneOnSight |
+| **Ops** | `trend_observe_resume.sh` → daemon JVM + desk poll + jvm-watch |
 
-**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-16` ~09:55; evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
+**Блок Phase C:** metrics `readyForPhaseC=true`, но **human OOS review + явный go** обязательны. FORTS SL / scale / pad-tune — нет.  
+Пакет для review: `IMOEX/data/trend-oos-human-review.md` (и `.json`) — evidence only, live не включает.
+
+**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh` (~09:55 next trade day); evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
 
 ---
 

@@ -10,14 +10,16 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import time
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from trend_observe_auth import DESK_URL, desk_request  # noqa: E402
+
 OUT = ROOT / "data" / "trend-gate-observe.jsonl"
-DESK_URL = "http://127.0.0.1:8080/api/trend/desk"
 
 NEEDLES = (
     ("smash", ("вынос через дневную полку", "smash")),
@@ -28,8 +30,7 @@ NEEDLES = (
 
 
 def fetch_desk():
-    with urllib.request.urlopen(DESK_URL, timeout=20) as r:
-        return json.load(r)
+    return desk_request(DESK_URL, timeout=20)
 
 
 def classify(text: str) -> list[str]:

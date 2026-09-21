@@ -26,9 +26,12 @@ PY
 SETTINGS="$ROOT/data/trend-ui-settings.json"
 python3 - <<'PY'
 import json
-import urllib.request
+import sys
 from pathlib import Path
 from datetime import datetime
+
+sys.path.insert(0, str(Path("scripts").resolve()))
+from trend_observe_auth import desk_request
 
 p = Path("data/trend-ui-settings.json")
 want = {
@@ -42,11 +45,10 @@ EXPIRED = {"BRU6"}  # last trade 2026-08-31
 
 def desk_front():
     try:
-        with urllib.request.urlopen(
+        d = desk_request(
             "http://127.0.0.1:8080/api/trend/desk?playbook=levels-profile-br-m5",
             timeout=3,
-        ) as r:
-            d = json.loads(r.read().decode())
+        )
         s = d.get("situation") or {}
         ce = s.get("contractExpiry") if isinstance(s.get("contractExpiry"), dict) else {}
         for cand in (ce.get("secid"), d.get("instrument"), s.get("instrument")):
