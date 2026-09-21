@@ -39,6 +39,7 @@ class TogglePersistContractTest {
                 "src/main/resources/static/js/trend-signal-desk.js",
                 "trinity-app/src/main/resources/static/js/trend-signal-desk.js");
         assertTrue(trend.contains("hydrateDeskModeSwitches"));
+        assertTrue(trend.contains("positionalAutoFlag"));
         assertTrue(trend.contains("dataset.hydrated"));
         int saveAt = trend.indexOf("async function saveDeskSelection");
         String saveBody = trend.substring(saveAt, Math.min(trend.length(), saveAt + 1600));
@@ -62,5 +63,17 @@ class TogglePersistContractTest {
                 "trinity-app/src/main/resources/static/js/operator.js");
         assertTrue(ops.contains("dataset.hydrated === \"1\""));
         assertTrue(ops.contains("payload.autoExecuteAfterAnalysis"));
+    }
+
+    @Test
+    void observeResumeMustKeepPositionalAuto() throws Exception {
+        String sh = read(
+                "scripts/trend_observe_resume.sh",
+                "../scripts/trend_observe_resume.sh",
+                "IMOEX/scripts/trend_observe_resume.sh");
+        assertTrue(sh.contains("positionalAutoExecution"),
+                "observe resume must not drop the positional paper switch");
+        assertTrue(sh.contains("{**cur, **want}") || sh.contains("want = {**cur"),
+                "observe resume must merge into existing settings, not replace with a short dict");
     }
 }

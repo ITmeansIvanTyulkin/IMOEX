@@ -82,7 +82,8 @@ public class MarketDataAutoConfiguration {
     @ConditionalOnMissingBean(MarketDataResearchService.class)
     MarketDataResearchService marketDataResearchService(
             MarketDataFeed feed,
-            @Value("${imoex.marketdata.auto-resolve-instrument:BR}") String instrument
+            @Value("${imoex.marketdata.auto-resolve-instrument:BR}") String instrument,
+            @Value("${imoex.data-dir:data}") String dataDir
     ) {
         String live = instrument == null || instrument.isBlank() ? "BRU6" : instrument.trim();
         TInvestCredentials creds = TInvestCredentials.resolve();
@@ -95,7 +96,7 @@ public class MarketDataAutoConfiguration {
         }
         return new MarketDataResearchService(
                 feed,
-                new com.moex.trinity.marketdata.BrokerTapeArchive(java.nio.file.Path.of("data", "broker-tape")),
+                new com.moex.trinity.marketdata.BrokerTapeArchive(java.nio.file.Path.of(dataDir, "broker-tape")),
                 live
         );
     }

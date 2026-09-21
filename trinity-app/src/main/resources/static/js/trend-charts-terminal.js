@@ -310,11 +310,23 @@
       return null;
     }
   }
+  function clampPaneSpacing(s) {
+    const n = Number(s);
+    if (!(n > 0) || !isFinite(n)) return 8;
+    return Math.max(3, Math.min(16, n));
+  }
   function restorePaneScale(p) {
     if (!p || !p.chart || !(p.barSpacing > 0)) return false;
     try {
-      p.chart.timeScale().applyOptions({ barSpacing: p.barSpacing });
-      if (p.logical) p.chart.timeScale().setVisibleLogicalRange(p.logical);
+      const spacing = clampPaneSpacing(p.barSpacing);
+      p.barSpacing = spacing;
+      p.chart.timeScale().applyOptions({ barSpacing: spacing });
+      const span = p.logical ? Math.abs(Number(p.logical.to) - Number(p.logical.from)) : 0;
+      if (span >= 12) p.chart.timeScale().setVisibleLogicalRange(p.logical);
+      else {
+        p.logical = null;
+        p.chart.timeScale().scrollToRealTime();
+      }
       return true;
     } catch (_) {
       return false;
@@ -327,7 +339,7 @@
       requestAnimationFrame(function () {
         const snap = snapshotPaneScale(p);
         if (!snap || !(snap.barSpacing > 0)) return;
-        p.barSpacing = snap.barSpacing;
+        p.barSpacing = clampPaneSpacing(snap.barSpacing);
         p.logical = snap.logical;
         p.scaleLocked = true;
         scheduleSave();
@@ -626,7 +638,12 @@
           p.series.setData(candles);
         }
         try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
-        try { p.chart.timeScale().fitContent(); } catch (_) {}
+        try {
+          p.chart.timeScale().applyOptions({ barSpacing: 8 });
+          p.chart.timeScale().scrollToRealTime();
+        } catch (_) {}
+        p.barSpacing = 8;
+        p.scaleLocked = true;
       }
       if (p.flow) {
         p.flow.setProfile(data.profile || []);
@@ -1084,7 +1101,10 @@
       p.logical = null;
       try { p.series.applyOptions({ autoscaleInfoProvider: undefined }); } catch (_) {}
       try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
-      try { p.chart.timeScale().fitContent(); } catch (_) {}
+      try {
+        p.chart.timeScale().applyOptions({ barSpacing: 8 });
+        p.chart.timeScale().scrollToRealTime();
+      } catch (_) {}
       if (p.flow) p.flow.layout();
     });
     scheduleSave();

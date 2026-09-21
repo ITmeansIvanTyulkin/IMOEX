@@ -80,6 +80,12 @@
         </dependency>
     </dependencies>
 
+    <properties>
+        <!-- Ordinary `mvn -pl trinity-app -am spring-boot:run` always boots the local
+             working tree (branch dev + uncommitted IMOEX / IMOEX-core) with profile dev. -->
+        <spring-boot.run.profiles>dev</spring-boot.run.profiles>
+    </properties>
+
     <build>
         <plugins>
             <plugin>
@@ -90,6 +96,12 @@
                     <mainClass>com.moex.trinity.TrinityApplication</mainClass>
                     <!-- Keep cwd at repo root so data/ and application-local.yml resolve. -->
                     <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
+                    <profiles>
+                        <profile>dev</profile>
+                    </profiles>
+                    <!-- Reactor classpath (not a stale thin launch) + live resource refresh. -->
+                    <optimizedLaunch>false</optimizedLaunch>
+                    <addResources>true</addResources>
                 </configuration>
                 <executions>
                     <execution>

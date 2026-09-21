@@ -158,10 +158,13 @@ HTF UP **не запрещает** шорт от TOP; HTF DOWN **не запре
 ```bash
 cd /Users/ivan/MEGA/Work/TRINITY/IMOEX
 mvn -pl trinity-app -am spring-boot:run
-# профиль operator активируется сам, если есть ../IMOEX-core/pom.xml
+# всегда: Spring profile `dev` (.mvn/maven.config + trinity-app pom) → working tree
+# (IMOEX + ../IMOEX-core), не stale jar / не «чистый» origin без локальных правок
+# профиль Maven `operator` активируется сам, если есть ../IMOEX-core/pom.xml
 # при нехватке RAM: -Dspring-boot.run.jvmArguments='-Xms256m -Xmx1536m'
 ```
 Без `-Poperator` на этой машине нормально. Не путать с public bones clone.
+Не использовать `trend_observe_resume.sh` для рестарта JVM (может переписать settings).
 
 **Утро (~09:55 MSK, после sleep/Mac off):**
 ```bash

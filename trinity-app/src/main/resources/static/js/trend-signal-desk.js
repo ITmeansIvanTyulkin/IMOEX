@@ -22,6 +22,8 @@
   let userScaleGesture = false;
   let chartNav = null;
   const SCALE_STORE = "trinity.trend.desk.scale";
+  const DEFAULT_BAR_SPACING = 8;
+  const MAX_BAR_SPACING = 16;
   const INST_STORE = "trinity.trend.desk.instrument";
   const PB_STORE = "trinity.trend.desk.playbook";
   let deskInstrumentPinned = null;
@@ -242,15 +244,28 @@
       "Ручная торговля: график без заявок."
     );
   }
+  function positionalAutoFlag(data) {
+    if (!data) return null;
+    if (data.positionalAutoExecution === true || data.positionalAutoExecution === false) {
+      return !!data.positionalAutoExecution;
+    }
+    const sit = data.situation || {};
+    if (sit.positionalAutoExecution === true || sit.positionalAutoExecution === false) {
+      return !!sit.positionalAutoExecution;
+    }
+    return null;
+  }
   function syncPositionalAutoSwitch(data) {
     const wrap = $("positional-auto-wrap");
     const tog = $("desk-positional-auto-execution");
     const pos = deskScope() === "positional";
     if (wrap) wrap.hidden = !pos;
     if (!tog) return;
+    const on = positionalAutoFlag(data);
+    if (on == null && tog.dataset.hydrated === "1") return;
     paintModeSwitch(
       tog,
-      !!(data && data.positionalAutoExecution),
+      !!on,
       "positional-mode-hint",
       "Авто: чек-лист задаёт сторону, сетка в журнал.",
       "Ручная торговля: график есть, входов нет."
@@ -1893,12 +1908,27 @@
     return ov;
   }
   function layoutProfile(levels) {
+    const host = $("signal-chart");
+    if (host) host.classList.toggle("is-session-profile", !!showProfile);
+    // Prefer kit flow profile: densest of day-tape / footprint / OHLC (ATAS-like).
+    if (chartFlow && typeof chartFlow.setProfile === "function") {
+      if (levels && levels.length) lastProfile = levels;
+      chartFlow.setProfile(lastProfile || []);
+      if (typeof chartFlow.setShowProfile === "function") {
+        chartFlow.setShowProfile(!!showProfile);
+      }
+      const legacy = $("signal-profile-overlay");
+      if (legacy) {
+        legacy.innerHTML = "";
+        legacy.hidden = true;
+      }
+      if (typeof chartFlow.layout === "function") chartFlow.layout();
+      return;
+    }
     const ov = ensureProfileOverlay();
     if (!ov || !candleSeries) return;
     ov.innerHTML = "";
     ov.hidden = !showProfile;
-    const host = $("signal-chart");
-    if (host) host.classList.toggle("is-session-profile", !!showProfile);
     if (!showProfile || !levels || !levels.length) return;
     const maxW = 84;
     const rowPx = 3;
@@ -2537,6 +2567,8 @@
     try { spacing = ts.options().barSpacing || 8; } catch (_) {}
     const colW = Math.max(28, Math.min(56, Math.round(spacing * 0.92)));
     const fpCount = Object.keys(footprintByTime).length;
+    let emptyCols = 0;
+    let painted = 0;
     keys.forEach(function (t) {
       const fb = lookupFootprint(t);
       const x = ts.timeToCoordinate(t);
@@ -2549,13 +2581,7 @@
       col.style.left = (x - colW / 2) + "px";
       col.style.width = colW + "px";
       if (!fb || !(fb.levels || []).length) {
-        const miss = document.createElement("div");
-        miss.className = "signal-fp-miss";
-        miss.textContent = fpCount ? "нет уровней" : "нет ленты";
-        miss.title = fpCount
-          ? "Лента есть, но для этой свечи уровней нет"
-          : "В desk нет footprint (лента пуста или не подгружена)";
-        col.appendChild(miss);
+        emptyCols += 1;
         ov.appendChild(col);
         return;
       }
@@ -2575,8 +2601,15 @@
           + "<span class=\"s\">" + sell + "</span>";
         col.appendChild(cell);
       });
+      painted += 1;
       ov.appendChild(col);
     });
+    if (!painted && emptyCols > 0) {
+      const miss = document.createElement("div");
+      miss.className = "charts-flow-miss";
+      miss.textContent = fpCount ? "нет уровней в диапазоне" : "нет ленты";
+      ov.appendChild(miss);
+    }
   }
   let lastChartSize = { w: 0, h: 0 };
   let overlayRaf = 0;
@@ -2823,6 +2856,23 @@
       return true;
     }
   }
+  function clampBarSpacing(s) {
+    const n = Number(s);
+    if (!(n > 0) || !isFinite(n)) return DEFAULT_BAR_SPACING;
+    return Math.max(3, Math.min(MAX_BAR_SPACING, n));
+  }
+  function logicalSpan(lr) {
+    if (!lr) return 0;
+    const a = Number(lr.from);
+    const b = Number(lr.to);
+    if (!isFinite(a) || !isFinite(b)) return 0;
+    return Math.abs(b - a);
+  }
+  function sanitizeScaleRow(row) {
+    if (!row || !(row.barSpacing > 0)) return null;
+    const logical = (row.logical && logicalSpan(row.logical) >= 12) ? row.logical : null;
+    return { barSpacing: clampBarSpacing(row.barSpacing), logical: logical };
+  }
   function snapshotTimeScale() {
     if (!chart) return null;
     try {
@@ -2841,23 +2891,27 @@
   function loadScaleLocal(instrument) {
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      const row = all[scaleStoreKey(instrument)];
-      if (row && row.barSpacing > 0) return row;
+      return sanitizeScaleRow(all[scaleStoreKey(instrument)]);
     } catch (_) {}
     return null;
   }
   function saveScaleLocal(instrument) {
     const snap = snapshotTimeScale();
-    const spacing = (lockedBarSpacing > 0)
+    const raw = (lockedBarSpacing > 0)
       ? lockedBarSpacing
       : (snap && snap.barSpacing > 0 ? snap.barSpacing : 0);
-    if (!(spacing > 0)) return;
+    if (!(raw > 0)) return;
+    const spacing = clampBarSpacing(raw);
+    if (raw > MAX_BAR_SPACING) {
+      lockedBarSpacing = spacing;
+      lockedLogical = null;
+    }
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      all[scaleStoreKey(instrument)] = {
-        barSpacing: spacing,
-        logical: lockedLogical || (snap && snap.logical) || null
-      };
+      const logical = lockedLogical && logicalSpan(lockedLogical) >= 12
+        ? lockedLogical
+        : ((snap && logicalSpan(snap.logical) >= 12) ? snap.logical : null);
+      all[scaleStoreKey(instrument)] = { barSpacing: spacing, logical: logical };
       localStorage.setItem(SCALE_STORE, JSON.stringify(all));
     } catch (_) {}
   }
@@ -2910,7 +2964,7 @@
     const snap = snapshotTimeScale();
     if (!snap || !(snap.barSpacing > 0)) return;
     scaleLocked = true;
-    lockedBarSpacing = snap.barSpacing;
+    lockedBarSpacing = clampBarSpacing(snap.barSpacing);
     const edge = atRightEdge();
     if (followLive && edge) {
       lockedLogical = null;
@@ -2933,19 +2987,45 @@
     const nested = applyingScale;
     applyingScale = true;
     try {
-      const spacing = lockedBarSpacing;
-      if (spacing > 0) {
-        chart.timeScale().applyOptions({ barSpacing: spacing });
-      }
+      const spacing = clampBarSpacing(lockedBarSpacing);
+      lockedBarSpacing = spacing;
+      chart.timeScale().applyOptions({ barSpacing: spacing });
       if (followLive && !userPinned) {
         chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
         chart.timeScale().scrollToRealTime();
-      } else if (lockedLogical) {
+      } else if (lockedLogical && logicalSpan(lockedLogical) >= 12) {
         chart.timeScale().setVisibleLogicalRange(lockedLogical);
+      } else {
+        chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
+        chart.timeScale().scrollToRealTime();
       }
       if (priceScaleLocked) freezePriceScale();
     } catch (_) {}
     if (!nested) applyingScale = false;
+  }
+  function healInsaneZoom(n) {
+    if (!chart || !(n >= 16)) return;
+    let spacing = DEFAULT_BAR_SPACING;
+    let vis = 0;
+    try {
+      spacing = chart.timeScale().options().barSpacing || DEFAULT_BAR_SPACING;
+      vis = logicalSpan(chart.timeScale().getVisibleLogicalRange());
+    } catch (_) {}
+    if (spacing <= MAX_BAR_SPACING && vis >= 12) return;
+    applyingScale = true;
+    try {
+      const use = clampBarSpacing(
+        lockedBarSpacing > 0 && lockedBarSpacing <= MAX_BAR_SPACING
+          ? lockedBarSpacing
+          : DEFAULT_BAR_SPACING
+      );
+      scaleLocked = true;
+      lockedBarSpacing = use;
+      lockedLogical = null;
+      chart.timeScale().applyOptions({ barSpacing: use, rightOffset: currentRightOffset() });
+      chart.timeScale().scrollToRealTime();
+    } catch (_) {}
+    applyingScale = false;
   }
   function bindUserScaleCapture(el) {
     if (!el || el._trinityScaleBound) return;
@@ -3407,10 +3487,9 @@
   }
   function applyTimeSnap(snap) {
     if (!chart || !snap) return;
-    if (snap.barSpacing > 0) {
-      try { chart.timeScale().applyOptions({ barSpacing: snap.barSpacing }); } catch (_) {}
-    }
-    if (snap.logical) {
+    const spacing = clampBarSpacing(snap.barSpacing);
+    try { chart.timeScale().applyOptions({ barSpacing: spacing }); } catch (_) {}
+    if (snap.logical && logicalSpan(snap.logical) >= 12) {
       try { chart.timeScale().setVisibleLogicalRange(snap.logical); } catch (_) {}
     }
   }
@@ -3471,6 +3550,7 @@
       replaceDataKeepView(candles);
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
+      healInsaneZoom(candles.length);
       if (priceScaleLocked) freezePriceScale();
       requestAnimationFrame(function () {
         if (priceScaleLocked) freezePriceScale();
@@ -3499,6 +3579,7 @@
       }
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
+      healInsaneZoom(candles.length);
       if (priceScaleLocked) freezePriceScale();
       requestAnimationFrame(function () {
         if (priceScaleLocked) freezePriceScale();
@@ -3515,14 +3596,21 @@
       candleSeries.setData(candles);
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
-      if (forceFit && !scaleLocked) {
-        try { candleSeries.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
-        try { chart.timeScale().fitContent(); } catch (_) {}
-        userPinned = false;
-        try { chart.timeScale().applyOptions({ rightOffset: currentRightOffset() }); } catch (_) {}
-        try { chart.timeScale().scrollToRealTime(); } catch (_) {}
-      } else if (scaleLocked) {
+      if (scaleLocked) {
         restoreTimeScale(followLive && !userPinned);
+      } else {
+        // Never fitContent: 1 bar fills the pane, 400 bars squash to pins.
+        try { candleSeries.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
+        try {
+          chart.timeScale().applyOptions({
+            barSpacing: DEFAULT_BAR_SPACING,
+            rightOffset: currentRightOffset()
+          });
+          chart.timeScale().scrollToRealTime();
+        } catch (_) {}
+        scaleLocked = true;
+        lockedBarSpacing = DEFAULT_BAR_SPACING;
+        lockedLogical = null;
       }
     } catch (err) {
       try {
@@ -3534,8 +3622,10 @@
       }
     }
     applyingScale = false;
+    healInsaneZoom(candles.length);
     requestAnimationFrame(function () {
       resizeChartToHost();
+      healInsaneZoom(candles.length);
       fitPriceToVisibleCandles();
       layoutMarketOverlays();
       syncMacdTimeScale();
@@ -4223,7 +4313,13 @@
     if (follow) follow.checked = true;
     if (chart) {
       applyingScale = true;
-      try { chart.timeScale().fitContent(); } catch (_) {}
+      try {
+        chart.timeScale().applyOptions({
+          barSpacing: DEFAULT_BAR_SPACING,
+          rightOffset: currentRightOffset()
+        });
+        chart.timeScale().scrollToRealTime();
+      } catch (_) {}
       applyingScale = false;
       applyRightPad(true);
     }
@@ -4864,8 +4960,9 @@
       if (!scaleLocked && lastCandleTime == null && sc && sc.barSpacing > 0
           && (!sc.instrument || sc.instrument === lastDeskInstrument)) {
         scaleLocked = true;
-        lockedBarSpacing = sc.barSpacing;
-        lockedLogical = sc.logical || null;
+        const sane = sanitizeScaleRow(sc);
+        lockedBarSpacing = sane ? sane.barSpacing : DEFAULT_BAR_SPACING;
+        lockedLogical = sane ? sane.logical : null;
         restoreTimeScale(followLive && !userPinned);
       }
       if (chartFlow && desk.flow && typeof chartFlow.setState === "function") {
@@ -4898,16 +4995,17 @@
       if (scaleLocked && lockedBarSpacing > 0) {
         cur.desk.scale = {
           instrument: lastDeskInstrument || null,
-          barSpacing: lockedBarSpacing,
-          logical: lockedLogical
+          barSpacing: clampBarSpacing(lockedBarSpacing),
+          logical: (lockedLogical && logicalSpan(lockedLogical) >= 12) ? lockedLogical : null
         };
       } else {
         const snap = snapshotTimeScale();
         if (snap && snap.barSpacing > 0) {
+          const sane = sanitizeScaleRow(snap);
           cur.desk.scale = {
             instrument: lastDeskInstrument || null,
-            barSpacing: snap.barSpacing,
-            logical: snap.logical || null
+            barSpacing: sane ? sane.barSpacing : DEFAULT_BAR_SPACING,
+            logical: sane ? sane.logical : null
           };
         }
       }

@@ -70,6 +70,8 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(js.contains("signal-fp-handle"), "footprint range handles must be drawable");
         assertTrue(js.contains("fpDragEnd"), "footprint handles must stretch the pinned range");
         assertTrue(js.contains("clusterZoomTried = true"), "restoring clusters must not steal the user's zoom");
+        assertTrue(js.contains("pickSessionProfile"), "session VAP must pick densest ATAS-like histogram");
+        assertTrue(js.contains("const TARGET = 12"), "cluster auto-zoom must not blow barSpacing to 42");
         assertTrue(css.contains(".charts-flow-profile"), "session VAP must have a positioned overlay");
         assertTrue(css.contains(".charts-cluster-cell"), "cluster cells need contrast styles");
         int vapAt = css.indexOf(".signal-profile-overlay,\n.charts-flow-profile {");

@@ -43,6 +43,9 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("desk-range-auto-execution"), "range desk switcher missing");
         assertTrue(src.contains("/api/trend/settings/auto-execution"), "range auto API missing");
         assertTrue(src.contains("hydrateDeskModeSwitches"), "range/positional toggles must hydrate from GET settings");
+        assertTrue(src.contains("positionalAutoFlag"), "positional toggle must not treat a missing desk field as off");
+        assertTrue(src.contains("healInsaneZoom"), "login/resume must not restore a one-candle time scale");
+        assertTrue(src.contains("MAX_BAR_SPACING = 16"), "saved barSpacing must be capped");
         int saveAt = src.indexOf("async function saveDeskSelection");
         assertTrue(saveAt > 0, "saveDeskSelection missing");
         String saveBody = src.substring(saveAt, Math.min(src.length(), saveAt + 1600));

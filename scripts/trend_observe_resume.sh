@@ -34,6 +34,8 @@ sys.path.insert(0, str(Path("scripts").resolve()))
 from trend_observe_auth import desk_request
 
 p = Path("data/trend-ui-settings.json")
+# Merge into the existing file. Never rebuild a short dict — that used to
+# drop positionalAutoExecution and the operator toggle came back OFF.
 want = {
     "autoExecution": True,
     "liveExecution": False,
@@ -62,6 +64,7 @@ if p.exists():
     try:
         cur = json.loads(p.read_text(encoding="utf-8"))
         if isinstance(cur, dict):
+            want = {**cur, **want}
             prev = str(cur.get("instrumentId") or "").upper()
             if prev and prev not in EXPIRED:
                 want["instrumentId"] = prev
@@ -70,6 +73,9 @@ if p.exists():
             want["liveExecution"] = False
             if cur.get("playbookId"):
                 want["playbookId"] = cur.get("playbookId")
+            # Paper positional switch is independent of Exclusive playbookId.
+            if "positionalAutoExecution" in cur:
+                want["positionalAutoExecution"] = bool(cur.get("positionalAutoExecution"))
     except Exception:
         pass
 

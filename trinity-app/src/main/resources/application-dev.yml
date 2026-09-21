@@ -1,0 +1,11 @@
+# Active automatically on `mvn -pl trinity-app -am spring-boot:run`
+# (spring-boot.run.profiles=dev in trinity-app/pom.xml).
+# Marks operator local/dev boot from the current working tree — not a packaged release.
+spring:
+  application:
+    name: trinity-dev
+
+logging:
+  level:
+    com.moex.trinity: INFO
+    com.moex.cointegration: INFO

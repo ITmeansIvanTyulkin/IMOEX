@@ -3166,12 +3166,102 @@
       if (Object.keys(next).length) fpByTime = next;
     }
 
-    function sessionVapFallback() {
+    function profileSpan(levels) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      let n = 0;
+      (levels || []).forEach(function (l) {
+        const px = Number(l && l.price);
+        if (!isFinite(px)) return;
+        if (px < lo) lo = px;
+        if (px > hi) hi = px;
+        n += 1;
+      });
+      return n > 0 && hi >= lo ? { n: n, lo: lo, hi: hi, span: hi - lo } : null;
+    }
+
+    function barsPriceSpan(bars) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      (bars || []).forEach(function (b) {
+        if (!b) return;
+        const a = Math.min(Number(b.low), Number(b.high));
+        const c = Math.max(Number(b.low), Number(b.high));
+        if (!isFinite(a) || !isFinite(c)) return;
+        if (a < lo) lo = a;
+        if (c > hi) hi = c;
+      });
+      return hi >= lo && isFinite(lo) ? { lo: lo, hi: hi, span: hi - lo } : null;
+    }
+
+    function sessionVapFromFootprints() {
+      const bars = getBars() || [];
+      if (!bars.length) return [];
+      const n = bars.length;
+      const take = Math.min(n, n > 200 ? 120 : 72);
+      const from = n - take;
+      const pt = pointSize > 0 ? pointSize : 0.01;
+      const map = Object.create(null);
+      for (let i = from; i < n; i++) {
+        const b = bars[i];
+        if (!b) continue;
+        const t = b.time != null ? b.time : b.t;
+        const fb = t != null ? fpByTime[t] : null;
+        const levels = fb && fb.levels;
+        if (!levels || !levels.length) continue;
+        for (let k = 0; k < levels.length; k++) {
+          const lv = levels[k];
+          const px = Number(lv && lv.price);
+          const vol = Number(lv && lv.volume) || Number(lv && lv.buy) + Number(lv && lv.sell)
+            || Number(lv && lv.buyLots) + Number(lv && lv.sellLots);
+          if (!isFinite(px) || !(vol > 0)) continue;
+          const key = String(Math.round(px / pt));
+          map[key] = (map[key] || 0) + vol;
+        }
+      }
+      const keys = Object.keys(map);
+      if (keys.length < 4) return [];
+      const levels = keys.map(function (k) {
+        return { price: Number(k) * pt, volume: map[k] };
+      }).sort(function (a, b) { return a.price - b.price; });
+      const max = levels.reduce(function (m, l) { return Math.max(m, l.volume); }, 0) || 1;
+      levels.forEach(function (l) { l.strength = l.volume / max; });
+      return thinLevels(levels, 96);
+    }
+
+    function sessionVapFromBars() {
       const bars = getBars() || [];
       if (!bars.length) return [];
       const n = bars.length;
       const take = Math.min(n, n > 200 ? 120 : 72);
       return vapFromBars(bars, n - take, n - 1, pointSize);
+    }
+
+    /** Prefer the denser ATAS-like histogram that spans the session. */
+    function pickSessionProfile() {
+      const bars = getBars() || [];
+      const barSpan = barsPriceSpan(bars.slice(Math.max(0, bars.length - 120)));
+      const server = profile || [];
+      const tape = sessionVapFromFootprints();
+      const ohlc = sessionVapFromBars();
+      const candidates = [server, tape, ohlc];
+      let best = [];
+      let bestScore = -1;
+      candidates.forEach(function (lv) {
+        const s = profileSpan(lv);
+        if (!s) return;
+        let score = s.n;
+        if (barSpan && barSpan.span > 0) {
+          score += 40 * Math.min(1, s.span / barSpan.span);
+        } else {
+          score += s.span * 10;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = lv;
+        }
+      });
+      return best;
     }
 
     function paintProfileLevels(ov, levels, maxW) {
@@ -3228,10 +3318,8 @@
       host.classList.toggle("is-session-profile", !!showProfile);
       if (!showProfile) return;
       const maxW = 84;
-      let drawn = paintProfileLevels(ov, profile, maxW);
-      if (drawn < 3) {
-        drawn += paintProfileLevels(ov, sessionVapFallback(), maxW);
-      }
+      const levels = pickSessionProfile();
+      const drawn = paintProfileLevels(ov, levels, maxW);
       ov.dataset.drawn = String(drawn);
       if (!drawn) {
         const miss = document.createElement("div");
@@ -3265,7 +3353,7 @@
       if (bars.length < 8) return false;
       const i1 = bars.length - 1;
       const i0 = Math.max(0, bars.length - 18);
-      const TARGET = 42;
+      const TARGET = 12;
       let spacing = 8;
       let visFrom = 0;
       let visTo = 0;
@@ -3278,10 +3366,11 @@
         }
       } catch (_) {}
       const vis = visTo - visFrom;
+      if (vis >= 16 && spacing <= 16) return false;
       const already = vis > 0 && vis <= 22 && visFrom <= i0 + 4 && visTo >= i1 - 2 && spacing >= TARGET;
       if (already) return false;
       try {
-        chart.timeScale().applyOptions({ barSpacing: Math.max(spacing, TARGET) });
+        chart.timeScale().applyOptions({ barSpacing: Math.min(16, Math.max(spacing, TARGET)) });
         chart.timeScale().setVisibleLogicalRange({
           from: Math.max(0, i0 - 0.4),
           to: i1 + 1.4
@@ -3530,6 +3619,8 @@
       try { spacing = ts.options().barSpacing || 8; } catch (_) {}
       const colW = Math.max(28, Math.min(56, Math.round(spacing * 0.92)));
       const fpCount = Object.keys(fpByTime).length;
+      let emptyCols = 0;
+      let painted = 0;
       keys.forEach(function (t) {
         const fb = lookupFp(t);
         const x = ts.timeToCoordinate(t);
@@ -3542,10 +3633,7 @@
         col.style.left = (x - colW / 2) + "px";
         col.style.width = colW + "px";
         if (!fb || !(fb.levels || []).length) {
-          const miss = document.createElement("div");
-          miss.className = "signal-fp-miss";
-          miss.textContent = fpCount ? "нет уровней" : "нет ленты";
-          col.appendChild(miss);
+          emptyCols += 1;
           ov.appendChild(col);
           return;
         }
@@ -3561,9 +3649,15 @@
           cell.innerHTML = "<span class=\"b\">" + buy + "</span><span class=\"x\">×</span><span class=\"s\">" + sell + "</span>";
           col.appendChild(cell);
         });
+        painted += 1;
         ov.appendChild(col);
       });
-    }
+      if (!painted && emptyCols > 0) {
+        const miss = document.createElement("div");
+        miss.className = "charts-flow-miss";
+        miss.textContent = fpCount ? "нет уровней в диапазоне" : "нет ленты";
+        ov.appendChild(miss);
+      }
 
     function fpRangeXs() {
       if (fpFrom == null || fpTo == null || !chart) return null;
