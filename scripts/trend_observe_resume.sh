@@ -191,6 +191,29 @@ sleep 0.3
 WATCH_PID="$(pgrep -f 'trend_observe_jvm_watch.py' | head -1 || true)"
 echo "jvm_watch_pid=${WATCH_PID:-?} log=$WATCH_LOG"
 
+# Durable HHMM wakes → /tmp/trend-observe-agent-wake.log (open / midday / evening)
+WAKE_ARM="$ROOT/scripts/trend_observe_wake_arm.sh"
+chmod +x "$WAKE_ARM" 2>/dev/null || true
+pkill -f 'trend_observe_wake_arm.sh' >/dev/null 2>&1 || true
+pkill -f '/tmp/trend_wake_arm.sh' >/dev/null 2>&1 || true
+sleep 0.2
+arm_wake() {
+  local label="$1" hhmm="$2"
+  # skip if already past (except evening — still useful same-minute)
+  local now
+  now="$(date +%H%M)"
+  if [ "$now" -ge "$hhmm" ] && [ "$label" != "evening" ]; then
+    echo "wake_arm skip ${label} (past ${hhmm})"
+    return 0
+  fi
+  nohup "$WAKE_ARM" "$label" "$hhmm" "$DAY" >/dev/null 2>&1 &
+  disown || true
+  echo "wake_arm ${label}@${hhmm} pid=$!"
+}
+arm_wake open 1025
+arm_wake midday 1330
+arm_wake evening 1802
+
 echo "LOG: $ROOT/data/trend-observe-path-log.json"
 echo "DONE snapshot for $DAY — evening seal ~18:02: python3 scripts/trend_observe_evening.py"
 echo "НЕ крутить пад/knife. Режим: collect corpus (Phase C NO_GO). ML/FORTS — только по явному go."
