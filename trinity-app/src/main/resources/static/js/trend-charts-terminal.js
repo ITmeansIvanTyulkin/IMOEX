@@ -108,8 +108,16 @@
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
 
+  function currentPane() {
+    if (activeId && panes[activeId]) return panes[activeId];
+    const keys = Object.keys(panes);
+    if (!keys.length) return null;
+    activeId = keys[0];
+    return panes[activeId];
+  }
+
   function syncToolButtons() {
-    const p = panes[activeId];
+    const p = currentPane();
     const drawMode = toolbarMode && toolbarMode !== "measure" ? toolbarMode : null;
     document.querySelectorAll(".charts-tv-btn[data-tool]").forEach(function (btn) {
       const tool = btn.getAttribute("data-tool") || "";
@@ -284,9 +292,12 @@
   async function paintPaneFromCache(secid) {
     const p = panes[secid];
     if (!p || !window.TrinityChartKit || typeof TrinityChartKit.barCacheGet !== "function") return;
-    const row = await TrinityChartKit.barCacheGet(secid, "M5");
+    const row = await TrinityChartKit.barCacheGet(secid, "M5")
+      || await TrinityChartKit.barCacheGet(secid, "H1");
     if (!row || !row.bars || !row.bars.length) return;
-    p.bars = row.raw || row.bars;
+    const bars = row.raw || row.bars;
+    if (!deskBarsMatchPane(secid, row, bars)) return;
+    p.bars = bars;
     try { p.series.setData(row.bars); } catch (_) {}
   }
 
@@ -340,6 +351,7 @@
         b.classList.toggle("is-on", b.getAttribute("data-tf") === pane.tf);
       });
     }
+    if (pane && pane.flow && typeof pane.flow.layout === "function") pane.flow.layout();
     scheduleSave();
   }
 
@@ -536,9 +548,34 @@
   }
 
   async function loadDeskFor(secid) {
-    const res = await authFetch("/api/trend/desk?instrument=" + encodeURIComponent(secid));
+    const kit = window.TrinityChartKit;
+    const fam = kit && kit.familyOf ? kit.familyOf(secid) : "";
+    const oil = fam === "BR";
+    let url = "/api/trend/desk?instrument=" + encodeURIComponent(secid) + "&study=1";
+    if (!oil) url += "&playbook=positional-volume-h1";
+    const res = await authFetch(url);
     if (!res.ok) throw new Error("desk HTTP " + res.status);
-    return res.json();
+    const data = await res.json();
+    if (data && (!data.bars || !data.bars.length) && data.barsH1 && data.barsH1.length) {
+      data.bars = data.barsH1;
+      data.timeframe = data.timeframe || "H1";
+    }
+    return data;
+  }
+
+  function deskBarsMatchPane(secid, data, bars) {
+    const kit = window.TrinityChartKit;
+    if (!kit) return !!(bars && bars.length);
+    if (data && data.instrument && kit.familyOf(data.instrument) !== kit.familyOf(secid)) {
+      return false;
+    }
+    if (!bars || !bars.length) return false;
+    const last = bars[bars.length - 1];
+    const px = last && (last.close != null ? last.close : last.value);
+    if (typeof kit.quotesMatchInstrument === "function") {
+      return kit.quotesMatchInstrument(secid, px);
+    }
+    return true;
   }
 
   async function refreshPane(secid) {
@@ -557,11 +594,23 @@
           time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume
         });
       });
+      if (!deskBarsMatchPane(secid, data, toolBars.length ? toolBars : candles)) {
+        console.warn("refreshPane skip foreign bars", secid, data && data.instrument);
+        return;
+      }
       p.bars = toolBars;
-      p.m5Bars = toolBars.slice();
+      const nativeH1 = String(data.timeframe || "").toUpperCase() === "H1";
+      p.m5Bars = nativeH1 ? [] : toolBars.slice();
+      if (nativeH1 && (!p.tf || p.tf === "M5")) p.tf = "H1";
       const kit = window.TrinityChartKit;
+      const cacheTf = nativeH1 ? "H1" : "M5";
       if (kit && typeof kit.barCachePut === "function") {
-        kit.barCachePut(secid, "M5", { instrument: secid, tf: "M5", bars: candles, raw: toolBars });
+        kit.barCachePut(secid, cacheTf, {
+          instrument: (data && data.instrument) || secid,
+          tf: cacheTf,
+          bars: candles,
+          raw: toolBars
+        });
       }
       if (p.scaleLocked && p.barSpacing > 0) {
         if (kit && typeof kit.setSeriesDataKeepView === "function") {
@@ -576,6 +625,12 @@
         } else {
           p.series.setData(candles);
         }
+        try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
+        try { p.chart.timeScale().fitContent(); } catch (_) {}
+      }
+      if (nativeH1) {
+        p.scaleLocked = false;
+        try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
         try { p.chart.timeScale().fitContent(); } catch (_) {}
       }
       if (p.flow) {
@@ -584,7 +639,8 @@
       }
       if (p.tools) p.tools.refreshOverlays();
       if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
-      if (p.tf && p.tf !== "M5") applyTf(p.tf, secid);
+      if (p.flow && typeof p.flow.layout === "function") p.flow.layout();
+      if (p.tf && p.tf !== "M5" && !nativeH1) applyTf(p.tf, secid);
     } catch (e) {
       console.warn("refreshPane", secid, e);
     }
@@ -631,6 +687,7 @@
     });
 
     activeId = (layoutDoc.terminal && layoutDoc.terminal.active) || list[0].secid;
+    if (!panes[activeId]) activeId = list[0].secid;
     setActive(activeId);
 
     await Promise.all(list.map(function (o) { return paintPaneFromCache(o.secid); }));
@@ -647,7 +704,7 @@
       }
       const sc = ((layoutDoc.terminal && layoutDoc.terminal.scaleByInstrument) || {})[o.secid];
       const pane = panes[o.secid];
-      if (sc && sc.barSpacing > 0 && pane) {
+      if (sc && sc.barSpacing > 0 && pane && pane.tf !== "H1") {
         pane.scaleLocked = true;
         pane.barSpacing = sc.barSpacing;
         pane.logical = sc.logical || null;
@@ -676,6 +733,8 @@
       checkAlerts(msg);
       Object.keys(panes).forEach(function (id) {
         if (!kit.sameTapeInstrument(id, msg.instrument)) return;
+        if (typeof kit.quotesMatchInstrument === "function"
+            && !kit.quotesMatchInstrument(id, px)) return;
         const p = panes[id];
         if (!p || !p.series) return;
         if (!p.ticks) p.ticks = [];
@@ -697,7 +756,10 @@
         }
         if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
       });
-      if (kit.sameTapeInstrument(activeId, msg.instrument)) appendTermTape(msg);
+      if (kit.sameTapeInstrument(activeId, msg.instrument)
+          && (!kit.quotesMatchInstrument || kit.quotesMatchInstrument(activeId, px))) {
+        appendTermTape(msg);
+      }
     });
     kit.tape.onBook(function (book) {
       if (!kit.sameTapeInstrument(activeId, book.instrument)) return;
@@ -710,6 +772,10 @@
 
   const quotes = Object.create(null);
   function noteWatch(msg) {
+    const px = Number(msg.px);
+    if (!(px > 0)) return;
+    if (window.TrinityChartKit && typeof TrinityChartKit.quotesMatchInstrument === "function"
+        && !TrinityChartKit.quotesMatchInstrument(msg.instrument, px)) return;
     const fam = (window.TrinityChartKit && TrinityChartKit.familyOf(msg.instrument)) || msg.instrument;
     let row = quotes[fam];
     if (!row) row = quotes[fam] = { px: 0, prev: 0, inst: msg.instrument };
@@ -885,7 +951,7 @@
   const tplSave = $("charts-tpl-save");
   if (tplSave) {
     tplSave.addEventListener("click", function () {
-      const p = panes[activeId];
+      const p = currentPane();
       if (!p || !p.tools) return;
       const name = window.prompt("Имя шаблона", "шаблон");
       if (!name) return;
@@ -907,7 +973,7 @@
       const sel = $("charts-templates");
       const tpls = (layoutDoc && layoutDoc.templates) || [];
       const t = tpls[Number(sel && sel.value)];
-      const p = panes[activeId];
+      const p = currentPane();
       if (!t || !p) return;
       if (t.drawings && p.tools && typeof p.tools.setState === "function") p.tools.setState(t.drawings);
       if (t.flow && p.flow && typeof p.flow.setState === "function") p.flow.setState(t.flow);
@@ -927,44 +993,55 @@
     });
   });
   $("charts-tool-ma").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p) return;
     const cfg = TrinityChartKit.promptMaConfig({ type: "SMA", period: 20 });
     if (!cfg) return;
     p.tools.upsertMa(cfg);
   });
   $("charts-tool-clusters").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p || !p.flow) return;
     p.flow.setShowClusters(!p.flow.getShowClusters());
+    if (p.flow.getShowClusters() && p.chart) {
+      try {
+        const sp = p.chart.timeScale().options().barSpacing;
+        const lr = p.chart.timeScale().getVisibleLogicalRange();
+        if (sp > 0) {
+          p.barSpacing = sp;
+          p.logical = lr;
+          p.scaleLocked = true;
+        }
+      } catch (_) {}
+    }
     syncToolButtons();
   });
   $("charts-tool-hvol").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p || !p.flow) return;
     p.flow.setShowProfile(!p.flow.getShowProfile());
     syncToolButtons();
   });
   $("charts-tool-magnet").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p || !p.tools || !p.tools.setMagnet) return;
     p.tools.setMagnet(!p.tools.getMagnet());
     syncToolButtons();
   });
   $("charts-tool-hide").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p || !p.tools || !p.tools.setDrawingsHidden) return;
     p.tools.setDrawingsHidden(!p.tools.getDrawingsHidden());
     syncToolButtons();
   });
   $("charts-tool-lock").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p || !p.tools || !p.tools.setDrawingsLocked) return;
     p.tools.setDrawingsLocked(!p.tools.getDrawingsLocked());
     syncToolButtons();
   });
   $("charts-tool-delete").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p) return;
     const gone = p.tools && p.tools.deleteSelected && p.tools.deleteSelected();
     if (!gone && p.nav) {
@@ -976,7 +1053,7 @@
     syncToolButtons();
   });
   $("charts-tool-clear").addEventListener("click", function () {
-    const p = panes[activeId];
+    const p = currentPane();
     if (!p) return;
     const label = ($("charts-active-name") && $("charts-active-name").textContent) || activeId;
     if (!window.confirm("Стереть все рисунки на «" + label + "»? Средние (MA) тоже снимутся. Это только этот график.")) return;

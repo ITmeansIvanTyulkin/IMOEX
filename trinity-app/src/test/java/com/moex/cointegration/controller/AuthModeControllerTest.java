@@ -17,13 +17,14 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.moex.cointegration.TestBootApplication;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.config.DeskSessionStore;
 
 import static org.mockito.Mockito.when;
 
 @WebMvcTest(controllers = AuthModeController.class)
 @AutoConfigureMockMvc(addFilters = false)
 @ContextConfiguration(classes = TestBootApplication.class)
-@Import(AuthModeController.class)
+@Import({AuthModeController.class, DeskSessionStore.class})
 class AuthModeControllerTest {
 
     @Autowired
@@ -37,7 +38,8 @@ class AuthModeControllerTest {
         when(properties.auth()).thenReturn(ImoexProperties.AuthProperties.defaults());
         mockMvc.perform(get("/api/auth/mode"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.supabase.enabled").value(false));
+                .andExpect(jsonPath("$.supabase.enabled").value(false))
+                .andExpect(jsonPath("$.bootId").isString());
     }
 
     @Test
@@ -48,6 +50,15 @@ class AuthModeControllerTest {
                         .content("{\"email\":\"a@b.c\",\"password\":\"x\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.error").value("supabase_disabled"));
+    }
+
+    @Test
+    void logoutClearsDeskCookie() throws Exception {
+        mockMvc.perform(post("/api/auth/logout"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Set-Cookie", org.hamcrest.Matchers.containsString("trinity.desk=")));
     }
 
     @Test

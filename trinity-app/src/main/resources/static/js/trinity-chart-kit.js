@@ -3058,6 +3058,7 @@
     let fpPinned = [];
     const FP_PIN_MAX = 24;
     let layoutRaf = 0;
+    let clusterZoomTried = false;
     function fpSnapTolNow() {
       return Math.max(barSecNow(), 300);
     }
@@ -3168,30 +3169,59 @@
     }
 
     function paintProfileLevels(ov, levels, maxW) {
-      let drawn = 0;
+      const rowPx = 3;
+      const bins = Object.create(null);
       (levels || []).forEach(function (lvl) {
         const px = Number(lvl.price);
         const vol = Number(lvl.volume);
         if (!isFinite(px) || !(vol > 0)) return;
         const y = series.priceToCoordinate(px);
         if (y == null) return;
-        const bar = document.createElement("div");
-        bar.className = "signal-vap-bar";
-        bar.style.top = (y - 1) + "px";
-        bar.style.width = Math.max(2, Math.round((lvl.strength || 0) * maxW)) + "px";
-        bar.title = px.toFixed(2) + " · vol " + Math.round(vol);
-        ov.appendChild(bar);
-        drawn += 1;
+        const key = String(Math.round(y / rowPx) * rowPx);
+        let b = bins[key];
+        if (!b) b = bins[key] = { y: Number(key), vol: 0, price: px, _best: 0 };
+        b.vol += vol;
+        if (vol >= b._best) {
+          b.price = px;
+          b._best = vol;
+        }
       });
-      return drawn;
+      const rows = Object.keys(bins).map(function (k) { return bins[k]; });
+      if (!rows.length) return 0;
+      let maxVol = 1;
+      let total = 0;
+      rows.forEach(function (r) {
+        if (r.vol > maxVol) maxVol = r.vol;
+        total += r.vol;
+      });
+      const ranked = rows.slice().sort(function (a, b) { return b.vol - a.vol; });
+      const va = Object.create(null);
+      let acc = 0;
+      ranked.forEach(function (r, i) {
+        if (acc < total * 0.7) va[r.y] = true;
+        acc += r.vol;
+        if (i === 0) r.poc = true;
+      });
+      rows.forEach(function (r) {
+        const bar = document.createElement("div");
+        bar.className = "signal-vap-bar"
+          + (r.poc ? " is-poc" : va[r.y] ? " is-va" : "");
+        bar.style.top = (r.y - 1) + "px";
+        bar.style.width = Math.max(3, Math.round((r.vol / maxVol) * maxW)) + "px";
+        bar.title = Number(r.price).toFixed(2) + " · vol " + Math.round(r.vol)
+          + (r.poc ? " · POC" : "");
+        ov.appendChild(bar);
+      });
+      return rows.length;
     }
 
     function layoutProfile() {
       const ov = ensureOv("charts-flow-profile");
       ov.innerHTML = "";
       ov.hidden = !showProfile;
+      host.classList.toggle("is-session-profile", !!showProfile);
       if (!showProfile) return;
-      const maxW = 72;
+      const maxW = 84;
       let drawn = paintProfileLevels(ov, profile, maxW);
       if (drawn < 3) {
         drawn += paintProfileLevels(ov, sessionVapFallback(), maxW);
@@ -3228,7 +3258,8 @@
       const bars = getBars() || [];
       if (bars.length < 8) return false;
       const i1 = bars.length - 1;
-      const i0 = Math.max(0, bars.length - 32);
+      const i0 = Math.max(0, bars.length - 18);
+      const TARGET = 42;
       let spacing = 8;
       let visFrom = 0;
       let visTo = 0;
@@ -3241,16 +3272,22 @@
         }
       } catch (_) {}
       const vis = visTo - visFrom;
-      const already = vis > 0 && vis <= 36 && visFrom <= i0 + 4 && visTo >= i1 - 2 && spacing >= 12;
+      const already = vis > 0 && vis <= 22 && visFrom <= i0 + 4 && visTo >= i1 - 2 && spacing >= TARGET;
       if (already) return false;
       try {
+        chart.timeScale().applyOptions({ barSpacing: Math.max(spacing, TARGET) });
         chart.timeScale().setVisibleLogicalRange({
-          from: Math.max(0, i0 - 1),
-          to: i1 + 2
+          from: Math.max(0, i0 - 0.4),
+          to: i1 + 1.4
         });
         return true;
       } catch (_) {
-        return false;
+        try {
+          chart.timeScale().applyOptions({ barSpacing: TARGET });
+          return true;
+        } catch (e2) {
+          return false;
+        }
       }
     }
 
@@ -3300,6 +3337,14 @@
       return levels;
     }
 
+    function fmtClusterVol(v) {
+      const n = Math.round(Number(v) || 0);
+      const a = Math.abs(n);
+      if (a >= 1000000) return (n / 1000000).toFixed(a >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "m";
+      if (a >= 10000) return Math.round(n / 1000) + "k";
+      return String(n);
+    }
+
     function clusterBins(levels, binPx) {
       const px = binPx > 0 ? binPx : 2;
       const bins = Object.create(null);
@@ -3327,18 +3372,32 @@
       const ov = ensureOv("charts-cluster-overlay");
       ov.innerHTML = "";
       ov.hidden = !showClusters;
+      host.classList.toggle("is-clusters", !!showClusters);
       if (!showClusters) return;
       let spacing = 8;
       try { spacing = chart.timeScale().options().barSpacing || 8; } catch (_) {}
       let times = visibleBarTimes();
+      if (times.length && spacing < 34 && !clusterZoomTried) {
+        clusterZoomTried = true;
+        if (maybeZoomForClusters()) {
+          requestAnimationFrame(function () { layoutNow(); });
+          return;
+        }
+      }
       if (times.length > CLUSTER_MAX) {
         times = times.slice(times.length - CLUSTER_MAX);
       }
       if (!times.length) return;
       const ts = chart.timeScale();
-      const half = Math.max(14, Math.min(40, Math.max(spacing, 10) * 0.88));
-      const tickH = Math.max(5, Math.min(9, Math.round(Math.max(spacing, 8) * 0.38)));
-      const minW = Math.max(8, Math.round(half * 0.28));
+      const colW = Math.max(8, Math.min(spacing * 0.86, 78));
+      const showPair = colW >= 34;
+      const showTot = !showPair && colW >= 20;
+      const tickH = showPair
+        ? Math.max(13, Math.min(16, Math.round(colW * 0.22)))
+        : showTot
+          ? Math.max(11, Math.min(14, Math.round(colW * 0.42)))
+          : Math.max(4, Math.min(8, Math.round(Math.max(spacing, 8) * 0.28)));
+      const binPx = Math.max(showPair ? 12 : 3, Math.round(tickH * 0.85));
       let ticks = 0;
       times.forEach(function (t) {
         const fb = lookupFp(t);
@@ -3348,49 +3407,60 @@
         if (!levels.length) return;
         const x = ts.timeToCoordinate(t);
         if (x == null) return;
-        let bins = clusterBins(levels, Math.max(3, Math.round(tickH * 0.7)));
-        if (bins.length > 22) bins = clusterBins(levels, 5);
+        let bins = clusterBins(levels, binPx);
+        if (bins.length > 18) bins = clusterBins(levels, Math.max(binPx, 6));
         let maxV = 1;
         bins.forEach(function (b) {
           const v = b.buy + b.sell;
           if (v > maxV) maxV = v;
         });
-        const floor = Math.max(0.0001, maxV * 0.04);
+        const floor = Math.max(0.0001, maxV * 0.05);
         let use = bins.filter(function (b) { return (b.buy + b.sell) >= floor; });
-        if (use.length < 4) {
+        if (use.length < 3) {
           use = bins.slice().sort(function (a, b) {
             return (b.buy + b.sell) - (a.buy + a.sell);
           }).slice(0, 6);
         }
+        if (!use.length) return;
+        let poc = use[0];
         use.forEach(function (b) {
-          const y = b.y;
-          if (b.buy > 0) {
-            const w = Math.max(minW, Math.round((b.buy / maxV) * half));
-            const el = document.createElement("div");
-            el.className = "charts-cluster-tick is-buy" + (fromTape ? "" : " is-ohlc");
-            el.style.top = (y - tickH / 2) + "px";
-            el.style.left = x + "px";
-            el.style.width = w + "px";
-            el.style.height = tickH + "px";
-            el.title = Number(b.price).toFixed(2) + " buy " + Math.round(b.buy)
-              + (fromTape ? "" : " · по свече");
-            ov.appendChild(el);
-            ticks += 1;
-          }
-          if (b.sell > 0) {
-            const w = Math.max(minW, Math.round((b.sell / maxV) * half));
-            const el = document.createElement("div");
-            el.className = "charts-cluster-tick is-sell" + (fromTape ? "" : " is-ohlc");
-            el.style.top = (y - tickH / 2) + "px";
-            el.style.left = (x - w) + "px";
-            el.style.width = w + "px";
-            el.style.height = tickH + "px";
-            el.title = Number(b.price).toFixed(2) + " sell " + Math.round(b.sell)
-              + (fromTape ? "" : " · по свече");
-            ov.appendChild(el);
-            ticks += 1;
-          }
+          if ((b.buy + b.sell) > (poc.buy + poc.sell)) poc = b;
         });
+        const col = document.createElement("div");
+        col.className = "charts-cluster-col" + (fromTape ? "" : " is-ohlc");
+        col.style.left = (x - colW / 2) + "px";
+        col.style.width = colW + "px";
+        use.forEach(function (b) {
+          const tot = b.buy + b.sell;
+          const delta = b.buy - b.sell;
+          const buyN = Math.round(b.buy);
+          const sellN = Math.round(b.sell);
+          const cell = document.createElement("div");
+          cell.className = "charts-cluster-cell"
+            + (delta > tot * 0.08 ? " is-buy" : delta < -tot * 0.08 ? " is-sell" : " is-even")
+            + (b === poc ? " is-poc" : "")
+            + (fromTape ? "" : " is-ohlc");
+          cell.style.top = (b.y - tickH / 2) + "px";
+          cell.style.height = tickH + "px";
+          cell.style.opacity = String(0.62 + 0.38 * (tot / maxV));
+          cell.title = Number(b.price).toFixed(2)
+            + " sell " + sellN + " × buy " + buyN
+            + (fromTape ? "" : " · по свече");
+          if (showPair) {
+            cell.innerHTML = "<span class=\"s\">" + fmtClusterVol(sellN) + "</span>"
+              + "<span class=\"x\">×</span>"
+              + "<span class=\"b\">" + fmtClusterVol(buyN) + "</span>";
+          } else if (showTot) {
+            cell.innerHTML = "<span class=\"t\">" + fmtClusterVol(buyN + sellN) + "</span>";
+          } else {
+            const sellW = tot > 0 ? Math.max(2, Math.round((b.sell / tot) * colW)) : Math.round(colW / 2);
+            cell.innerHTML = "<i class=\"charts-cluster-split-s\" style=\"width:" + sellW + "px\"></i>"
+              + "<i class=\"charts-cluster-split-b\"></i>";
+          }
+          col.appendChild(cell);
+          ticks += 1;
+        });
+        ov.appendChild(col);
       });
       ov.dataset.ticks = String(ticks);
       if (!ticks) {
@@ -3447,6 +3517,9 @@
         }
       }
       const ts = chart.timeScale();
+      let spacing = 8;
+      try { spacing = ts.options().barSpacing || 8; } catch (_) {}
+      const colW = Math.max(28, Math.min(56, Math.round(spacing * 0.92)));
       const fpCount = Object.keys(fpByTime).length;
       keys.forEach(function (t) {
         const fb = lookupFp(t);
@@ -3457,7 +3530,8 @@
           + (times[t] === "hover" ? " is-hover" : "")
           + (times[t] === "pin" ? " is-pinned" : "")
           + (times[t] === "preview" ? " is-preview" : "");
-        col.style.left = (x - 22) + "px";
+        col.style.left = (x - colW / 2) + "px";
+        col.style.width = colW + "px";
         if (!fb || !(fb.levels || []).length) {
           const miss = document.createElement("div");
           miss.className = "signal-fp-miss";
@@ -3550,6 +3624,7 @@
       getShowProfile: function () { return showProfile; },
       setShowClusters: function (on) {
         showClusters = !!on;
+        clusterZoomTried = false;
         if (showClusters && maybeZoomForClusters()) {
           requestAnimationFrame(function () { layoutNow(); });
         }
@@ -3620,6 +3695,7 @@
         if (!st) return;
         showProfile = !!st.showProfile;
         showClusters = !!st.showClusters;
+        clusterZoomTried = false;
         if (st.fpFrom != null && st.fpTo != null) {
           fpFrom = st.fpFrom;
           fpTo = st.fpTo;
@@ -3628,6 +3704,7 @@
         layoutNow();
       },
       destroy: function () {
+        host.classList.remove("is-clusters", "is-session-profile", "is-fp-tool");
         ["charts-flow-profile", "charts-cluster-overlay", "charts-fp-overlay"].forEach(function (cls) {
           const el = host.querySelector("." + cls);
           if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -3647,13 +3724,40 @@
   }
 
   function familyOf(secid) {
-    const u = String(secid || "").trim().toUpperCase();
-    if (!u) return "";
-    if (u.indexOf("RI") === 0 || u.indexOf("RT") === 0) return "RI";
-    if (u.indexOf("BR") === 0) return "BR";
+    const raw = String(secid || "").trim();
+    if (!raw) return "";
+    const u = raw.toUpperCase();
+    if (u === "GOLD" || u.indexOf("GD") === 0) return "GD";
+    if (u === "MIX" || u.indexOf("MX") === 0) return "MX";
+    if (u === "USD" || u.indexOf("SI") === 0
+        || (raw.length >= 2 && raw.charAt(0) === "S" && raw.charAt(1) === "i")) return "SI";
+    if (u === "RTS" || u.indexOf("RI") === 0 || u.indexOf("RT") === 0
+        || (raw.length >= 2 && raw.charAt(0) === "R" && raw.charAt(1) === "i")) return "RI";
     if (u.indexOf("NG") === 0) return "NG";
-    if (u.indexOf("GOLD") === 0) return "GD";
+    if (u.indexOf("BR") === 0) return "BR";
     return u.slice(0, 2);
+  }
+
+  /** Drop a print that cannot belong on this family's scale (BR 103 onto Ri 84000). */
+  function quotesMatchInstrument(secid, px) {
+    const p = Number(px);
+    if (!(p > 0) || !isFinite(p)) return false;
+    const fam = familyOf(secid);
+    if (fam === "BR") return p > 20 && p < 250;
+    if (fam === "NG") return p > 0.2 && p < 50;
+    if (fam === "GD") return p > 200 && p < 20000;
+    if (fam === "RI" || fam === "SI") return p > 5000 && p < 500000;
+    if (fam === "MX") return p > 20000 && p < 2000000;
+    return true;
+  }
+
+  function printFitsLast(last, px) {
+    if (!last) return px > 0 && isFinite(px);
+    const c = Number(last.close != null ? last.close : last.value);
+    if (!(c > 0) || !(px > 0) || !isFinite(px)) return false;
+    const barRange = Math.abs(Number(last.high) - Number(last.low));
+    const cap = Math.max(c * 0.025, (isFinite(barRange) ? barRange * 12 : 0), c * 0.002);
+    return Math.abs(px - c) <= cap;
   }
   function sameTapeInstrument(a, b) {
     if (!a || !b) return false;
@@ -3675,6 +3779,7 @@
     const t = typeof last.time === "number" ? last.time : null;
     if (t == null) return false;
     if (bucketMin > 0 && t !== currentBucketUnix(bucketMin)) return false;
+    if (!printFitsLast(last, px)) return false;
     const o = Number(last.open);
     let h = Number(last.high);
     let l = Number(last.low);
@@ -3828,7 +3933,12 @@
     function url() {
       const proto = (typeof location !== "undefined" && location.protocol === "https:") ? "wss:" : "ws:";
       const host = (typeof location !== "undefined" && location.host) ? location.host : "localhost";
-      return proto + "//" + host + "/api/trend/ws/tape";
+      let u = proto + "//" + host + "/api/trend/ws/tape";
+      try {
+        const token = localStorage.getItem("trinity.supabase.access_token");
+        if (token) u += "?access_token=" + encodeURIComponent(token);
+      } catch (_) {}
+      return u;
     }
     function sendSub() {
       if (!ws || ws.readyState !== 1) return;
@@ -3943,6 +4053,8 @@
     tape: createTapeClient(),
     mergeDomBook: mergeDomBook,
     familyOf: familyOf,
+    quotesMatchInstrument: quotesMatchInstrument,
+    printFitsLast: printFitsLast,
     sameTapeInstrument: sameTapeInstrument,
     applyTradeToCandle: applyTradeToCandle,
     applyTradeToLine: applyTradeToLine,

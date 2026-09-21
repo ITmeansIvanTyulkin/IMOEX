@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Terminal dock: TF / alerts / templates / tape must stay wired. */
@@ -45,6 +46,10 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(js.contains("buildRangeBars"), "range missing");
         assertTrue(js.contains("ingestPrint"), "footprint ingest missing");
         assertTrue(js.contains("mergeDomBook"), "terminal DOM must keep both shelves");
+        assertTrue(js.contains("study=1"), "terminal must request study bars, not Exclusive oil lock");
+        assertTrue(js.contains("positional-volume-h1"), "non-oil panes must use positional desk until study=1 is live");
+        assertTrue(js.contains("function deskBarsMatchPane"), "foreign-family bars must not paint");
+        assertTrue(js.contains("quotesMatchInstrument"), "tape must not apply BR 103 onto Ri/Si");
     }
 
     @Test
@@ -53,6 +58,22 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(js.contains("function mergeDomBook"), "mergeDomBook helper missing");
         assertTrue(js.contains("n.length >= p.length ? n : p"),
                 "shallower WS book must not drop DOM depth");
+        assertTrue(js.contains("access_token"), "tape WS must pass cabinet token on handshake");
+    }
+
+    @Test
+    void kitClusterCellsStayInsideBar() throws Exception {
+        String js = read("src/main/resources/static/js/trinity-chart-kit.js");
+        String css = read("src/main/resources/static/css/operator.css");
+        assertTrue(js.contains("charts-cluster-cell"), "clusters must paint readable cells, not raw ticks");
+        assertTrue(js.contains("colW"), "cluster column width must follow barSpacing");
+        assertTrue(css.contains(".charts-flow-profile"), "session VAP must have a positioned overlay");
+        assertTrue(css.contains(".charts-cluster-cell"), "cluster cells need contrast styles");
+        int vapAt = css.indexOf(".signal-profile-overlay,\n.charts-flow-profile {");
+        assertTrue(vapAt >= 0, "session profile overlay must be CSS-positioned");
+        String vapBlock = css.substring(vapAt, Math.min(css.length(), vapAt + 220));
+        assertTrue(vapBlock.contains("left: 0"), "horizontal volumes grow from the left, not the price scale");
+        assertFalse(vapBlock.contains("right: 56px"), "session VAP must not sit on the right plaques");
     }
 
     @Test

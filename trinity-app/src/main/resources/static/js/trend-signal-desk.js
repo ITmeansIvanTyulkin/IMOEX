@@ -156,8 +156,13 @@
     }
     const kick = $("sig-kick-btn");
     if (kick) kick.hidden = pos;
-    const wrap = $("positional-auto-wrap");
-    if (wrap) wrap.hidden = !pos;
+    if (pos) {
+      const rangeWrap = $("range-auto-wrap");
+      if (rangeWrap) rangeWrap.hidden = true;
+    } else {
+      const wrap = $("positional-auto-wrap");
+      if (wrap) wrap.hidden = true;
+    }
     const modeLink = $("signal-desk-mode-link");
     if (modeLink) {
       modeLink.setAttribute("href", pos
@@ -203,28 +208,107 @@
     else chip.classList.add("is-scan");
     chip.title = detail ? (status + " · " + detail) : status;
   }
+  function paintModeSwitch(tog, on, hintId, autoHint, manualHint) {
+    if (!tog) return;
+    tog.checked = !!on;
+    tog.setAttribute("aria-checked", on ? "true" : "false");
+    const sw = tog.closest(".mode-switch");
+    if (sw) {
+      sw.classList.toggle("is-auto", !!on);
+      sw.classList.toggle("is-signal", !on);
+    }
+    const hint = $(hintId);
+    if (hint) hint.textContent = on ? autoHint : manualHint;
+    tog.dataset.hydrated = "1";
+    tog.disabled = false;
+  }
+  function rangeAutoOn(data) {
+    if (!data) return false;
+    if (data.autoExecution != null) return !!data.autoExecution;
+    const sit = data.situation || {};
+    return !!sit.autoExecution;
+  }
+  function syncRangeAutoSwitch(data) {
+    const wrap = $("range-auto-wrap");
+    const tog = $("desk-range-auto-execution");
+    const range = deskScope() !== "positional";
+    if (wrap) wrap.hidden = !range;
+    if (!tog) return;
+    paintModeSwitch(
+      tog,
+      rangeAutoOn(data),
+      "range-mode-hint",
+      "Авто: планы уходят в журнал песочницы.",
+      "Ручная торговля: график без заявок."
+    );
+  }
   function syncPositionalAutoSwitch(data) {
     const wrap = $("positional-auto-wrap");
     const tog = $("desk-positional-auto-execution");
     const pos = deskScope() === "positional";
     if (wrap) wrap.hidden = !pos;
     if (!tog) return;
-    const on = !!(data && data.positionalAutoExecution);
-    tog.checked = on;
-    tog.setAttribute("aria-checked", on ? "true" : "false");
-    const sw = tog.closest(".mode-switch");
-    if (sw) {
-      sw.classList.toggle("is-auto", on);
-      sw.classList.toggle("is-signal", !on);
-    }
+    paintModeSwitch(
+      tog,
+      !!(data && data.positionalAutoExecution),
+      "positional-mode-hint",
+      "Авто: чек-лист задаёт сторону, сетка в журнал.",
+      "Ручная торговля: график есть, входов нет."
+    );
+  }
+  async function hydrateDeskModeSwitches() {
+    try {
+      const res = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const view = await res.json();
+      syncRangeAutoSwitch(view);
+      syncPositionalAutoSwitch(view);
+    } catch (_) {}
+  }
+  function bindRangeAutoSwitch() {
+    const tog = $("desk-range-auto-execution");
+    if (!tog || tog.dataset.bound === "1") return;
+    tog.dataset.bound = "1";
+    tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
+      setRangeAutoFromDesk(tog.checked);
+    });
   }
   function bindPositionalAutoSwitch() {
     const tog = $("desk-positional-auto-execution");
     if (!tog || tog.dataset.bound === "1") return;
     tog.dataset.bound = "1";
     tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
       setPositionalAutoFromDesk(tog.checked);
     });
+  }
+  async function setRangeAutoFromDesk(enabled) {
+    const tog = $("desk-range-auto-execution");
+    if (tog) tog.disabled = true;
+    try {
+      const res = await fetch("/api/trend/settings/auto-execution", {
+        method: "POST",
+        headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      const view = await res.json();
+      syncRangeAutoSwitch({ autoExecution: !!view.autoExecution });
+      if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
+        window.TrinityPlaques.refresh();
+      }
+      await loadDesk(true);
+    } catch (e) {
+      alert("Не удалось переключить диапазонного робота: " + (e && e.message ? e.message : e)
+        + "\nНужен вход в кабинет.");
+      if (tog) tog.checked = !enabled;
+    } finally {
+      if (tog) tog.disabled = false;
+    }
   }
   async function setPositionalAutoFromDesk(enabled) {
     const tog = $("desk-positional-auto-execution");
@@ -1813,18 +1897,49 @@
     if (!ov || !candleSeries) return;
     ov.innerHTML = "";
     ov.hidden = !showProfile;
+    const host = $("signal-chart");
+    if (host) host.classList.toggle("is-session-profile", !!showProfile);
     if (!showProfile || !levels || !levels.length) return;
-    const maxW = 72;
+    const maxW = 84;
+    const rowPx = 3;
+    const bins = Object.create(null);
     levels.forEach(function (lvl) {
       if (!finitePrice(lvl.price) || !(lvl.volume > 0)) return;
       const y = candleSeries.priceToCoordinate(lvl.price);
       if (y == null) return;
+      const key = String(Math.round(y / rowPx) * rowPx);
+      let b = bins[key];
+      if (!b) b = bins[key] = { y: Number(key), vol: 0, price: Number(lvl.price), _best: 0 };
+      b.vol += Number(lvl.volume);
+      if (Number(lvl.volume) >= b._best) {
+        b.price = Number(lvl.price);
+        b._best = Number(lvl.volume);
+      }
+    });
+    const rows = Object.keys(bins).map(function (k) { return bins[k]; });
+    if (!rows.length) return;
+    let maxVol = 1;
+    let total = 0;
+    rows.forEach(function (r) {
+      if (r.vol > maxVol) maxVol = r.vol;
+      total += r.vol;
+    });
+    const ranked = rows.slice().sort(function (a, b) { return b.vol - a.vol; });
+    const va = Object.create(null);
+    let acc = 0;
+    ranked.forEach(function (r, i) {
+      if (acc < total * 0.7) va[r.y] = true;
+      acc += r.vol;
+      if (i === 0) r.poc = true;
+    });
+    rows.forEach(function (r) {
       const bar = document.createElement("div");
-      bar.className = "signal-vap-bar";
-      const w = Math.max(2, Math.round((lvl.strength || 0) * maxW));
-      bar.style.top = (y - 1) + "px";
-      bar.style.width = w + "px";
-      bar.title = Number(lvl.price).toFixed(2) + " · vol " + Math.round(lvl.volume);
+      bar.className = "signal-vap-bar"
+        + (r.poc ? " is-poc" : va[r.y] ? " is-va" : "");
+      bar.style.top = (r.y - 1) + "px";
+      bar.style.width = Math.max(3, Math.round((r.vol / maxVol) * maxW)) + "px";
+      bar.title = Number(r.price).toFixed(2) + " · vol " + Math.round(r.vol)
+        + (r.poc ? " · POC" : "");
       ov.appendChild(bar);
     });
   }
@@ -2406,6 +2521,9 @@
     }
     ov.hidden = false;
     const ts = chart.timeScale();
+    let spacing = 8;
+    try { spacing = ts.options().barSpacing || 8; } catch (_) {}
+    const colW = Math.max(28, Math.min(56, Math.round(spacing * 0.92)));
     const fpCount = Object.keys(footprintByTime).length;
     keys.forEach(function (t) {
       const fb = lookupFootprint(t);
@@ -2416,7 +2534,8 @@
         + (times[t] === "hover" ? " is-hover" : "")
         + (times[t] === "pin" ? " is-pinned" : "")
         + (times[t] === "preview" ? " is-preview" : "");
-      col.style.left = (x - 22) + "px";
+      col.style.left = (x - colW / 2) + "px";
+      col.style.width = colW + "px";
       if (!fb || !(fb.levels || []).length) {
         const miss = document.createElement("div");
         miss.className = "signal-fp-miss";
@@ -3866,7 +3985,11 @@
       }
       fillDeskSelects(data);
       paintRobotChip(data);
-      syncPositionalAutoSwitch(data);
+      if (deskScope() === "positional") {
+        syncPositionalAutoSwitch(data);
+      } else {
+        syncRangeAutoSwitch(data);
+      }
       const oilBanWrap = $("us-oil-banner");
       if (oilBanWrap) oilBanWrap.hidden = deskScope() === "positional";
       const oilBan = $("us-oil-banner-text");
@@ -4070,7 +4193,9 @@
   }
   const btn = $("signal-desk-refresh");
   if (btn) btn.addEventListener("click", function () { loadDesk(false); });
+  bindRangeAutoSwitch();
   bindPositionalAutoSwitch();
+  hydrateDeskModeSwitches();
   const kickBtn = $("sig-kick-btn");
   if (kickBtn) kickBtn.addEventListener("click", kickRobot);
   const fitBtn = $("signal-desk-fit");
@@ -4126,6 +4251,17 @@
       if (!chartFlow || typeof chartFlow.setShowClusters !== "function") return;
       chartFlow.setShowClusters(!chartFlow.getShowClusters());
       setToolPressed("tool-clusters", chartFlow.getShowClusters());
+      if (chartFlow.getShowClusters() && chart) {
+        try {
+          const sp = chart.timeScale().options().barSpacing;
+          const lr = chart.timeScale().getVisibleLogicalRange();
+          if (sp > 0) {
+            scaleLocked = true;
+            lockedBarSpacing = sp;
+            if (lr) lockedLogical = lr;
+          }
+        } catch (_) {}
+      }
     });
   }
   const toolMacd = $("tool-macd");
@@ -4661,15 +4797,10 @@
         }
         return false;
       }
-      const cur = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
-      const view = cur.ok ? await cur.json() : {};
-      const body = {
-        autoExecution: view.autoExecution,
-        liveExecution: view.liveExecution,
-        playbookId: patch.playbookId || view.playbookId,
-        instrumentId: patch.instrumentId || view.instrumentId,
-        positionalAutoExecution: view.positionalAutoExecution
-      };
+      const body = {};
+      if (patch.playbookId) body.playbookId = patch.playbookId;
+      if (patch.instrumentId) body.instrumentId = patch.instrumentId;
+      if (!body.playbookId && !body.instrumentId) return false;
       const res = await fetch("/api/trend/settings", {
         method: "POST",
         headers: deskAuthHeaders({ "Content-Type": "application/json" }),
@@ -4713,13 +4844,6 @@
       }
       const st = desk.tools || null;
       if (chartTools && st) chartTools.setState(st);
-      if (chartFlow && desk.flow && typeof chartFlow.setState === "function") {
-        chartFlow.setState(desk.flow);
-      } else if (chartFlow && deskScope() === "positional"
-          && !(desk.flow && desk.flow.showClusters === false)) {
-        chartFlow.setShowClusters(true);
-      }
-      setToolPressed("tool-clusters", !!(chartFlow && chartFlow.getShowClusters && chartFlow.getShowClusters()));
       const sc = desk.scale;
       if (!scaleLocked && lastCandleTime == null && sc && sc.barSpacing > 0
           && (!sc.instrument || sc.instrument === lastDeskInstrument)) {
@@ -4728,6 +4852,13 @@
         lockedLogical = sc.logical || null;
         restoreTimeScale(followLive && !userPinned);
       }
+      if (chartFlow && desk.flow && typeof chartFlow.setState === "function") {
+        chartFlow.setState(desk.flow);
+      } else if (chartFlow && deskScope() === "positional"
+          && !(desk.flow && desk.flow.showClusters === false)) {
+        chartFlow.setShowClusters(true);
+      }
+      setToolPressed("tool-clusters", !!(chartFlow && chartFlow.getShowClusters && chartFlow.getShowClusters()));
     } catch (e) {
       console.warn("chart layout load", e);
     }
@@ -4883,6 +5014,7 @@
 
   async function bootDesk() {
     applyDeskChrome();
+    hydrateDeskModeSwitches();
     const metaBoot = $("signal-desk-meta");
     if (metaBoot) metaBoot.textContent = "грузим desk… " + formatSecidWithMonth(wantedDeskInstrument() || "BRV6");
     const domBody = $("signal-dom-body");

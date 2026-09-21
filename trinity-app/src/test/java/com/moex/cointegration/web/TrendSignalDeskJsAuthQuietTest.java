@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -39,6 +40,18 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("После 16:00 новый вход не ставим"), "late-arm copy must be Russian");
         assertTrue(src.contains("desk-positional-auto-execution"), "positional desk switcher missing");
         assertTrue(src.contains("/api/trend/settings/positional-auto-execution"), "positional auto API missing");
+        assertTrue(src.contains("desk-range-auto-execution"), "range desk switcher missing");
+        assertTrue(src.contains("/api/trend/settings/auto-execution"), "range auto API missing");
+        assertTrue(src.contains("hydrateDeskModeSwitches"), "range/positional toggles must hydrate from GET settings");
+        int saveAt = src.indexOf("async function saveDeskSelection");
+        assertTrue(saveAt > 0, "saveDeskSelection missing");
+        String saveBody = src.substring(saveAt, Math.min(src.length(), saveAt + 1600));
+        assertFalse(saveBody.contains("autoExecution:"),
+                "saveDeskSelection must not echo autoExecution (playbook/instrument only)");
+        assertFalse(saveBody.contains("positionalAutoExecution:"),
+                "saveDeskSelection must not echo positionalAutoExecution");
+        assertFalse(saveBody.contains("liveExecution:"),
+                "saveDeskSelection must not echo liveExecution");
         assertTrue(src.contains("Перед входом · фундамент и охота"), "hunt brief heading missing");
         assertTrue(src.contains("function wantedDeskInstrument"), "desk must request pinned instrument");
         assertTrue(src.contains("invalidateDeskFetch"), "stale oil payload must be dropped on instrument change");

@@ -245,11 +245,11 @@
     if (settings.autoExecution != null) return !!settings.autoExecution;
     if (data && data.autoExecution != null) return !!data.autoExecution;
     if (fp.autoExecution != null) return !!fp.autoExecution;
-    return true;
+    return null;
   }
 
   function deliveryRu(code, data) {
-    if (!autoOn(data)) return "наблюдение";
+    if (autoOn(data) === false) return "наблюдение";
     const c = String(code || "");
     if (c === "LIVE_FORTS") return "авто · живые заявки";
     if (c === "SANDBOX_FAIR" || c === "AUTO") return "авто · журнал";
@@ -259,14 +259,26 @@
 
   function syncArbAutoSwitch(data) {
     const tog = $("desk-arb-auto-execution");
-    if (!tog || tog.disabled) return;
+    if (!tog) return;
     const on = autoOn(data);
-    tog.checked = on;
-    tog.setAttribute("aria-checked", on ? "true" : "false");
+    if (on == null && tog.dataset.hydrated !== "1") return;
+    const shown = on == null ? !!tog.checked : on;
+    tog.checked = shown;
+    tog.setAttribute("aria-checked", shown ? "true" : "false");
+    tog.dataset.hydrated = "1";
+    tog.disabled = false;
+    const bar = $("arb-auto-wrap");
+    if (bar) bar.hidden = false;
     const sw = tog.closest(".mode-switch");
     if (sw) {
-      sw.classList.toggle("is-auto", on);
-      sw.classList.toggle("is-signal", !on);
+      sw.classList.toggle("is-auto", shown);
+      sw.classList.toggle("is-signal", !shown);
+    }
+    const hint = $("arb-mode-hint");
+    if (hint) {
+      hint.textContent = shown
+        ? "Авто: робот сам открывает и закрывает по правилам."
+        : "Ручная торговля: график без сделок.";
     }
   }
 
@@ -292,6 +304,7 @@
     if (!tog || tog.dataset.bound === "1") return;
     tog.dataset.bound = "1";
     tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
       setArbAutoFromDesk(tog.checked);
     });
   }
@@ -312,7 +325,7 @@
       const view = await res.json();
       syncArbAutoSwitch(view);
       if ($("arb-delivery")) $("arb-delivery").textContent = deliveryRu(view.delivery, view);
-      if ($("arb-robot") && !autoOn(view)) $("arb-robot").textContent = "Наблюдение";
+      if ($("arb-robot") && autoOn(view) === false) $("arb-robot").textContent = "Наблюдение";
       refreshStatus().catch(function () {});
     } catch (err) {
       if (tog) tog.checked = !enabled;
@@ -329,7 +342,7 @@
     if (fp.open) {
       return "В сделке " + (fp.open.pair || "");
     }
-    if (!autoOn(data)) {
+    if (autoOn(data) === false) {
       return "Наблюдение";
     }
     const act = fp.lastAction || "";
@@ -374,7 +387,7 @@
     if ($("arb-desk-meta")) {
       const armed = fp.open
         ? "есть позиция"
-        : (!autoOn(data)
+        : (autoOn(data) === false
           ? "наблюдение"
           : (fp.liveArmed ? "авто · живые заявки, ордеров нет" : "авто · журнал, ордеров нет"));
       $("arb-desk-meta").textContent = "Котировки брокера · " + armed;
@@ -572,7 +585,7 @@
       (warming ? " · загрузка…" : "") +
       (data.stale ? " · локальный снимок" : "") +
       (fp.open ? " · есть позиция"
-        : (!autoOn(data) ? " · наблюдение"
+        : (autoOn(data) === false ? " · наблюдение"
           : (fp.liveArmed ? " · авто · живые заявки, ордеров нет" : " · авто · журнал, ордеров нет")));
   }
 
@@ -1025,6 +1038,8 @@
   }
 
   function bind() {
+    const arbWrap = $("arb-auto-wrap");
+    if (arbWrap) arbWrap.hidden = true;
     fillFamilySelect(DEFAULT_FAMS, loadFamilyFromUrl());
     bindArbAutoSwitch();
     bindArbGuide();

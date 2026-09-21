@@ -86,36 +86,39 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260919-dom4">
+              <link rel="stylesheet" href="/css/operator.css?v=20260919-vapL">
+              <script>
+              (function () {
+                var E = "trinity.desk.entered";
+                var B = "trinity.desk.boot";
+                var boot = "{{BOOT_ID}}";
+                var prev = "";
+                var entered = false;
+                try {
+                  prev = sessionStorage.getItem(B) || "";
+                  entered = sessionStorage.getItem(E) === "1";
+                } catch (err) {}
+                if (boot && prev && prev !== boot) {
+                  try {
+                    sessionStorage.removeItem(E);
+                    sessionStorage.removeItem(B);
+                    sessionStorage.removeItem("trinity.welcome.played");
+                    localStorage.removeItem("trinity.supabase.access_token");
+                  } catch (err) {}
+                  entered = false;
+                }
+                if (entered) return;
+                document.documentElement.classList.add("trinity-need-gate");
+                var p = (location.pathname || "").replace(/\\/+$/, "") || "/view";
+                if (p !== "/view" && p !== "") {
+                  location.replace("/view");
+                }
+              })();
+              </script>
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
                   data-nav-strategy="{{NAV_STRATEGY}}">
-              <header class="site-header">
-                <div class="brand-row">
-                  <div class="trinity-logo" aria-hidden="true">
-                    <span class="ring ring-a"></span>
-                    <span class="ring ring-b"></span>
-                    <span class="ring ring-c"></span>
-                  </div>
-                  <div class="brand-text">
-                    <h1 class="brand">TRINITY</h1>
-                    <p class="brand-sub">Multi-Strategy Arbitrage</p>
-                  </div>
-                </div>
-                <p class="tagline">Three Strategies. One Mission.</p>
-              </header>
-              {{NAV}}
-              <div id="auth-session-bar" class="auth-session-bar" hidden></div>
-              <div id="trinity-smoke-banner" class="trinity-smoke-banner" hidden role="status" aria-live="polite"></div>
-              <main>
-                {{OPS}}
-                {{BODY}}
-                <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
-                <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
-                <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
-                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
-              </main>
               <div id="trinity-auth-gate" class="trinity-auth-gate" hidden aria-hidden="true">
                 <canvas id="trinity-auth-canvas" class="trinity-auth-canvas" aria-hidden="true"></canvas>
                 <div class="trinity-auth-veil"></div>
@@ -162,8 +165,44 @@ public class AnalysisHtmlRenderer {
                   </div>
                 </div>
               </div>
-              <script src="/js/operator.js?v=20260902-desc2"></script>
-              <script src="/js/trinity-status-plaques.js?v=20260821-desksplit"></script>
+              <script>
+              (function () {
+                if (!document.documentElement.classList.contains("trinity-need-gate")) return;
+                var gate = document.getElementById("trinity-auth-gate");
+                if (!gate) return;
+                gate.hidden = false;
+                gate.setAttribute("aria-hidden", "false");
+                gate.classList.add("is-open");
+                document.body.classList.add("trinity-gate-lock");
+              })();
+              </script>
+              <header class="site-header">
+                <div class="brand-row">
+                  <div class="trinity-logo" aria-hidden="true">
+                    <span class="ring ring-a"></span>
+                    <span class="ring ring-b"></span>
+                    <span class="ring ring-c"></span>
+                  </div>
+                  <div class="brand-text">
+                    <h1 class="brand">TRINITY</h1>
+                    <p class="brand-sub">Multi-Strategy Arbitrage</p>
+                  </div>
+                </div>
+                <p class="tagline">Three Strategies. One Mission.</p>
+              </header>
+              {{NAV}}
+              <div id="auth-session-bar" class="auth-session-bar" hidden></div>
+              <div id="trinity-smoke-banner" class="trinity-smoke-banner" hidden role="status" aria-live="polite"></div>
+              <main>
+                {{OPS}}
+                {{BODY}}
+                <div id="trinity-toast-stack" class="toast-stack" aria-live="assertive"></div>
+                <div id="trinity-upsell-host" class="upsell-host" aria-live="polite"></div>
+                <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
+                <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
+              </main>
+              <script src="/js/operator.js?v=20260919-auth3"></script>
+              <script src="/js/trinity-status-plaques.js?v=20260919-chrome1"></script>
             </body>
             </html>
             """;
@@ -1661,7 +1700,7 @@ public class AnalysisHtmlRenderer {
                   <div id="chart-z" class="chart tall"></div>
                 </div>
                 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-                <script src="/js/trinity-chart-kit.js?v=20260919-dom1"></script>
+                <script src="/js/trinity-chart-kit.js?v=20260919-auth1"></script>
                 <script src="/js/pairs-charts.js?v=20260919-dom1"></script>
                 """
                 .replace("{{Y}}", escape(tickerY))
@@ -1820,8 +1859,8 @@ public class AnalysisHtmlRenderer {
 
         body.append(renderFinalExplainPanel(rows, technical, regime, report, cluster));
         body.append(renderFinalNewsSection(rss));
-        body.append("<script src=\"/js/trinity-fast-boot.js?v=20260910-fast1\"></script>");
-        body.append("<script src=\"/js/pairs-final-desk.js?v=20260910-fast1\"></script>");
+        body.append("<script src=\"/js/trinity-fast-boot.js?v=20260919-auth1\"></script>");
+        body.append("<script src=\"/js/pairs-final-desk.js?v=20260919-persist1\"></script>");
         return page("TRINITY — пульт пар", body.toString(), nav("final"), OpsMode.NONE);
     }
 
@@ -1965,13 +2004,13 @@ public class AnalysisHtmlRenderer {
                   </div>
 
                   <div class="pairs-desk-toolbar">
-                    <label class="mode-switch is-signal" title="Наблюдение: журнал без заявок. Авто: ещё ордера брокера после анализа, если брокер готов.">
-                      <span class="mode-switch-label">Наблюдение</span>
-                      <input type="checkbox" id="pairs-auto-execution" role="switch" aria-checked="false">
+                    <label class="mode-switch is-signal" hidden title="Ручная торговля: журнал без заявок. Авто: ещё ордера брокера после анализа, если брокер готов.">
+                      <span class="mode-switch-label">Ручная торговля</span>
+                      <input type="checkbox" id="pairs-auto-execution" role="switch" aria-checked="false" disabled>
                       <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
                       <span class="mode-switch-label">Авто</span>
                     </label>
-                    <p class="pairs-desk-delivery" id="pairs-delivery-hint">Наблюдение пишет журнал. Авто = ещё заявки брокера после анализа.</p>
+                    <p class="pairs-desk-delivery" id="pairs-delivery-hint">Ручная торговля: журнал пишется, заявок нет. Авто — ещё заявки, если брокер готов.</p>
                     <div class="pairs-filter" role="group" aria-label="Фильтр итога">
                       <button type="button" class="pairs-chip is-on" data-filter="ALL">Все</button>
                       <button type="button" class="pairs-chip" data-filter="ENTER">Вход</button>
@@ -3121,6 +3160,7 @@ public class AnalysisHtmlRenderer {
         }
         return PAGE_TEMPLATE
                 .replace("{{TITLE}}", escape(title))
+                .replace("{{BOOT_ID}}", OperatorProcessId.ID)
                 .replace("{{UPSELL}}", upsellAttr)
                 .replace("{{UPSELL_PHASE}}", escape(phase))
                 .replace("{{EDITION}}", edition.name())

@@ -57,8 +57,8 @@ public class StartupSmokeStatus {
 
     public synchronized void ok(int attempt, int maxAttempts, List<Check> checks, boolean keepBlocked) {
         snap.set(new Snapshot(Phase.OK, true, keepBlocked, attempt, maxAttempts, Instant.now(),
-                List.copyOf(checks), keepBlocked
-                        ? "OK after fail — auto/live remain off until operator re-enables"
+                List.copyOf(checks),                 keepBlocked
+                        ? "OK after fail — live remains off until operator re-enables"
                         : "OK"));
     }
 
@@ -95,7 +95,7 @@ public class StartupSmokeStatus {
                 "401 на GET desk/settings — не слать Bearer на публичный GET / сломан security",
                 "5xx на desk — warmup/архив; не торговать",
                 "POST settings без auth не 401 при auth.enabled=true — дыра в security",
-                "Починить → POST /api/ops/smoke/rerun или рестарт; auto/live включать вручную"
+                "Починить → POST /api/ops/smoke/rerun или рестарт; live включать вручную"
         ));
         return m;
     }

@@ -12,14 +12,25 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class TrendTapeWebSocketConfig implements WebSocketConfigurer {
 
     private final TrendTapeWebSocketHandler handler;
+    private final TrendTapeHandshakeInterceptor handshake;
 
-    public TrendTapeWebSocketConfig(TrendTapeWebSocketHandler handler) {
+    public TrendTapeWebSocketConfig(
+            TrendTapeWebSocketHandler handler,
+            TrendTapeHandshakeInterceptor handshake
+    ) {
         this.handler = handler;
+        this.handshake = handshake;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(handler, "/api/trend/ws/tape")
-                .setAllowedOriginPatterns("*");
+                .addInterceptors(handshake)
+                .setAllowedOriginPatterns(
+                        "http://127.0.0.1:*",
+                        "http://localhost:*",
+                        "https://127.0.0.1:*",
+                        "https://localhost:*"
+                );
     }
 }

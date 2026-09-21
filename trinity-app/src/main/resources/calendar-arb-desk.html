@@ -7,15 +7,6 @@
     </div>
     <div class="signal-desk-actions">
       <button type="button" class="btn btn-ghost" id="arb-desk-refresh">Обновить</button>
-      <div class="signal-pos-switch" id="arb-auto-wrap">
-        <span class="k">Робот</span>
-        <label class="mode-switch" title="Наблюдение: график без сделок. Авто: робот сам открывает и закрывает по правилам.">
-          <span class="mode-switch-label">Наблюдение</span>
-          <input type="checkbox" id="desk-arb-auto-execution" role="switch" aria-checked="false">
-          <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
-          <span class="mode-switch-label">Авто</span>
-        </label>
-      </div>
       <a class="btn btn-ghost" href="/view/settings#calendar-arb-settings">Режим</a>
     </div>
   </div>
@@ -44,6 +35,15 @@
     <div class="signal-chip"><span class="k">Сделки сегодня</span>
       <strong><a id="arb-paper-today" href="/view/statement#arb">—</a></strong>
     </div>
+  </div>
+  <div class="strategy-mode-bar" id="arb-auto-wrap" hidden>
+    <label class="mode-switch is-signal" title="Ручная торговля: график без сделок. Авто: робот сам открывает и закрывает по правилам.">
+      <span class="mode-switch-label">Ручная торговля</span>
+      <input type="checkbox" id="desk-arb-auto-execution" role="switch" aria-checked="false" disabled>
+      <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+      <span class="mode-switch-label">Авто</span>
+    </label>
+    <p class="strategy-mode-hint" id="arb-mode-hint">Ручная торговля: график без сделок.</p>
   </div>
   <p class="meta" id="arb-reason">—</p>
   <p class="meta" id="arb-fill-quality">Стакан ещё подгружается.</p>
@@ -283,6 +283,6 @@
   </div>
 </div>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-fast-boot.js?v=20260910-fast1"></script>
-<script src="/js/trinity-chart-kit.js?v=20260919-dom1"></script>
-<script src="/js/calendar-arb-desk.js?v=20260919-dom1"></script>
+<script src="/js/trinity-fast-boot.js?v=20260919-auth1"></script>
+<script src="/js/trinity-chart-kit.js?v=20260919-auth1"></script>
+<script src="/js/calendar-arb-desk.js?v=20260919-persist1"></script>

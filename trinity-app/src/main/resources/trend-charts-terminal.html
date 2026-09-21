@@ -1,4 +1,5 @@
 <section class="charts-terminal" id="trend-charts-terminal" data-nav-strategy="trend">
+  <link rel="stylesheet" href="/css/operator.css?v=20260919-vapL">
   <div class="charts-terminal-head">
     <div>
       <p class="meta"><a href="/view/trend-signal">← диапазонная торговля</a>
@@ -66,7 +67,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         <span class="charts-tv-tip">Footprint</span>
       </button>
-      <button type="button" class="charts-tv-btn" id="charts-tool-hvol" aria-pressed="false" title="Горизонтальные объёмы — volume profile сессии справа">
+      <button type="button" class="charts-tv-btn" id="charts-tool-hvol" aria-pressed="false" title="Горизонтальные объёмы — volume profile сессии слева">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H8v2h13V5zm0 6H11v2h10v-2zm0 6H6v2h15v-2zM3 4h2v16H3z"/></svg>
         <span class="charts-tv-tip">Горизонтальные объёмы</span>
       </button>
@@ -362,7 +363,8 @@
 .charts-flow-profile {
   position: absolute;
   top: 0;
-  right: 56px;
+  left: 0;
+  right: auto;
   bottom: 28px;
   width: 80px;
   pointer-events: none;
@@ -370,26 +372,17 @@
   overflow: hidden;
 }
 .charts-flow-profile .signal-vap-bar {
-  left: auto;
-  right: 0;
-  background: linear-gradient(270deg, rgba(109, 40, 217, 0.82), rgba(109, 40, 217, 0.1));
+  left: 0;
+  right: auto;
+  background: linear-gradient(90deg, rgba(109, 40, 217, 0.82), rgba(109, 40, 217, 0.1));
 }
 .charts-cluster-overlay {
   position: absolute;
-  inset: 0;
+  inset: 0 56px 28px 0;
   pointer-events: none;
   z-index: 5;
   overflow: hidden;
 }
-.charts-cluster-tick {
-  position: absolute;
-  height: 6px;
-  border-radius: 1px;
-  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.35);
-}
-.charts-cluster-tick.is-buy { background: rgba(22, 163, 74, 0.92); }
-.charts-cluster-tick.is-sell { background: rgba(220, 38, 38, 0.92); }
-.charts-cluster-tick.is-ohlc { opacity: 0.72; }
 .chart-ma-sel-label {
   font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
   fill: #0f766e;
@@ -411,6 +404,6 @@
 .chart-draw-handle.is-level-v { cursor: ew-resize; }
 </style>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-fast-boot.js?v=20260910-fast1"></script>
-<script src="/js/trinity-chart-kit.js?v=20260919-dom1"></script>
-<script src="/js/trend-charts-terminal.js?v=20260919-dom1"></script>
+<script src="/js/trinity-fast-boot.js?v=20260919-auth1"></script>
+<script src="/js/trinity-chart-kit.js?v=20260919-auth1"></script>
+<script src="/js/trend-charts-terminal.js?v=20260919-cl4"></script>

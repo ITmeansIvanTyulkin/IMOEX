@@ -22,6 +22,9 @@ class TrinityFastBootContractTest {
         assertTrue(src.contains("BOOK_MS"), "BOOK_MS missing");
         assertTrue(src.contains("AbortController"), "AbortController missing");
         assertTrue(src.contains("fetchJson"), "fetchJson missing");
+        assertTrue(src.contains("apiNeedsAuth") && src.contains("__trinityApiAuthFetch"),
+                "API fetches must attach cabinet JWT after GET lock");
+        assertTrue(src.contains("headers.forEach"), "Headers objects must copy via forEach");
         assertTrue(src.contains("do not regress") || src.contains("all strategy desks"),
                 "contract comment missing");
     }

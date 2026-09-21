@@ -9,8 +9,12 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import jakarta.servlet.http.HttpServletRequest;
+
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moex.cointegration.config.DeskSessionStore;
 import com.moex.cointegration.config.ImoexProperties;
 
 /**
@@ -34,13 +39,19 @@ public class AuthModeController {
 
     private final ImoexProperties properties;
     private final ObjectMapper objectMapper;
+    private final DeskSessionStore deskSessions;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
-    public AuthModeController(ImoexProperties properties, ObjectMapper objectMapper) {
+    public AuthModeController(
+            ImoexProperties properties,
+            ObjectMapper objectMapper,
+            DeskSessionStore deskSessions
+    ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.deskSessions = deskSessions;
     }
 
     @GetMapping("/mode")
@@ -57,6 +68,7 @@ public class AuthModeController {
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("basicEnabled", auth.enabled());
+        out.put("bootId", com.moex.cointegration.web.OperatorProcessId.ID);
         out.put("supabase", supabase);
         out.put(
                 "note",
@@ -132,7 +144,10 @@ public class AuthModeController {
             out.put("expires_in", body.get("expires_in"));
             out.put("refresh_token", body.get("refresh_token"));
             out.put("email", email);
-            return ResponseEntity.ok(out);
+            ResponseCookie cookie = deskSessions.issueCookie(email, Duration.ofSeconds(expiresSeconds(body.get("expires_in"))));
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .body(out);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(
@@ -146,6 +161,14 @@ public class AuthModeController {
                     "Не удалось связаться с Supabase: " + detail
             ));
         }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, Object>> logout(HttpServletRequest request) {
+        deskSessions.revoke(deskSessions.idOf(request));
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, deskSessions.expireCookie().toString())
+                .body(Map.of("ok", true));
     }
 
     private Map<String, Object> parseJson(String text) {
@@ -164,6 +187,20 @@ public class AuthModeController {
         out.put("error", code);
         out.put("message", message);
         return out;
+    }
+
+    private static long expiresSeconds(Object raw) {
+        long seconds = 3600L;
+        if (raw instanceof Number n) {
+            seconds = n.longValue();
+        } else if (raw instanceof String s && !s.isBlank()) {
+            try {
+                seconds = Long.parseLong(s.trim());
+            } catch (NumberFormatException ignored) {
+                // keep default
+            }
+        }
+        return Math.min(Math.max(seconds, 60L), 86_400L);
     }
 
     private static String stringVal(Map<String, Object> body, String key) {
