@@ -56,8 +56,10 @@ class TrendChartsTerminalTvContractTest {
     void kitMergesOneSidedBooks() throws Exception {
         String js = read("src/main/resources/static/js/trinity-chart-kit.js");
         assertTrue(js.contains("function mergeDomBook"), "mergeDomBook helper missing");
-        assertTrue(js.contains("n.length >= p.length ? n : p"),
-                "shallower WS book must not drop DOM depth");
+        assertTrue(js.contains("shorter full shelf") || js.contains("Empty bids with live asks"),
+                "shallower complete shelf must replace prev; one-sided empty must keep opposite");
+        assertFalse(js.contains("n.length >= p.length ? n : p"),
+                "must not keep stale longer shelf when next is shorter");
         assertTrue(js.contains("access_token"), "tape WS must pass cabinet token on handshake");
     }
 

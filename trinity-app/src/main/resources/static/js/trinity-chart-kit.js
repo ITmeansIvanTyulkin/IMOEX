@@ -4058,22 +4058,33 @@
   }
   /**
    * Keep both bid and ask shelves. A one-sided stream snapshot must not
-   * repaint the whole ladder red or green from the last trade.
+   * wipe the opposite ladder. A shorter full shelf (50→49) must replace prev.
    */
   function mergeDomBook(prev, next) {
     if (!next) return prev || null;
     if (!prev) return next;
-    function pick(nextSide, prevSide) {
-      const n = nextSide && nextSide.length ? nextSide : null;
-      const p = prevSide && prevSide.length ? prevSide : null;
-      if (!n) return p || [];
-      if (!p) return n;
-      return n.length >= p.length ? n : p;
+    const nb = Array.isArray(next.bids) ? next.bids : null;
+    const na = Array.isArray(next.asks) ? next.asks : null;
+    const pb = prev.bids || [];
+    const pa = prev.asks || [];
+    let bids;
+    let asks;
+    if (nb == null) {
+      bids = pb;
+    } else if (nb.length > 0) {
+      bids = nb;
+    } else {
+      // Empty bids with live asks → one-sided paint; keep previous bids.
+      bids = (na && na.length > 0 && pb.length) ? pb : nb;
     }
-    return Object.assign({}, next, {
-      bids: pick(next.bids, prev.bids),
-      asks: pick(next.asks, prev.asks)
-    });
+    if (na == null) {
+      asks = pa;
+    } else if (na.length > 0) {
+      asks = na;
+    } else {
+      asks = (nb && nb.length > 0 && pa.length) ? pa : na;
+    }
+    return Object.assign({}, next, { bids: bids, asks: asks });
   }
   function createTapeClient() {
     let ws = null;
