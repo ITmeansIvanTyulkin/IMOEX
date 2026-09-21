@@ -14,6 +14,20 @@
   var BOOK_MS = 12000;
   var STATUS_MS = 8000;
 
+  function jwtExpired(token) {
+    if (!token) return true;
+    try {
+      var parts = String(token).split(".");
+      if (parts.length < 2) return true;
+      var json = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      json += "=".repeat((4 - (json.length % 4)) % 4);
+      var payload = JSON.parse(atob(json));
+      return !(payload.exp > (Date.now() / 1000) + 15);
+    } catch (_) {
+      return true;
+    }
+  }
+
   function apiUrlOf(input) {
     if (typeof input === "string") return input;
     if (input && typeof input.url === "string") return input.url;
@@ -43,7 +57,7 @@
     if (h.Authorization || h.authorization) return h;
     try {
       var token = localStorage.getItem("trinity.supabase.access_token");
-      if (token) {
+      if (token && !jwtExpired(token)) {
         h.Authorization = "Bearer " + token;
         return h;
       }

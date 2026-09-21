@@ -25,4 +25,15 @@ class DeskSessionStoreTest {
         assertFalse(store.valid(""));
         assertFalse(store.valid("missing"));
     }
+
+    @Test
+    void defaultCookieLivesEightHours() {
+        DeskSessionStore store = new DeskSessionStore();
+        var cookie = store.issueCookie("a@b.c", null);
+        assertTrue(store.valid(cookie.getValue()));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                DeskSessionStore.DESK_TTL.getSeconds(),
+                cookie.getMaxAge().getSeconds());
+        org.junit.jupiter.api.Assertions.assertEquals(8L * 3600L, DeskSessionStore.DESK_TTL.toSeconds());
+    }
 }

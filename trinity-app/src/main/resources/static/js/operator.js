@@ -5,7 +5,9 @@
   const SB_EMAIL_KEY = "trinity.supabase.user_email";
   const WELCOME_SESSION_KEY = "trinity.welcome.played";
   const DESK_ENTERED_KEY = "trinity.desk.entered";
+  const DESK_ENTERED_UNTIL_KEY = "trinity.desk.enteredUntil";
   const DESK_BOOT_KEY = "trinity.desk.boot";
+  const DESK_TTL_MS = 8 * 60 * 60 * 1000;
   const ALERTS_ENABLED_KEY = "imoex.alerts.enabled";
   const ALERTS_SOUND_KEY = "imoex.alerts.sound";
   const SEEN_IDS_KEY = "imoex.alerts.seenIds";
@@ -41,7 +43,7 @@
       if (h.Authorization || h.authorization) return h;
       try {
         var token = localStorage.getItem(SB_TOKEN_KEY);
-        if (token) {
+        if (token && !jwtExpired(token)) {
           h.Authorization = "Bearer " + token;
           return h;
         }
@@ -139,9 +141,23 @@
     return localStorage.getItem(PASS_KEY) || "";
   }
 
+  function jwtExpired(token) {
+    if (!token) return true;
+    try {
+      var parts = String(token).split(".");
+      if (parts.length < 2) return true;
+      var json = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      json += "=".repeat((4 - (json.length % 4)) % 4);
+      var payload = JSON.parse(atob(json));
+      return !(payload.exp > (Date.now() / 1000) + 15);
+    } catch (_) {
+      return true;
+    }
+  }
+
   function authHeader() {
     const token = localStorage.getItem(SB_TOKEN_KEY);
-    if (token) {
+    if (token && !jwtExpired(token)) {
       return "Bearer " + token;
     }
     const user = readLoginEmail() || "imoex";
@@ -436,6 +452,7 @@
             revokeDeskSession();
             localStorage.removeItem(SB_TOKEN_KEY);
             localStorage.removeItem(SB_EMAIL_KEY);
+            localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
             sessionStorage.removeItem(WELCOME_SESSION_KEY);
             sessionStorage.removeItem(DESK_ENTERED_KEY);
             sessionStorage.removeItem(DESK_BOOT_KEY);
@@ -952,17 +969,23 @@
   function markDeskEntered(bootId) {
     try {
       sessionStorage.setItem(DESK_ENTERED_KEY, "1");
+      localStorage.setItem(DESK_ENTERED_UNTIL_KEY, String(Date.now() + DESK_TTL_MS));
       if (bootId) sessionStorage.setItem(DESK_BOOT_KEY, String(bootId));
+      if (bootId) localStorage.setItem(DESK_BOOT_KEY, String(bootId));
     } catch (_) { /* ignore */ }
     document.documentElement.classList.remove("trinity-need-gate");
   }
 
   function deskSessionReady() {
     try {
-      if (sessionStorage.getItem(DESK_ENTERED_KEY) !== "1") return false;
       const boot = (authMode && authMode.bootId) || "";
-      if (!boot) return true;
-      return sessionStorage.getItem(DESK_BOOT_KEY) === boot;
+      const savedBoot = sessionStorage.getItem(DESK_BOOT_KEY)
+        || localStorage.getItem(DESK_BOOT_KEY)
+        || "";
+      if (boot && savedBoot && savedBoot !== boot) return false;
+      if (sessionStorage.getItem(DESK_ENTERED_KEY) === "1") return true;
+      const until = parseInt(localStorage.getItem(DESK_ENTERED_UNTIL_KEY) || "0", 10);
+      return until > Date.now();
     } catch (_) {
       return false;
     }
@@ -972,13 +995,22 @@
     const boot = (authMode && authMode.bootId) || "";
     if (!boot) return;
     try {
-      const prev = sessionStorage.getItem(DESK_BOOT_KEY) || "";
+      const prev = sessionStorage.getItem(DESK_BOOT_KEY)
+        || localStorage.getItem(DESK_BOOT_KEY)
+        || "";
       if (prev && prev !== boot) {
         revokeDeskSession();
         localStorage.removeItem(SB_TOKEN_KEY);
+        localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
+        localStorage.removeItem(DESK_BOOT_KEY);
         sessionStorage.removeItem(DESK_ENTERED_KEY);
         sessionStorage.removeItem(DESK_BOOT_KEY);
         sessionStorage.removeItem(WELCOME_SESSION_KEY);
+      }
+      const until = parseInt(localStorage.getItem(DESK_ENTERED_UNTIL_KEY) || "0", 10);
+      if (until && until <= Date.now()) {
+        localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
+        sessionStorage.removeItem(DESK_ENTERED_KEY);
       }
     } catch (_) { /* ignore */ }
   }

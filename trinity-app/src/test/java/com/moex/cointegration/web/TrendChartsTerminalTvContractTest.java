@@ -67,6 +67,9 @@ class TrendChartsTerminalTvContractTest {
         String css = read("src/main/resources/static/css/operator.css");
         assertTrue(js.contains("charts-cluster-cell"), "clusters must paint readable cells, not raw ticks");
         assertTrue(js.contains("colW"), "cluster column width must follow barSpacing");
+        assertTrue(js.contains("signal-fp-handle"), "footprint range handles must be drawable");
+        assertTrue(js.contains("fpDragEnd"), "footprint handles must stretch the pinned range");
+        assertTrue(js.contains("clusterZoomTried = true"), "restoring clusters must not steal the user's zoom");
         assertTrue(css.contains(".charts-flow-profile"), "session VAP must have a positioned overlay");
         assertTrue(css.contains(".charts-cluster-cell"), "cluster cells need contrast styles");
         int vapAt = css.indexOf(".signal-profile-overlay,\n.charts-flow-profile {");

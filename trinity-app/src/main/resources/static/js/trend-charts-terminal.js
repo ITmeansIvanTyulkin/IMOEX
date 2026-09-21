@@ -83,7 +83,7 @@
           }
           cur.terminal.byInstrument[id] = st;
         }
-        if (p && p.scaleLocked && p.barSpacing > 0) {
+        if (p && p.barSpacing > 0) {
           cur.terminal.scaleByInstrument = cur.terminal.scaleByInstrument || {};
           cur.terminal.scaleByInstrument[id] = {
             barSpacing: p.barSpacing,
@@ -628,11 +628,6 @@
         try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
         try { p.chart.timeScale().fitContent(); } catch (_) {}
       }
-      if (nativeH1) {
-        p.scaleLocked = false;
-        try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
-        try { p.chart.timeScale().fitContent(); } catch (_) {}
-      }
       if (p.flow) {
         p.flow.setProfile(data.profile || []);
         p.flow.setFootprints(data.footprint || []);
@@ -694,21 +689,27 @@
 
     // Parallel live refresh (TrinityFastBoot) — sequential was multi-minute cold boots.
     await Promise.allSettled(list.map(async function (o) {
-      await refreshPane(o.secid);
       const by = (layoutDoc.terminal && layoutDoc.terminal.byInstrument) || {};
+      const sc = ((layoutDoc.terminal && layoutDoc.terminal.scaleByInstrument) || {})[o.secid];
+      const pane = panes[o.secid];
+      if (sc && sc.barSpacing > 0 && pane) {
+        pane.scaleLocked = true;
+        pane.barSpacing = sc.barSpacing;
+        pane.logical = sc.logical || null;
+        restorePaneScale(pane);
+      }
+      await refreshPane(o.secid);
       if (by[o.secid] && panes[o.secid]) {
         panes[o.secid].tools.setState(by[o.secid]);
         if (by[o.secid].flow && panes[o.secid].flow) {
           panes[o.secid].flow.setState(by[o.secid].flow);
         }
       }
-      const sc = ((layoutDoc.terminal && layoutDoc.terminal.scaleByInstrument) || {})[o.secid];
-      const pane = panes[o.secid];
-      if (sc && sc.barSpacing > 0 && pane && pane.tf !== "H1") {
-        pane.scaleLocked = true;
-        pane.barSpacing = sc.barSpacing;
-        pane.logical = sc.logical || null;
-        restorePaneScale(pane);
+      if (sc && sc.barSpacing > 0 && panes[o.secid]) {
+        panes[o.secid].scaleLocked = true;
+        panes[o.secid].barSpacing = sc.barSpacing;
+        panes[o.secid].logical = sc.logical || null;
+        restorePaneScale(panes[o.secid]);
       }
     }));
     resizeAll();

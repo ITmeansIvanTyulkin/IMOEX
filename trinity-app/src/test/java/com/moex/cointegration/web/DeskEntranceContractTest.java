@@ -28,11 +28,12 @@ class DeskEntranceContractTest {
                 "src/main/java/com/moex/cointegration/web/AnalysisHtmlRenderer.java",
                 "trinity-app/src/main/java/com/moex/cointegration/web/AnalysisHtmlRenderer.java");
         assertTrue(src.contains("trinity.desk.entered"), src);
+        assertTrue(src.contains("trinity.desk.enteredUntil"), src);
         assertTrue(src.contains("trinity.desk.boot"), src);
         assertTrue(src.contains("location.replace(\"/view\")"), src);
         assertTrue(src.contains("{{BOOT_ID}}"), src);
         assertTrue(src.contains("trinity-need-gate"), src);
-        assertTrue(src.contains("operator.js?v=20260919-auth3"), src);
+        assertTrue(src.contains("operator.js?v=20260921-sess8"), src);
     }
 
     @Test
@@ -45,6 +46,8 @@ class DeskEntranceContractTest {
         assertTrue(src.contains("function revokeDeskSession"), src);
         assertTrue(src.contains("injectAuthHeaders"), src);
         assertTrue(src.contains("headers.forEach"), src);
+        assertTrue(src.contains("jwtExpired"), src);
+        assertTrue(src.contains("DESK_TTL_MS"), src);
         assertTrue(src.contains("location.replace(\"/view\")"), src);
         int gateAt = src.indexOf("function maybeShowAuthGate");
         assertTrue(gateAt > 0, "maybeShowAuthGate missing");

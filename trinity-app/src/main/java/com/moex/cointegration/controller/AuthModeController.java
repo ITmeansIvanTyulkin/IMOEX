@@ -141,10 +141,11 @@ public class AuthModeController {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("access_token", body.get("access_token"));
             out.put("token_type", body.getOrDefault("token_type", "bearer"));
-            out.put("expires_in", body.get("expires_in"));
+            /* Desk cookie is 8h; Supabase JWT is often 1h — browser omits expired Bearer and keeps the cookie. */
+            out.put("expires_in", DeskSessionStore.DESK_TTL.toSeconds());
             out.put("refresh_token", body.get("refresh_token"));
             out.put("email", email);
-            ResponseCookie cookie = deskSessions.issueCookie(email, Duration.ofSeconds(expiresSeconds(body.get("expires_in"))));
+            ResponseCookie cookie = deskSessions.issueCookie(email, DeskSessionStore.DESK_TTL);
             return ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, cookie.toString())
                     .body(out);
@@ -187,20 +188,6 @@ public class AuthModeController {
         out.put("error", code);
         out.put("message", message);
         return out;
-    }
-
-    private static long expiresSeconds(Object raw) {
-        long seconds = 3600L;
-        if (raw instanceof Number n) {
-            seconds = n.longValue();
-        } else if (raw instanceof String s && !s.isBlank()) {
-            try {
-                seconds = Long.parseLong(s.trim());
-            } catch (NumberFormatException ignored) {
-                // keep default
-            }
-        }
-        return Math.min(Math.max(seconds, 60L), 86_400L);
     }
 
     private static String stringVal(Map<String, Object> body, String key) {

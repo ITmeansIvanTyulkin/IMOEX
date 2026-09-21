@@ -86,17 +86,21 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20260919-vapL">
+              <link rel="stylesheet" href="/css/operator.css?v=20260921-fp2">
               <script>
               (function () {
                 var E = "trinity.desk.entered";
+                var EU = "trinity.desk.enteredUntil";
                 var B = "trinity.desk.boot";
                 var boot = "{{BOOT_ID}}";
                 var prev = "";
                 var entered = false;
+                var until = 0;
                 try {
-                  prev = sessionStorage.getItem(B) || "";
+                  prev = sessionStorage.getItem(B) || localStorage.getItem(B) || "";
                   entered = sessionStorage.getItem(E) === "1";
+                  until = parseInt(localStorage.getItem(EU) || "0", 10) || 0;
+                  if (!entered && until > Date.now()) entered = true;
                 } catch (err) {}
                 if (boot && prev && prev !== boot) {
                   try {
@@ -104,6 +108,8 @@ public class AnalysisHtmlRenderer {
                     sessionStorage.removeItem(B);
                     sessionStorage.removeItem("trinity.welcome.played");
                     localStorage.removeItem("trinity.supabase.access_token");
+                    localStorage.removeItem(EU);
+                    localStorage.removeItem(B);
                   } catch (err) {}
                   entered = false;
                 }
@@ -201,7 +207,7 @@ public class AnalysisHtmlRenderer {
                 <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
               </main>
-              <script src="/js/operator.js?v=20260919-auth3"></script>
+              <script src="/js/operator.js?v=20260921-sess8"></script>
               <script src="/js/trinity-status-plaques.js?v=20260919-chrome1"></script>
             </body>
             </html>
@@ -1700,7 +1706,7 @@ public class AnalysisHtmlRenderer {
                   <div id="chart-z" class="chart tall"></div>
                 </div>
                 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-                <script src="/js/trinity-chart-kit.js?v=20260919-auth1"></script>
+                <script src="/js/trinity-chart-kit.js?v=20260921-fp2"></script>
                 <script src="/js/pairs-charts.js?v=20260919-dom1"></script>
                 """
                 .replace("{{Y}}", escape(tickerY))
@@ -1859,7 +1865,7 @@ public class AnalysisHtmlRenderer {
 
         body.append(renderFinalExplainPanel(rows, technical, regime, report, cluster));
         body.append(renderFinalNewsSection(rss));
-        body.append("<script src=\"/js/trinity-fast-boot.js?v=20260919-auth1\"></script>");
+        body.append("<script src=\"/js/trinity-fast-boot.js?v=20260921-sess8\"></script>");
         body.append("<script src=\"/js/pairs-final-desk.js?v=20260919-persist1\"></script>");
         return page("TRINITY — пульт пар", body.toString(), nav("final"), OpsMode.NONE);
     }

@@ -3059,6 +3059,8 @@
     const FP_PIN_MAX = 24;
     let layoutRaf = 0;
     let clusterZoomTried = false;
+    let fpDragEnd = null;
+    let fpHostBound = false;
     function fpSnapTolNow() {
       return Math.max(barSecNow(), 300);
     }
@@ -3139,9 +3141,12 @@
     }
 
     function indexFp(fps) {
-      fpByTime = {};
+      if (!fps || !fps.length) {
+        return;
+      }
+      const next = {};
       const times = barTimes();
-      (fps || []).forEach(function (fb) {
+      fps.forEach(function (fb) {
         let t = timeOf(fb.time);
         if (t == null) return;
         if (times.length) {
@@ -3156,8 +3161,9 @@
           }
           if (bestD <= fpSnapTolNow()) t = best;
         }
-        fpByTime[t] = fb;
+        next[t] = fb;
       });
+      if (Object.keys(next).length) fpByTime = next;
     }
 
     function sessionVapFallback() {
@@ -3377,13 +3383,6 @@
       let spacing = 8;
       try { spacing = chart.timeScale().options().barSpacing || 8; } catch (_) {}
       let times = visibleBarTimes();
-      if (times.length && spacing < 34 && !clusterZoomTried) {
-        clusterZoomTried = true;
-        if (maybeZoomForClusters()) {
-          requestAnimationFrame(function () { layoutNow(); });
-          return;
-        }
-      }
       if (times.length > CLUSTER_MAX) {
         times = times.slice(times.length - CLUSTER_MAX);
       }
@@ -3473,6 +3472,7 @@
 
     function layoutFootprint() {
       const ov = ensureOv("signal-footprint-overlay charts-fp-overlay");
+      bindFpHostHandlers();
       ov.innerHTML = "";
       const times = {};
       fpPinned.forEach(function (t) { times[t] = "pin"; });
@@ -3514,6 +3514,15 @@
           band.style.left = left + "px";
           band.style.width = Math.max(2, right - left) + "px";
           ov.appendChild(band);
+          if (fpAnchor == null && fpFrom != null && fpTo != null) {
+            ["from", "to"].forEach(function (end) {
+              const h = document.createElement("div");
+              h.className = "signal-fp-handle";
+              h.dataset.end = end;
+              h.style.left = ((end === "from" ? left : right) - 6) + "px";
+              ov.appendChild(h);
+            });
+          }
         }
       }
       const ts = chart.timeScale();
@@ -3556,6 +3565,72 @@
       });
     }
 
+    function fpRangeXs() {
+      if (fpFrom == null || fpTo == null || !chart) return null;
+      let x1 = null;
+      let x2 = null;
+      try {
+        x1 = chart.timeScale().timeToCoordinate(Math.min(fpFrom, fpTo));
+        x2 = chart.timeScale().timeToCoordinate(Math.max(fpFrom, fpTo));
+      } catch (_) {}
+      if (x1 == null || x2 == null) return null;
+      let barW = 8;
+      try {
+        const sp = chart.timeScale().options().barSpacing;
+        if (sp > 0) barW = sp;
+      } catch (_) {}
+      return {
+        left: Math.min(x1, x2) - barW * 0.35,
+        right: Math.max(x1, x2) + barW * 0.55
+      };
+    }
+
+    function bindFpHostHandlers() {
+      if (fpHostBound || !host) return;
+      fpHostBound = true;
+      host.addEventListener("pointerdown", function (ev) {
+        if (fpFrom == null || fpTo == null || !chart) return;
+        if (ev.button != null && ev.button !== 0) return;
+        if (fpAnchor != null) return;
+        const rect = host.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        const xs = fpRangeXs();
+        if (!xs) return;
+        const hit = 14;
+        if (Math.abs(x - xs.left) <= hit) fpDragEnd = "from";
+        else if (Math.abs(x - xs.right) <= hit) fpDragEnd = "to";
+        else return;
+        try { host.setPointerCapture(ev.pointerId); } catch (_) {}
+        ev.preventDefault();
+        ev.stopPropagation();
+      }, true);
+      host.addEventListener("pointermove", function (ev) {
+        if (!fpDragEnd || !chart) return;
+        const rect = host.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        let t = null;
+        try { t = chart.timeScale().coordinateToTime(x); } catch (_) {}
+        if (typeof t !== "number") return;
+        t = nearestTime(t);
+        if (fpDragEnd === "from") {
+          if (t === fpFrom) return;
+          applyFpRange(t, fpTo);
+        } else {
+          if (t === fpTo) return;
+          applyFpRange(fpFrom, t);
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+      }, true);
+      host.addEventListener("pointerup", function (ev) {
+        if (!fpDragEnd) return;
+        fpDragEnd = null;
+        try { host.releasePointerCapture(ev.pointerId); } catch (_) {}
+        ev.preventDefault();
+        ev.stopPropagation();
+      }, true);
+    }
+
     function layoutNow() {
       layoutProfile();
       layoutClusters();
@@ -3573,7 +3648,7 @@
 
     if (typeof chart.subscribeClick === "function") {
       chart.subscribeClick(function (param) {
-        if (!fpTool || isBusy()) return;
+        if (!fpTool || fpDragEnd) return;
         if (!param || param.time == null) return;
         const t = nearestTime(typeof param.time === "number" ? param.time : timeOf(param.time));
         if (t == null) return;
@@ -3588,7 +3663,7 @@
     }
     if (typeof chart.subscribeCrosshairMove === "function") {
       chart.subscribeCrosshairMove(function (param) {
-        if (!fpTool || isBusy()) return;
+        if (!fpTool || fpDragEnd) return;
         const t = param && param.time != null
           ? nearestTime(typeof param.time === "number" ? param.time : timeOf(param.time))
           : null;
@@ -3623,10 +3698,11 @@
       },
       getShowProfile: function () { return showProfile; },
       setShowClusters: function (on) {
+        const was = showClusters;
         showClusters = !!on;
-        clusterZoomTried = false;
-        if (showClusters && maybeZoomForClusters()) {
-          requestAnimationFrame(function () { layoutNow(); });
+        if (showClusters && !was) {
+          clusterZoomTried = false;
+          maybeZoomForClusters();
         }
         layoutNow();
         onChange();
@@ -3695,7 +3771,7 @@
         if (!st) return;
         showProfile = !!st.showProfile;
         showClusters = !!st.showClusters;
-        clusterZoomTried = false;
+        clusterZoomTried = true;
         if (st.fpFrom != null && st.fpTo != null) {
           fpFrom = st.fpFrom;
           fpTo = st.fpTo;

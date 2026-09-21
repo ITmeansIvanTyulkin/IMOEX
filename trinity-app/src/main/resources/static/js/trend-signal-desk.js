@@ -1956,11 +1956,15 @@
     return ov;
   }
   function indexFootprints(fps) {
-    footprintByTime = {};
-    (fps || []).forEach(function (fb) {
+    if (!fps || !fps.length) {
+      return;
+    }
+    const next = {};
+    fps.forEach(function (fb) {
       const t = toChartTime(fb.time);
-      if (t != null) footprintByTime[t] = fb;
+      if (t != null) next[t] = fb;
     });
+    if (Object.keys(next).length) footprintByTime = next;
   }
   function fpSnapTolSec() {
     return lastChartTf === "H1" ? 1800 : 150;
@@ -2068,20 +2072,21 @@
     if (!el || fpHostBound) return;
     fpHostBound = true;
     el.addEventListener("pointerdown", function (ev) {
-      if (!fpSelected || fpRangeFrom == null || fpRangeTo == null || !chart) return;
+      if (fpRangeFrom == null || fpRangeTo == null || !chart) return;
       if (ev.button != null && ev.button !== 0) return;
-      if (fpToolActive) return; // drawing uses clicks
+      if (fpAnchor != null) return;
       const rect = el.getBoundingClientRect();
       const x = ev.clientX - rect.left;
       const xs = fpRangeXs();
       if (!xs) return;
-      if (Math.abs(x - xs.left) <= 8) fpDragEnd = "from";
-      else if (Math.abs(x - xs.right) <= 8) fpDragEnd = "to";
+      const hit = 14;
+      if (Math.abs(x - xs.left) <= hit) fpDragEnd = "from";
+      else if (Math.abs(x - xs.right) <= hit) fpDragEnd = "to";
       else return;
       try { el.setPointerCapture(ev.pointerId); } catch (_) {}
       ev.preventDefault();
       ev.stopPropagation();
-    });
+    }, true);
     el.addEventListener("pointermove", function (ev) {
       if (!fpDragEnd || !chart) return;
       const rect = el.getBoundingClientRect();
@@ -2090,16 +2095,23 @@
       try { t = chart.timeScale().coordinateToTime(x); } catch (_) {}
       if (typeof t !== "number") return;
       t = nearestBarTime(t);
-      if (fpDragEnd === "from") fpRangeFrom = t;
-      else fpRangeTo = t;
-      applyFpRange(fpRangeFrom, fpRangeTo);
+      if (fpDragEnd === "from") {
+        if (t === fpRangeFrom) return;
+        applyFpRange(t, fpRangeTo);
+      } else {
+        if (t === fpRangeTo) return;
+        applyFpRange(fpRangeFrom, t);
+      }
       ev.preventDefault();
-    });
+      ev.stopPropagation();
+    }, true);
     el.addEventListener("pointerup", function (ev) {
       if (!fpDragEnd) return;
       fpDragEnd = null;
       try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
-    });
+      ev.preventDefault();
+      ev.stopPropagation();
+    }, true);
   }
   function fpRangeXs() {
     if (fpRangeFrom == null || fpRangeTo == null || !chart) return null;
@@ -2486,7 +2498,7 @@
             const h = document.createElement("div");
             h.className = "signal-fp-handle";
             h.dataset.end = end;
-            h.style.left = ((end === "from" ? xs.left : xs.right) - 4) + "px";
+            h.style.left = ((end === "from" ? xs.left : xs.right) - 6) + "px";
             ov.appendChild(h);
           });
         }
@@ -2835,12 +2847,16 @@
     return null;
   }
   function saveScaleLocal(instrument) {
-    if (!scaleLocked || !(lockedBarSpacing > 0)) return;
+    const snap = snapshotTimeScale();
+    const spacing = (lockedBarSpacing > 0)
+      ? lockedBarSpacing
+      : (snap && snap.barSpacing > 0 ? snap.barSpacing : 0);
+    if (!(spacing > 0)) return;
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
       all[scaleStoreKey(instrument)] = {
-        barSpacing: lockedBarSpacing,
-        logical: lockedLogical
+        barSpacing: spacing,
+        logical: lockedLogical || (snap && snap.logical) || null
       };
       localStorage.setItem(SCALE_STORE, JSON.stringify(all));
     } catch (_) {}
@@ -3166,7 +3182,7 @@
     });
     chart.subscribeClick(function (param) {
       if (chartTools && chartTools.getMode()) return; // vap/trend handled in kit
-      if (!fpToolActive || !param || param.time == null) return;
+      if (!fpToolActive || fpDragEnd || !param || param.time == null) return;
       const t = typeof param.time === "number" ? nearestBarTime(param.time) : null;
       if (t == null) return;
       if (fpAnchor == null) {
@@ -4858,6 +4874,9 @@
           && !(desk.flow && desk.flow.showClusters === false)) {
         chartFlow.setShowClusters(true);
       }
+      if (scaleLocked && lockedBarSpacing > 0) {
+        restoreTimeScale(followLive && !userPinned);
+      }
       setToolPressed("tool-clusters", !!(chartFlow && chartFlow.getShowClusters && chartFlow.getShowClusters()));
     } catch (e) {
       console.warn("chart layout load", e);
@@ -4882,6 +4901,15 @@
           barSpacing: lockedBarSpacing,
           logical: lockedLogical
         };
+      } else {
+        const snap = snapshotTimeScale();
+        if (snap && snap.barSpacing > 0) {
+          cur.desk.scale = {
+            instrument: lastDeskInstrument || null,
+            barSpacing: snap.barSpacing,
+            logical: snap.logical || null
+          };
+        }
       }
       deskLayoutDoc = await TrinityChartKit.saveLayouts(cur);
     } catch (e) {
@@ -5056,6 +5084,21 @@
       }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? BOOK_LIVE_MS : BOOK_MS);
     })();
   }
+
+  window.addEventListener("pagehide", function () {
+    try {
+      saveScaleLocal(lastDeskInstrument);
+      persistDeskLayout();
+    } catch (_) {}
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") {
+      try {
+        saveScaleLocal(lastDeskInstrument);
+        persistDeskLayout();
+      } catch (_) {}
+    }
+  });
 
   bootDesk();
 })();

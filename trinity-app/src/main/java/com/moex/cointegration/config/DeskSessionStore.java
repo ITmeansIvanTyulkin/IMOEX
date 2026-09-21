@@ -18,11 +18,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DeskSessionStore {
 
     public static final String COOKIE_NAME = "trinity.desk";
+    public static final Duration DESK_TTL = Duration.ofHours(8);
 
     private final ConcurrentHashMap<String, Held> sessions = new ConcurrentHashMap<>();
 
     public ResponseCookie issueCookie(String email, Duration ttl) {
-        Duration life = ttl == null || ttl.isZero() || ttl.isNegative() ? Duration.ofHours(1) : ttl;
+        Duration life = ttl == null || ttl.isZero() || ttl.isNegative() ? DESK_TTL : ttl;
         String id = UUID.randomUUID().toString();
         sessions.put(id, new Held(email == null ? "" : email, Instant.now().plus(life)));
         prune();
