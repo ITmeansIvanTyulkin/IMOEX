@@ -1006,7 +1006,15 @@
     if (!chart || !series || !host) {
       return { destroy: function () {}, syncGoLive: function () {} };
     }
-    if (host._trinityTvNav) return host._trinityTvNav;
+    if (host._trinityTvNav) {
+      // Re-assert native wheel zoom if nav was bound under older options.
+      try {
+        chart.applyOptions({
+          handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+        });
+      } catch (_) {}
+      return host._trinityTvNav;
+    }
     const isDrawing = typeof opts.isDrawing === "function" ? opts.isDrawing : function () { return false; };
     const onTimeGesture = typeof opts.onTimeGesture === "function" ? opts.onTimeGesture : function () {};
     const onPriceLock = typeof opts.onPriceLock === "function" ? opts.onPriceLock : function () {};
@@ -1034,7 +1042,8 @@
         },
         handleScale: {
           axisPressedMouseMove: true,
-          mouseWheel: false,
+          // Native wheel zoom — custom zoomTimeAtX was fighting barSpacing restore.
+          mouseWheel: true,
           pinch: true
         }
       });
@@ -1099,7 +1108,7 @@
       if (!(span > 0) || !(factor > 0)) return;
       const px = Math.max(0, Math.min(x, m.plotW));
       const anchor = logical.from + (px / m.plotW) * span;
-      const newSpan = Math.max(6, Math.min(span * factor, 12000));
+      const newSpan = Math.max(4, Math.min(span * factor, 12000));
       const newFrom = anchor - (px / m.plotW) * newSpan;
       try {
         ts.setVisibleLogicalRange({ from: newFrom, to: newFrom + newSpan });
@@ -1271,18 +1280,19 @@
       const overTime = xy.y >= m.h - m.timeH;
       const dx = ev.deltaX || 0;
       const dy = ev.deltaY || 0;
+      const wantPan = ev.shiftKey || overTime || Math.abs(dx) > Math.abs(dy) * 1.15;
+      const wantPrice = overPrice || ev.altKey;
+      if (!wantPan && !wantPrice) {
+        // Plain wheel: do NOT preventDefault — Lightweight Charts native mouseWheel scale.
+        return;
+      }
       ev.preventDefault();
-      if (ev.shiftKey || overTime || Math.abs(dx) > Math.abs(dy) * 1.15) {
+      if (wantPan) {
         panTimePx(Math.abs(dx) > Math.abs(dy) ? dx : dy);
         syncGoLive();
         return;
       }
-      if (overPrice || ev.altKey) {
-        zoomPriceAtY(xy.y, zoomFactor(dy));
-        return;
-      }
-      zoomTimeAtX(xy.x, zoomFactor(dy));
-      syncGoLive();
+      zoomPriceAtY(xy.y, zoomFactor(dy));
     }
 
     function onDblClick(ev) {
@@ -1405,6 +1415,8 @@
       chart.timeScale().subscribeVisibleLogicalRangeChange(function () { syncGoLive(); });
     } catch (_) {}
 
+    // Only intercept Shift/Alt/axis wheel. Plain wheel → native handleScale.mouseWheel.
+    // A capture handler that always preventDefault()'d was killing zoom.
     host.addEventListener("wheel", onWheel, { passive: false, capture: true });
     host.addEventListener("dblclick", onDblClick);
     host.addEventListener("pointerdown", onPointerDown, true);
@@ -3141,29 +3153,29 @@
     }
 
     function indexFp(fps) {
-      if (!fps || !fps.length) {
-        return;
-      }
+      // Always replace the map so instrument switches / empty tape cannot keep stale levels.
       const next = {};
-      const times = barTimes();
-      fps.forEach(function (fb) {
-        let t = timeOf(fb.time);
-        if (t == null) return;
-        if (times.length) {
-          let best = t;
-          let bestD = Infinity;
-          for (let i = 0; i < times.length; i++) {
-            const d = Math.abs(Number(times[i]) - Number(t));
-            if (d < bestD) {
-              bestD = d;
-              best = times[i];
+      if (fps && fps.length) {
+        const times = barTimes();
+        fps.forEach(function (fb) {
+          let t = timeOf(fb.time);
+          if (t == null) return;
+          if (times.length) {
+            let best = t;
+            let bestD = Infinity;
+            for (let i = 0; i < times.length; i++) {
+              const d = Math.abs(Number(times[i]) - Number(t));
+              if (d < bestD) {
+                bestD = d;
+                best = times[i];
+              }
             }
+            if (bestD <= fpSnapTolNow()) t = best;
           }
-          if (bestD <= fpSnapTolNow()) t = best;
-        }
-        next[t] = fb;
-      });
-      if (Object.keys(next).length) fpByTime = next;
+          next[t] = fb;
+        });
+      }
+      fpByTime = next;
     }
 
     function profileSpan(levels) {
@@ -3237,11 +3249,14 @@
       return vapFromBars(bars, n - take, n - 1, pointSize);
     }
 
-    /** Prefer the denser ATAS-like histogram that spans the session. */
+    /** Prefer authoritative day-tape server profile; fallback to denser footprint/OHLC. */
     function pickSessionProfile() {
+      const server = profile || [];
+      if (profileSpan(server) && server.length >= 8) {
+        return server;
+      }
       const bars = getBars() || [];
       const barSpan = barsPriceSpan(bars.slice(Math.max(0, bars.length - 120)));
-      const server = profile || [];
       const tape = sessionVapFromFootprints();
       const ohlc = sessionVapFromBars();
       const candidates = [server, tape, ohlc];
@@ -3353,7 +3368,8 @@
       if (bars.length < 8) return false;
       const i1 = bars.length - 1;
       const i0 = Math.max(0, bars.length - 18);
-      const TARGET = 12;
+      const TARGET = 18;
+      const CAP = 120;
       let spacing = 8;
       let visFrom = 0;
       let visTo = 0;
@@ -3366,11 +3382,12 @@
         }
       } catch (_) {}
       const vis = visTo - visFrom;
-      if (vis >= 16 && spacing <= 16) return false;
+      // Don't fight the user's mouse zoom — only nudge once when clusters need readable cells.
+      if (vis >= 16 && spacing >= TARGET && spacing <= CAP) return false;
       const already = vis > 0 && vis <= 22 && visFrom <= i0 + 4 && visTo >= i1 - 2 && spacing >= TARGET;
       if (already) return false;
       try {
-        chart.timeScale().applyOptions({ barSpacing: Math.min(16, Math.max(spacing, TARGET)) });
+        chart.timeScale().applyOptions({ barSpacing: Math.min(CAP, Math.max(spacing, TARGET)) });
         chart.timeScale().setVisibleLogicalRange({
           from: Math.max(0, i0 - 0.4),
           to: i1 + 1.4
@@ -3658,6 +3675,7 @@
         miss.textContent = fpCount ? "нет уровней в диапазоне" : "нет ленты";
         ov.appendChild(miss);
       }
+    }
 
     function fpRangeXs() {
       if (fpFrom == null || fpTo == null || !chart) return null;

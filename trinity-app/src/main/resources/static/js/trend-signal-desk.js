@@ -23,7 +23,11 @@
   let chartNav = null;
   const SCALE_STORE = "trinity.trend.desk.scale";
   const DEFAULT_BAR_SPACING = 8;
-  const MAX_BAR_SPACING = 16;
+  // Soft ceiling only. Hard caps (16/48) made mouse zoom feel broken: at ~900px
+  // width, spacing 48 ≈ 19 bars and wheel zoom-in could not go closer.
+  const MAX_BAR_SPACING = 160;
+  // Keep user's close zoom (≥4 bars). Below ~2.5 is healInsaneZoom territory.
+  const MIN_KEEP_LOGICAL = 4;
   const INST_STORE = "trinity.trend.desk.instrument";
   const PB_STORE = "trinity.trend.desk.playbook";
   let deskInstrumentPinned = null;
@@ -390,13 +394,30 @@
     return String(t == null ? "" : t)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
+  function jwtUnexpired(token) {
+    try {
+      const parts = String(token || "").split(".");
+      if (parts.length < 2) return false;
+      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+      const json = JSON.parse(atob(b64 + pad));
+      if (!json || json.exp == null) return true;
+      return Number(json.exp) * 1000 > Date.now() + 5000;
+    } catch (_) {
+      return false;
+    }
+  }
   function deskAuthHeaders(extra) {
     const headers = Object.assign({ Accept: "application/json" }, extra || {});
     try {
       const token = localStorage.getItem("trinity.supabase.access_token");
-      if (token) {
+      if (token && jwtUnexpired(token)) {
         headers.Authorization = "Bearer " + token;
         return headers;
+      }
+      if (token && !jwtUnexpired(token)) {
+        // Drop expired JWT so the desk cookie can authorize writes.
+        try { localStorage.removeItem("trinity.supabase.access_token"); } catch (_) {}
       }
       const user = (localStorage.getItem("imoex.ops.user") || "").trim();
       const pass = localStorage.getItem("imoex.ops.pass") || "";
@@ -408,7 +429,8 @@
   }
   function hasDeskWriteAuth() {
     try {
-      if (localStorage.getItem("trinity.supabase.access_token")) return true;
+      const token = localStorage.getItem("trinity.supabase.access_token");
+      if (token && jwtUnexpired(token)) return true;
       const user = (localStorage.getItem("imoex.ops.user") || "").trim();
       const pass = localStorage.getItem("imoex.ops.pass") || "";
       return !!(user && pass && user.indexOf("@") < 0);
@@ -1986,15 +2008,13 @@
     return ov;
   }
   function indexFootprints(fps) {
-    if (!fps || !fps.length) {
-      return;
-    }
+    // Always replace so instrument switches cannot keep foreign levels.
     const next = {};
-    fps.forEach(function (fb) {
+    (fps || []).forEach(function (fb) {
       const t = toChartTime(fb.time);
       if (t != null) next[t] = fb;
     });
-    if (Object.keys(next).length) footprintByTime = next;
+    footprintByTime = next;
   }
   function fpSnapTolSec() {
     return lastChartTf === "H1" ? 1800 : 150;
@@ -2870,7 +2890,7 @@
   }
   function sanitizeScaleRow(row) {
     if (!row || !(row.barSpacing > 0)) return null;
-    const logical = (row.logical && logicalSpan(row.logical) >= 12) ? row.logical : null;
+    const logical = (row.logical && logicalSpan(row.logical) >= MIN_KEEP_LOGICAL) ? row.logical : null;
     return { barSpacing: clampBarSpacing(row.barSpacing), logical: logical };
   }
   function snapshotTimeScale() {
@@ -2908,9 +2928,9 @@
     }
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      const logical = lockedLogical && logicalSpan(lockedLogical) >= 12
+      const logical = lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL
         ? lockedLogical
-        : ((snap && logicalSpan(snap.logical) >= 12) ? snap.logical : null);
+        : ((snap && logicalSpan(snap.logical) >= MIN_KEEP_LOGICAL) ? snap.logical : null);
       all[scaleStoreKey(instrument)] = { barSpacing: spacing, logical: logical };
       localStorage.setItem(SCALE_STORE, JSON.stringify(all));
     } catch (_) {}
@@ -2993,7 +3013,7 @@
       if (followLive && !userPinned) {
         chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
         chart.timeScale().scrollToRealTime();
-      } else if (lockedLogical && logicalSpan(lockedLogical) >= 12) {
+      } else if (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) {
         chart.timeScale().setVisibleLogicalRange(lockedLogical);
       } else {
         chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
@@ -3011,14 +3031,14 @@
       spacing = chart.timeScale().options().barSpacing || DEFAULT_BAR_SPACING;
       vis = logicalSpan(chart.timeScale().getVisibleLogicalRange());
     } catch (_) {}
-    if (spacing <= MAX_BAR_SPACING && vis >= 12) return;
+    // ONLY snap a poisoned one-candle fill (resume / bad localStorage).
+    // Never reset just because spacing is "large" — that undoes mouse wheel zoom.
+    const oneCandle = vis > 0 && vis < 2.5;
+    const absurd = spacing > 200;
+    if (!oneCandle && !absurd) return;
     applyingScale = true;
     try {
-      const use = clampBarSpacing(
-        lockedBarSpacing > 0 && lockedBarSpacing <= MAX_BAR_SPACING
-          ? lockedBarSpacing
-          : DEFAULT_BAR_SPACING
-      );
+      const use = DEFAULT_BAR_SPACING;
       scaleLocked = true;
       lockedBarSpacing = use;
       lockedLogical = null;
@@ -3241,7 +3261,7 @@
         shiftVisibleRangeOnNewBar: true
       },
       handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: true }
+      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
     });
     syncPadButtons();
     candleSeries = chart.addCandlestickSeries({
@@ -3489,7 +3509,7 @@
     if (!chart || !snap) return;
     const spacing = clampBarSpacing(snap.barSpacing);
     try { chart.timeScale().applyOptions({ barSpacing: spacing }); } catch (_) {}
-    if (snap.logical && logicalSpan(snap.logical) >= 12) {
+    if (snap.logical && logicalSpan(snap.logical) >= MIN_KEEP_LOGICAL) {
       try { chart.timeScale().setVisibleLogicalRange(snap.logical); } catch (_) {}
     }
   }
@@ -3550,7 +3570,6 @@
       replaceDataKeepView(candles);
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
-      healInsaneZoom(candles.length);
       if (priceScaleLocked) freezePriceScale();
       requestAnimationFrame(function () {
         if (priceScaleLocked) freezePriceScale();
@@ -3579,7 +3598,6 @@
       }
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
-      healInsaneZoom(candles.length);
       if (priceScaleLocked) freezePriceScale();
       requestAnimationFrame(function () {
         if (priceScaleLocked) freezePriceScale();
@@ -4165,6 +4183,20 @@
         lastOverlayKey = "";
         lastCandleTime = null;
         lastCandlesLen = 0;
+        footprintByTime = {};
+        lastFootprint = [];
+        lastProfile = [];
+        fpPinned = [];
+        fpRangeFrom = null;
+        fpRangeTo = null;
+        fpAnchor = null;
+        fpHoverTime = null;
+        if (chartFlow && typeof chartFlow.setFootprints === "function") {
+          chartFlow.setFootprints([]);
+        }
+        if (chartFlow && typeof chartFlow.setProfile === "function") {
+          chartFlow.setProfile([]);
+        }
         scaleLocked = false;
         lockedBarSpacing = null;
         lockedLogical = null;
@@ -4996,7 +5028,7 @@
         cur.desk.scale = {
           instrument: lastDeskInstrument || null,
           barSpacing: clampBarSpacing(lockedBarSpacing),
-          logical: (lockedLogical && logicalSpan(lockedLogical) >= 12) ? lockedLogical : null
+          logical: (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) ? lockedLogical : null
         };
       } else {
         const snap = snapshotTimeScale();

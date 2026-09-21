@@ -52,14 +52,18 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
             max = DESK_MAX;
             path = "desk";
         }
-        if (max > 0 && !alreadyAuthed(request) && !allow(ip + "|" + path, max)) {
-            response.setStatus(429);
-            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-            response.getWriter().write(
-                    "{\"error\":\"rate_limited\",\"message\":\"Too many requests — wait a minute.\"}"
-            );
-            return;
+        if (max > 0) {
+            // Login stuffing must never be skipped via a fake Authorization header.
+            boolean loginPath = "login".equals(path);
+            if ((loginPath || !alreadyAuthed(request)) && !allow(ip + "|" + path, max)) {
+                response.setStatus(429);
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+                response.getWriter().write(
+                        "{\"error\":\"rate_limited\",\"message\":\"Too many requests — wait a minute.\"}"
+                );
+                return;
+            }
         }
         filterChain.doFilter(request, response);
     }

@@ -71,7 +71,23 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(js.contains("fpDragEnd"), "footprint handles must stretch the pinned range");
         assertTrue(js.contains("clusterZoomTried = true"), "restoring clusters must not steal the user's zoom");
         assertTrue(js.contains("pickSessionProfile"), "session VAP must pick densest ATAS-like histogram");
-        assertTrue(js.contains("const TARGET = 12"), "cluster auto-zoom must not blow barSpacing to 42");
+        assertTrue(js.contains("Prefer authoritative day-tape server profile"),
+                "server day-tape profile must win over multi-day footprint VAP");
+        assertTrue(js.contains("Always replace the map so instrument switches"),
+                "empty footprint payload must clear stale instrument levels");
+        assertTrue(js.contains("mouseWheel: true"), "native LW wheel zoom must be enabled");
+        assertTrue(js.contains("do NOT preventDefault"), "plain wheel must reach native LW scale");
+        assertTrue(js.contains("const TARGET = 18"), "cluster auto-zoom must nudge gently, not blow to 42");
+        assertTrue(js.contains("const CAP = 120"), "cluster auto-zoom must allow deep mouse zoom");
+        // Syntax: miss-banner edit previously dropped a closing brace and broke all desks.
+        Process p = new ProcessBuilder("node", "--check",
+                Files.isRegularFile(Path.of("src/main/resources/static/js/trinity-chart-kit.js"))
+                        ? "src/main/resources/static/js/trinity-chart-kit.js"
+                        : "trinity-app/src/main/resources/static/js/trinity-chart-kit.js")
+                .redirectErrorStream(true)
+                .start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(p.waitFor() == 0, "trinity-chart-kit.js must parse: " + out);
         assertTrue(css.contains(".charts-flow-profile"), "session VAP must have a positioned overlay");
         assertTrue(css.contains(".charts-cluster-cell"), "cluster cells need contrast styles");
         int vapAt = css.indexOf(".signal-profile-overlay,\n.charts-flow-profile {");

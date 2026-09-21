@@ -202,7 +202,7 @@
         lockVisibleTimeRangeOnResize: true
       },
       handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: true }
+      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
     });
     const series = chart.addCandlestickSeries({
       upColor: "#16a34a", downColor: "#dc2626",
@@ -313,7 +313,7 @@
   function clampPaneSpacing(s) {
     const n = Number(s);
     if (!(n > 0) || !isFinite(n)) return 8;
-    return Math.max(3, Math.min(16, n));
+    return Math.max(2, Math.min(120, n));
   }
   function restorePaneScale(p) {
     if (!p || !p.chart || !(p.barSpacing > 0)) return false;
@@ -322,7 +322,7 @@
       p.barSpacing = spacing;
       p.chart.timeScale().applyOptions({ barSpacing: spacing });
       const span = p.logical ? Math.abs(Number(p.logical.to) - Number(p.logical.from)) : 0;
-      if (span >= 12) p.chart.timeScale().setVisibleLogicalRange(p.logical);
+      if (span >= 4) p.chart.timeScale().setVisibleLogicalRange(p.logical);
       else {
         p.logical = null;
         p.chart.timeScale().scrollToRealTime();

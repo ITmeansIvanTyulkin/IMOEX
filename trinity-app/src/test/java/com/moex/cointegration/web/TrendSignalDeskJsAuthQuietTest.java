@@ -45,7 +45,13 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("hydrateDeskModeSwitches"), "range/positional toggles must hydrate from GET settings");
         assertTrue(src.contains("positionalAutoFlag"), "positional toggle must not treat a missing desk field as off");
         assertTrue(src.contains("healInsaneZoom"), "login/resume must not restore a one-candle time scale");
-        assertTrue(src.contains("MAX_BAR_SPACING = 16"), "saved barSpacing must be capped");
+        assertTrue(src.contains("MAX_BAR_SPACING = 160"), "barSpacing soft-cap must allow deep mouse zoom");
+        assertTrue(src.contains("Never reset just because spacing is"), "heal must not undo wheel zoom");
+        assertTrue(src.contains("vis > 0 && vis < 2.5"), "heal only one-candle fill");
+        assertTrue(src.contains("function jwtUnexpired"), "expired cabinet JWT must not block desk cookie writes");
+        assertTrue(src.contains("footprintByTime = {}"), "instrument change must clear foreign footprint levels");
+        assertTrue(src.contains("Always replace so instrument switches"),
+                "empty footprint response must clear prior map");
         int saveAt = src.indexOf("async function saveDeskSelection");
         assertTrue(saveAt > 0, "saveDeskSelection missing");
         String saveBody = src.substring(saveAt, Math.min(src.length(), saveAt + 1600));

@@ -1,9 +1,12 @@
 package com.moex.cointegration.config;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.lang.NonNull;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
@@ -21,10 +24,16 @@ public class TrendTapeHandshakeInterceptor implements HandshakeInterceptor {
 
     private final ImoexProperties properties;
     private final DeskSessionStore sessions;
+    private final ObjectProvider<JwtDecoder> jwtDecoder;
 
-    public TrendTapeHandshakeInterceptor(ImoexProperties properties, DeskSessionStore sessions) {
+    public TrendTapeHandshakeInterceptor(
+            ImoexProperties properties,
+            DeskSessionStore sessions,
+            ObjectProvider<JwtDecoder> jwtDecoder
+    ) {
         this.properties = properties;
         this.sessions = sessions;
+        this.jwtDecoder = jwtDecoder;
     }
 
     @Override
@@ -44,8 +53,7 @@ public class TrendTapeHandshakeInterceptor implements HandshakeInterceptor {
         if (deskSessionOk(request)) {
             return true;
         }
-        String token = accessToken(request);
-        return token != null && !token.isBlank();
+        return bearerOk(accessToken(request));
     }
 
     @Override
@@ -73,6 +81,23 @@ public class TrendTapeHandshakeInterceptor implements HandshakeInterceptor {
             boolean http = "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
             return local && http;
         } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private boolean bearerOk(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        JwtDecoder decoder = jwtDecoder.getIfAvailable();
+        if (decoder == null) {
+            // Auth on but no JWT decoder → require desk cookie only (no garbage-token bypass).
+            return false;
+        }
+        try {
+            decoder.decode(token);
+            return true;
+        } catch (JwtException | IllegalArgumentException ex) {
             return false;
         }
     }
