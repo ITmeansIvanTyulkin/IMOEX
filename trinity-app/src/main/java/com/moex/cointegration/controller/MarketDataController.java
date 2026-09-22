@@ -2,6 +2,7 @@ package com.moex.cointegration.controller;
 
 import com.moex.trinity.marketdata.DomBook;
 import com.moex.trinity.marketdata.MarketDataResearchService;
+import com.moex.trinity.marketdata.PlainHttp;
 import com.moex.trinity.marketdata.TradePrint;
 import com.moex.trinity.trend.TapeToM5Aggregator;
 import org.springframework.beans.factory.ObjectProvider;
@@ -124,15 +125,9 @@ public class MarketDataController {
                 + id + ".json?iss.meta=off&iss.only=marketdata"
                 + "&marketdata.columns=SECID,LAST,LASTCHANGE,LASTTOPREVPRICE,UPDATETIME";
         try {
-            java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofMillis(1200))
-                    .build();
-            var req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
-                    .timeout(java.time.Duration.ofMillis(1800))
-                    .GET()
-                    .build();
-            var res = http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() < 200 || res.statusCode() >= 300) {
+            com.moex.trinity.marketdata.PlainHttp.Reply res = PlainHttp.exchange(
+                    "GET", url, 1800, "TRINITY-iss-last/1.0", null, null);
+            if (res.status() < 200 || res.status() >= 300) {
                 return ResponseEntity.ok(Map.of("secid", id, "px", 0, "ok", false));
             }
             com.fasterxml.jackson.databind.JsonNode root =

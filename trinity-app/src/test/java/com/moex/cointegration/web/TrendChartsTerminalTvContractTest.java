@@ -78,6 +78,12 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(js.contains("Always replace the map so instrument switches"),
                 "empty footprint payload must clear stale instrument levels");
         assertTrue(js.contains("mouseWheel: true"), "native LW wheel zoom must be enabled");
+        assertTrue(js.contains("function currentBucketUnix"), "MSK bucket clock missing");
+        assertTrue(js.contains("function barTimeUnix"), "ISO desk bars must convert to unix for live prints");
+        assertTrue(js.contains("Closed last bar: open a forming candle"),
+                "applyTradeToCandle must roll the current bucket, not skip live prints");
+        assertTrue(js.contains("0.006"), "printFitsLast must be TV-tight, not 2.5% / barRange*12 wicks");
+        assertFalse(js.contains("barRange * 12"), "spiked bar range must not widen the next tick cap");
         assertTrue(js.contains("do NOT preventDefault"), "plain wheel must reach native LW scale");
         assertTrue(js.contains("const TARGET = 18"), "cluster auto-zoom must nudge gently, not blow to 42");
         assertTrue(js.contains("const CAP = 120"), "cluster auto-zoom must allow deep mouse zoom");

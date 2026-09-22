@@ -1760,7 +1760,7 @@
   function plausibleLivePx(ref, px) {
     if (!(px > 0)) return false;
     if (!(ref > 0)) return true;
-    return Math.abs(px - ref) <= Math.max(Math.abs(ref) * 0.02, 0.5);
+    return Math.abs(px - ref) <= Math.max(Math.abs(ref) * 0.006, ref >= 1000 ? Math.abs(ref) * 0.003 : 0.12);
   }
   function fitPriceToVisibleCandles() {
     if (!candleSeries || priceScaleLocked) return;
@@ -3666,8 +3666,8 @@
   let tapeWsWant = "";
   let tapeBound = false;
   function liveCandlePx(book) {
-    if (lastTapePx > 0 && (Date.now() - lastTapeAt) < 4000) return lastTapePx;
-    return livePxFromBook(book);
+    if (lastTapePx > 0 && (Date.now() - lastTapeAt) < 15000) return lastTapePx;
+    return null;
   }
   function appendDeskTape(msg) {
     const el = $("signal-tape");
@@ -3723,6 +3723,8 @@
           && !kit.sameTapeInstrument(tapeWsWant, inst)) return;
       const px = Number(msg.px);
       if (!(px > 0)) return;
+      if (typeof kit.quotesMatchInstrument === "function"
+          && tapeWsWant && !kit.quotesMatchInstrument(tapeWsWant, px)) return;
       lastTapePx = px;
       lastTapeAt = Date.now();
       paintLastCandle(px, null);
@@ -3747,34 +3749,45 @@
   }
   function lastRawIsCurrentBucket(raw) {
     const t = raw && raw.time != null
-      ? (typeof raw.time === "number" ? raw.time : toChartTime(raw.time))
+      ? (typeof raw.time === "number" && raw.time < 1e12 ? raw.time : toChartTime(raw.time))
       : lastCandleTime;
     if (t == null) return false;
     return t === currentBucketUnix(lastChartTf === "H1" ? 60 : 5);
   }
   function paintLastCandle(px, book) {
-    if (!candleSeries || !(px > 0) || lastCandleTime == null) return;
-    const raw = lastBarsRaw && lastBarsRaw.length ? lastBarsRaw[lastBarsRaw.length - 1] : null;
-    if (!raw) return;
-    // Instant IDB paint is kept; do not glue live last onto a closed cached bar.
-    if (!lastRawIsCurrentBucket(raw)) return;
-    const o = Number(raw.open);
-    let h = Number(raw.high);
-    let l = Number(raw.low);
-    if (![o, h, l].every(Number.isFinite)) return;
-    if (!plausibleLivePx(o, px) && !plausibleLivePx(Number(raw.close), px)) return;
-    // Chart: only last/mid trade expands the forming wick — NOT best bid/ask.
-    // Bid/ask extremes caused fake spikes to deep DOM levels; TP touch uses book separately.
-    if (px > h) h = px;
-    if (px < l) l = px;
-    raw.close = px;
-    raw.high = h;
-    raw.low = l;
+    if (!candleSeries || !(px > 0) || !(lastBarsRaw && lastBarsRaw.length)) return;
+    const minutes = lastChartTf === "H1" ? 60 : 5;
+    const kit = window.TrinityChartKit;
     applyingScale = true;
+    let ok = false;
     try {
-      candleSeries.update({ time: lastCandleTime, open: o, high: h, low: l, close: px });
-    } catch (_) {}
+      if (kit && typeof kit.applyTradeToCandle === "function") {
+        ok = kit.applyTradeToCandle(candleSeries, lastBarsRaw, px, minutes);
+      }
+    } catch (_) { ok = false; }
     applyingScale = false;
+    if (!ok) return;
+    const raw = lastBarsRaw[lastBarsRaw.length - 1];
+    const t = raw && raw.time != null
+      ? (typeof raw.time === "number" && raw.time < 1e12 ? raw.time : toChartTime(raw.time))
+      : null;
+    if (t != null) lastCandleTime = t;
+    if (t != null && lastSanitizedCandles && lastSanitizedCandles.length) {
+      const sc = lastSanitizedCandles[lastSanitizedCandles.length - 1];
+      if (sc && sc.time === t) {
+        sc.high = Math.max(Number(sc.high), px);
+        sc.low = Math.min(Number(sc.low), px);
+        sc.close = px;
+      } else if (!sc || sc.time < t) {
+        lastSanitizedCandles.push({
+          time: t,
+          open: Number(raw.open),
+          high: Number(raw.high),
+          low: Number(raw.low),
+          close: px
+        });
+      }
+    }
     if (priceScaleLocked) freezePriceScale();
     applyLiveManage(px, book);
     paintChartOhlc();
@@ -3981,7 +3994,8 @@
         + "</div>";
     }
     body.innerHTML = html;
-    paintLastCandle(liveCandlePx(book), book);
+    const tapePx = liveCandlePx(book);
+    if (tapePx > 0) paintLastCandle(tapePx, book);
     if (firstPaint) {
       centerDomOnSpread(body);
       requestAnimationFrame(function () {
@@ -4250,13 +4264,20 @@
       lastOverlayCandles = candles;
       lastDeskSnapshot = data;
       lastTimelineMarkers = timelineMarkersFromDesk(data);
+      lastBarsRaw = rawBars;
       if (candles.length) {
         updateCandles(candles, !!forceFit, true);
         const planForOv = (!overlayOpen && liveFlatUntil > Date.now())
           ? Object.assign({}, plan, { actionable: false })
           : plan;
         applyOverlays(planForOv, sig, candles, data.structure || {}, overlayOpen);
-        if (livePx > 0) applyLiveManage(livePx, data.book);
+        const liveNow = liveCandlePx(data.book);
+        if (liveNow > 0) {
+          paintLastCandle(liveNow, data.book);
+          applyLiveManage(liveNow, data.book);
+        } else if (livePx > 0) {
+          applyLiveManage(livePx, data.book);
+        }
         refreshImpulseUi(candles);
       } else if (instrumentChanged && candleSeries) {
         // Don't leave the previous instrument's candles on screen.
@@ -4264,7 +4285,6 @@
         lastOverlayKey = "";
         applyOverlays({}, {}, [], {}, null);
       }
-      lastBarsRaw = rawBars;
       lastProfile = data.profile || [];
       lastFootprint = data.footprint || [];
       indexFootprints(lastFootprint);

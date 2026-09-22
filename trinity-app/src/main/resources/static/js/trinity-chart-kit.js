@@ -3939,12 +3939,12 @@
     return true;
   }
 
+  /** TV-like: last trade only. 0.6% vs last close — BR 100.13 onto 99.18 is a bad tick, not a wick. */
   function printFitsLast(last, px) {
     if (!last) return px > 0 && isFinite(px);
     const c = Number(last.close != null ? last.close : last.value);
     if (!(c > 0) || !(px > 0) || !isFinite(px)) return false;
-    const barRange = Math.abs(Number(last.high) - Number(last.low));
-    const cap = Math.max(c * 0.025, (isFinite(barRange) ? barRange * 12 : 0), c * 0.002);
+    const cap = Math.max(Math.abs(c) * 0.006, c >= 1000 ? Math.abs(c) * 0.003 : 0.12);
     return Math.abs(px - c) <= cap;
   }
   function sameTapeInstrument(a, b) {
@@ -3961,12 +3961,46 @@
     const msk = Date.now() + 3 * 3600 * 1000;
     return Math.floor((msk - (msk % step) - 3 * 3600 * 1000) / 1000);
   }
+  /** Desk bars are ISO+03; LW / terminal bars are unix seconds. */
+  function barTimeUnix(b) {
+    if (!b || b.time == null) return null;
+    if (typeof b.time === "number" && isFinite(b.time)) {
+      return b.time > 1e12 ? Math.floor(b.time / 1000) : b.time;
+    }
+    let s = String(b.time).trim();
+    s = s.replace(
+      /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})([Zz]|[+-]\d{2}:?\d{2})?$/,
+      function (_, hm, off) { return hm + ":00" + (off || ""); }
+    );
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return Math.floor(d.getTime() / 1000);
+  }
   function applyTradeToCandle(series, bars, px, bucketMin) {
     if (!series || !bars || !bars.length || !(px > 0)) return false;
-    const last = bars[bars.length - 1];
-    const t = typeof last.time === "number" ? last.time : null;
+    let last = bars[bars.length - 1];
+    let t = barTimeUnix(last);
     if (t == null) return false;
-    if (bucketMin > 0 && t !== currentBucketUnix(bucketMin)) return false;
+    const bucket = bucketMin > 0 ? currentBucketUnix(bucketMin) : t;
+    if (bucketMin > 0 && t !== bucket) {
+      // Closed last bar: open a forming candle (TV). Do not rewrite history.
+      if (t > bucket) return false;
+      const seed = Number(last.close);
+      if (!(seed > 0) || !printFitsLast({ close: seed, high: seed, low: seed }, px)) return false;
+      last = {
+        time: bucket,
+        open: seed,
+        high: Math.max(seed, px),
+        low: Math.min(seed, px),
+        close: px,
+        volume: 0
+      };
+      bars.push(last);
+      try {
+        series.update({ time: bucket, open: last.open, high: last.high, low: last.low, close: px });
+      } catch (_) { return false; }
+      return true;
+    }
     if (!printFitsLast(last, px)) return false;
     const o = Number(last.open);
     let h = Number(last.high);

@@ -54,4 +54,13 @@ class PublicEnergyContextTest {
         assertEquals(-1500, cons.kbbl(), 1e-9);
         assertEquals("street", cons.source());
     }
+
+    @Test
+    void publicHttpForcesHttp11() throws Exception {
+        String src = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/com/moex/trinity/marketdata/PublicEnergyContext.java"));
+        assertTrue(src.contains("PlainHttp.get"), "Yahoo/FRED/CFTC must use PlainHttp, not JDK HttpClient");
+        assertTrue(!src.contains("java.net.http.HttpClient") && !src.contains("HttpClient.newBuilder"),
+                "JDK HttpClient SSLFlowDelegate must stay out of energy context");
+    }
 }

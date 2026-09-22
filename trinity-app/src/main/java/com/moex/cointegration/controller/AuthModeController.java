@@ -41,6 +41,7 @@ public class AuthModeController {
     private final ObjectMapper objectMapper;
     private final DeskSessionStore deskSessions;
     private final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 

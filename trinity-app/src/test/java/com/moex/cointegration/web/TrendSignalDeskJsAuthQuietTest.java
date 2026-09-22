@@ -83,5 +83,11 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("const DOM_DEPTH = 50"), "DOM must keep max bid and ask depth");
         assertTrue(src.contains("overflow-y: scroll") || src.contains("body.scrollTop"), "DOM ladder must scroll");
         assertTrue(src.contains("function centerDomOnSpread"), "DOM must pin the view on spread, not last tick");
+        assertTrue(src.contains("kit.applyTradeToCandle"), "range M5 must paint live prints via kit (incl. new bucket)");
+        assertTrue(src.contains("liveCandlePx(data.book)"), "desk poll must re-apply last tape px so last close stays live");
+        assertTrue(src.contains("if (lastTapePx > 0") || src.contains("lastTapeAt) < 15000"),
+                "candles must not fall back to DOM mid after tape goes quiet");
+        assertFalse(src.contains("return livePxFromBook(book)"),
+                "TradingView last: never paint bid/ask mid onto OHLC");
     }
 }

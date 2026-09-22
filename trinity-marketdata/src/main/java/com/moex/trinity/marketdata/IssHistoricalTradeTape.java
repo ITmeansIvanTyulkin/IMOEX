@@ -3,11 +3,6 @@ package com.moex.trinity.marketdata;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -28,9 +23,6 @@ public final class IssHistoricalTradeTape {
     private static final ZoneId MSK = ZoneId.of("Europe/Moscow");
     private static final DateTimeFormatter DAY = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
 
     private IssHistoricalTradeTape() {
     }
@@ -48,14 +40,9 @@ public final class IssHistoricalTradeTape {
                     "https://iss.moex.com/iss/engines/futures/markets/forts/securities/%s/trades.json"
                             + "?date=%s&iss.meta=off&iss.only=trades&start=%d",
                     id, day.format(DAY), start);
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(90))
-                    .header("User-Agent", "trinity-marketdata")
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() >= 400) {
-                throw new IllegalStateException("ISS trades HTTP " + resp.statusCode() + " for " + url);
+            PlainHttp.Reply resp = PlainHttp.exchange("GET", url, 90_000, "trinity-marketdata", null, null);
+            if (resp.status() >= 400) {
+                throw new IllegalStateException("ISS trades HTTP " + resp.status() + " for " + url);
             }
             JsonNode root = MAPPER.readTree(resp.body());
             JsonNode trades = root.path("trades");
