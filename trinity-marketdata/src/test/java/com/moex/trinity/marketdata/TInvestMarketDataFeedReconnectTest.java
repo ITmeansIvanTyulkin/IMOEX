@@ -54,7 +54,11 @@ class TInvestMarketDataFeedReconnectTest {
                 "src/main/java/com/moex/trinity/marketdata/TInvestMarketDataFeed.java"));
         org.junit.jupiter.api.Assertions.assertTrue(src.contains("storeBook(inst, book)"));
         org.junit.jupiter.api.Assertions.assertTrue(src.contains("maybeArchiveDom(inst, book)"));
-        org.junit.jupiter.api.Assertions.assertTrue(src.contains("DOM_ARCHIVE_MIN_MS = 10_000"),
-                "disk DOM jsonl must not write every 2s into MEGA; live book still ticks");
+        org.junit.jupiter.api.Assertions.assertTrue(src.contains("DOM_ARCHIVE_MIN_MS = 60_000"),
+                "disk DOM jsonl must not write denser than loadDomDay (1/min); live book still ticks");
+        org.junit.jupiter.api.Assertions.assertTrue(src.contains("domArchiveFingerprint"),
+                "identical DOM ladders must not rewrite MEGA rows");
+        org.junit.jupiter.api.Assertions.assertFalse(src.contains("archive.appendDom(seeded)"),
+                "reconnect seed must not flood DOM archive");
     }
 }

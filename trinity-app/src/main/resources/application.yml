@@ -169,7 +169,7 @@ imoex:
     min-closed-trades: 4
     exclude-oil-gas: false
     champion-only: true
-    sit-out-if-unproven: true
+    sit-out-if-unproven: false
     min-quality-pairs: 2
     pair-min-closed-trades: 2
     pair-loss-streak: 2

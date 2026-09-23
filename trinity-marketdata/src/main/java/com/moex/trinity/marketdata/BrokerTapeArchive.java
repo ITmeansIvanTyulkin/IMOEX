@@ -46,6 +46,7 @@ public final class BrokerTapeArchive {
     private final Path dir;
     private final ReentrantLock lock = new ReentrantLock();
     private final AtomicReference<LocalDate> lastClosedSweep = new AtomicReference<>();
+    private final AtomicReference<LocalDate> lastDomThinDay = new AtomicReference<>();
 
     public BrokerTapeArchive(Path dir) {
         this.dir = dir == null ? Path.of("data", "broker-tape") : dir;
@@ -179,7 +180,127 @@ public final class BrokerTapeArchive {
 
     /** Compress closed days relative to today MSK — used when the live stream starts. */
     public int compressClosedDays() {
-        return compressClosedBefore(LocalDate.now(MSK));
+        LocalDate today = LocalDate.now(MSK);
+        int n = compressClosedBefore(today);
+        thinLiveDomToOnePerMinute(today);
+        return n;
+    }
+
+    /**
+     * Rewrite today's live {@code dom-*.jsonl} keeping ≤1 snapshot per minute (latest in bucket).
+     * Matches {@link #loadDomDay} subsample — recovers MEGA space after denser historical writes
+     * without losing hist DOM usable for replay/training. Tape files are left intact.
+     *
+     * @return number of files rewritten
+     */
+    public int thinLiveDomToOnePerMinute(LocalDate liveDay) {
+        if (liveDay == null || dir == null || !Files.isDirectory(dir)) {
+            return 0;
+        }
+        LocalDate already = lastDomThinDay.get();
+        if (liveDay.equals(already)) {
+            return 0;
+        }
+        if (!lastDomThinDay.compareAndSet(already, liveDay)) {
+            return 0;
+        }
+        List<Path> domFiles = new ArrayList<>();
+        String prefix = "dom-" + liveDay + "-";
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "dom-*.jsonl")) {
+            for (Path p : stream) {
+                String name = p.getFileName().toString();
+                if (name.startsWith(prefix) && !name.contains("(")) {
+                    domFiles.add(p);
+                }
+            }
+        } catch (Exception ex) {
+            lastDomThinDay.compareAndSet(liveDay, already);
+            log.warn("broker-tape DOM thin listing failed: {}", ex.toString());
+            return 0;
+        }
+        int n = 0;
+        lock.lock();
+        try {
+            for (Path dom : domFiles) {
+                if (thinDomJsonlLocked(dom)) {
+                    n++;
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+        if (n > 0) {
+            log.info("broker-tape thinned {} live DOM file(s) to ≤1/min for {}", n, liveDay);
+        }
+        return n;
+    }
+
+    /** Package-visible for tests. Caller must hold {@link #lock} (or be single-threaded in tests). */
+    boolean thinDomJsonlLocked(Path jsonl) {
+        if (jsonl == null || !Files.isRegularFile(jsonl)) {
+            return false;
+        }
+        Path tmp = Path.of(jsonl.toString() + ".thin.tmp");
+        try {
+            long before = Files.size(jsonl);
+            if (before < 256_000L) {
+                // Tiny files — not worth rewrite churn.
+                return false;
+            }
+            List<String> kept = new ArrayList<>();
+            long lastKeptEpochMin = Long.MIN_VALUE;
+            try (BufferedReader in = Files.newBufferedReader(jsonl, StandardCharsets.UTF_8)) {
+                String line;
+                while ((line = in.readLine()) != null) {
+                    if (line.isBlank()) {
+                        continue;
+                    }
+                    Instant t;
+                    try {
+                        JsonNode node = MAPPER.readTree(line);
+                        t = Instant.parse(node.path("time").asText());
+                    } catch (Exception ex) {
+                        kept.add(line);
+                        continue;
+                    }
+                    long epochMin = t.getEpochSecond() / 60L;
+                    if (epochMin == lastKeptEpochMin && !kept.isEmpty()) {
+                        kept.set(kept.size() - 1, line);
+                        continue;
+                    }
+                    lastKeptEpochMin = epochMin;
+                    kept.add(line);
+                }
+            }
+            long approxAfter = 0L;
+            for (String s : kept) {
+                approxAfter += s.length() + 1L;
+            }
+            if (approxAfter >= before * 85L / 100L) {
+                // Already sparse enough.
+                return false;
+            }
+            try (OutputStream out = Files.newOutputStream(tmp)) {
+                for (String s : kept) {
+                    out.write(s.getBytes(StandardCharsets.UTF_8));
+                    out.write('\n');
+                }
+            }
+            try {
+                Files.move(tmp, jsonl, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (Exception atomic) {
+                Files.move(tmp, jsonl, StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (Exception ex) {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (Exception ignored) {
+                // leave original
+            }
+            log.warn("thin DOM {} failed: {}", jsonl.getFileName(), ex.toString());
+            return false;
+        }
     }
 
     private void maybeCompressClosed(LocalDate liveDay) {

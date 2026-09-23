@@ -50,10 +50,12 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     private final Map<String, DomBook> books = new ConcurrentHashMap<>();
     private final Map<String, String> instrumentByFigi = new ConcurrentHashMap<>();
     private final Map<String, Long> lastDomArchiveMs = new ConcurrentHashMap<>();
+    private final Map<String, Integer> lastDomArchiveFp = new ConcurrentHashMap<>();
 
     private static final ZoneId MSK = ZoneId.of("Europe/Moscow");
-    /** Min gap between persisted DOM snapshots. Live book still updates every stream tick. */
-    private static final long DOM_ARCHIVE_MIN_MS = 10_000;
+    /** Min gap between persisted DOM snapshots. Live book still updates every stream tick.
+     * Replay/{@code loadDomDay} keeps ≤1 book/min — denser disk writes only inflate MEGA. */
+    private static final long DOM_ARCHIVE_MIN_MS = 60_000;
     private static final long RECONNECT_MAX_DELAY_MS = 60_000L;
     /** gRPC can hang with streaming=true and no onError — reconnect during FORTS hours. */
     private static final long STALE_STREAM_MS = 60_000L;
@@ -170,9 +172,8 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
                         true
                 );
                 storeBook(e.getKey(), seeded);
-                if (archive != null) {
-                    archive.appendDom(seeded);
-                }
+                // Do not archive seed books: every reconnect would append full depth-50 rows.
+                // Live continuum uses maybeArchiveDom on stream ticks.
             } catch (Exception ex) {
                 log.debug("seed orderbook {}: {}", e.getKey(), ex.toString());
             }
@@ -350,15 +351,24 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
     }
 
     private void maybeArchiveDom(String instrumentId, DomBook book) {
-        if (archive == null || book == null) {
+        if (archive == null || book == null || instrumentId == null || instrumentId.isBlank()) {
             return;
         }
         long now = System.currentTimeMillis();
-        Long prev = lastDomArchiveMs.get(instrumentId);
+        String key = instrumentId.trim().toUpperCase(Locale.ROOT);
+        Long prev = lastDomArchiveMs.get(key);
         if (prev != null && now - prev < DOM_ARCHIVE_MIN_MS) {
             return;
         }
-        lastDomArchiveMs.put(instrumentId, now);
+        int fp = domArchiveFingerprint(book);
+        Integer prevFp = lastDomArchiveFp.get(key);
+        if (prevFp != null && prevFp == fp && prev != null) {
+            // Unchanged ladder — bump timer so quiet books don't rewrite identical rows.
+            lastDomArchiveMs.put(key, now);
+            return;
+        }
+        lastDomArchiveMs.put(key, now);
+        lastDomArchiveFp.put(key, fp);
         archiveExec.execute(() -> {
             try {
                 archive.appendDom(book);
@@ -366,6 +376,34 @@ public final class TInvestMarketDataFeed implements MarketDataFeed, AutoCloseabl
                 // best-effort disk
             }
         });
+    }
+
+    /** Stable hash of depth + bid/ask ladders — skip identical DOM rows on disk. */
+    static int domArchiveFingerprint(DomBook book) {
+        if (book == null) {
+            return 0;
+        }
+        int h = 17;
+        h = 31 * h + book.depth();
+        h = 31 * h + Boolean.hashCode(book.consistent());
+        h = 31 * h + levelsFingerprint(book.bids());
+        h = 31 * h + levelsFingerprint(book.asks());
+        return h;
+    }
+
+    private static int levelsFingerprint(List<DomBook.DomLevel> levels) {
+        if (levels == null || levels.isEmpty()) {
+            return 0;
+        }
+        int h = 1;
+        for (DomBook.DomLevel l : levels) {
+            if (l == null) {
+                continue;
+            }
+            h = 31 * h + Double.hashCode(l.price());
+            h = 31 * h + Long.hashCode(l.quantityLots());
+        }
+        return h;
     }
 
     private static List<DomBook.DomLevel> mapOrders(List<Order> orders) {
