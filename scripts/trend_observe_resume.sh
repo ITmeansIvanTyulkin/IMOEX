@@ -198,6 +198,7 @@ WATCH_PID="$(pgrep -f 'trend_observe_jvm_watch.py' | head -1 || true)"
 echo "jvm_watch_pid=${WATCH_PID:-?} log=$WATCH_LOG"
 
 # Durable HHMM wakes → /tmp/trend-observe-agent-wake.log (open / midday / evening)
+# Double-fork like desk_poll — plain nohup dies when the resume agent shell tears down.
 WAKE_ARM="$ROOT/scripts/trend_observe_wake_arm.sh"
 chmod +x "$WAKE_ARM" 2>/dev/null || true
 pkill -f 'trend_observe_wake_arm.sh' >/dev/null 2>&1 || true
@@ -205,16 +206,31 @@ pkill -f '/tmp/trend_wake_arm.sh' >/dev/null 2>&1 || true
 sleep 0.2
 arm_wake() {
   local label="$1" hhmm="$2"
-  # skip if already past (except evening — still useful same-minute)
   local now
   now="$(date +%H%M)"
   if [ "$now" -ge "$hhmm" ] && [ "$label" != "evening" ]; then
     echo "wake_arm skip ${label} (past ${hhmm})"
     return 0
   fi
-  nohup "$WAKE_ARM" "$label" "$hhmm" "$DAY" >/dev/null 2>&1 &
-  disown || true
-  echo "wake_arm ${label}@${hhmm} pid=$!"
+  python3 - <<PY
+import os
+arm = r"""$WAKE_ARM"""
+label, hhmm, day = "$label", "$hhmm", "$DAY"
+if os.fork() > 0:
+    raise SystemExit(0)
+os.setsid()
+if os.fork() > 0:
+    os._exit(0)
+os.chdir("/")
+dn = os.open(os.devnull, os.O_RDWR)
+os.dup2(dn, 0); os.dup2(dn, 1); os.dup2(dn, 2)
+os.close(dn)
+os.execv(arm, [arm, label, hhmm, day])
+PY
+  sleep 0.15
+  local pid
+  pid="$(pgrep -f "trend_observe_wake_arm.sh ${label} ${hhmm}" | head -1 || true)"
+  echo "wake_arm ${label}@${hhmm} pid=${pid:-?}"
 }
 arm_wake open 1025
 arm_wake midday 1330
