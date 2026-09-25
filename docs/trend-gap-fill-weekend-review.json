@@ -1,0 +1,61 @@
+{
+  "asOf": "2026-09-25T18:20+03",
+  "mode": "evidence_only",
+  "tune": "none",
+  "sample": {
+    "liveGapFillClosesThisWeek": 1,
+    "note": "Cannot compare yesterday-pretty vs today-ugly on same family — BR skipped, NG filled and lost"
+  },
+  "ngv6_2026_09_25": {
+    "journalId": "sandbox-fair-positional-volume-h1-NGV6-2026-09-25T09-00",
+    "side": "BUY",
+    "mode": "GAP_FILL",
+    "priorClose": 3.322,
+    "dayOpen": 3.28,
+    "gapPts": -42,
+    "pointSize": 0.001,
+    "entry": 3.26015,
+    "sl": 3.25015,
+    "tp1": 3.29265,
+    "tp2": 3.32515,
+    "openedAt": "2026-09-25T09:00+03:00",
+    "closedAt": "2026-09-25T13:00+03:00",
+    "exitReason": "SL",
+    "slKind": "THROUGH",
+    "pnlRub": -420.0,
+    "qty": 6,
+    "plannedQty": 9,
+    "corpus": { "ARM": true, "FILL": true, "CLOSE": false },
+    "tapeMsk": {
+      "08_10": { "qty": 14406, "buy": 6829, "sell": 7577, "delta": -748 },
+      "09_10": { "qty": 13915, "buy": 6688, "sell": 7227, "delta": -539 },
+      "10_12": { "qty": 42569, "buy": 22179, "sell": 20390, "delta": 1789 },
+      "12_13": { "qty": 13978, "buy": 5836, "sell": 8142, "delta": -2306 }
+    },
+    "domImbBidShareByHourMsk": {
+      "9": 0.59,
+      "10": 0.42,
+      "12": 0.41,
+      "13": 0.38
+    },
+    "finding": "Entry allowed but tape/DOM/FP against BUY fill into DOWN gap; sell surge into SL hour"
+  },
+  "br_contrast": {
+    "2026-09-24": {
+      "gapPts": -131,
+      "gate": "large gap vs ATR — skip fill",
+      "filled": false
+    },
+    "2026-09-25": {
+      "gapPts": -129,
+      "gate": "medium gap needs hard micro confirm; bounce sleeps while gap open",
+      "filled": false
+    }
+  },
+  "hypothesesForLaterGo": [
+    "veto ARM if arm-window tape delta against fill side",
+    "soft DOM veto when askTop5 >> bidTop5 against fill",
+    "enrich corpus ARM/FILL/CLOSE with tape delta + DOM imb + FP summary",
+    "do not loosen ATR large-skip without OOS"
+  ]
+}
