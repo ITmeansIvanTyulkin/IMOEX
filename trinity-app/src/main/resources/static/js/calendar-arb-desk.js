@@ -18,6 +18,7 @@
   let lastGood = null;
   let everReady = false;
   let lastSeriesKey = "";
+  let lastArbDesk = null;
   let lastSpreadData = [];
   let lastNearData = [];
   let lastFarData = [];
@@ -428,6 +429,7 @@
   }
 
   function render(data) {
+    lastArbDesk = data || null;
     const warming = !!data.warming && !everReady;
     const desk = $("calendar-arb-desk");
     if (desk) desk.classList.toggle("is-warming", warming);
@@ -887,6 +889,8 @@
     });
   }
 
+  let arbTimeline = null;
+
   function ensureCharts() {
     if (typeof LightweightCharts === "undefined") return;
     const spreadEl = $("arb-chart");
@@ -895,6 +899,10 @@
       chart = LightweightCharts.createChart(spreadEl, whiteChartOpts(spreadEl, spreadEl.clientHeight || 360));
       series = chart.addLineSeries({ color: "#0b7a66", lineWidth: 2 });
       bindArbChartScale(spreadEl, chart, series, function () { return lastSpreadData; }, 0.01);
+      const kit = window.TrinityChartKit;
+      if (kit && typeof kit.attachTimelineRail === "function") {
+        arbTimeline = kit.attachTimelineRail({ hostEl: spreadEl, chart: chart });
+      }
     }
     if (legsEl && !legsChart) {
       legsChart = LightweightCharts.createChart(legsEl, whiteChartOpts(legsEl, legsEl.clientHeight || 280));
@@ -907,6 +915,42 @@
       resizeBound = true;
       window.addEventListener("resize", resizeCharts);
     }
+  }
+
+  function arbRailMarkers(desk, points) {
+    const out = [];
+    if (!desk || !points || !points.length) return out;
+    const lastT = points[points.length - 1].t || points[points.length - 1].time;
+    if (!lastT) return out;
+    const fam = (desk.selected && desk.selected.family) || (desk.settings && desk.settings.family) || "";
+    const skips = desk.sessionSkips || [];
+    skips.forEach(function (s) {
+      if (!s) return;
+      if (fam && s.family && s.family !== fam) return;
+      const act = String(s.action || "");
+      if (act === "SKIP_ROLL" || act.indexOf("ROLL") >= 0 || act.indexOf("EXPIR") >= 0) {
+        out.push({
+          time: lastT,
+          kind: "CONTRACT_EXPIRY",
+          color: "#dc2626",
+          text: "Exp",
+          title: s.reason || "Окно roll / FND",
+          detail: (s.family || "") + (s.structure ? (" · " + s.structure) : "")
+        });
+      }
+    });
+    const fp = desk.fairPaper || {};
+    if (fp.lastAction === "SKIP_ROLL" && fp.lastReason) {
+      out.push({
+        time: lastT,
+        kind: "CONTRACT_EXPIRY",
+        color: "#dc2626",
+        text: "Exp",
+        title: fp.lastReason,
+        detail: "calendar-arb"
+      });
+    }
+    return out;
   }
 
   function toLine(points, field) {
@@ -950,6 +994,9 @@
     }
     paintNav($("arb-chart"));
     paintNav($("arb-legs-chart"));
+    if (arbTimeline && typeof arbTimeline.setMarkers === "function") {
+      arbTimeline.setMarkers(arbRailMarkers(lastArbDesk, points));
+    }
   }
 
   function subscribeArbTape() {

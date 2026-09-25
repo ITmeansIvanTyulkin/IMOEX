@@ -2291,10 +2291,13 @@
       if (t == null) continue;
       out.push({
         time: t,
+        kind: m.kind || "",
         position: m.position || "belowBar",
         color: m.color || "#6366f1",
         shape: m.shape || "circle",
         text: m.text || m.kind || "•",
+        title: m.title || "",
+        detail: m.detail || "",
         _kind: m.kind || "",
         _title: m.title || "",
         _detail: m.detail || ""
@@ -2303,59 +2306,22 @@
     out.sort(function (a, b) { return a.time - b.time; });
     return out.slice(-48);
   }
-  function ensureTimelineOverlay() {
+  let deskTimelineRail = null;
+  function ensureDeskTimelineRail() {
     const host = document.querySelector(".signal-chart-main") || $("signal-chart");
-    if (!host) return null;
-    let ov = $("signal-timeline-rail");
-    if (!ov) {
-      ov = document.createElement("div");
-      ov.id = "signal-timeline-rail";
-      ov.className = "signal-timeline-rail";
-      ov.setAttribute("aria-hidden", "true");
-      host.appendChild(ov);
+    if (!host || !chart) return null;
+    if (deskTimelineRail) return deskTimelineRail;
+    const kit = window.TrinityChartKit;
+    if (kit && typeof kit.attachTimelineRail === "function") {
+      deskTimelineRail = kit.attachTimelineRail({ hostEl: host, chart: chart });
+      return deskTimelineRail;
     }
-    return ov;
+    return null;
   }
   function layoutTimelineMarkers() {
-    const ov = ensureTimelineOverlay();
-    if (!ov || !chart) return;
-    ov.innerHTML = "";
-    const chartEl = $("signal-chart");
-    const chartW = chartEl ? chartEl.clientWidth : 0;
-    const ts = chart.timeScale();
-    const items = lastTimelineMarkers || [];
-    if (!items.length) {
-      ov.hidden = true;
-      return;
-    }
-    ov.hidden = false;
-    items.forEach(function (m) {
-      if (!m || m.time == null) return;
-      let x = null;
-      try { x = ts.timeToCoordinate(m.time); } catch (_) {}
-      if (x == null) {
-        const t = nearestBarTime(m.time);
-        if (t != null) {
-          try { x = ts.timeToCoordinate(t); } catch (_) {}
-        }
-      }
-      if (x == null || x < -16 || x > chartW + 16) return;
-      const chip = document.createElement("div");
-      chip.className = "signal-timeline-chip";
-      chip.style.left = Math.round(x) + "px";
-      const title = m._title || m.text || m._kind || "";
-      const detail = m._detail || "";
-      chip.title = detail ? (title + "\n" + detail) : title;
-      const dot = document.createElement("span");
-      dot.className = "signal-timeline-dot";
-      dot.style.background = m.color || "#6366f1";
-      const letter = document.createElement("span");
-      letter.className = "signal-timeline-letter";
-      letter.textContent = (m.text || m._kind || "•").slice(0, 3);
-      dot.appendChild(letter);
-      chip.appendChild(dot);
-      ov.appendChild(chip);
-    });
+    const rail = ensureDeskTimelineRail();
+    if (!rail) return;
+    rail.setMarkers(lastTimelineMarkers || []);
   }
   function lwMarker(m) {
     if (!m || m.time == null) return null;

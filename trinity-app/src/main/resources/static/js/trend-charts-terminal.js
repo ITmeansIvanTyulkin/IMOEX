@@ -232,7 +232,10 @@
     });
     panes[secid] = { wrap: wrap, el: el, chart: chart, series: series, tools: tools, bars: [],
       m5Bars: [], ticks: [], tf: "M5",
-      scaleLocked: false, barSpacing: null, logical: null, nav: null, flow: null };
+      scaleLocked: false, barSpacing: null, logical: null, nav: null, flow: null, timeline: null };
+    if (kit && typeof kit.attachTimelineRail === "function") {
+      panes[secid].timeline = kit.attachTimelineRail({ hostEl: el, chart: chart });
+    }
     if (kit && typeof kit.attachFlowOverlays === "function") {
       panes[secid].flow = kit.attachFlowOverlays({
         chart: chart,
@@ -649,9 +652,13 @@
         p.flow.setProfile(data.profile || []);
         p.flow.setFootprints(data.footprint || []);
       }
+      if (p.timeline && typeof p.timeline.setMarkers === "function") {
+        p.timeline.setMarkers(data.chartMarkers || []);
+      }
       if (p.tools) p.tools.refreshOverlays();
       if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
       if (p.flow && typeof p.flow.layout === "function") p.flow.layout();
+      if (p.timeline && typeof p.timeline.layout === "function") p.timeline.layout();
       if (p.tf && p.tf !== "M5" && !nativeH1) applyTf(p.tf, secid);
     } catch (e) {
       console.warn("refreshPane", secid, e);

@@ -3573,6 +3573,24 @@ body[data-upsell="off"] .full-core-badge {
   overflow: hidden;
 }
 /* TradingView-style event rail — bottom of chart, above time scale */
+.signal-timeline-vline-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 19;
+  overflow: hidden;
+}
+.signal-timeline-vline {
+  position: absolute;
+  top: 0;
+  bottom: 26px;
+  width: 0;
+  border-left: 2px dashed rgba(234, 88, 12, 0.95);
+  transform: translateX(-1px);
+  opacity: 1;
+  z-index: 21;
+  pointer-events: none;
+}
 .signal-timeline-rail {
   position: absolute;
   left: 0;
@@ -3591,7 +3609,7 @@ body[data-upsell="off"] .full-core-badge {
   align-items: center;
   justify-content: center;
   pointer-events: auto;
-  cursor: default;
+  cursor: pointer;
 }
 .signal-timeline-dot {
   width: 18px;
@@ -3603,18 +3621,28 @@ body[data-upsell="off"] .full-core-badge {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 .signal-timeline-letter {
-  font-size: 8px;
-  font-weight: 700;
+  font-size: 9px;
+  font-weight: 800;
   line-height: 1;
   color: #fff;
   text-transform: uppercase;
   letter-spacing: -0.02em;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+.signal-timeline-ico {
+  width: 11px;
+  height: 11px;
+  display: block;
+}
+.signal-timeline-chip.is-gap .signal-timeline-letter {
+  font-size: 10px;
 }
 .signal-timeline-chip:hover .signal-timeline-dot {
-  transform: scale(1.12);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.4);
+  transform: scale(1.14);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.45);
 }
 .signal-profile-overlay,
 .charts-flow-profile {

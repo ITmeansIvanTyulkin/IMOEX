@@ -4256,6 +4256,154 @@
     };
   }
 
+  /**
+   * TradingView-style event rail (gap / expiry / roll / open / calendar).
+   * Shared by Exclusive desk, positional desk, charts terminal, calendar-arb.
+   *
+   * markers: [{ time: unixSec|iso, kind, color, text, title, detail }]
+   */
+  function attachTimelineRail(opts) {
+    opts = opts || {};
+    const host = opts.hostEl;
+    const chart = opts.chart;
+    if (!host || !chart) {
+      return { setMarkers: function () {}, layout: function () {}, clear: function () {} };
+    }
+    if (getComputedStyle(host).position === "static") {
+      host.style.position = "relative";
+    }
+    let items = [];
+    let rail = host.querySelector(".signal-timeline-rail");
+    if (!rail) {
+      rail = document.createElement("div");
+      rail.className = "signal-timeline-rail";
+      rail.setAttribute("aria-hidden", "true");
+      host.appendChild(rail);
+    }
+    let layer = host.querySelector(".signal-timeline-vline-layer");
+    let line = null;
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "signal-timeline-vline-layer";
+      layer.setAttribute("aria-hidden", "true");
+      line = document.createElement("div");
+      line.className = "signal-timeline-vline";
+      line.hidden = true;
+      layer.appendChild(line);
+      host.appendChild(layer);
+    } else {
+      line = layer.querySelector(".signal-timeline-vline");
+    }
+
+    function toUnix(t) {
+      if (t == null) return null;
+      if (typeof t === "number" && isFinite(t)) return t > 1e12 ? Math.floor(t / 1000) : t;
+      const ms = Date.parse(String(t).replace(" ", "T"));
+      return isFinite(ms) ? Math.floor(ms / 1000) : null;
+    }
+
+    function glyph(kind, text, color) {
+      const k = String(kind || "").toUpperCase();
+      const ARROWS = '<svg class="signal-timeline-ico" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<path d="M2.5 5.2h9.2M9.2 2.8L12.8 5.2 9.2 7.6" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'
+        + '<path d="M13.5 10.8H4.3M6.8 13.2L3.2 10.8 6.8 8.4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'
+        + "</svg>";
+      const SWAP = '<svg class="signal-timeline-ico" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<path d="M4.2 5.5c1.6-2.2 5.2-2.4 7.1-.4M10.2 3.6l1.6 1.9-2.2.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+        + '<path d="M11.8 10.5c-1.6 2.2-5.2 2.4-7.1.4M5.8 12.4L4.2 10.5l2.2-.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+        + "</svg>";
+      const BOLT = '<svg class="signal-timeline-ico" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<path d="M9.2 2.2L4.4 8.8h3.1L6.8 13.8l5.2-7.2H8.8z" fill="#fff"/>'
+        + "</svg>";
+      if (k === "SESSION_GAP") {
+        return { cls: "is-gap", color: "#ea580c", html: '<span class="signal-timeline-letter">G</span>' };
+      }
+      if (k === "CONTRACT_EXPIRY" || k === "FND" || k === "SKIP_ROLL") {
+        return { cls: "is-expiry", color: color || "#dc2626", html: ARROWS };
+      }
+      if (k === "CONTRACT_ROLL") {
+        return { cls: "is-roll", color: color || "#7c3aed", html: SWAP };
+      }
+      if (k === "CALENDAR") {
+        return { cls: "is-calendar", color: color || "#64748b", html: BOLT };
+      }
+      if (k === "SESSION_OPEN") {
+        return { cls: "is-open", color: color || "#2563eb", html: '<span class="signal-timeline-letter">O</span>' };
+      }
+      if (k === "TRADE_ENTRY") {
+        const letter = (text || "•").slice(0, 1).toUpperCase();
+        return { cls: "is-entry", color: color || "#2563eb", html: '<span class="signal-timeline-letter">' + letter + "</span>" };
+      }
+      return {
+        cls: "is-misc",
+        color: color || "#6366f1",
+        html: '<span class="signal-timeline-letter">' + (text || "•").slice(0, 3) + "</span>"
+      };
+    }
+
+    function setHover(x, color, show) {
+      if (!line) return;
+      if (!show || x == null || !isFinite(x)) {
+        line.hidden = true;
+        return;
+      }
+      line.hidden = false;
+      line.style.left = Math.round(x) + "px";
+      line.style.borderColor = color || "rgba(99, 102, 241, 0.85)";
+    }
+
+    function layout() {
+      rail.innerHTML = "";
+      setHover(null, null, false);
+      if (!items.length) {
+        rail.hidden = true;
+        return;
+      }
+      rail.hidden = false;
+      const w = host.clientWidth || 0;
+      const ts = chart.timeScale();
+      items.forEach(function (m) {
+        if (!m) return;
+        const unix = toUnix(m.time);
+        if (unix == null) return;
+        let x = null;
+        try { x = ts.timeToCoordinate(unix); } catch (_) {}
+        if (x == null || x < -16 || x > w + 16) return;
+        const vis = glyph(m.kind || m._kind, m.text, m.color);
+        const chipX = Math.round(x);
+        const chip = document.createElement("div");
+        chip.className = "signal-timeline-chip " + (vis.cls || "");
+        chip.style.left = chipX + "px";
+        const title = m.title || m._title || m.text || m.kind || "";
+        const detail = m.detail || m._detail || "";
+        chip.title = detail ? (title + "\n" + detail) : title;
+        const dot = document.createElement("span");
+        dot.className = "signal-timeline-dot";
+        dot.style.background = vis.color;
+        dot.innerHTML = vis.html;
+        chip.appendChild(dot);
+        chip.addEventListener("mouseenter", function () { setHover(chipX, vis.color, true); });
+        chip.addEventListener("mouseleave", function () { setHover(null, null, false); });
+        rail.appendChild(chip);
+      });
+    }
+
+    function setMarkers(list) {
+      items = Array.isArray(list) ? list.slice() : [];
+      layout();
+    }
+
+    try {
+      chart.timeScale().subscribeVisibleLogicalRangeChange(function () { layout(); });
+    } catch (_) {}
+
+    return {
+      setMarkers: setMarkers,
+      layout: layout,
+      clear: function () { setMarkers([]); }
+    };
+  }
+
   global.TrinityChartKit = {
     authHeaders: authHeaders,
     currentUserKey: currentUserKey,
@@ -4270,6 +4418,7 @@
     ema: ema,
     attachTools: attachTools,
     attachFlowOverlays: attachFlowOverlays,
+    attachTimelineRail: attachTimelineRail,
     bindTradingViewNav: bindTradingViewNav,
     attachFriendlyNav: attachFriendlyNav,
     ensureNavHud: ensureNavHud,
