@@ -242,9 +242,9 @@ curl -s 'http://127.0.0.1:8080/api/trend/desk?instrument=BRV6&playbook=levels-pr
 **Не делать из бэклога без gate:** кластеры/KD/OI как сигналы; DOM «стены → цена пойдёт сюда»; options; биллинг; updater Core; полный ATAS-desk.
 
 **observeCandidatesLater (только лог, не implement):** cooldown после SL режет BOT bounce; mid-shelf HTF DOWN → SWEEP; positional OOM до `both`; tick-trail SL с входа — нет; trail runner после TP1 Exclusive — **DONE 28.08**.  
-**§8 anti-pattern 28.09 (void `…BRV6-2026-09-28T17-55`, −259 THROUGH):** не брать **BUY RETEST** у TOP, если цена пришла **снизу через коробку** и купила на первом close ≥ TOP↑ (failed breakout). Чеклист: §8 long только после hold **снаружи сверху** и возврата к полке сверху; close внутри TOP = bounce **SELL**, не BUY. Stale `topBrokenHeld` с утра не оправдывает reclaim-from-below.
+**§8 anti-pattern 28.09 (void `…BRV6-2026-09-28T17-55`, −259 THROUGH):** не брать **BUY RETEST** у TOP при reclaim **снизу через коробку** — **DONE 28.09** (`retestEntryAllowed` + `heldOutsideAfterLastWrongSide`: нужен свежий hold снаружи после последнего close внутри/ниже; melt-up pierce запрещён).
 
-**Fragility, которую уже чинили и нельзя регрессировать:** day-lock TOP vs HI; HI≈LO infinite loop `ChecklistStructure` (31.08); lastClose leak между lanes; qty filled/planned; wick SL FORMING_BAR vs close M5; два playbook на одном экране; dual focus TOP+BOT (28.09) — не залипать на пробитом TOP при dump→BOT.
+**Fragility, которую уже чинили и нельзя регрессировать:** day-lock TOP vs HI; HI≈LO infinite loop `ChecklistStructure` (31.08); lastClose leak между lanes; qty filled/planned; wick SL FORMING_BAR vs close M5; два playbook на одном экране; dual focus TOP+BOT (28.09) — не залипать на пробитом TOP при dump→BOT; §8 reclaim-from-below (28.09).
 
 ---
 
