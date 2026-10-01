@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -39,6 +40,27 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("После 16:00 новый вход не ставим"), "late-arm copy must be Russian");
         assertTrue(src.contains("desk-positional-auto-execution"), "positional desk switcher missing");
         assertTrue(src.contains("/api/trend/settings/positional-auto-execution"), "positional auto API missing");
+        assertTrue(src.contains("desk-range-auto-execution"), "range desk switcher missing");
+        assertTrue(src.contains("/api/trend/settings/auto-execution"), "range auto API missing");
+        assertTrue(src.contains("hydrateDeskModeSwitches"), "range/positional toggles must hydrate from GET settings");
+        assertTrue(src.contains("positionalAutoFlag"), "positional toggle must not treat a missing desk field as off");
+        assertTrue(src.contains("healInsaneZoom"), "login/resume must not restore a one-candle time scale");
+        assertTrue(src.contains("MAX_BAR_SPACING = 160"), "barSpacing soft-cap must allow deep mouse zoom");
+        assertTrue(src.contains("Never reset just because spacing is"), "heal must not undo wheel zoom");
+        assertTrue(src.contains("vis > 0 && vis < 2.5"), "heal only one-candle fill");
+        assertTrue(src.contains("function jwtUnexpired"), "expired cabinet JWT must not block desk cookie writes");
+        assertTrue(src.contains("footprintByTime = {}"), "instrument change must clear foreign footprint levels");
+        assertTrue(src.contains("Always replace so instrument switches"),
+                "empty footprint response must clear prior map");
+        int saveAt = src.indexOf("async function saveDeskSelection");
+        assertTrue(saveAt > 0, "saveDeskSelection missing");
+        String saveBody = src.substring(saveAt, Math.min(src.length(), saveAt + 1600));
+        assertFalse(saveBody.contains("autoExecution:"),
+                "saveDeskSelection must not echo autoExecution (playbook/instrument only)");
+        assertFalse(saveBody.contains("positionalAutoExecution:"),
+                "saveDeskSelection must not echo positionalAutoExecution");
+        assertFalse(saveBody.contains("liveExecution:"),
+                "saveDeskSelection must not echo liveExecution");
         assertTrue(src.contains("Перед входом · фундамент и охота"), "hunt brief heading missing");
         assertTrue(src.contains("function wantedDeskInstrument"), "desk must request pinned instrument");
         assertTrue(src.contains("invalidateDeskFetch"), "stale oil payload must be dropped on instrument change");
@@ -55,5 +77,17 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("октябрь"), "October month label missing");
         assertTrue(src.contains("DESK_FETCH_MS"), "desk fetch timeout missing");
         assertTrue(src.contains("AbortController"), "desk/book must abort hung fetches");
+        assertTrue(src.contains("tool-clusters"), "positional/range desk must wire clusters tool");
+        assertTrue(src.contains("attachFlowOverlays"), "desk must attach flow overlays for clusters");
+        assertTrue(src.contains("mergeDomBook"), "DOM must keep both bid and ask shelves");
+        assertTrue(src.contains("const DOM_DEPTH = 50"), "DOM must keep max bid and ask depth");
+        assertTrue(src.contains("overflow-y: scroll") || src.contains("body.scrollTop"), "DOM ladder must scroll");
+        assertTrue(src.contains("function centerDomOnSpread"), "DOM must pin the view on spread, not last tick");
+        assertTrue(src.contains("kit.applyTradeToCandle"), "range M5 must paint live prints via kit (incl. new bucket)");
+        assertTrue(src.contains("liveCandlePx(data.book)"), "desk poll must re-apply last tape px so last close stays live");
+        assertTrue(src.contains("if (lastTapePx > 0") || src.contains("lastTapeAt) < 15000"),
+                "candles must not fall back to DOM mid after tape goes quiet");
+        assertFalse(src.contains("return livePxFromBook(book)"),
+                "TradingView last: never paint bid/ask mid onto OHLC");
     }
 }

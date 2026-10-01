@@ -9,14 +9,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import sys
 import time
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from trend_observe_auth import DESK_URL, desk_request  # noqa: E402
+
 OUT = ROOT / "data" / "trend-gate-observe.jsonl"
-DESK_URL = "http://127.0.0.1:8080/api/trend/desk"
 
 NEEDLES = (
     ("smash", ("вынос через дневную полку", "smash")),
@@ -27,8 +30,7 @@ NEEDLES = (
 
 
 def fetch_desk():
-    with urllib.request.urlopen(DESK_URL, timeout=20) as r:
-        return json.load(r)
+    return desk_request(DESK_URL, timeout=20)
 
 
 def classify(text: str) -> list[str]:
@@ -90,12 +92,46 @@ def append_if_new(row: dict, seen: set[str]) -> bool:
     return True
 
 
+def daemonize(log_path: Path) -> None:
+    """Double-fork so Cursor/agent shell teardown cannot kill the poll."""
+    log_path = log_path.expanduser().resolve()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if os.fork() > 0:
+        raise SystemExit(0)
+    os.setsid()
+    if os.fork() > 0:
+        raise SystemExit(0)
+    os.chdir("/")
+    fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    os.dup2(fd, 1)
+    os.dup2(fd, 2)
+    os.close(fd)
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--seconds", type=int, default=5400, help="poll duration (default ~90m)")
     ap.add_argument("--interval", type=int, default=60)
+    ap.add_argument(
+        "--daemon",
+        action="store_true",
+        help="double-fork detach; log to --log (default data/trend-desk-poll.log)",
+    )
+    ap.add_argument(
+        "--log",
+        type=Path,
+        default=None,
+        help="log file when --daemon (also used to redirect stdout)",
+    )
     args = ap.parse_args()
+
+    if args.daemon:
+        log = args.log or (ROOT / "data" / "trend-desk-poll.log")
+        daemonize(log)
 
     seen: set[str] = set()
     if OUT.exists():

@@ -520,8 +520,11 @@
     if (!toggle) return;
     toggle.checked = !!on;
     toggle.setAttribute("aria-checked", on ? "true" : "false");
+    toggle.dataset.hydrated = "1";
+    toggle.disabled = false;
     const wrap = toggle.closest(".mode-switch");
     if (wrap) {
+      wrap.hidden = false;
       wrap.classList.toggle("is-auto", !!on);
       wrap.classList.toggle("is-signal", !on);
     }
@@ -531,16 +534,13 @@
     const toggle = $("pairs-auto-execution");
     if (!toggle) return;
     const view = await getJson("/api/broker/settings");
-    if (!view) {
-      syncModeSwitch(false);
-      return;
-    }
+    if (!view) return;
     syncModeSwitch(!!view.autoExecuteAfterAnalysis);
     const hint = $("pairs-delivery-hint");
     if (hint) {
       hint.textContent = toggle.checked
         ? "Авто: после анализа журнал + заявки, если брокер готов."
-        : "Наблюдение: журнал пишется, заявок брокеру нет.";
+        : "Ручная торговля: журнал пишется, заявок брокеру нет.";
     }
   }
 
@@ -556,7 +556,7 @@
       if (!res.ok) throw new Error("settings " + res.status);
       if (hint) hint.textContent = on
         ? "Авто включён. Живые заявки всё равно требуют готового брокера."
-        : "Наблюдение: только журнал, без авто-заявок.";
+        : "Ручная торговля: только журнал, без авто-заявок.";
     } catch (e) {
       syncModeSwitch(!on);
       if (hint) hint.textContent = "Не удалось сохранить режим: " + e.message;
@@ -641,11 +641,17 @@
   }
   const toggle = $("pairs-auto-execution");
   if (toggle) {
+    toggle.disabled = true;
     const wrap = toggle.closest(".mode-switch");
+    if (wrap) wrap.hidden = true;
     if (wrap && !wrap.classList.contains("is-auto") && !wrap.classList.contains("is-signal")) {
       wrap.classList.add("is-signal");
     }
+    const labels = wrap ? wrap.querySelectorAll(".mode-switch-label") : [];
+    if (labels[0]) labels[0].textContent = "Ручная торговля";
+    if (labels[1]) labels[1].textContent = "Авто";
     toggle.addEventListener("change", function () {
+      if (toggle.dataset.hydrated !== "1") return;
       setDelivery(toggle.checked);
     });
   }

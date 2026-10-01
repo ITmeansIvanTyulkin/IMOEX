@@ -31,11 +31,14 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Ops/auth: при {@code imoex.auth.enabled=true} POST /api/** требует HTTP Basic
- * и/или Bearer JWT (Supabase), если {@code imoex.auth.supabase.enabled=true}.
- * GET API, HTML view и actuator health остаются открытыми.
+ * Ops/auth: при {@code imoex.auth.enabled=true} {@code /api/**} требует HTTP Basic
+ * и/или Bearer JWT (Supabase). Публично: HTML {@code /view}, health/info,
+ * {@code GET /api/auth/**}, {@code POST /api/auth/login|logout}, upsell beacon, tape WS handshake
+ * (origin+token/cookie проверяет {@link TrendTapeHandshakeInterceptor}).
+ * HTML: {@code GET /view} (gate) публичен; {@code /view/**} — cookie {@code trinity.desk} / JWT / Basic.
  *
  * <p>401 без {@code WWW-Authenticate: Basic} — иначе Chrome показывает native Basic-диалог
  * и пользователь вводит email кабинета туда вместо формы на /view.
@@ -56,21 +59,29 @@ public class SecurityConfig {
     @Bean
     @Order(1)
     @ConditionalOnProperty(prefix = "imoex.auth", name = "enabled", havingValue = "true")
-    SecurityFilterChain securedSecurity(HttpSecurity http, ImoexProperties properties) throws Exception {
+    SecurityFilterChain securedSecurity(
+            HttpSecurity http,
+            ImoexProperties properties,
+            DeskSessionStore deskSessions
+    ) throws Exception {
         boolean supabaseJwt = properties.auth().supabase().jwtConfigured();
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .addFilterBefore(new DeskSessionAuthFilter(deskSessions), UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(EndpointRequest.to("health", "info")).permitAll()
-                        .requestMatchers("/", "/view", "/view/**").permitAll()
+                        .requestMatchers("/", "/view", "/view/").permitAll()
+                        .requestMatchers("/js/**", "/css/**", "/images/**", "/fonts/**", "/favicon.ico").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/**").permitAll()
-                        /* same-origin cabinet login proxy (before authenticated POST /api/**) */
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/**").permitAll()
+                        /* same-origin cabinet login proxy (before authenticated /api/**) */
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/logout").permitAll()
+                        /* WS handshake cannot send Authorization; interceptor checks origin + token/cookie */
+                        .requestMatchers("/api/trend/ws/**").permitAll()
                         /* soft commercial beacons — не должны триггерить login prompt */
                         .requestMatchers(HttpMethod.POST, "/api/upsell/events").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/**").authenticated()
+                        .requestMatchers("/view/**").authenticated()
+                        .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
                 )
                 .httpBasic(basic -> basic.authenticationEntryPoint(apiAuthEntryPoint(supabaseJwt)))
@@ -89,6 +100,15 @@ public class SecurityConfig {
      */
     private static AuthenticationEntryPoint apiAuthEntryPoint(boolean supabaseJwt) {
         return (request, response, authException) -> {
+            String path = request.getRequestURI() == null ? "" : request.getRequestURI();
+            String accept = request.getHeader("Accept");
+            if (path.startsWith("/view/")
+                    && accept != null
+                    && accept.toLowerCase().startsWith("text/html")) {
+                response.setStatus(HttpStatus.FOUND.value());
+                response.setHeader("Location", "/view");
+                return;
+            }
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding(StandardCharsets.UTF_8.name());

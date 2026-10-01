@@ -131,8 +131,19 @@ def main():
         except Exception:
             pass
 
+    def _is_day(x: object) -> bool:
+        if not isinstance(x, dict):
+            return False
+        date = str(x.get("date") or "")
+        return len(date) == 10 and date[4] == "-" and date[7] == "-" and date[:4].isdigit()
+
+    # Drop accidental non-date rows (e.g. readiness "status") so they never poison seals.
+    clean_days = [d for d in (log.get("days") or []) if _is_day(d)]
+    if len(clean_days) != len(log.get("days") or []):
+        log["days"] = clean_days
+
     full_days = []
-    for d in log.get("days") or []:
+    for d in clean_days:
         eod = d.get("eod") or {}
         if eod.get("countAsFullObserveDay"):
             full_days.append(d.get("date"))
@@ -140,7 +151,7 @@ def main():
     for d in prog.get("fullObserveDays") or []:
         if d not in full_days:
             full_days.append(d)
-    full_days = sorted(x for x in full_days if x)
+    full_days = sorted(x for x in full_days if x and str(x)[:4].isdigit())
 
     ready, reason = phase_c_ready(r, full_days)
     r["readyForPhaseC"] = ready

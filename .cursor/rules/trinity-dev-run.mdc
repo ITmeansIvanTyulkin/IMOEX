@@ -1,0 +1,27 @@
+---
+description: Always start Trinity from local working tree with Spring profile dev
+alwaysApply: true
+---
+
+# Trinity local run (dev)
+
+When starting or restarting the app on 8080:
+
+```bash
+cd /Users/ivan/MEGA/Work/TRINITY/IMOEX
+mvn -pl trinity-app -am spring-boot:run
+```
+
+Optional: `-DskipTests` if a fast restart is needed.
+
+This command already:
+
+- activates Maven profile `operator` when `../IMOEX-core` exists
+- activates Spring profile `dev` (`.mvn/maven.config` + `trinity-app` pom)
+- compiles the **current working tree** of IMOEX + IMOEX-core into the JVM
+
+Do **not**:
+
+- require a clean checkout of `origin/dev` that drops local changes
+- use `scripts/trend_observe_resume.sh` to restart the JVM (it can rewrite `data/trend-ui-settings.json`)
+- start `trinity-shell` when the operator core is present

@@ -22,6 +22,12 @@
   let userScaleGesture = false;
   let chartNav = null;
   const SCALE_STORE = "trinity.trend.desk.scale";
+  const DEFAULT_BAR_SPACING = 8;
+  // Soft ceiling only. Hard caps (16/48) made mouse zoom feel broken: at ~900px
+  // width, spacing 48 ≈ 19 bars and wheel zoom-in could not go closer.
+  const MAX_BAR_SPACING = 160;
+  // Keep user's close zoom (≥4 bars). Below ~2.5 is healInsaneZoom territory.
+  const MIN_KEEP_LOGICAL = 4;
   const INST_STORE = "trinity.trend.desk.instrument";
   const PB_STORE = "trinity.trend.desk.playbook";
   let deskInstrumentPinned = null;
@@ -55,12 +61,15 @@
   let deskFetchGen = 0;
   let deskQueuedForceFit = false;
   let chartTools = null;
+  let chartFlow = null;
   let deskLayoutDoc = null;
   let deskLayoutTimer = null;
   let domFollowMid = true;
   let domScrollBound = false;
+  let lastDomBook = null;
+  const DOM_DEPTH = 50;
   const DESK_MS = 12000;
-  const BOOK_MS = 8000;
+  const BOOK_MS = 6000;
   /** Hard ceiling — prefer TrinityFastBoot contract (all strategies). */
   const DESK_FETCH_MS = (window.TrinityFastBoot && TrinityFastBoot.DESK_MS) || 25000;
   const BOOK_FETCH_MS = (window.TrinityFastBoot && TrinityFastBoot.BOOK_MS) || 12000;
@@ -73,7 +82,7 @@
   const HI_LO_COLOR = "#b91c1c";
   const ZONE_EDGE = "#6d28d9";
   const DESK_LIVE_MS = 2000;
-  const BOOK_LIVE_MS = 1500;
+  const BOOK_LIVE_MS = 6000;
   let lastWorkingOpen = null;
   let lastOverlayPlan = {};
   let lastOverlaySig = {};
@@ -153,8 +162,13 @@
     }
     const kick = $("sig-kick-btn");
     if (kick) kick.hidden = pos;
-    const wrap = $("positional-auto-wrap");
-    if (wrap) wrap.hidden = !pos;
+    if (pos) {
+      const rangeWrap = $("range-auto-wrap");
+      if (rangeWrap) rangeWrap.hidden = true;
+    } else {
+      const wrap = $("positional-auto-wrap");
+      if (wrap) wrap.hidden = true;
+    }
     const modeLink = $("signal-desk-mode-link");
     if (modeLink) {
       modeLink.setAttribute("href", pos
@@ -200,28 +214,120 @@
     else chip.classList.add("is-scan");
     chip.title = detail ? (status + " · " + detail) : status;
   }
+  function paintModeSwitch(tog, on, hintId, autoHint, manualHint) {
+    if (!tog) return;
+    tog.checked = !!on;
+    tog.setAttribute("aria-checked", on ? "true" : "false");
+    const sw = tog.closest(".mode-switch");
+    if (sw) {
+      sw.classList.toggle("is-auto", !!on);
+      sw.classList.toggle("is-signal", !on);
+    }
+    const hint = $(hintId);
+    if (hint) hint.textContent = on ? autoHint : manualHint;
+    tog.dataset.hydrated = "1";
+    tog.disabled = false;
+  }
+  function rangeAutoOn(data) {
+    if (!data) return false;
+    if (data.autoExecution != null) return !!data.autoExecution;
+    const sit = data.situation || {};
+    return !!sit.autoExecution;
+  }
+  function syncRangeAutoSwitch(data) {
+    const wrap = $("range-auto-wrap");
+    const tog = $("desk-range-auto-execution");
+    const range = deskScope() !== "positional";
+    if (wrap) wrap.hidden = !range;
+    if (!tog) return;
+    paintModeSwitch(
+      tog,
+      rangeAutoOn(data),
+      "range-mode-hint",
+      "Авто: планы уходят в журнал песочницы.",
+      "Ручная торговля: график без заявок."
+    );
+  }
+  function positionalAutoFlag(data) {
+    if (!data) return null;
+    if (data.positionalAutoExecution === true || data.positionalAutoExecution === false) {
+      return !!data.positionalAutoExecution;
+    }
+    const sit = data.situation || {};
+    if (sit.positionalAutoExecution === true || sit.positionalAutoExecution === false) {
+      return !!sit.positionalAutoExecution;
+    }
+    return null;
+  }
   function syncPositionalAutoSwitch(data) {
     const wrap = $("positional-auto-wrap");
     const tog = $("desk-positional-auto-execution");
     const pos = deskScope() === "positional";
     if (wrap) wrap.hidden = !pos;
     if (!tog) return;
-    const on = !!(data && data.positionalAutoExecution);
-    tog.checked = on;
-    tog.setAttribute("aria-checked", on ? "true" : "false");
-    const sw = tog.closest(".mode-switch");
-    if (sw) {
-      sw.classList.toggle("is-auto", on);
-      sw.classList.toggle("is-signal", !on);
-    }
+    const on = positionalAutoFlag(data);
+    if (on == null && tog.dataset.hydrated === "1") return;
+    paintModeSwitch(
+      tog,
+      !!on,
+      "positional-mode-hint",
+      "Авто: чек-лист задаёт сторону, сетка в журнал.",
+      "Ручная торговля: график есть, входов нет."
+    );
+  }
+  async function hydrateDeskModeSwitches() {
+    try {
+      const res = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const view = await res.json();
+      syncRangeAutoSwitch(view);
+      syncPositionalAutoSwitch(view);
+    } catch (_) {}
+  }
+  function bindRangeAutoSwitch() {
+    const tog = $("desk-range-auto-execution");
+    if (!tog || tog.dataset.bound === "1") return;
+    tog.dataset.bound = "1";
+    tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
+      setRangeAutoFromDesk(tog.checked);
+    });
   }
   function bindPositionalAutoSwitch() {
     const tog = $("desk-positional-auto-execution");
     if (!tog || tog.dataset.bound === "1") return;
     tog.dataset.bound = "1";
     tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
       setPositionalAutoFromDesk(tog.checked);
     });
+  }
+  async function setRangeAutoFromDesk(enabled) {
+    const tog = $("desk-range-auto-execution");
+    if (tog) tog.disabled = true;
+    try {
+      const res = await fetch("/api/trend/settings/auto-execution", {
+        method: "POST",
+        headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      const view = await res.json();
+      syncRangeAutoSwitch({ autoExecution: !!view.autoExecution });
+      if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
+        window.TrinityPlaques.refresh();
+      }
+      await loadDesk(true);
+    } catch (e) {
+      alert("Не удалось переключить диапазонного робота: " + (e && e.message ? e.message : e)
+        + "\nНужен вход в кабинет.");
+      if (tog) tog.checked = !enabled;
+    } finally {
+      if (tog) tog.disabled = false;
+    }
   }
   async function setPositionalAutoFromDesk(enabled) {
     const tog = $("desk-positional-auto-execution");
@@ -288,13 +394,30 @@
     return String(t == null ? "" : t)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
+  function jwtUnexpired(token) {
+    try {
+      const parts = String(token || "").split(".");
+      if (parts.length < 2) return false;
+      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+      const json = JSON.parse(atob(b64 + pad));
+      if (!json || json.exp == null) return true;
+      return Number(json.exp) * 1000 > Date.now() + 5000;
+    } catch (_) {
+      return false;
+    }
+  }
   function deskAuthHeaders(extra) {
     const headers = Object.assign({ Accept: "application/json" }, extra || {});
     try {
       const token = localStorage.getItem("trinity.supabase.access_token");
-      if (token) {
+      if (token && jwtUnexpired(token)) {
         headers.Authorization = "Bearer " + token;
         return headers;
+      }
+      if (token && !jwtUnexpired(token)) {
+        // Drop expired JWT so the desk cookie can authorize writes.
+        try { localStorage.removeItem("trinity.supabase.access_token"); } catch (_) {}
       }
       const user = (localStorage.getItem("imoex.ops.user") || "").trim();
       const pass = localStorage.getItem("imoex.ops.pass") || "";
@@ -306,7 +429,8 @@
   }
   function hasDeskWriteAuth() {
     try {
-      if (localStorage.getItem("trinity.supabase.access_token")) return true;
+      const token = localStorage.getItem("trinity.supabase.access_token");
+      if (token && jwtUnexpired(token)) return true;
       const user = (localStorage.getItem("imoex.ops.user") || "").trim();
       const pass = localStorage.getItem("imoex.ops.pass") || "";
       return !!(user && pass && user.indexOf("@") < 0);
@@ -1636,7 +1760,7 @@
   function plausibleLivePx(ref, px) {
     if (!(px > 0)) return false;
     if (!(ref > 0)) return true;
-    return Math.abs(px - ref) <= Math.max(Math.abs(ref) * 0.02, 0.5);
+    return Math.abs(px - ref) <= Math.max(Math.abs(ref) * 0.006, ref >= 1000 ? Math.abs(ref) * 0.003 : 0.12);
   }
   function fitPriceToVisibleCandles() {
     if (!candleSeries || priceScaleLocked) return;
@@ -1806,22 +1930,68 @@
     return ov;
   }
   function layoutProfile(levels) {
+    const host = $("signal-chart");
+    if (host) host.classList.toggle("is-session-profile", !!showProfile);
+    // Prefer kit flow profile: densest of day-tape / footprint / OHLC (ATAS-like).
+    if (chartFlow && typeof chartFlow.setProfile === "function") {
+      if (levels && levels.length) lastProfile = levels;
+      chartFlow.setProfile(lastProfile || []);
+      if (typeof chartFlow.setShowProfile === "function") {
+        chartFlow.setShowProfile(!!showProfile);
+      }
+      const legacy = $("signal-profile-overlay");
+      if (legacy) {
+        legacy.innerHTML = "";
+        legacy.hidden = true;
+      }
+      if (typeof chartFlow.layout === "function") chartFlow.layout();
+      return;
+    }
     const ov = ensureProfileOverlay();
     if (!ov || !candleSeries) return;
     ov.innerHTML = "";
     ov.hidden = !showProfile;
     if (!showProfile || !levels || !levels.length) return;
-    const maxW = 72;
+    const maxW = 84;
+    const rowPx = 3;
+    const bins = Object.create(null);
     levels.forEach(function (lvl) {
       if (!finitePrice(lvl.price) || !(lvl.volume > 0)) return;
       const y = candleSeries.priceToCoordinate(lvl.price);
       if (y == null) return;
+      const key = String(Math.round(y / rowPx) * rowPx);
+      let b = bins[key];
+      if (!b) b = bins[key] = { y: Number(key), vol: 0, price: Number(lvl.price), _best: 0 };
+      b.vol += Number(lvl.volume);
+      if (Number(lvl.volume) >= b._best) {
+        b.price = Number(lvl.price);
+        b._best = Number(lvl.volume);
+      }
+    });
+    const rows = Object.keys(bins).map(function (k) { return bins[k]; });
+    if (!rows.length) return;
+    let maxVol = 1;
+    let total = 0;
+    rows.forEach(function (r) {
+      if (r.vol > maxVol) maxVol = r.vol;
+      total += r.vol;
+    });
+    const ranked = rows.slice().sort(function (a, b) { return b.vol - a.vol; });
+    const va = Object.create(null);
+    let acc = 0;
+    ranked.forEach(function (r, i) {
+      if (acc < total * 0.7) va[r.y] = true;
+      acc += r.vol;
+      if (i === 0) r.poc = true;
+    });
+    rows.forEach(function (r) {
       const bar = document.createElement("div");
-      bar.className = "signal-vap-bar";
-      const w = Math.max(2, Math.round((lvl.strength || 0) * maxW));
-      bar.style.top = (y - 1) + "px";
-      bar.style.width = w + "px";
-      bar.title = Number(lvl.price).toFixed(2) + " · vol " + Math.round(lvl.volume);
+      bar.className = "signal-vap-bar"
+        + (r.poc ? " is-poc" : va[r.y] ? " is-va" : "");
+      bar.style.top = (r.y - 1) + "px";
+      bar.style.width = Math.max(3, Math.round((r.vol / maxVol) * maxW)) + "px";
+      bar.title = Number(r.price).toFixed(2) + " · vol " + Math.round(r.vol)
+        + (r.poc ? " · POC" : "");
       ov.appendChild(bar);
     });
   }
@@ -1838,11 +2008,13 @@
     return ov;
   }
   function indexFootprints(fps) {
-    footprintByTime = {};
+    // Always replace so instrument switches cannot keep foreign levels.
+    const next = {};
     (fps || []).forEach(function (fb) {
       const t = toChartTime(fb.time);
-      if (t != null) footprintByTime[t] = fb;
+      if (t != null) next[t] = fb;
     });
+    footprintByTime = next;
   }
   function fpSnapTolSec() {
     return lastChartTf === "H1" ? 1800 : 150;
@@ -1950,20 +2122,21 @@
     if (!el || fpHostBound) return;
     fpHostBound = true;
     el.addEventListener("pointerdown", function (ev) {
-      if (!fpSelected || fpRangeFrom == null || fpRangeTo == null || !chart) return;
+      if (fpRangeFrom == null || fpRangeTo == null || !chart) return;
       if (ev.button != null && ev.button !== 0) return;
-      if (fpToolActive) return; // drawing uses clicks
+      if (fpAnchor != null) return;
       const rect = el.getBoundingClientRect();
       const x = ev.clientX - rect.left;
       const xs = fpRangeXs();
       if (!xs) return;
-      if (Math.abs(x - xs.left) <= 8) fpDragEnd = "from";
-      else if (Math.abs(x - xs.right) <= 8) fpDragEnd = "to";
+      const hit = 14;
+      if (Math.abs(x - xs.left) <= hit) fpDragEnd = "from";
+      else if (Math.abs(x - xs.right) <= hit) fpDragEnd = "to";
       else return;
       try { el.setPointerCapture(ev.pointerId); } catch (_) {}
       ev.preventDefault();
       ev.stopPropagation();
-    });
+    }, true);
     el.addEventListener("pointermove", function (ev) {
       if (!fpDragEnd || !chart) return;
       const rect = el.getBoundingClientRect();
@@ -1972,16 +2145,23 @@
       try { t = chart.timeScale().coordinateToTime(x); } catch (_) {}
       if (typeof t !== "number") return;
       t = nearestBarTime(t);
-      if (fpDragEnd === "from") fpRangeFrom = t;
-      else fpRangeTo = t;
-      applyFpRange(fpRangeFrom, fpRangeTo);
+      if (fpDragEnd === "from") {
+        if (t === fpRangeFrom) return;
+        applyFpRange(t, fpRangeTo);
+      } else {
+        if (t === fpRangeTo) return;
+        applyFpRange(fpRangeFrom, t);
+      }
       ev.preventDefault();
-    });
+      ev.stopPropagation();
+    }, true);
     el.addEventListener("pointerup", function (ev) {
       if (!fpDragEnd) return;
       fpDragEnd = null;
       try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
-    });
+      ev.preventDefault();
+      ev.stopPropagation();
+    }, true);
   }
   function fpRangeXs() {
     if (fpRangeFrom == null || fpRangeTo == null || !chart) return null;
@@ -2111,10 +2291,13 @@
       if (t == null) continue;
       out.push({
         time: t,
+        kind: m.kind || "",
         position: m.position || "belowBar",
         color: m.color || "#6366f1",
         shape: m.shape || "circle",
         text: m.text || m.kind || "•",
+        title: m.title || "",
+        detail: m.detail || "",
         _kind: m.kind || "",
         _title: m.title || "",
         _detail: m.detail || ""
@@ -2123,59 +2306,22 @@
     out.sort(function (a, b) { return a.time - b.time; });
     return out.slice(-48);
   }
-  function ensureTimelineOverlay() {
+  let deskTimelineRail = null;
+  function ensureDeskTimelineRail() {
     const host = document.querySelector(".signal-chart-main") || $("signal-chart");
-    if (!host) return null;
-    let ov = $("signal-timeline-rail");
-    if (!ov) {
-      ov = document.createElement("div");
-      ov.id = "signal-timeline-rail";
-      ov.className = "signal-timeline-rail";
-      ov.setAttribute("aria-hidden", "true");
-      host.appendChild(ov);
+    if (!host || !chart) return null;
+    if (deskTimelineRail) return deskTimelineRail;
+    const kit = window.TrinityChartKit;
+    if (kit && typeof kit.attachTimelineRail === "function") {
+      deskTimelineRail = kit.attachTimelineRail({ hostEl: host, chart: chart });
+      return deskTimelineRail;
     }
-    return ov;
+    return null;
   }
   function layoutTimelineMarkers() {
-    const ov = ensureTimelineOverlay();
-    if (!ov || !chart) return;
-    ov.innerHTML = "";
-    const chartEl = $("signal-chart");
-    const chartW = chartEl ? chartEl.clientWidth : 0;
-    const ts = chart.timeScale();
-    const items = lastTimelineMarkers || [];
-    if (!items.length) {
-      ov.hidden = true;
-      return;
-    }
-    ov.hidden = false;
-    items.forEach(function (m) {
-      if (!m || m.time == null) return;
-      let x = null;
-      try { x = ts.timeToCoordinate(m.time); } catch (_) {}
-      if (x == null) {
-        const t = nearestBarTime(m.time);
-        if (t != null) {
-          try { x = ts.timeToCoordinate(t); } catch (_) {}
-        }
-      }
-      if (x == null || x < -16 || x > chartW + 16) return;
-      const chip = document.createElement("div");
-      chip.className = "signal-timeline-chip";
-      chip.style.left = Math.round(x) + "px";
-      const title = m._title || m.text || m._kind || "";
-      const detail = m._detail || "";
-      chip.title = detail ? (title + "\n" + detail) : title;
-      const dot = document.createElement("span");
-      dot.className = "signal-timeline-dot";
-      dot.style.background = m.color || "#6366f1";
-      const letter = document.createElement("span");
-      letter.className = "signal-timeline-letter";
-      letter.textContent = (m.text || m._kind || "•").slice(0, 3);
-      dot.appendChild(letter);
-      chip.appendChild(dot);
-      ov.appendChild(chip);
-    });
+    const rail = ensureDeskTimelineRail();
+    if (!rail) return;
+    rail.setMarkers(lastTimelineMarkers || []);
   }
   function lwMarker(m) {
     if (!m || m.time == null) return null;
@@ -2368,7 +2514,7 @@
             const h = document.createElement("div");
             h.className = "signal-fp-handle";
             h.dataset.end = end;
-            h.style.left = ((end === "from" ? xs.left : xs.right) - 4) + "px";
+            h.style.left = ((end === "from" ? xs.left : xs.right) - 6) + "px";
             ov.appendChild(h);
           });
         }
@@ -2403,7 +2549,12 @@
     }
     ov.hidden = false;
     const ts = chart.timeScale();
+    let spacing = 8;
+    try { spacing = ts.options().barSpacing || 8; } catch (_) {}
+    const colW = Math.max(28, Math.min(56, Math.round(spacing * 0.92)));
     const fpCount = Object.keys(footprintByTime).length;
+    let emptyCols = 0;
+    let painted = 0;
     keys.forEach(function (t) {
       const fb = lookupFootprint(t);
       const x = ts.timeToCoordinate(t);
@@ -2413,15 +2564,10 @@
         + (times[t] === "hover" ? " is-hover" : "")
         + (times[t] === "pin" ? " is-pinned" : "")
         + (times[t] === "preview" ? " is-preview" : "");
-      col.style.left = (x - 22) + "px";
+      col.style.left = (x - colW / 2) + "px";
+      col.style.width = colW + "px";
       if (!fb || !(fb.levels || []).length) {
-        const miss = document.createElement("div");
-        miss.className = "signal-fp-miss";
-        miss.textContent = fpCount ? "нет уровней" : "нет ленты";
-        miss.title = fpCount
-          ? "Лента есть, но для этой свечи уровней нет"
-          : "В desk нет footprint (лента пуста или не подгружена)";
-        col.appendChild(miss);
+        emptyCols += 1;
         ov.appendChild(col);
         return;
       }
@@ -2441,8 +2587,15 @@
           + "<span class=\"s\">" + sell + "</span>";
         col.appendChild(cell);
       });
+      painted += 1;
       ov.appendChild(col);
     });
+    if (!painted && emptyCols > 0) {
+      const miss = document.createElement("div");
+      miss.className = "charts-flow-miss";
+      miss.textContent = fpCount ? "нет уровней в диапазоне" : "нет ленты";
+      ov.appendChild(miss);
+    }
   }
   let lastChartSize = { w: 0, h: 0 };
   let overlayRaf = 0;
@@ -2454,6 +2607,7 @@
       chartTools.layoutStretchedVap();
       if (typeof chartTools.layoutTrendLines === "function") chartTools.layoutTrendLines();
     }
+    if (chartFlow && typeof chartFlow.layout === "function") chartFlow.layout();
     if (fpToolActive || fpPinned.length || fpRangeFrom != null || fpAnchor != null) {
       layoutFootprint();
     }
@@ -2688,6 +2842,23 @@
       return true;
     }
   }
+  function clampBarSpacing(s) {
+    const n = Number(s);
+    if (!(n > 0) || !isFinite(n)) return DEFAULT_BAR_SPACING;
+    return Math.max(3, Math.min(MAX_BAR_SPACING, n));
+  }
+  function logicalSpan(lr) {
+    if (!lr) return 0;
+    const a = Number(lr.from);
+    const b = Number(lr.to);
+    if (!isFinite(a) || !isFinite(b)) return 0;
+    return Math.abs(b - a);
+  }
+  function sanitizeScaleRow(row) {
+    if (!row || !(row.barSpacing > 0)) return null;
+    const logical = (row.logical && logicalSpan(row.logical) >= MIN_KEEP_LOGICAL) ? row.logical : null;
+    return { barSpacing: clampBarSpacing(row.barSpacing), logical: logical };
+  }
   function snapshotTimeScale() {
     if (!chart) return null;
     try {
@@ -2706,19 +2877,27 @@
   function loadScaleLocal(instrument) {
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      const row = all[scaleStoreKey(instrument)];
-      if (row && row.barSpacing > 0) return row;
+      return sanitizeScaleRow(all[scaleStoreKey(instrument)]);
     } catch (_) {}
     return null;
   }
   function saveScaleLocal(instrument) {
-    if (!scaleLocked || !(lockedBarSpacing > 0)) return;
+    const snap = snapshotTimeScale();
+    const raw = (lockedBarSpacing > 0)
+      ? lockedBarSpacing
+      : (snap && snap.barSpacing > 0 ? snap.barSpacing : 0);
+    if (!(raw > 0)) return;
+    const spacing = clampBarSpacing(raw);
+    if (raw > MAX_BAR_SPACING) {
+      lockedBarSpacing = spacing;
+      lockedLogical = null;
+    }
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      all[scaleStoreKey(instrument)] = {
-        barSpacing: lockedBarSpacing,
-        logical: lockedLogical
-      };
+      const logical = lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL
+        ? lockedLogical
+        : ((snap && logicalSpan(snap.logical) >= MIN_KEEP_LOGICAL) ? snap.logical : null);
+      all[scaleStoreKey(instrument)] = { barSpacing: spacing, logical: logical };
       localStorage.setItem(SCALE_STORE, JSON.stringify(all));
     } catch (_) {}
   }
@@ -2771,7 +2950,7 @@
     const snap = snapshotTimeScale();
     if (!snap || !(snap.barSpacing > 0)) return;
     scaleLocked = true;
-    lockedBarSpacing = snap.barSpacing;
+    lockedBarSpacing = clampBarSpacing(snap.barSpacing);
     const edge = atRightEdge();
     if (followLive && edge) {
       lockedLogical = null;
@@ -2794,19 +2973,45 @@
     const nested = applyingScale;
     applyingScale = true;
     try {
-      const spacing = lockedBarSpacing;
-      if (spacing > 0) {
-        chart.timeScale().applyOptions({ barSpacing: spacing });
-      }
+      const spacing = clampBarSpacing(lockedBarSpacing);
+      lockedBarSpacing = spacing;
+      chart.timeScale().applyOptions({ barSpacing: spacing });
       if (followLive && !userPinned) {
         chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
         chart.timeScale().scrollToRealTime();
-      } else if (lockedLogical) {
+      } else if (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) {
         chart.timeScale().setVisibleLogicalRange(lockedLogical);
+      } else {
+        chart.timeScale().applyOptions({ rightOffset: currentRightOffset() });
+        chart.timeScale().scrollToRealTime();
       }
       if (priceScaleLocked) freezePriceScale();
     } catch (_) {}
     if (!nested) applyingScale = false;
+  }
+  function healInsaneZoom(n) {
+    if (!chart || !(n >= 16)) return;
+    let spacing = DEFAULT_BAR_SPACING;
+    let vis = 0;
+    try {
+      spacing = chart.timeScale().options().barSpacing || DEFAULT_BAR_SPACING;
+      vis = logicalSpan(chart.timeScale().getVisibleLogicalRange());
+    } catch (_) {}
+    // ONLY snap a poisoned one-candle fill (resume / bad localStorage).
+    // Never reset just because spacing is "large" — that undoes mouse wheel zoom.
+    const oneCandle = vis > 0 && vis < 2.5;
+    const absurd = spacing > 200;
+    if (!oneCandle && !absurd) return;
+    applyingScale = true;
+    try {
+      const use = DEFAULT_BAR_SPACING;
+      scaleLocked = true;
+      lockedBarSpacing = use;
+      lockedLogical = null;
+      chart.timeScale().applyOptions({ barSpacing: use, rightOffset: currentRightOffset() });
+      chart.timeScale().scrollToRealTime();
+    } catch (_) {}
+    applyingScale = false;
   }
   function bindUserScaleCapture(el) {
     if (!el || el._trinityScaleBound) return;
@@ -3022,7 +3227,7 @@
         shiftVisibleRangeOnNewBar: true
       },
       handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: true }
+      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
     });
     syncPadButtons();
     candleSeries = chart.addCandlestickSeries({
@@ -3043,7 +3248,7 @@
     });
     chart.subscribeClick(function (param) {
       if (chartTools && chartTools.getMode()) return; // vap/trend handled in kit
-      if (!fpToolActive || !param || param.time == null) return;
+      if (!fpToolActive || fpDragEnd || !param || param.time == null) return;
       const t = typeof param.time === "number" ? nearestBarTime(param.time) : null;
       if (t == null) return;
       if (fpAnchor == null) {
@@ -3075,6 +3280,31 @@
         freezePrice: false,
         legendEl: $("signal-chart-legend")
       });
+      if (typeof TrinityChartKit.attachFlowOverlays === "function" && !chartFlow) {
+        chartFlow = TrinityChartKit.attachFlowOverlays({
+          chart: chart,
+          series: candleSeries,
+          hostEl: el,
+          barSec: function () { return lastChartTf === "H1" ? 3600 : 300; },
+          pointSize: deskPointSize(secid, pointSize),
+          timeOf: toChartTime,
+          getBars: function () {
+            return (lastBarsRaw || []).map(function (b) {
+              return {
+                time: toChartTime(b.time),
+                open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume
+              };
+            }).filter(function (b) { return b.time != null; });
+          },
+          isDrawing: function () {
+            return !!(chartTools && chartTools.getMode()) || !!fpToolActive;
+          },
+          onChange: function () {
+            setToolPressed("tool-clusters", !!(chartFlow && chartFlow.getShowClusters && chartFlow.getShowClusters()));
+            scheduleSaveDeskLayout();
+          }
+        });
+      }
       loadDeskLayoutOnce();
     }
     chart.subscribeCrosshairMove(function (param) {
@@ -3243,10 +3473,9 @@
   }
   function applyTimeSnap(snap) {
     if (!chart || !snap) return;
-    if (snap.barSpacing > 0) {
-      try { chart.timeScale().applyOptions({ barSpacing: snap.barSpacing }); } catch (_) {}
-    }
-    if (snap.logical) {
+    const spacing = clampBarSpacing(snap.barSpacing);
+    try { chart.timeScale().applyOptions({ barSpacing: spacing }); } catch (_) {}
+    if (snap.logical && logicalSpan(snap.logical) >= MIN_KEEP_LOGICAL) {
       try { chart.timeScale().setVisibleLogicalRange(snap.logical); } catch (_) {}
     }
   }
@@ -3268,13 +3497,30 @@
       applyCombinedMarkers();
     });
   }
+  function sameSanitizedBar(a, b) {
+    return !!a && !!b && a.time === b.time
+      && a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close;
+  }
+  /** True when only the forming last (or a newly rolled bar) changed — TV-style update(). */
+  function canIncrementalUpdate(prev, next) {
+    if (!prev || !next || prev.length < 1 || next.length < 1) return false;
+    if (next.length < prev.length || next.length - prev.length > 1) return false;
+    const closed = next.length === prev.length ? next.length - 1 : next.length - 2;
+    for (let i = 0; i < closed; i++) {
+      if (!sameSanitizedBar(prev[i], next[i])) return false;
+    }
+    if (next.length === prev.length + 1) {
+      return prev[prev.length - 1].time === next[next.length - 2].time;
+    }
+    return next[next.length - 1].time === prev[prev.length - 1].time;
+  }
   /**
    * @param {boolean} forceFit fit content / unlock
-   * @param {boolean} [fromServer] full series replace (desk poll) — incremental update alone
-   *   leaves fake wicks on older bars after IndexedDB/live DOM corruption
+   * @param {boolean} [fromServer] desk poll — rewrite only when older bars actually changed
    */
   function updateCandles(candles, forceFit, fromServer) {
     candles = sanitizeCandles(candles);
+    const prevSanitized = lastSanitizedCandles;
     lastSanitizedCandles = candles;
     if (!candleSeries || !candles.length) return;
     resizeChartToHost();
@@ -3283,9 +3529,10 @@
     const firstPaint = lastCandleTime == null;
     const sameLast = !firstPaint && last.time === lastCandleTime;
     const newBar = !firstPaint && prevBar && prevBar.time === lastCandleTime;
+    const incremental = !firstPaint && (sameLast || newBar)
+      && (!fromServer || canIncrementalUpdate(prevSanitized, candles));
 
-    // Server desk payload: always rewrite series (keeps zoom). Live book only updates last bar.
-    if (fromServer && !forceFit && !firstPaint) {
+    if (fromServer && !forceFit && !firstPaint && !incremental) {
       replaceDataKeepView(candles);
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
@@ -3333,14 +3580,21 @@
       candleSeries.setData(candles);
       lastCandleTime = last.time;
       lastCandlesLen = candles.length;
-      if (forceFit && !scaleLocked) {
-        try { candleSeries.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
-        try { chart.timeScale().fitContent(); } catch (_) {}
-        userPinned = false;
-        try { chart.timeScale().applyOptions({ rightOffset: currentRightOffset() }); } catch (_) {}
-        try { chart.timeScale().scrollToRealTime(); } catch (_) {}
-      } else if (scaleLocked) {
+      if (scaleLocked) {
         restoreTimeScale(followLive && !userPinned);
+      } else {
+        // Never fitContent: 1 bar fills the pane, 400 bars squash to pins.
+        try { candleSeries.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
+        try {
+          chart.timeScale().applyOptions({
+            barSpacing: DEFAULT_BAR_SPACING,
+            rightOffset: currentRightOffset()
+          });
+          chart.timeScale().scrollToRealTime();
+        } catch (_) {}
+        scaleLocked = true;
+        lockedBarSpacing = DEFAULT_BAR_SPACING;
+        lockedLogical = null;
       }
     } catch (err) {
       try {
@@ -3352,8 +3606,10 @@
       }
     }
     applyingScale = false;
+    healInsaneZoom(candles.length);
     requestAnimationFrame(function () {
       resizeChartToHost();
+      healInsaneZoom(candles.length);
       fitPriceToVisibleCandles();
       layoutMarketOverlays();
       syncMacdTimeScale();
@@ -3371,29 +3627,136 @@
     if (ba > 0) return ba;
     return null;
   }
+  let lastTapePx = 0;
+  let lastTapeAt = 0;
+  let tapeWsWant = "";
+  let tapeBound = false;
+  function liveCandlePx(book) {
+    if (lastTapePx > 0 && (Date.now() - lastTapeAt) < 15000) return lastTapePx;
+    return null;
+  }
+  function appendDeskTape(msg) {
+    const el = $("signal-tape");
+    if (!el) return;
+    const row = document.createElement("div");
+    const sell = String(msg.side || "").toUpperCase() === "SELL";
+    row.className = "signal-tape-row " + (sell ? "is-sell" : "is-buy");
+    const px = Number(msg.px);
+    row.innerHTML = "<span>" + (px > 0 ? px.toFixed(2) : "—") + "</span><span>×"
+      + (msg.qty || "") + "</span>";
+    el.insertBefore(row, el.firstChild);
+    while (el.childNodes.length > 80) el.removeChild(el.lastChild);
+  }
+  function tapeSubscribe(inst) {
+    tapeWsWant = String(inst || wantedDeskInstrument() || lastDeskInstrument || "").trim().toUpperCase();
+    const kit = window.TrinityChartKit;
+    if (kit && kit.tape) kit.tape.subscribe(tapeWsWant ? [tapeWsWant] : []);
+  }
+  function ingestDeskFootprint(px, qty, side) {
+    const price = Number(px);
+    const lots = Number(qty);
+    if (!(price > 0) || !(lots > 0) || !lastCandleTime) return;
+    const t = lastCandleTime;
+    let fb = footprintByTime[t];
+    if (!fb) {
+      fb = { time: t, levels: [] };
+      footprintByTime[t] = fb;
+    }
+    const step = deskPointSize(lastDeskInstrument, null) || 0.01;
+    const rounded = Math.round(price / step) * step;
+    let lv = null;
+    for (let i = 0; i < fb.levels.length; i++) {
+      if (Math.abs(Number(fb.levels[i].price) - rounded) < step * 0.51) {
+        lv = fb.levels[i];
+        break;
+      }
+    }
+    if (!lv) {
+      lv = { price: rounded, buy: 0, sell: 0 };
+      fb.levels.push(lv);
+    }
+    if (String(side || "").toUpperCase() === "SELL") lv.sell += lots;
+    else lv.buy += lots;
+    if (fpToolActive || fpPinned.length || fpRangeFrom != null) layoutFootprint();
+  }
+  function bindTape() {
+    const kit = window.TrinityChartKit;
+    if (!kit || !kit.tape || tapeBound) return;
+    tapeBound = true;
+    kit.tape.onTrade(function (msg) {
+      const inst = String(msg.instrument || "");
+      if (tapeWsWant && inst && kit.sameTapeInstrument
+          && !kit.sameTapeInstrument(tapeWsWant, inst)) return;
+      const px = Number(msg.px);
+      if (!(px > 0)) return;
+      if (typeof kit.quotesMatchInstrument === "function"
+          && tapeWsWant && !kit.quotesMatchInstrument(tapeWsWant, px)) return;
+      lastTapePx = px;
+      lastTapeAt = Date.now();
+      paintLastCandle(px, null);
+      appendDeskTape(msg);
+      if (chartFlow && typeof chartFlow.ingestPrint === "function") {
+        chartFlow.ingestPrint(px, msg.qty || 1, msg.side, Math.floor(Date.now() / 1000));
+      }
+      ingestDeskFootprint(px, msg.qty || 1, msg.side);
+    });
+    kit.tape.onBook(function (book) {
+      const inst = String(book.instrument || "");
+      if (tapeWsWant && inst && kit.sameTapeInstrument
+          && !kit.sameTapeInstrument(tapeWsWant, inst)) return;
+      renderDom(book);
+    });
+    kit.tape.connect();
+  }
+  function currentBucketUnix(minutes) {
+    const step = Math.max(1, minutes || 5) * 60 * 1000;
+    const msk = Date.now() + 3 * 3600 * 1000;
+    return Math.floor((msk - (msk % step) - 3 * 3600 * 1000) / 1000);
+  }
+  function lastRawIsCurrentBucket(raw) {
+    const t = raw && raw.time != null
+      ? (typeof raw.time === "number" && raw.time < 1e12 ? raw.time : toChartTime(raw.time))
+      : lastCandleTime;
+    if (t == null) return false;
+    return t === currentBucketUnix(lastChartTf === "H1" ? 60 : 5);
+  }
   function paintLastCandle(px, book) {
-    if (!candleSeries || !(px > 0) || lastCandleTime == null) return;
-    const raw = lastBarsRaw && lastBarsRaw.length ? lastBarsRaw[lastBarsRaw.length - 1] : null;
-    if (!raw) return;
-    const o = Number(raw.open);
-    let h = Number(raw.high);
-    let l = Number(raw.low);
-    if (![o, h, l].every(Number.isFinite)) return;
-    if (!plausibleLivePx(o, px) && !plausibleLivePx(Number(raw.close), px)) return;
-    // Chart: only last/mid trade expands the forming wick — NOT best bid/ask.
-    // Bid/ask extremes caused fake spikes to deep DOM levels; TP touch uses book separately.
-    if (px > h) h = px;
-    if (px < l) l = px;
-    raw.close = px;
-    raw.high = h;
-    raw.low = l;
+    if (!candleSeries || !(px > 0) || !(lastBarsRaw && lastBarsRaw.length)) return;
+    const minutes = lastChartTf === "H1" ? 60 : 5;
+    const kit = window.TrinityChartKit;
     applyingScale = true;
+    let ok = false;
     try {
-      candleSeries.update({ time: lastCandleTime, open: o, high: h, low: l, close: px });
-    } catch (_) {}
+      if (kit && typeof kit.applyTradeToCandle === "function") {
+        ok = kit.applyTradeToCandle(candleSeries, lastBarsRaw, px, minutes);
+      }
+    } catch (_) { ok = false; }
     applyingScale = false;
+    if (!ok) return;
+    const raw = lastBarsRaw[lastBarsRaw.length - 1];
+    const t = raw && raw.time != null
+      ? (typeof raw.time === "number" && raw.time < 1e12 ? raw.time : toChartTime(raw.time))
+      : null;
+    if (t != null) lastCandleTime = t;
+    if (t != null && lastSanitizedCandles && lastSanitizedCandles.length) {
+      const sc = lastSanitizedCandles[lastSanitizedCandles.length - 1];
+      if (sc && sc.time === t) {
+        sc.high = Math.max(Number(sc.high), px);
+        sc.low = Math.min(Number(sc.low), px);
+        sc.close = px;
+      } else if (!sc || sc.time < t) {
+        lastSanitizedCandles.push({
+          time: t,
+          open: Number(raw.open),
+          high: Number(raw.high),
+          low: Number(raw.low),
+          close: px
+        });
+      }
+    }
     if (priceScaleLocked) freezePriceScale();
     applyLiveManage(px, book);
+    paintChartOhlc();
   }
   function bookTouchPx(open, book, mid) {
     const bb = book && book.bids && book.bids[0] ? Number(book.bids[0].p) : NaN;
@@ -3466,6 +3829,16 @@
       try { syncStatusRail(snap); } catch (_) {}
     }
   }
+  function centerDomOnSpread(body) {
+    if (!body) return false;
+    const mid = body.querySelector(".dom-spread");
+    if (!mid || !(body.clientHeight > 0)) return false;
+    const bodyBox = body.getBoundingClientRect();
+    const midBox = mid.getBoundingClientRect();
+    const y = midBox.top - bodyBox.top + body.scrollTop;
+    body.scrollTop = Math.max(0, y - body.clientHeight / 2 + midBox.height / 2);
+    return true;
+  }
   function renderDom(book) {
     const body = $("signal-dom-body");
     const meta = $("signal-dom-meta");
@@ -3479,40 +3852,46 @@
         domFollowMid = false;
       }, { passive: true });
     }
+    const kit = window.TrinityChartKit;
+    const instOf = function (b) {
+      return (b && (b.instrumentId || b.instrument)) || "";
+    };
+    if (lastDomBook && book && kit && typeof kit.sameTapeInstrument === "function"
+        && instOf(book) && instOf(lastDomBook)
+        && !kit.sameTapeInstrument(instOf(book), instOf(lastDomBook))) {
+      lastDomBook = null;
+    }
+    if (kit && typeof kit.mergeDomBook === "function") {
+      book = kit.mergeDomBook(lastDomBook, book);
+    }
     if (!book || ((!book.bids || !book.bids.length) && (!book.asks || !book.asks.length))) {
       body.innerHTML = "<div class=\"signal-dom-empty\">Нет DOM</div>";
       if (meta) meta.textContent = book && book.summary ? book.summary : "—";
       if (imb) imb.hidden = true;
       return;
     }
+    lastDomBook = book;
     const prevScroll = body.scrollTop;
-    const hadRows = !!body.querySelector(".dom-row");
-    const bids = (book.bids || []).slice(0, 50);
-    const asks = (book.asks || []).slice(0, 50);
+    const firstPaint = !body.querySelector(".dom-row");
+    const bids = (book.bids || []).filter(function (lv) { return lv && Number(lv.p) > 0; }).slice(0, DOM_DEPTH);
+    const asks = (book.asks || []).filter(function (lv) { return lv && Number(lv.p) > 0; }).slice(0, DOM_DEPTH);
     const tape = book.tapeByPrice || {};
     const bestBid = bids.length ? Number(bids[0].p) : null;
     const bestAsk = asks.length ? Number(asks[0].p) : null;
-    let bidLots = 0, askLots = 0;
-    bids.forEach(function (b) { bidLots += Number(b.q) || 0; });
-    asks.forEach(function (a) { askLots += Number(a.q) || 0; });
-    const totLots = bidLots + askLots;
-    if (imb && imbBid && imbAsk && totLots > 0) {
+    if (imb && imbBid && imbAsk) {
       imb.hidden = false;
-      const bp = Math.round(100 * bidLots / totLots);
-      imbBid.style.width = bp + "%";
-      imbAsk.style.width = (100 - bp) + "%";
-      imbBid.title = "Bid " + Math.round(bidLots) + " лотов (" + bp + "%)";
-      imbAsk.title = "Ask " + Math.round(askLots) + " лотов (" + (100 - bp) + "%)";
-    } else if (imb) {
-      imb.hidden = true;
+      imbBid.style.width = "50%";
+      imbAsk.style.width = "50%";
+      imbBid.title = "Bid";
+      imbAsk.title = "Ask";
     }
     if (meta) {
-      const age = book.asOf ? (" · " + new Date(book.asOf).toLocaleTimeString("ru-RU")) : "";
+      const age = book.asOf ? " · live" : "";
       const spr = (bestBid != null && bestAsk != null)
         ? (" · spr " + (bestAsk - bestBid).toFixed(2))
         : "";
-      meta.textContent = (book.instrumentId || "BR")
-        + " · depth " + Math.max(bids.length, asks.length)
+      meta.textContent = (book.instrumentId || book.instrument || "BR")
+        + " · bid " + bids.length + " · ask " + asks.length
         + spr + age;
     }
     let maxQ = 1;
@@ -3529,7 +3908,6 @@
       return Math.max(4, Math.round(100 * (Number(q) || 0) / maxQ));
     };
     let html = "";
-    // Asks: reverse so highest at top, best ask at bottom of ask zone
     for (let i = asks.length - 1; i >= 0; i--) {
       const a = asks[i];
       const p = Number(a.p);
@@ -3582,14 +3960,14 @@
         + "</div>";
     }
     body.innerHTML = html;
-    paintLastCandle(livePxFromBook(book), book);
-    // Center mid only on first paint; never scrollIntoView (it jumps the whole page)
-    if (!hadRows || domFollowMid) {
-      const bestEl = body.querySelector(".dom-spread") || body.querySelector(".is-best");
-      if (bestEl) {
-        const target = bestEl.offsetTop - (body.clientHeight / 2) + (bestEl.offsetHeight / 2);
-        body.scrollTop = Math.max(0, target);
-      }
+    const tapePx = liveCandlePx(book);
+    if (tapePx > 0) paintLastCandle(tapePx, book);
+    if (firstPaint) {
+      centerDomOnSpread(body);
+      requestAnimationFrame(function () {
+        centerDomOnSpread(body);
+        requestAnimationFrame(function () { centerDomOnSpread(body); });
+      });
     } else {
       body.scrollTop = prevScroll;
     }
@@ -3711,7 +4089,11 @@
       }
       fillDeskSelects(data);
       paintRobotChip(data);
-      syncPositionalAutoSwitch(data);
+      if (deskScope() === "positional") {
+        syncPositionalAutoSwitch(data);
+      } else {
+        syncRangeAutoSwitch(data);
+      }
       const oilBanWrap = $("us-oil-banner");
       if (oilBanWrap) oilBanWrap.hidden = deskScope() === "positional";
       const oilBan = $("us-oil-banner-text");
@@ -3769,6 +4151,7 @@
       }
       lastChartTf = chartTf;
       setChartLegendSymbol(chartInst, chartTf);
+      if (chartInst && chartInst !== "—") tapeSubscribe(chartInst);
       if (chartLabel) {
         chartLabel.textContent = "График · " + formatSecidWithMonth(chartInst) + " "
           + (chartTf === "H1" ? "час" : chartTf)
@@ -3780,6 +4163,20 @@
         lastOverlayKey = "";
         lastCandleTime = null;
         lastCandlesLen = 0;
+        footprintByTime = {};
+        lastFootprint = [];
+        lastProfile = [];
+        fpPinned = [];
+        fpRangeFrom = null;
+        fpRangeTo = null;
+        fpAnchor = null;
+        fpHoverTime = null;
+        if (chartFlow && typeof chartFlow.setFootprints === "function") {
+          chartFlow.setFootprints([]);
+        }
+        if (chartFlow && typeof chartFlow.setProfile === "function") {
+          chartFlow.setProfile([]);
+        }
         scaleLocked = false;
         lockedBarSpacing = null;
         lockedLogical = null;
@@ -3799,15 +4196,6 @@
         return { time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
       }).filter(Boolean);
       const livePx = livePxFromBook(data.book);
-      if (livePx > 0 && candles.length) {
-        const last = candles[candles.length - 1];
-        const ref = Number(last.close);
-        if (plausibleLivePx(ref, livePx)) {
-          last.close = livePx;
-          if (livePx > last.high) last.high = livePx;
-          if (livePx < last.low) last.low = livePx;
-        }
-      }
       if (meta && rawBars.length && !candles.length) {
         meta.textContent = (meta.textContent || "") + " · chart: bad bar times";
       } else if (meta && candles.length) {
@@ -3842,13 +4230,20 @@
       lastOverlayCandles = candles;
       lastDeskSnapshot = data;
       lastTimelineMarkers = timelineMarkersFromDesk(data);
+      lastBarsRaw = rawBars;
       if (candles.length) {
         updateCandles(candles, !!forceFit, true);
         const planForOv = (!overlayOpen && liveFlatUntil > Date.now())
           ? Object.assign({}, plan, { actionable: false })
           : plan;
         applyOverlays(planForOv, sig, candles, data.structure || {}, overlayOpen);
-        if (livePx > 0) applyLiveManage(livePx, data.book);
+        const liveNow = liveCandlePx(data.book);
+        if (liveNow > 0) {
+          paintLastCandle(liveNow, data.book);
+          applyLiveManage(liveNow, data.book);
+        } else if (livePx > 0) {
+          applyLiveManage(livePx, data.book);
+        }
         refreshImpulseUi(candles);
       } else if (instrumentChanged && candleSeries) {
         // Don't leave the previous instrument's candles on screen.
@@ -3856,10 +4251,13 @@
         lastOverlayKey = "";
         applyOverlays({}, {}, [], {}, null);
       }
-      lastBarsRaw = rawBars;
       lastProfile = data.profile || [];
       lastFootprint = data.footprint || [];
       indexFootprints(lastFootprint);
+      if (chartFlow) {
+        if (typeof chartFlow.setProfile === "function") chartFlow.setProfile(lastProfile);
+        if (typeof chartFlow.setFootprints === "function") chartFlow.setFootprints(lastFootprint);
+      }
       updateVolume(lastBarsRaw);
       updateMacd(lastBarsRaw);
       // setData on desk poll clears LW markers unless we re-apply every refresh.
@@ -3919,7 +4317,9 @@
   }
   const btn = $("signal-desk-refresh");
   if (btn) btn.addEventListener("click", function () { loadDesk(false); });
+  bindRangeAutoSwitch();
   bindPositionalAutoSwitch();
+  hydrateDeskModeSwitches();
   const kickBtn = $("sig-kick-btn");
   if (kickBtn) kickBtn.addEventListener("click", kickRobot);
   const fitBtn = $("signal-desk-fit");
@@ -3931,7 +4331,13 @@
     if (follow) follow.checked = true;
     if (chart) {
       applyingScale = true;
-      try { chart.timeScale().fitContent(); } catch (_) {}
+      try {
+        chart.timeScale().applyOptions({
+          barSpacing: DEFAULT_BAR_SPACING,
+          rightOffset: currentRightOffset()
+        });
+        chart.timeScale().scrollToRealTime();
+      } catch (_) {}
       applyingScale = false;
       applyRightPad(true);
     }
@@ -3969,6 +4375,25 @@
   }
   const toolFp = $("tool-footprint");
   if (toolFp) toolFp.addEventListener("click", toggleFpTool);
+  const toolClusters = $("tool-clusters");
+  if (toolClusters) {
+    toolClusters.addEventListener("click", function () {
+      if (!chartFlow || typeof chartFlow.setShowClusters !== "function") return;
+      chartFlow.setShowClusters(!chartFlow.getShowClusters());
+      setToolPressed("tool-clusters", chartFlow.getShowClusters());
+      if (chartFlow.getShowClusters() && chart) {
+        try {
+          const sp = chart.timeScale().options().barSpacing;
+          const lr = chart.timeScale().getVisibleLogicalRange();
+          if (sp > 0) {
+            scaleLocked = true;
+            lockedBarSpacing = sp;
+            if (lr) lockedLogical = lr;
+          }
+        } catch (_) {}
+      }
+    });
+  }
   const toolMacd = $("tool-macd");
   if (toolMacd) {
     toolMacd.addEventListener("click", function () {
@@ -4465,6 +4890,7 @@
       instSel.addEventListener("change", function () {
         invalidateDeskFetch();
         lastDeskInstrument = "";
+        lastDomBook = null;
         lastOverlayKey = "";
         deskInstrumentPinned = instSel.value;
         writeStoredInstrument(instSel.value);
@@ -4501,15 +4927,10 @@
         }
         return false;
       }
-      const cur = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
-      const view = cur.ok ? await cur.json() : {};
-      const body = {
-        autoExecution: view.autoExecution,
-        liveExecution: view.liveExecution,
-        playbookId: patch.playbookId || view.playbookId,
-        instrumentId: patch.instrumentId || view.instrumentId,
-        positionalAutoExecution: view.positionalAutoExecution
-      };
+      const body = {};
+      if (patch.playbookId) body.playbookId = patch.playbookId;
+      if (patch.instrumentId) body.instrumentId = patch.instrumentId;
+      if (!body.playbookId && !body.instrumentId) return false;
       const res = await fetch("/api/trend/settings", {
         method: "POST",
         headers: deskAuthHeaders({ "Content-Type": "application/json" }),
@@ -4557,10 +4978,21 @@
       if (!scaleLocked && lastCandleTime == null && sc && sc.barSpacing > 0
           && (!sc.instrument || sc.instrument === lastDeskInstrument)) {
         scaleLocked = true;
-        lockedBarSpacing = sc.barSpacing;
-        lockedLogical = sc.logical || null;
+        const sane = sanitizeScaleRow(sc);
+        lockedBarSpacing = sane ? sane.barSpacing : DEFAULT_BAR_SPACING;
+        lockedLogical = sane ? sane.logical : null;
         restoreTimeScale(followLive && !userPinned);
       }
+      if (chartFlow && desk.flow && typeof chartFlow.setState === "function") {
+        chartFlow.setState(desk.flow);
+      } else if (chartFlow && deskScope() === "positional"
+          && !(desk.flow && desk.flow.showClusters === false)) {
+        chartFlow.setShowClusters(true);
+      }
+      if (scaleLocked && lockedBarSpacing > 0) {
+        restoreTimeScale(followLive && !userPinned);
+      }
+      setToolPressed("tool-clusters", !!(chartFlow && chartFlow.getShowClusters && chartFlow.getShowClusters()));
     } catch (e) {
       console.warn("chart layout load", e);
     }
@@ -4571,6 +5003,9 @@
       const cur = deskLayoutDoc || await TrinityChartKit.loadLayouts();
       cur.desk = cur.desk || {};
       cur.desk.tools = chartTools.getState();
+      if (chartFlow && typeof chartFlow.getState === "function") {
+        cur.desk.flow = chartFlow.getState();
+      }
       if (!isRangeDesk()) {
         cur.desk.instrument = ($("sig-instrument") && $("sig-instrument").value) || null;
         cur.desk.playbookId = ($("sig-playbook") && $("sig-playbook").value) || null;
@@ -4578,9 +5013,19 @@
       if (scaleLocked && lockedBarSpacing > 0) {
         cur.desk.scale = {
           instrument: lastDeskInstrument || null,
-          barSpacing: lockedBarSpacing,
-          logical: lockedLogical
+          barSpacing: clampBarSpacing(lockedBarSpacing),
+          logical: (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) ? lockedLogical : null
         };
+      } else {
+        const snap = snapshotTimeScale();
+        if (snap && snap.barSpacing > 0) {
+          const sane = sanitizeScaleRow(snap);
+          cur.desk.scale = {
+            instrument: lastDeskInstrument || null,
+            barSpacing: sane ? sane.barSpacing : DEFAULT_BAR_SPACING,
+            logical: sane ? sane.logical : null
+          };
+        }
       }
       deskLayoutDoc = await TrinityChartKit.saveLayouts(cur);
     } catch (e) {
@@ -4713,6 +5158,7 @@
 
   async function bootDesk() {
     applyDeskChrome();
+    hydrateDeskModeSwitches();
     const metaBoot = $("signal-desk-meta");
     if (metaBoot) metaBoot.textContent = "грузим desk… " + formatSecidWithMonth(wantedDeskInstrument() || "BRV6");
     const domBody = $("signal-dom-body");
@@ -4734,6 +5180,8 @@
       deskInstrumentPinned = null;
     }
     applyUrlInstrumentOnce();
+    bindTape();
+    tapeSubscribe(wantedDeskInstrument() || lastDeskInstrument);
     const hadCache = await paintCachedChart();
     try {
       await applyUrlPlaybookOnce();
@@ -4752,6 +5200,21 @@
       }, (lastWorkingOpen || liveFlatUntil > Date.now()) ? BOOK_LIVE_MS : BOOK_MS);
     })();
   }
+
+  window.addEventListener("pagehide", function () {
+    try {
+      saveScaleLocal(lastDeskInstrument);
+      persistDeskLayout();
+    } catch (_) {}
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") {
+      try {
+        saveScaleLocal(lastDeskInstrument);
+        persistDeskLayout();
+      } catch (_) {}
+    }
+  });
 
   bootDesk();
 })();

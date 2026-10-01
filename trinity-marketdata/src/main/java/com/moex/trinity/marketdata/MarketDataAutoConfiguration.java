@@ -16,8 +16,15 @@ import java.util.Optional;
 public class MarketDataAutoConfiguration {
 
     @Bean
+    @ConditionalOnMissingBean(TapeTickBus.class)
+    TapeTickBus tapeTickBus() {
+        return new TapeTickBus();
+    }
+
+    @Bean
     @ConditionalOnMissingBean(MarketDataFeed.class)
     MarketDataFeed marketDataFeed(
+            TapeTickBus tapeTickBus,
             @Value("${imoex.marketdata.provider:T_INVEST}") String provider,
             @Value("${imoex.marketdata.token:${imoex.broker.token:}}") String token,
             @Value("${imoex.marketdata.sandbox:false}") boolean sandbox,
@@ -30,6 +37,7 @@ public class MarketDataAutoConfiguration {
             return new NoopMarketDataFeed();
         }
         TInvestMarketDataFeed feed = new TInvestMarketDataFeed(tapeCapacity, orderbookDepth);
+        feed.setTickBus(tapeTickBus);
         Map<String, String> figiMap = parseInstrumentFigiMap(instrumentsCsv);
         String tok = token;
         boolean sb = sandbox;
@@ -74,7 +82,8 @@ public class MarketDataAutoConfiguration {
     @ConditionalOnMissingBean(MarketDataResearchService.class)
     MarketDataResearchService marketDataResearchService(
             MarketDataFeed feed,
-            @Value("${imoex.marketdata.auto-resolve-instrument:BR}") String instrument
+            @Value("${imoex.marketdata.auto-resolve-instrument:BR}") String instrument,
+            @Value("${imoex.data-dir:data}") String dataDir
     ) {
         String live = instrument == null || instrument.isBlank() ? "BRU6" : instrument.trim();
         TInvestCredentials creds = TInvestCredentials.resolve();
@@ -87,7 +96,7 @@ public class MarketDataAutoConfiguration {
         }
         return new MarketDataResearchService(
                 feed,
-                new com.moex.trinity.marketdata.BrokerTapeArchive(java.nio.file.Path.of("data", "broker-tape")),
+                new com.moex.trinity.marketdata.BrokerTapeArchive(java.nio.file.Path.of(dataDir, "broker-tape")),
                 live
         );
     }

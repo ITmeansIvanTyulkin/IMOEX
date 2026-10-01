@@ -17,6 +17,19 @@ CORPUS = ROOT / "research-corpus" / "exclusive-m5"
 OUT = ROOT / "data" / "trend-training-observations.json"
 
 
+def is_top_wait(rr: str) -> bool:
+    """Waiting on day TOP / TREND_HI — not mere 'TOP+BOT in play' or BOT focus."""
+    if not rr or "waiting" not in rr.lower():
+        return False
+    if "TREND_HI" in rr or "focus TREND_HI" in rr:
+        return True
+    if "TREND_LO" in rr or "focus TREND_LO" in rr:
+        return False
+    if "price above BOT" in rr and "price below TOP" not in rr and "TOP bounce" not in rr:
+        return False
+    return "TOP bounce" in rr or "price below TOP" in rr
+
+
 def scan(since: str = "2026-08-25", until: str | None = None) -> list[dict]:
     until = until or datetime.now().strftime("%Y-%m-%d")
     similar: list[dict] = []
@@ -44,13 +57,10 @@ def scan(since: str = "2026-08-25", until: str | None = None) -> list[dict]:
                 if not line.strip():
                     continue
                 o = json.loads(line)
-                lab = o.get("label") or {}
-                rr = str(lab.get("rejectReason") or "")
-                if (
-                    o.get("kind") == "PLAN_REJECTED"
-                    and ("TREND_HI" in rr or "TOP" in rr)
-                    and "waiting" in rr.lower()
-                ):
+                if o.get("kind") != "PLAN_REJECTED":
+                    continue
+                rr = str((o.get("label") or {}).get("rejectReason") or "")
+                if is_top_wait(rr):
                     top_wait += 1
             if top_wait >= 10:
                 similar.append(
@@ -76,13 +86,10 @@ def scan(since: str = "2026-08-25", until: str | None = None) -> list[dict]:
             ts = o.get("ts") or ""
             if ts <= first_close:
                 continue
-            lab = o.get("label") or {}
-            rr = str(lab.get("rejectReason") or "")
-            if (
-                o.get("kind") == "PLAN_REJECTED"
-                and ("TREND_HI" in rr or "TOP" in rr)
-                and "waiting" in rr.lower()
-            ):
+            if o.get("kind") != "PLAN_REJECTED":
+                continue
+            rr = str((o.get("label") or {}).get("rejectReason") or "")
+            if is_top_wait(rr):
                 top_wait_after += 1
         if fills_after or top_wait_after < 10:
             continue
@@ -103,7 +110,7 @@ def main() -> None:
     store = json.loads(OUT.read_text(encoding="utf-8")) if OUT.is_file() else {"items": []}
     store["similarDayScan"] = {
         "at": datetime.now().strftime("%Y-%m-%dT%H:%M+03"),
-        "rule": "0 FILL after first CLOSE (or all day) + ≥10 TOP-wait rejects",
+        "rule": "0 FILL after first CLOSE (or all day) + ≥10 real TOP/TREND_HI waits (not TOP+BOT boilerplate)",
         "days": similar,
         "note": "candidates for priceAboveTopNoChase — not auto gates",
     }

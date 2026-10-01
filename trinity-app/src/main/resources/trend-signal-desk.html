@@ -1,6 +1,5 @@
 <section class="signal-desk" id="trend-signal-desk" data-desk-scope="range">
-  <link rel="stylesheet" href="/css/operator.css?v=20260910-soft001">
-  <style>#positional-auto-wrap[hidden]{display:none!important}</style>
+  <link rel="stylesheet" href="/css/operator.css?v=20260925-gapfix">
   <div class="signal-desk-head">
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
@@ -26,15 +25,6 @@
               aria-pressed="true">Автоотступ</button>
       <button type="button" class="btn btn-ghost" id="signal-desk-fit">Весь график</button>
       <button type="button" class="btn btn-ghost" id="signal-desk-refresh">Обновить</button>
-      <div class="signal-pos-switch" id="positional-auto-wrap" hidden>
-        <span class="k">Робот</span>
-        <label class="mode-switch" title="Включить или выключить позиционного робота">
-          <span class="mode-switch-label">Выкл</span>
-          <input type="checkbox" id="desk-positional-auto-execution" role="switch" aria-checked="false">
-          <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
-          <span class="mode-switch-label">Авто</span>
-        </label>
-      </div>
       <a class="btn btn-ghost" href="/view/settings#trend-playbook-settings" id="signal-desk-mode-link">Режим</a>
     </div>
   </div>
@@ -65,6 +55,24 @@
       <strong><a id="sig-paper-total" href="/view/statement#trend">—</a></strong>
     </div>
   </div>
+  <div class="strategy-mode-bar" id="range-auto-wrap" hidden>
+    <label class="mode-switch is-signal" title="Ручная торговля: график без заявок. Авто: робот ведёт журнал песочницы.">
+      <span class="mode-switch-label">Ручная торговля</span>
+      <input type="checkbox" id="desk-range-auto-execution" role="switch" aria-checked="false" disabled>
+      <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+      <span class="mode-switch-label">Авто</span>
+    </label>
+    <p class="strategy-mode-hint" id="range-mode-hint">Ручная торговля: график без заявок.</p>
+  </div>
+  <div class="strategy-mode-bar" id="positional-auto-wrap" hidden>
+    <label class="mode-switch is-signal" title="Ручная торговля: график без входов. Авто: робот ведёт журнал по сетке H1.">
+      <span class="mode-switch-label">Ручная торговля</span>
+      <input type="checkbox" id="desk-positional-auto-execution" role="switch" aria-checked="false" disabled>
+      <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+      <span class="mode-switch-label">Авто</span>
+    </label>
+    <p class="strategy-mode-hint" id="positional-mode-hint">Ручная торговля: график есть, входов нет.</p>
+  </div>
   <div class="signal-paper-panel" id="signal-paper-panel" hidden>
     <p class="signal-brief-title" id="signal-paper-title">Сделки сегодня</p>
     <p class="meta" id="signal-paper-meta">—</p>
@@ -90,13 +98,18 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
             <span class="signal-tool-tip">Footprint на свечу</span>
           </button>
+          <button type="button" class="signal-tool" id="tool-clusters" aria-pressed="false"
+                  data-tip="Кластеры: объём по цене внутри свечи. С ленты — buy/sell, без ленты — по OHLC. На позиционном H1 включаются сразу.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18h3v-6H5zm5 0h3V6h-3zm5 0h3v-10h-3z"/></svg>
+            <span class="signal-tool-tip">Кластеры</span>
+          </button>
           <button type="button" class="signal-tool" id="tool-macd" aria-pressed="false"
                   data-tip="Дивергенция MACD CM_ULT_MACD_MTF 1 · 12/26/9 — гистограмма + маркеры bull/bear div.">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17h2v4H3zm4-6h2v10H7zm4-4h2v14h-2zm4 7h2v7h-2zm4-9h2v16h-2z"/></svg>
             <span class="signal-tool-tip">Дивергенция MACD 12/26/9</span>
           </button>
           <button type="button" class="signal-tool is-active" id="tool-profile" aria-pressed="true"
-                  data-tip="Проторгованные объёмы — горизонтальный volume profile (VAP) справа.">
+                  data-tip="Проторгованные объёмы — горизонтальный volume profile (VAP) слева.">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H8v2h13V5zm0 6H11v2h10v-2zm0 6H6v2h15v-2zM3 4h2v16H3z"/></svg>
             <span class="signal-tool-tip">Проторгованные объёмы</span>
           </button>
@@ -195,8 +208,17 @@
         </div>
       </div>
       <p class="meta signal-dom-legend">
-        Зелёная зона — bids · красная — asks · Tape = агрессор buy×sell (~90м)
+        Зелёная зона — bids · красная — asks. Тики идут в свечу, цвет стакана не меняют.
       </p>
+      <div class="signal-tape-head">Лента сделок</div>
+      <div class="signal-tape" id="signal-tape" aria-label="Time and Sales"></div>
+      <style>
+        .signal-tape-head { font-size: 0.72rem; opacity: 0.65; margin: 0.55rem 0 0.25rem; }
+        .signal-tape { max-height: 11rem; overflow: auto; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+        .signal-tape-row { display: flex; justify-content: space-between; gap: 0.4rem; }
+        .signal-tape-row.is-buy { color: #15803d; }
+        .signal-tape-row.is-sell { color: #b91c1c; }
+      </style>
     </aside>
   </div>
   <button type="button" class="signal-pressure-fab" id="signal-pressure-fab" hidden
@@ -588,6 +610,6 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="/js/trinity-fast-boot.js?v=20260910-fast1"></script>
-<script src="/js/trinity-chart-kit.js?v=20260902-disk1"></script>
-<script src="/js/trend-signal-desk.js?v=20260910-fast1"></script>
+<script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
+<script src="/js/trinity-chart-kit.js?v=20260925-tlmark2"></script>
+<script src="/js/trend-signal-desk.js?v=20260925-tlmark2"></script>

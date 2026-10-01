@@ -1,0 +1,19 @@
+# MEGA keeps a cloud version on every rewrite/append. Live jsonl from the
+# robot tape burns tens of GB of version history while local size stays small.
+# Training reads files from disk here — sync only cold .jsonl.gz backups.
+
+-f:data/broker-tape/*.jsonl
+-f:data/broker-tape/*.tmp
+-f:data/broker-tape/*.thin.tmp
+-f:data/broker-tape/*.gz.tmp
+
+# Append-only research events — same version trap.
+-d:research-corpus
+
+# Maven/IDE build noise rewritten on every Resume.
+-d:target
+-f:*.class
+-f:*.jar
+
+# MEGA conflict renames like name(1).ext
+-f:*([0-9]).*

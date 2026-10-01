@@ -2,6 +2,7 @@ package com.moex.cointegration.controller;
 
 import com.moex.trinity.marketdata.DomBook;
 import com.moex.trinity.marketdata.MarketDataResearchService;
+import com.moex.trinity.marketdata.PlainHttp;
 import com.moex.trinity.marketdata.TradePrint;
 import com.moex.trinity.trend.TapeToM5Aggregator;
 import org.springframework.beans.factory.ObjectProvider;
@@ -110,6 +111,41 @@ public class MarketDataController {
             return com.moex.cointegration.service.TrendDeskService.aggregateTapeByPrice(recent, 0.01);
         } catch (Exception ex) {
             return Map.of();
+        }
+    }
+
+    /** Last TQBR print for equity pairs (ISS has no operator websocket). */
+    @GetMapping("/iss-last")
+    public ResponseEntity<?> issLast(@RequestParam("secid") String secid) {
+        String id = secid == null ? "" : secid.trim();
+        if (id.isEmpty() || !id.matches("[A-Za-z0-9._-]{1,20}")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "bad secid"));
+        }
+        String url = "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/"
+                + id + ".json?iss.meta=off&iss.only=marketdata"
+                + "&marketdata.columns=SECID,LAST,LASTCHANGE,LASTTOPREVPRICE,UPDATETIME";
+        try {
+            com.moex.trinity.marketdata.PlainHttp.Reply res = PlainHttp.exchange(
+                    "GET", url, 1800, "TRINITY-iss-last/1.0", null, null);
+            if (res.status() < 200 || res.status() >= 300) {
+                return ResponseEntity.ok(Map.of("secid", id, "px", 0, "ok", false));
+            }
+            com.fasterxml.jackson.databind.JsonNode root =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(res.body());
+            var data = root.path("marketdata").path("data");
+            if (!data.isArray() || data.isEmpty()) {
+                return ResponseEntity.ok(Map.of("secid", id, "px", 0, "ok", false));
+            }
+            var row = data.get(0);
+            double px = row.path(1).asDouble(0);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("secid", id);
+            out.put("px", px);
+            out.put("change", row.path(2).asDouble(0));
+            out.put("ok", px > 0);
+            return ResponseEntity.ok(out);
+        } catch (Exception ex) {
+            return ResponseEntity.ok(Map.of("secid", id, "px", 0, "ok", false));
         }
     }
 }

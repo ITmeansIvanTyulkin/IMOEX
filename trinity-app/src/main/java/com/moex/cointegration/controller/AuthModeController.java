@@ -9,8 +9,12 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import jakarta.servlet.http.HttpServletRequest;
+
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moex.cointegration.config.DeskCloudSessionStore;
+import com.moex.cointegration.config.DeskSessionStore;
 import com.moex.cointegration.config.ImoexProperties;
 
 /**
@@ -34,13 +40,23 @@ public class AuthModeController {
 
     private final ImoexProperties properties;
     private final ObjectMapper objectMapper;
+    private final DeskSessionStore deskSessions;
+    private final DeskCloudSessionStore cloudSessions;
     private final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
-    public AuthModeController(ImoexProperties properties, ObjectMapper objectMapper) {
+    public AuthModeController(
+            ImoexProperties properties,
+            ObjectMapper objectMapper,
+            DeskSessionStore deskSessions,
+            DeskCloudSessionStore cloudSessions
+    ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.deskSessions = deskSessions;
+        this.cloudSessions = cloudSessions;
     }
 
     @GetMapping("/mode")
@@ -57,6 +73,7 @@ public class AuthModeController {
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("basicEnabled", auth.enabled());
+        out.put("bootId", com.moex.cointegration.web.OperatorProcessId.ID);
         out.put("supabase", supabase);
         out.put(
                 "note",
@@ -126,13 +143,22 @@ public class AuthModeController {
                 return ResponseEntity.status(status).body(error("login_failed", msg));
             }
 
+            String access = (String) body.get("access_token");
+            String refresh = body.get("refresh_token") instanceof String r ? r : "";
+            long jwtExpiresIn = body.get("expires_in") instanceof Number n ? n.longValue() : 3600L;
+            cloudSessions.remember(email, access, refresh, jwtExpiresIn);
+
             Map<String, Object> out = new LinkedHashMap<>();
-            out.put("access_token", body.get("access_token"));
+            out.put("access_token", access);
             out.put("token_type", body.getOrDefault("token_type", "bearer"));
-            out.put("expires_in", body.get("expires_in"));
-            out.put("refresh_token", body.get("refresh_token"));
+            /* Desk cookie is 8h; Supabase JWT is often 1h — browser omits expired Bearer and keeps the cookie. */
+            out.put("expires_in", DeskSessionStore.DESK_TTL.toSeconds());
+            out.put("refresh_token", refresh);
             out.put("email", email);
-            return ResponseEntity.ok(out);
+            ResponseCookie cookie = deskSessions.issueCookie(email, DeskSessionStore.DESK_TTL);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .body(out);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(
@@ -146,6 +172,15 @@ public class AuthModeController {
                     "Не удалось связаться с Supabase: " + detail
             ));
         }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, Object>> logout(HttpServletRequest request) {
+        deskSessions.revoke(deskSessions.idOf(request));
+        cloudSessions.clear();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, deskSessions.expireCookie().toString())
+                .body(Map.of("ok", true));
     }
 
     private Map<String, Object> parseJson(String text) {

@@ -1006,7 +1006,15 @@
     if (!chart || !series || !host) {
       return { destroy: function () {}, syncGoLive: function () {} };
     }
-    if (host._trinityTvNav) return host._trinityTvNav;
+    if (host._trinityTvNav) {
+      // Re-assert native wheel zoom if nav was bound under older options.
+      try {
+        chart.applyOptions({
+          handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+        });
+      } catch (_) {}
+      return host._trinityTvNav;
+    }
     const isDrawing = typeof opts.isDrawing === "function" ? opts.isDrawing : function () { return false; };
     const onTimeGesture = typeof opts.onTimeGesture === "function" ? opts.onTimeGesture : function () {};
     const onPriceLock = typeof opts.onPriceLock === "function" ? opts.onPriceLock : function () {};
@@ -1034,7 +1042,8 @@
         },
         handleScale: {
           axisPressedMouseMove: true,
-          mouseWheel: false,
+          // Native wheel zoom — custom zoomTimeAtX was fighting barSpacing restore.
+          mouseWheel: true,
           pinch: true
         }
       });
@@ -1099,7 +1108,7 @@
       if (!(span > 0) || !(factor > 0)) return;
       const px = Math.max(0, Math.min(x, m.plotW));
       const anchor = logical.from + (px / m.plotW) * span;
-      const newSpan = Math.max(6, Math.min(span * factor, 12000));
+      const newSpan = Math.max(4, Math.min(span * factor, 12000));
       const newFrom = anchor - (px / m.plotW) * newSpan;
       try {
         ts.setVisibleLogicalRange({ from: newFrom, to: newFrom + newSpan });
@@ -1271,18 +1280,19 @@
       const overTime = xy.y >= m.h - m.timeH;
       const dx = ev.deltaX || 0;
       const dy = ev.deltaY || 0;
+      const wantPan = ev.shiftKey || overTime || Math.abs(dx) > Math.abs(dy) * 1.15;
+      const wantPrice = overPrice || ev.altKey;
+      if (!wantPan && !wantPrice) {
+        // Plain wheel: do NOT preventDefault — Lightweight Charts native mouseWheel scale.
+        return;
+      }
       ev.preventDefault();
-      if (ev.shiftKey || overTime || Math.abs(dx) > Math.abs(dy) * 1.15) {
+      if (wantPan) {
         panTimePx(Math.abs(dx) > Math.abs(dy) ? dx : dy);
         syncGoLive();
         return;
       }
-      if (overPrice || ev.altKey) {
-        zoomPriceAtY(xy.y, zoomFactor(dy));
-        return;
-      }
-      zoomTimeAtX(xy.x, zoomFactor(dy));
-      syncGoLive();
+      zoomPriceAtY(xy.y, zoomFactor(dy));
     }
 
     function onDblClick(ev) {
@@ -1405,6 +1415,8 @@
       chart.timeScale().subscribeVisibleLogicalRangeChange(function () { syncGoLive(); });
     } catch (_) {}
 
+    // Only intercept Shift/Alt/axis wheel. Plain wheel → native handleScale.mouseWheel.
+    // A capture handler that always preventDefault()'d was killing zoom.
     host.addEventListener("wheel", onWheel, { passive: false, capture: true });
     host.addEventListener("dblclick", onDblClick);
     host.addEventListener("pointerdown", onPointerDown, true);
@@ -3033,7 +3045,13 @@
     };
     const onChange = typeof opts.onChange === "function" ? opts.onChange : function () {};
     const isBusy = typeof opts.isDrawing === "function" ? opts.isDrawing : function () { return false; };
-    const barSec = opts.barSec > 0 ? opts.barSec : 300;
+    function barSecNow() {
+      if (typeof opts.barSec === "function") {
+        const v = Number(opts.barSec());
+        return v > 0 ? v : 300;
+      }
+      return opts.barSec > 0 ? opts.barSec : 300;
+    }
     const pointSize = opts.pointSize > 0 ? opts.pointSize : 0.01;
     const CLUSTER_MAX = 40;
     if (!chart || !series || !host) {
@@ -3052,7 +3070,12 @@
     let fpPinned = [];
     const FP_PIN_MAX = 24;
     let layoutRaf = 0;
-    const fpSnapTol = Math.max(barSec, 300);
+    let clusterZoomTried = false;
+    let fpDragEnd = null;
+    let fpHostBound = false;
+    function fpSnapTolNow() {
+      return Math.max(barSecNow(), 300);
+    }
 
     function ensureOv(cls) {
       let ov = host.querySelector("." + cls.split(" ").join("."));
@@ -3100,7 +3123,7 @@
           best = fpByTime[k];
         }
       });
-      return bestD <= fpSnapTol ? best : null;
+      return bestD <= fpSnapTolNow() ? best : null;
     }
 
     function timesInRange(a, b) {
@@ -3130,28 +3153,95 @@
     }
 
     function indexFp(fps) {
-      fpByTime = {};
-      const times = barTimes();
-      (fps || []).forEach(function (fb) {
-        let t = timeOf(fb.time);
-        if (t == null) return;
-        if (times.length) {
-          let best = t;
-          let bestD = Infinity;
-          for (let i = 0; i < times.length; i++) {
-            const d = Math.abs(Number(times[i]) - Number(t));
-            if (d < bestD) {
-              bestD = d;
-              best = times[i];
+      // Always replace the map so instrument switches / empty tape cannot keep stale levels.
+      const next = {};
+      if (fps && fps.length) {
+        const times = barTimes();
+        fps.forEach(function (fb) {
+          let t = timeOf(fb.time);
+          if (t == null) return;
+          if (times.length) {
+            let best = t;
+            let bestD = Infinity;
+            for (let i = 0; i < times.length; i++) {
+              const d = Math.abs(Number(times[i]) - Number(t));
+              if (d < bestD) {
+                bestD = d;
+                best = times[i];
+              }
             }
+            if (bestD <= fpSnapTolNow()) t = best;
           }
-          if (bestD <= fpSnapTol) t = best;
-        }
-        fpByTime[t] = fb;
-      });
+          next[t] = fb;
+        });
+      }
+      fpByTime = next;
     }
 
-    function sessionVapFallback() {
+    function profileSpan(levels) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      let n = 0;
+      (levels || []).forEach(function (l) {
+        const px = Number(l && l.price);
+        if (!isFinite(px)) return;
+        if (px < lo) lo = px;
+        if (px > hi) hi = px;
+        n += 1;
+      });
+      return n > 0 && hi >= lo ? { n: n, lo: lo, hi: hi, span: hi - lo } : null;
+    }
+
+    function barsPriceSpan(bars) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      (bars || []).forEach(function (b) {
+        if (!b) return;
+        const a = Math.min(Number(b.low), Number(b.high));
+        const c = Math.max(Number(b.low), Number(b.high));
+        if (!isFinite(a) || !isFinite(c)) return;
+        if (a < lo) lo = a;
+        if (c > hi) hi = c;
+      });
+      return hi >= lo && isFinite(lo) ? { lo: lo, hi: hi, span: hi - lo } : null;
+    }
+
+    function sessionVapFromFootprints() {
+      const bars = getBars() || [];
+      if (!bars.length) return [];
+      const n = bars.length;
+      const take = Math.min(n, n > 200 ? 120 : 72);
+      const from = n - take;
+      const pt = pointSize > 0 ? pointSize : 0.01;
+      const map = Object.create(null);
+      for (let i = from; i < n; i++) {
+        const b = bars[i];
+        if (!b) continue;
+        const t = b.time != null ? b.time : b.t;
+        const fb = t != null ? fpByTime[t] : null;
+        const levels = fb && fb.levels;
+        if (!levels || !levels.length) continue;
+        for (let k = 0; k < levels.length; k++) {
+          const lv = levels[k];
+          const px = Number(lv && lv.price);
+          const vol = Number(lv && lv.volume) || Number(lv && lv.buy) + Number(lv && lv.sell)
+            || Number(lv && lv.buyLots) + Number(lv && lv.sellLots);
+          if (!isFinite(px) || !(vol > 0)) continue;
+          const key = String(Math.round(px / pt));
+          map[key] = (map[key] || 0) + vol;
+        }
+      }
+      const keys = Object.keys(map);
+      if (keys.length < 4) return [];
+      const levels = keys.map(function (k) {
+        return { price: Number(k) * pt, volume: map[k] };
+      }).sort(function (a, b) { return a.price - b.price; });
+      const max = levels.reduce(function (m, l) { return Math.max(m, l.volume); }, 0) || 1;
+      levels.forEach(function (l) { l.strength = l.volume / max; });
+      return thinLevels(levels, 96);
+    }
+
+    function sessionVapFromBars() {
       const bars = getBars() || [];
       if (!bars.length) return [];
       const n = bars.length;
@@ -3159,35 +3249,92 @@
       return vapFromBars(bars, n - take, n - 1, pointSize);
     }
 
+    /** Prefer authoritative day-tape server profile; fallback to denser footprint/OHLC. */
+    function pickSessionProfile() {
+      const server = profile || [];
+      if (profileSpan(server) && server.length >= 8) {
+        return server;
+      }
+      const bars = getBars() || [];
+      const barSpan = barsPriceSpan(bars.slice(Math.max(0, bars.length - 120)));
+      const tape = sessionVapFromFootprints();
+      const ohlc = sessionVapFromBars();
+      const candidates = [server, tape, ohlc];
+      let best = [];
+      let bestScore = -1;
+      candidates.forEach(function (lv) {
+        const s = profileSpan(lv);
+        if (!s) return;
+        let score = s.n;
+        if (barSpan && barSpan.span > 0) {
+          score += 40 * Math.min(1, s.span / barSpan.span);
+        } else {
+          score += s.span * 10;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = lv;
+        }
+      });
+      return best;
+    }
+
     function paintProfileLevels(ov, levels, maxW) {
-      let drawn = 0;
+      const rowPx = 3;
+      const bins = Object.create(null);
       (levels || []).forEach(function (lvl) {
         const px = Number(lvl.price);
         const vol = Number(lvl.volume);
         if (!isFinite(px) || !(vol > 0)) return;
         const y = series.priceToCoordinate(px);
         if (y == null) return;
-        const bar = document.createElement("div");
-        bar.className = "signal-vap-bar";
-        bar.style.top = (y - 1) + "px";
-        bar.style.width = Math.max(2, Math.round((lvl.strength || 0) * maxW)) + "px";
-        bar.title = px.toFixed(2) + " · vol " + Math.round(vol);
-        ov.appendChild(bar);
-        drawn += 1;
+        const key = String(Math.round(y / rowPx) * rowPx);
+        let b = bins[key];
+        if (!b) b = bins[key] = { y: Number(key), vol: 0, price: px, _best: 0 };
+        b.vol += vol;
+        if (vol >= b._best) {
+          b.price = px;
+          b._best = vol;
+        }
       });
-      return drawn;
+      const rows = Object.keys(bins).map(function (k) { return bins[k]; });
+      if (!rows.length) return 0;
+      let maxVol = 1;
+      let total = 0;
+      rows.forEach(function (r) {
+        if (r.vol > maxVol) maxVol = r.vol;
+        total += r.vol;
+      });
+      const ranked = rows.slice().sort(function (a, b) { return b.vol - a.vol; });
+      const va = Object.create(null);
+      let acc = 0;
+      ranked.forEach(function (r, i) {
+        if (acc < total * 0.7) va[r.y] = true;
+        acc += r.vol;
+        if (i === 0) r.poc = true;
+      });
+      rows.forEach(function (r) {
+        const bar = document.createElement("div");
+        bar.className = "signal-vap-bar"
+          + (r.poc ? " is-poc" : va[r.y] ? " is-va" : "");
+        bar.style.top = (r.y - 1) + "px";
+        bar.style.width = Math.max(3, Math.round((r.vol / maxVol) * maxW)) + "px";
+        bar.title = Number(r.price).toFixed(2) + " · vol " + Math.round(r.vol)
+          + (r.poc ? " · POC" : "");
+        ov.appendChild(bar);
+      });
+      return rows.length;
     }
 
     function layoutProfile() {
       const ov = ensureOv("charts-flow-profile");
       ov.innerHTML = "";
       ov.hidden = !showProfile;
+      host.classList.toggle("is-session-profile", !!showProfile);
       if (!showProfile) return;
-      const maxW = 72;
-      let drawn = paintProfileLevels(ov, profile, maxW);
-      if (drawn < 3) {
-        drawn += paintProfileLevels(ov, sessionVapFallback(), maxW);
-      }
+      const maxW = 84;
+      const levels = pickSessionProfile();
+      const drawn = paintProfileLevels(ov, levels, maxW);
       ov.dataset.drawn = String(drawn);
       if (!drawn) {
         const miss = document.createElement("div");
@@ -3220,7 +3367,9 @@
       const bars = getBars() || [];
       if (bars.length < 8) return false;
       const i1 = bars.length - 1;
-      const i0 = Math.max(0, bars.length - 32);
+      const i0 = Math.max(0, bars.length - 18);
+      const TARGET = 18;
+      const CAP = 120;
       let spacing = 8;
       let visFrom = 0;
       let visTo = 0;
@@ -3233,16 +3382,24 @@
         }
       } catch (_) {}
       const vis = visTo - visFrom;
-      const already = vis > 0 && vis <= 36 && visFrom <= i0 + 4 && visTo >= i1 - 2 && spacing >= 12;
+      // Don't fight the user's mouse zoom — only nudge once when clusters need readable cells.
+      if (vis >= 16 && spacing >= TARGET && spacing <= CAP) return false;
+      const already = vis > 0 && vis <= 22 && visFrom <= i0 + 4 && visTo >= i1 - 2 && spacing >= TARGET;
       if (already) return false;
       try {
+        chart.timeScale().applyOptions({ barSpacing: Math.min(CAP, Math.max(spacing, TARGET)) });
         chart.timeScale().setVisibleLogicalRange({
-          from: Math.max(0, i0 - 1),
-          to: i1 + 2
+          from: Math.max(0, i0 - 0.4),
+          to: i1 + 1.4
         });
         return true;
       } catch (_) {
-        return false;
+        try {
+          chart.timeScale().applyOptions({ barSpacing: TARGET });
+          return true;
+        } catch (e2) {
+          return false;
+        }
       }
     }
 
@@ -3260,7 +3417,7 @@
           best = bars[i];
         }
       }
-      return bestD <= fpSnapTol ? best : null;
+      return bestD <= fpSnapTolNow() ? best : null;
     }
 
     function levelsFromCandle(bar) {
@@ -3292,6 +3449,14 @@
       return levels;
     }
 
+    function fmtClusterVol(v) {
+      const n = Math.round(Number(v) || 0);
+      const a = Math.abs(n);
+      if (a >= 1000000) return (n / 1000000).toFixed(a >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "m";
+      if (a >= 10000) return Math.round(n / 1000) + "k";
+      return String(n);
+    }
+
     function clusterBins(levels, binPx) {
       const px = binPx > 0 ? binPx : 2;
       const bins = Object.create(null);
@@ -3319,6 +3484,7 @@
       const ov = ensureOv("charts-cluster-overlay");
       ov.innerHTML = "";
       ov.hidden = !showClusters;
+      host.classList.toggle("is-clusters", !!showClusters);
       if (!showClusters) return;
       let spacing = 8;
       try { spacing = chart.timeScale().options().barSpacing || 8; } catch (_) {}
@@ -3328,9 +3494,15 @@
       }
       if (!times.length) return;
       const ts = chart.timeScale();
-      const half = Math.max(14, Math.min(40, Math.max(spacing, 10) * 0.88));
-      const tickH = Math.max(5, Math.min(9, Math.round(Math.max(spacing, 8) * 0.38)));
-      const minW = Math.max(8, Math.round(half * 0.28));
+      const colW = Math.max(8, Math.min(spacing * 0.86, 78));
+      const showPair = colW >= 34;
+      const showTot = !showPair && colW >= 20;
+      const tickH = showPair
+        ? Math.max(13, Math.min(16, Math.round(colW * 0.22)))
+        : showTot
+          ? Math.max(11, Math.min(14, Math.round(colW * 0.42)))
+          : Math.max(4, Math.min(8, Math.round(Math.max(spacing, 8) * 0.28)));
+      const binPx = Math.max(showPair ? 12 : 3, Math.round(tickH * 0.85));
       let ticks = 0;
       times.forEach(function (t) {
         const fb = lookupFp(t);
@@ -3340,49 +3512,60 @@
         if (!levels.length) return;
         const x = ts.timeToCoordinate(t);
         if (x == null) return;
-        let bins = clusterBins(levels, Math.max(3, Math.round(tickH * 0.7)));
-        if (bins.length > 22) bins = clusterBins(levels, 5);
+        let bins = clusterBins(levels, binPx);
+        if (bins.length > 18) bins = clusterBins(levels, Math.max(binPx, 6));
         let maxV = 1;
         bins.forEach(function (b) {
           const v = b.buy + b.sell;
           if (v > maxV) maxV = v;
         });
-        const floor = Math.max(0.0001, maxV * 0.04);
+        const floor = Math.max(0.0001, maxV * 0.05);
         let use = bins.filter(function (b) { return (b.buy + b.sell) >= floor; });
-        if (use.length < 4) {
+        if (use.length < 3) {
           use = bins.slice().sort(function (a, b) {
             return (b.buy + b.sell) - (a.buy + a.sell);
           }).slice(0, 6);
         }
+        if (!use.length) return;
+        let poc = use[0];
         use.forEach(function (b) {
-          const y = b.y;
-          if (b.buy > 0) {
-            const w = Math.max(minW, Math.round((b.buy / maxV) * half));
-            const el = document.createElement("div");
-            el.className = "charts-cluster-tick is-buy" + (fromTape ? "" : " is-ohlc");
-            el.style.top = (y - tickH / 2) + "px";
-            el.style.left = x + "px";
-            el.style.width = w + "px";
-            el.style.height = tickH + "px";
-            el.title = Number(b.price).toFixed(2) + " buy " + Math.round(b.buy)
-              + (fromTape ? "" : " · по свече");
-            ov.appendChild(el);
-            ticks += 1;
-          }
-          if (b.sell > 0) {
-            const w = Math.max(minW, Math.round((b.sell / maxV) * half));
-            const el = document.createElement("div");
-            el.className = "charts-cluster-tick is-sell" + (fromTape ? "" : " is-ohlc");
-            el.style.top = (y - tickH / 2) + "px";
-            el.style.left = (x - w) + "px";
-            el.style.width = w + "px";
-            el.style.height = tickH + "px";
-            el.title = Number(b.price).toFixed(2) + " sell " + Math.round(b.sell)
-              + (fromTape ? "" : " · по свече");
-            ov.appendChild(el);
-            ticks += 1;
-          }
+          if ((b.buy + b.sell) > (poc.buy + poc.sell)) poc = b;
         });
+        const col = document.createElement("div");
+        col.className = "charts-cluster-col" + (fromTape ? "" : " is-ohlc");
+        col.style.left = (x - colW / 2) + "px";
+        col.style.width = colW + "px";
+        use.forEach(function (b) {
+          const tot = b.buy + b.sell;
+          const delta = b.buy - b.sell;
+          const buyN = Math.round(b.buy);
+          const sellN = Math.round(b.sell);
+          const cell = document.createElement("div");
+          cell.className = "charts-cluster-cell"
+            + (delta > tot * 0.08 ? " is-buy" : delta < -tot * 0.08 ? " is-sell" : " is-even")
+            + (b === poc ? " is-poc" : "")
+            + (fromTape ? "" : " is-ohlc");
+          cell.style.top = (b.y - tickH / 2) + "px";
+          cell.style.height = tickH + "px";
+          cell.style.opacity = String(0.62 + 0.38 * (tot / maxV));
+          cell.title = Number(b.price).toFixed(2)
+            + " sell " + sellN + " × buy " + buyN
+            + (fromTape ? "" : " · по свече");
+          if (showPair) {
+            cell.innerHTML = "<span class=\"s\">" + fmtClusterVol(sellN) + "</span>"
+              + "<span class=\"x\">×</span>"
+              + "<span class=\"b\">" + fmtClusterVol(buyN) + "</span>";
+          } else if (showTot) {
+            cell.innerHTML = "<span class=\"t\">" + fmtClusterVol(buyN + sellN) + "</span>";
+          } else {
+            const sellW = tot > 0 ? Math.max(2, Math.round((b.sell / tot) * colW)) : Math.round(colW / 2);
+            cell.innerHTML = "<i class=\"charts-cluster-split-s\" style=\"width:" + sellW + "px\"></i>"
+              + "<i class=\"charts-cluster-split-b\"></i>";
+          }
+          col.appendChild(cell);
+          ticks += 1;
+        });
+        ov.appendChild(col);
       });
       ov.dataset.ticks = String(ticks);
       if (!ticks) {
@@ -3395,6 +3578,7 @@
 
     function layoutFootprint() {
       const ov = ensureOv("signal-footprint-overlay charts-fp-overlay");
+      bindFpHostHandlers();
       ov.innerHTML = "";
       const times = {};
       fpPinned.forEach(function (t) { times[t] = "pin"; });
@@ -3436,10 +3620,24 @@
           band.style.left = left + "px";
           band.style.width = Math.max(2, right - left) + "px";
           ov.appendChild(band);
+          if (fpAnchor == null && fpFrom != null && fpTo != null) {
+            ["from", "to"].forEach(function (end) {
+              const h = document.createElement("div");
+              h.className = "signal-fp-handle";
+              h.dataset.end = end;
+              h.style.left = ((end === "from" ? left : right) - 6) + "px";
+              ov.appendChild(h);
+            });
+          }
         }
       }
       const ts = chart.timeScale();
+      let spacing = 8;
+      try { spacing = ts.options().barSpacing || 8; } catch (_) {}
+      const colW = Math.max(28, Math.min(56, Math.round(spacing * 0.92)));
       const fpCount = Object.keys(fpByTime).length;
+      let emptyCols = 0;
+      let painted = 0;
       keys.forEach(function (t) {
         const fb = lookupFp(t);
         const x = ts.timeToCoordinate(t);
@@ -3449,12 +3647,10 @@
           + (times[t] === "hover" ? " is-hover" : "")
           + (times[t] === "pin" ? " is-pinned" : "")
           + (times[t] === "preview" ? " is-preview" : "");
-        col.style.left = (x - 22) + "px";
+        col.style.left = (x - colW / 2) + "px";
+        col.style.width = colW + "px";
         if (!fb || !(fb.levels || []).length) {
-          const miss = document.createElement("div");
-          miss.className = "signal-fp-miss";
-          miss.textContent = fpCount ? "нет уровней" : "нет ленты";
-          col.appendChild(miss);
+          emptyCols += 1;
           ov.appendChild(col);
           return;
         }
@@ -3470,8 +3666,81 @@
           cell.innerHTML = "<span class=\"b\">" + buy + "</span><span class=\"x\">×</span><span class=\"s\">" + sell + "</span>";
           col.appendChild(cell);
         });
+        painted += 1;
         ov.appendChild(col);
       });
+      if (!painted && emptyCols > 0) {
+        const miss = document.createElement("div");
+        miss.className = "charts-flow-miss";
+        miss.textContent = fpCount ? "нет уровней в диапазоне" : "нет ленты";
+        ov.appendChild(miss);
+      }
+    }
+
+    function fpRangeXs() {
+      if (fpFrom == null || fpTo == null || !chart) return null;
+      let x1 = null;
+      let x2 = null;
+      try {
+        x1 = chart.timeScale().timeToCoordinate(Math.min(fpFrom, fpTo));
+        x2 = chart.timeScale().timeToCoordinate(Math.max(fpFrom, fpTo));
+      } catch (_) {}
+      if (x1 == null || x2 == null) return null;
+      let barW = 8;
+      try {
+        const sp = chart.timeScale().options().barSpacing;
+        if (sp > 0) barW = sp;
+      } catch (_) {}
+      return {
+        left: Math.min(x1, x2) - barW * 0.35,
+        right: Math.max(x1, x2) + barW * 0.55
+      };
+    }
+
+    function bindFpHostHandlers() {
+      if (fpHostBound || !host) return;
+      fpHostBound = true;
+      host.addEventListener("pointerdown", function (ev) {
+        if (fpFrom == null || fpTo == null || !chart) return;
+        if (ev.button != null && ev.button !== 0) return;
+        if (fpAnchor != null) return;
+        const rect = host.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        const xs = fpRangeXs();
+        if (!xs) return;
+        const hit = 14;
+        if (Math.abs(x - xs.left) <= hit) fpDragEnd = "from";
+        else if (Math.abs(x - xs.right) <= hit) fpDragEnd = "to";
+        else return;
+        try { host.setPointerCapture(ev.pointerId); } catch (_) {}
+        ev.preventDefault();
+        ev.stopPropagation();
+      }, true);
+      host.addEventListener("pointermove", function (ev) {
+        if (!fpDragEnd || !chart) return;
+        const rect = host.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        let t = null;
+        try { t = chart.timeScale().coordinateToTime(x); } catch (_) {}
+        if (typeof t !== "number") return;
+        t = nearestTime(t);
+        if (fpDragEnd === "from") {
+          if (t === fpFrom) return;
+          applyFpRange(t, fpTo);
+        } else {
+          if (t === fpTo) return;
+          applyFpRange(fpFrom, t);
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+      }, true);
+      host.addEventListener("pointerup", function (ev) {
+        if (!fpDragEnd) return;
+        fpDragEnd = null;
+        try { host.releasePointerCapture(ev.pointerId); } catch (_) {}
+        ev.preventDefault();
+        ev.stopPropagation();
+      }, true);
     }
 
     function layoutNow() {
@@ -3491,7 +3760,7 @@
 
     if (typeof chart.subscribeClick === "function") {
       chart.subscribeClick(function (param) {
-        if (!fpTool || isBusy()) return;
+        if (!fpTool || fpDragEnd) return;
         if (!param || param.time == null) return;
         const t = nearestTime(typeof param.time === "number" ? param.time : timeOf(param.time));
         if (t == null) return;
@@ -3506,7 +3775,7 @@
     }
     if (typeof chart.subscribeCrosshairMove === "function") {
       chart.subscribeCrosshairMove(function (param) {
-        if (!fpTool || isBusy()) return;
+        if (!fpTool || fpDragEnd) return;
         const t = param && param.time != null
           ? nearestTime(typeof param.time === "number" ? param.time : timeOf(param.time))
           : null;
@@ -3541,9 +3810,11 @@
       },
       getShowProfile: function () { return showProfile; },
       setShowClusters: function (on) {
+        const was = showClusters;
         showClusters = !!on;
-        if (showClusters && maybeZoomForClusters()) {
-          requestAnimationFrame(function () { layoutNow(); });
+        if (showClusters && !was) {
+          clusterZoomTried = false;
+          maybeZoomForClusters();
         }
         layoutNow();
         onChange();
@@ -3565,6 +3836,41 @@
         onChange();
       },
       layout: layout,
+      ingestPrint: function (px, qty, side, tsSec) {
+        const price = Number(px);
+        const lots = Number(qty);
+        if (!(price > 0) || !(lots > 0)) return;
+        const bars = getBars() || [];
+        if (!bars.length) return;
+        const last = bars[bars.length - 1];
+        let t = last.time;
+        if (typeof tsSec === "number" && isFinite(tsSec)) {
+          const bucket = tsSec - (tsSec % Math.max(1, barSecNow()));
+          if (Math.abs(bucket - t) <= fpSnapTolNow()) t = last.time;
+        }
+        let fb = fpByTime[t];
+        if (!fb) {
+          fb = { time: t, levels: [] };
+          fpByTime[t] = fb;
+        }
+        const step = pointSize > 0 ? pointSize : 0.01;
+        const rounded = Math.round(price / step) * step;
+        let lv = null;
+        for (let i = 0; i < fb.levels.length; i++) {
+          if (Math.abs(Number(fb.levels[i].price) - rounded) < step * 0.51) {
+            lv = fb.levels[i];
+            break;
+          }
+        }
+        if (!lv) {
+          lv = { price: rounded, buy: 0, sell: 0 };
+          fb.levels.push(lv);
+        }
+        const sell = String(side || "").toUpperCase() === "SELL";
+        if (sell) lv.sell += lots;
+        else lv.buy += lots;
+        layout();
+      },
       getState: function () {
         return {
           showProfile: !!showProfile,
@@ -3577,6 +3883,7 @@
         if (!st) return;
         showProfile = !!st.showProfile;
         showClusters = !!st.showClusters;
+        clusterZoomTried = true;
         if (st.fpFrom != null && st.fpTo != null) {
           fpFrom = st.fpFrom;
           fpTo = st.fpTo;
@@ -3585,6 +3892,7 @@
         layoutNow();
       },
       destroy: function () {
+        host.classList.remove("is-clusters", "is-session-profile", "is-fp-tool");
         ["charts-flow-profile", "charts-cluster-overlay", "charts-fp-overlay"].forEach(function (cls) {
           const el = host.querySelector("." + cls);
           if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -3603,6 +3911,499 @@
     return { type: String(type).toUpperCase() === "EMA" ? "EMA" : "SMA", period: period };
   }
 
+  function familyOf(secid) {
+    const raw = String(secid || "").trim();
+    if (!raw) return "";
+    const u = raw.toUpperCase();
+    if (u === "GOLD" || u.indexOf("GD") === 0) return "GD";
+    if (u === "MIX" || u.indexOf("MX") === 0) return "MX";
+    if (u === "USD" || u.indexOf("SI") === 0
+        || (raw.length >= 2 && raw.charAt(0) === "S" && raw.charAt(1) === "i")) return "SI";
+    if (u === "RTS" || u.indexOf("RI") === 0 || u.indexOf("RT") === 0
+        || (raw.length >= 2 && raw.charAt(0) === "R" && raw.charAt(1) === "i")) return "RI";
+    if (u.indexOf("NG") === 0) return "NG";
+    if (u.indexOf("BR") === 0) return "BR";
+    return u.slice(0, 2);
+  }
+
+  /** Drop a print that cannot belong on this family's scale (BR 103 onto Ri 84000). */
+  function quotesMatchInstrument(secid, px) {
+    const p = Number(px);
+    if (!(p > 0) || !isFinite(p)) return false;
+    const fam = familyOf(secid);
+    if (fam === "BR") return p > 20 && p < 250;
+    if (fam === "NG") return p > 0.2 && p < 50;
+    if (fam === "GD") return p > 200 && p < 20000;
+    if (fam === "RI" || fam === "SI") return p > 5000 && p < 500000;
+    if (fam === "MX") return p > 20000 && p < 2000000;
+    return true;
+  }
+
+  /** TV-like: last trade only. 0.6% vs last close — BR 100.13 onto 99.18 is a bad tick, not a wick. */
+  function printFitsLast(last, px) {
+    if (!last) return px > 0 && isFinite(px);
+    const c = Number(last.close != null ? last.close : last.value);
+    if (!(c > 0) || !(px > 0) || !isFinite(px)) return false;
+    const cap = Math.max(Math.abs(c) * 0.006, c >= 1000 ? Math.abs(c) * 0.003 : 0.12);
+    return Math.abs(px - c) <= cap;
+  }
+  function sameTapeInstrument(a, b) {
+    if (!a || !b) return false;
+    const A = String(a).trim().toUpperCase();
+    const B = String(b).trim().toUpperCase();
+    if (A === B || A === "*") return true;
+    const fa = familyOf(A);
+    const fb = familyOf(B);
+    return !!(fa && fa === fb);
+  }
+  function currentBucketUnix(minutes) {
+    const step = Math.max(1, minutes || 5) * 60 * 1000;
+    const msk = Date.now() + 3 * 3600 * 1000;
+    return Math.floor((msk - (msk % step) - 3 * 3600 * 1000) / 1000);
+  }
+  /** Desk bars are ISO+03; LW / terminal bars are unix seconds. */
+  function barTimeUnix(b) {
+    if (!b || b.time == null) return null;
+    if (typeof b.time === "number" && isFinite(b.time)) {
+      return b.time > 1e12 ? Math.floor(b.time / 1000) : b.time;
+    }
+    let s = String(b.time).trim();
+    s = s.replace(
+      /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})([Zz]|[+-]\d{2}:?\d{2})?$/,
+      function (_, hm, off) { return hm + ":00" + (off || ""); }
+    );
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return Math.floor(d.getTime() / 1000);
+  }
+  function applyTradeToCandle(series, bars, px, bucketMin) {
+    if (!series || !bars || !bars.length || !(px > 0)) return false;
+    let last = bars[bars.length - 1];
+    let t = barTimeUnix(last);
+    if (t == null) return false;
+    const bucket = bucketMin > 0 ? currentBucketUnix(bucketMin) : t;
+    if (bucketMin > 0 && t !== bucket) {
+      // Closed last bar: open a forming candle (TV). Do not rewrite history.
+      if (t > bucket) return false;
+      const seed = Number(last.close);
+      if (!(seed > 0) || !printFitsLast({ close: seed, high: seed, low: seed }, px)) return false;
+      last = {
+        time: bucket,
+        open: seed,
+        high: Math.max(seed, px),
+        low: Math.min(seed, px),
+        close: px,
+        volume: 0
+      };
+      bars.push(last);
+      try {
+        series.update({ time: bucket, open: last.open, high: last.high, low: last.low, close: px });
+      } catch (_) { return false; }
+      return true;
+    }
+    if (!printFitsLast(last, px)) return false;
+    const o = Number(last.open);
+    let h = Number(last.high);
+    let l = Number(last.low);
+    if (![o, h, l].every(Number.isFinite)) return false;
+    if (px > h) h = px;
+    if (px < l) l = px;
+    last.close = px;
+    last.high = h;
+    last.low = l;
+    try { series.update({ time: t, open: o, high: h, low: l, close: px }); } catch (_) { return false; }
+    return true;
+  }
+  function applyTradeToLine(series, data, px) {
+    if (!series || !data || !data.length || !Number.isFinite(px)) return false;
+    const last = data[data.length - 1];
+    if (!last || last.time == null) return false;
+    last.value = px;
+    try { series.update({ time: last.time, value: px }); } catch (_) { return false; }
+    return true;
+  }
+  function aggregateBars(bars, bucketMin) {
+    const step = Math.max(1, bucketMin || 5) * 60;
+    const out = [];
+    let cur = null;
+    (bars || []).forEach(function (b) {
+      if (!b || b.time == null) return;
+      const bucket = b.time - (b.time % step);
+      if (!cur || cur.time !== bucket) {
+        if (cur) out.push(cur);
+        cur = {
+          time: bucket, open: b.open, high: b.high, low: b.low, close: b.close,
+          volume: b.volume || 0
+        };
+      } else {
+        if (b.high > cur.high) cur.high = b.high;
+        if (b.low < cur.low) cur.low = b.low;
+        cur.close = b.close;
+        cur.volume += Number(b.volume) || 0;
+      }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+  function buildRenko(bars, brick) {
+    const size = brick > 0 ? brick : 0.1;
+    const out = [];
+    let last = null;
+    (bars || []).forEach(function (b) {
+      const px = Number(b && b.close);
+      if (!(px > 0)) return;
+      if (last == null) {
+        last = px;
+        return;
+      }
+      while (px - last >= size) {
+        const o = last;
+        last = last + size;
+        out.push({ time: (b.time || 0) + out.length, open: o, high: last, low: o, close: last });
+      }
+      while (last - px >= size) {
+        const o = last;
+        last = last - size;
+        out.push({ time: (b.time || 0) + out.length, open: o, high: o, low: last, close: last });
+      }
+    });
+    return out;
+  }
+  function buildRangeBars(bars, range) {
+    const size = range > 0 ? range : 0.2;
+    const out = [];
+    let cur = null;
+    (bars || []).forEach(function (b) {
+      if (!b) return;
+      if (!cur) {
+        cur = { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+        return;
+      }
+      if (b.high > cur.high) cur.high = b.high;
+      if (b.low < cur.low) cur.low = b.low;
+      cur.close = b.close;
+      if (cur.high - cur.low >= size) {
+        out.push(cur);
+        cur = { time: b.time, open: b.close, high: b.close, low: b.close, close: b.close };
+      }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+  /**
+   * Keep both bid and ask shelves. A one-sided stream snapshot must not
+   * wipe the opposite ladder. A shorter full shelf (50→49) must replace prev.
+   */
+  function mergeDomBook(prev, next) {
+    if (!next) return prev || null;
+    if (!prev) return next;
+    const nb = Array.isArray(next.bids) ? next.bids : null;
+    const na = Array.isArray(next.asks) ? next.asks : null;
+    const pb = prev.bids || [];
+    const pa = prev.asks || [];
+    let bids;
+    let asks;
+    if (nb == null) {
+      bids = pb;
+    } else if (nb.length > 0) {
+      bids = nb;
+    } else {
+      // Empty bids with live asks → one-sided paint; keep previous bids.
+      bids = (na && na.length > 0 && pb.length) ? pb : nb;
+    }
+    if (na == null) {
+      asks = pa;
+    } else if (na.length > 0) {
+      asks = na;
+    } else {
+      asks = (nb && nb.length > 0 && pa.length) ? pa : na;
+    }
+    return Object.assign({}, next, { bids: bids, asks: asks });
+  }
+  function createTapeClient() {
+    let ws = null;
+    let want = [];
+    let all = false;
+    let retryMs = 1000;
+    let timer = null;
+    const tradeFn = [];
+    const bookFn = [];
+    let raf = 0;
+    const tapeQueue = [];
+    const latestBook = Object.create(null);
+    const lastBookFp = Object.create(null);
+    const lastMerged = Object.create(null);
+    let bookTimer = 0;
+    const BOOK_UI_MS = 6000;
+    function bookFingerprint(msg) {
+      const bids = msg && msg.bids ? msg.bids : [];
+      const asks = msg && msg.asks ? msg.asks : [];
+      let s = String((msg && msg.instrument) || "");
+      const n = Math.max(bids.length, asks.length);
+      for (let i = 0; i < n; i++) {
+        const b = bids[i];
+        const a = asks[i];
+        s += "|" + (b ? (b.p + ":" + b.q) : "") + "/" + (a ? (a.p + ":" + a.q) : "");
+      }
+      return s;
+    }
+    function flushBooks() {
+      bookTimer = 0;
+      Object.keys(latestBook).forEach(function (id) {
+        const incoming = latestBook[id];
+        delete latestBook[id];
+        const msg = mergeDomBook(lastMerged[id], incoming);
+        if (!msg) return;
+        lastMerged[id] = msg;
+        const fp = bookFingerprint(msg);
+        if (lastBookFp[id] === fp) return;
+        lastBookFp[id] = fp;
+        for (let i = 0; i < bookFn.length; i++) {
+          try { bookFn[i](msg); } catch (_) {}
+        }
+      });
+    }
+    function url() {
+      const proto = (typeof location !== "undefined" && location.protocol === "https:") ? "wss:" : "ws:";
+      const host = (typeof location !== "undefined" && location.host) ? location.host : "localhost";
+      let u = proto + "//" + host + "/api/trend/ws/tape";
+      try {
+        const token = localStorage.getItem("trinity.supabase.access_token");
+        if (token) u += "?access_token=" + encodeURIComponent(token);
+      } catch (_) {}
+      return u;
+    }
+    function sendSub() {
+      if (!ws || ws.readyState !== 1) return;
+      try {
+        ws.send(JSON.stringify(all ? { all: true } : { instruments: want }));
+      } catch (_) {}
+    }
+    function emitTrade(msg) {
+      tapeQueue.push(msg);
+      if (tapeQueue.length > 400) tapeQueue.splice(0, tapeQueue.length - 400);
+      if (raf) return;
+      raf = (typeof requestAnimationFrame === "function")
+        ? requestAnimationFrame(flushTrades)
+        : (setTimeout(flushTrades, 16), 1);
+    }
+    function flushTrades() {
+      raf = 0;
+      const batch = tapeQueue.splice(0);
+      for (let b = 0; b < batch.length; b++) {
+        const msg = batch[b];
+        for (let i = 0; i < tradeFn.length; i++) {
+          try { tradeFn[i](msg); } catch (_) {}
+        }
+      }
+    }
+    function schedule() {
+      if (timer) return;
+      const wait = retryMs;
+      retryMs = Math.min(15000, Math.floor(retryMs * 1.6));
+      timer = setTimeout(function () {
+        timer = null;
+        connect();
+      }, wait);
+    }
+    function connect() {
+      if (typeof WebSocket === "undefined") return;
+      if (ws && (ws.readyState === 0 || ws.readyState === 1)) {
+        sendSub();
+        return;
+      }
+      try { if (ws) ws.close(); } catch (_) {}
+      let sock;
+      try { sock = new WebSocket(url()); } catch (_) { schedule(); return; }
+      ws = sock;
+      sock.onopen = function () {
+        retryMs = 1000;
+        sendSub();
+      };
+      sock.onmessage = function (ev) {
+        let msg = null;
+        try { msg = JSON.parse(ev.data); } catch (_) { return; }
+        if (!msg || !msg.t) return;
+        if (msg.t === "trade") emitTrade(msg);
+        else if (msg.t === "book") {
+          const id = familyOf(msg.instrument) || (msg.instrument || "*");
+          latestBook[id] = mergeDomBook(latestBook[id] || lastMerged[id], msg);
+          if (!bookTimer) bookTimer = setTimeout(flushBooks, BOOK_UI_MS);
+        }
+      };
+      sock.onclose = function () {
+        if (ws === sock) ws = null;
+        schedule();
+      };
+      sock.onerror = function () {
+        try { sock.close(); } catch (_) {}
+      };
+    }
+    return {
+      connect: connect,
+      subscribe: function (list, opts) {
+        all = !!(opts && opts.all);
+        want = (list || []).map(function (s) { return String(s || "").trim().toUpperCase(); }).filter(Boolean);
+        connect();
+        sendSub();
+      },
+      onTrade: function (fn) {
+        if (typeof fn === "function") tradeFn.push(fn);
+      },
+      onBook: function (fn) {
+        if (typeof fn === "function") bookFn.push(fn);
+      }
+    };
+  }
+
+  /**
+   * TradingView-style event rail (gap / expiry / roll / open / calendar).
+   * Shared by Exclusive desk, positional desk, charts terminal, calendar-arb.
+   *
+   * markers: [{ time: unixSec|iso, kind, color, text, title, detail }]
+   */
+  function attachTimelineRail(opts) {
+    opts = opts || {};
+    const host = opts.hostEl;
+    const chart = opts.chart;
+    if (!host || !chart) {
+      return { setMarkers: function () {}, layout: function () {}, clear: function () {} };
+    }
+    if (getComputedStyle(host).position === "static") {
+      host.style.position = "relative";
+    }
+    let items = [];
+    let rail = host.querySelector(".signal-timeline-rail");
+    if (!rail) {
+      rail = document.createElement("div");
+      rail.className = "signal-timeline-rail";
+      rail.setAttribute("aria-hidden", "true");
+      host.appendChild(rail);
+    }
+    let layer = host.querySelector(".signal-timeline-vline-layer");
+    let line = null;
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "signal-timeline-vline-layer";
+      layer.setAttribute("aria-hidden", "true");
+      line = document.createElement("div");
+      line.className = "signal-timeline-vline";
+      line.hidden = true;
+      layer.appendChild(line);
+      host.appendChild(layer);
+    } else {
+      line = layer.querySelector(".signal-timeline-vline");
+    }
+
+    function toUnix(t) {
+      if (t == null) return null;
+      if (typeof t === "number" && isFinite(t)) return t > 1e12 ? Math.floor(t / 1000) : t;
+      const ms = Date.parse(String(t).replace(" ", "T"));
+      return isFinite(ms) ? Math.floor(ms / 1000) : null;
+    }
+
+    function glyph(kind, text, color) {
+      const k = String(kind || "").toUpperCase();
+      const ARROWS = '<svg class="signal-timeline-ico" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<path d="M2.5 5.2h9.2M9.2 2.8L12.8 5.2 9.2 7.6" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'
+        + '<path d="M13.5 10.8H4.3M6.8 13.2L3.2 10.8 6.8 8.4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'
+        + "</svg>";
+      const SWAP = '<svg class="signal-timeline-ico" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<path d="M4.2 5.5c1.6-2.2 5.2-2.4 7.1-.4M10.2 3.6l1.6 1.9-2.2.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+        + '<path d="M11.8 10.5c-1.6 2.2-5.2 2.4-7.1.4M5.8 12.4L4.2 10.5l2.2-.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+        + "</svg>";
+      const BOLT = '<svg class="signal-timeline-ico" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<path d="M9.2 2.2L4.4 8.8h3.1L6.8 13.8l5.2-7.2H8.8z" fill="#fff"/>'
+        + "</svg>";
+      if (k === "SESSION_GAP") {
+        return { cls: "is-gap", color: "#ea580c", html: '<span class="signal-timeline-letter">G</span>' };
+      }
+      if (k === "CONTRACT_EXPIRY" || k === "FND" || k === "SKIP_ROLL") {
+        return { cls: "is-expiry", color: color || "#dc2626", html: ARROWS };
+      }
+      if (k === "CONTRACT_ROLL") {
+        return { cls: "is-roll", color: color || "#7c3aed", html: SWAP };
+      }
+      if (k === "CALENDAR") {
+        return { cls: "is-calendar", color: color || "#64748b", html: BOLT };
+      }
+      if (k === "SESSION_OPEN") {
+        return { cls: "is-open", color: color || "#2563eb", html: '<span class="signal-timeline-letter">O</span>' };
+      }
+      if (k === "TRADE_ENTRY") {
+        const letter = (text || "•").slice(0, 1).toUpperCase();
+        return { cls: "is-entry", color: color || "#2563eb", html: '<span class="signal-timeline-letter">' + letter + "</span>" };
+      }
+      return {
+        cls: "is-misc",
+        color: color || "#6366f1",
+        html: '<span class="signal-timeline-letter">' + (text || "•").slice(0, 3) + "</span>"
+      };
+    }
+
+    function setHover(x, color, show) {
+      if (!line) return;
+      if (!show || x == null || !isFinite(x)) {
+        line.hidden = true;
+        return;
+      }
+      line.hidden = false;
+      line.style.left = Math.round(x) + "px";
+      line.style.borderColor = color || "rgba(99, 102, 241, 0.85)";
+    }
+
+    function layout() {
+      rail.innerHTML = "";
+      setHover(null, null, false);
+      if (!items.length) {
+        rail.hidden = true;
+        return;
+      }
+      rail.hidden = false;
+      const w = host.clientWidth || 0;
+      const ts = chart.timeScale();
+      items.forEach(function (m) {
+        if (!m) return;
+        const unix = toUnix(m.time);
+        if (unix == null) return;
+        let x = null;
+        try { x = ts.timeToCoordinate(unix); } catch (_) {}
+        if (x == null || x < -16 || x > w + 16) return;
+        const vis = glyph(m.kind || m._kind, m.text, m.color);
+        const chipX = Math.round(x);
+        const chip = document.createElement("div");
+        chip.className = "signal-timeline-chip " + (vis.cls || "");
+        chip.style.left = chipX + "px";
+        const title = m.title || m._title || m.text || m.kind || "";
+        const detail = m.detail || m._detail || "";
+        chip.title = detail ? (title + "\n" + detail) : title;
+        const dot = document.createElement("span");
+        dot.className = "signal-timeline-dot";
+        dot.style.background = vis.color;
+        dot.innerHTML = vis.html;
+        chip.appendChild(dot);
+        chip.addEventListener("mouseenter", function () { setHover(chipX, vis.color, true); });
+        chip.addEventListener("mouseleave", function () { setHover(null, null, false); });
+        rail.appendChild(chip);
+      });
+    }
+
+    function setMarkers(list) {
+      items = Array.isArray(list) ? list.slice() : [];
+      layout();
+    }
+
+    try {
+      chart.timeScale().subscribeVisibleLogicalRangeChange(function () { layout(); });
+    } catch (_) {}
+
+    return {
+      setMarkers: setMarkers,
+      layout: layout,
+      clear: function () { setMarkers([]); }
+    };
+  }
+
   global.TrinityChartKit = {
     authHeaders: authHeaders,
     currentUserKey: currentUserKey,
@@ -3617,6 +4418,7 @@
     ema: ema,
     attachTools: attachTools,
     attachFlowOverlays: attachFlowOverlays,
+    attachTimelineRail: attachTimelineRail,
     bindTradingViewNav: bindTradingViewNav,
     attachFriendlyNav: attachFriendlyNav,
     ensureNavHud: ensureNavHud,
@@ -3629,6 +4431,17 @@
     barCacheGet: barCacheGet,
     barCachePut: barCachePut,
     promptMaConfig: promptMaConfig,
-    esc: esc
+    esc: esc,
+    tape: createTapeClient(),
+    mergeDomBook: mergeDomBook,
+    familyOf: familyOf,
+    quotesMatchInstrument: quotesMatchInstrument,
+    printFitsLast: printFitsLast,
+    sameTapeInstrument: sameTapeInstrument,
+    applyTradeToCandle: applyTradeToCandle,
+    applyTradeToLine: applyTradeToLine,
+    aggregateBars: aggregateBars,
+    buildRenko: buildRenko,
+    buildRangeBars: buildRangeBars
   };
 })(typeof window !== "undefined" ? window : globalThis);

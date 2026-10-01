@@ -1,6 +1,7 @@
 package com.moex.cointegration.controller;
 
 import com.moex.cointegration.TestBootApplication;
+import com.moex.cointegration.config.DeskSessionStore;
 import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.config.SecurityConfig;
 import org.junit.jupiter.api.Test;
@@ -28,13 +29,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Regression: GET trend settings/desk stay public; POST settings requires auth
- * (hard-refresh must not rely on anonymous POST).
+ * Regression: GET and POST /api/trend/* require auth; login/mode stay public.
  */
-@WebMvcTest(controllers = TrendSettingsAuthContractTest.StubTrendApi.class)
+@WebMvcTest(controllers = {
+        TrendSettingsAuthContractTest.StubTrendApi.class,
+        TrendSettingsAuthContractTest.StubViews.class
+})
 @AutoConfigureMockMvc
 @ContextConfiguration(classes = TestBootApplication.class)
-@Import({SecurityConfig.class, TrendSettingsAuthContractTest.AuthPropsConfig.class, TrendSettingsAuthContractTest.StubTrendApi.class})
+@Import({SecurityConfig.class, DeskSessionStore.class, TrendSettingsAuthContractTest.AuthPropsConfig.class, TrendSettingsAuthContractTest.StubTrendApi.class, TrendSettingsAuthContractTest.StubViews.class})
 @TestPropertySource(properties = {
         "imoex.auth.enabled=true",
         "imoex.auth.username=imoex",
@@ -49,16 +52,25 @@ class TrendSettingsAuthContractTest {
     MockMvc mockMvc;
 
     @Test
-    void getSettingsIsPublic() throws Exception {
+    void getSettingsUnauthorizedWithoutCredentials() throws Exception {
         mockMvc.perform(get("/api/trend/settings").accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.ok").value(true));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("unauthorized"));
     }
 
     @Test
-    void getDeskIsPublic() throws Exception {
+    void getDeskUnauthorizedWithoutCredentials() throws Exception {
         mockMvc.perform(get("/api/trend/desk").accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void getSettingsOkWithBasic() throws Exception {
+        mockMvc.perform(get("/api/trend/settings")
+                        .with(httpBasic("imoex", "secret"))
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true));
     }
 
     @Test
@@ -80,6 +92,34 @@ class TrendSettingsAuthContractTest {
                 .andExpect(jsonPath("$.saved").value(true));
     }
 
+    @Test
+    void gateHtmlStaysPublic() throws Exception {
+        mockMvc.perform(get("/view").accept(MediaType.TEXT_HTML))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void deskHtmlUnauthorizedWithoutSession() throws Exception {
+        mockMvc.perform(get("/view/trend-signal").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void deskHtmlOkWithBasic() throws Exception {
+        mockMvc.perform(get("/view/trend-signal")
+                        .with(httpBasic("imoex", "secret"))
+                        .accept(MediaType.TEXT_HTML))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void deskHtmlRedirectsBrowserWithoutSession() throws Exception {
+        mockMvc.perform(get("/view/trend-signal").accept(MediaType.TEXT_HTML))
+                .andExpect(status().isFound())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Location", "/view"));
+    }
+
     @RestController
     @RequestMapping("/api/trend")
     static class StubTrendApi {
@@ -96,6 +136,19 @@ class TrendSettingsAuthContractTest {
         @GetMapping("/desk")
         Map<String, Object> desk() {
             return Map.of("bars", java.util.List.of());
+        }
+    }
+
+    @RestController
+    static class StubViews {
+        @GetMapping(value = "/view", produces = MediaType.TEXT_HTML_VALUE)
+        String gate() {
+            return "<html>gate</html>";
+        }
+
+        @GetMapping(value = "/view/trend-signal", produces = MediaType.TEXT_HTML_VALUE)
+        String desk() {
+            return "<html>desk</html>";
         }
     }
 

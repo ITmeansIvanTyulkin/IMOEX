@@ -10,3 +10,11 @@ imoex:
     enabled: true
     username: imoex
     password: "paste-strong-password-here"
+    # Тот же project, что кабинет на trinity.trading (см. js/cabinet-config.local.js)
+    supabase:
+      enabled: true
+      url: https://YOUR_PROJECT.supabase.co
+      anon-key: "YOUR_ANON_KEY"
+      # optional legacy HS256; современные проекты часто без него (JWKS/ES256)
+      jwt-secret: "YOUR_JWT_SECRET"
+      snapshot-ms: 60000

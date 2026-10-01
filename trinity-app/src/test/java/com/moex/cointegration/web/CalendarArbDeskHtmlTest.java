@@ -25,6 +25,9 @@ class CalendarArbDeskHtmlTest {
         assertTrue(html.contains("Как торгует робот"), html);
         assertTrue(html.contains("id=\"arb-guide-open\""), "guide button missing");
         assertTrue(html.contains("id=\"desk-arb-auto-execution\""), "desk auto switch missing");
+        assertTrue(html.contains("id=\"arb-auto-wrap\" hidden") || html.contains("id=\"arb-auto-wrap\" hidden>"),
+                "arb auto bar must stay hidden until settings hydrate");
+        assertTrue(html.contains("Ручная торговля"), html);
         assertTrue(html.contains("Наблюдение"), html);
         assertTrue(html.contains("id=\"arb-guide-idea\""), "guide idea section missing");
         assertTrue(html.contains("календарный спред"), html.toLowerCase());
@@ -33,6 +36,7 @@ class CalendarArbDeskHtmlTest {
         assertFalse(html.contains("§"), "no checklist paragraph marks in arb desk copy");
         String js = read("static/js/calendar-arb-desk.js");
         assertTrue(js.contains("/api/calendar-arb/settings/auto-execution"), "desk auto API missing");
+        assertTrue(js.contains("dataset.hydrated"), "arb toggle must wait for server state");
         assertTrue(js.contains("function bindArbGuide"), "guide binder missing");
         assertTrue(js.contains("Наблюдение"), js);
     }

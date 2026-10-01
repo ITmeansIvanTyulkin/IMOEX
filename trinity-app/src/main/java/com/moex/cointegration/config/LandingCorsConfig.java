@@ -24,6 +24,14 @@ public class LandingCorsConfig implements WebMvcConfigurer {
                 .allowedOrigins(LANDING_ORIGINS)
                 .allowedMethods("GET")
                 .maxAge(3600);
+        registry.addMapping("/api/trend/paper")
+                .allowedOrigins(LANDING_ORIGINS)
+                .allowedMethods("GET")
+                .maxAge(3600);
+        registry.addMapping("/api/calendar-arb/status")
+                .allowedOrigins(LANDING_ORIGINS)
+                .allowedMethods("GET")
+                .maxAge(3600);
         registry.addMapping("/api/analysis/regime")
                 .allowedOrigins(LANDING_ORIGINS)
                 .allowedMethods("GET")

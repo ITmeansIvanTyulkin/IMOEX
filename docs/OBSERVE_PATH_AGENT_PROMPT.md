@@ -1,7 +1,7 @@
 # Handoff prompt: TRINITY operator (Exclusive observe + desk/playbook)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-09-07 ~18:30 MSK · seals до 07.09; Phase C NO_GO; collect corpus; overnight SELL open.  
+> **Обновлено:** 2026-09-28 ~18:23 MSK · seals до 28.09; Phase C NO_GO; collect; wake_arm double-fork.  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
@@ -36,19 +36,26 @@ Pairs DAILY и calendar-arb оператор смотрит сам, пока н�
 
 **Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
 
-### Состояние на 2026-09-10 EOD (~18:03 MSK)
+### Состояние на 2026-09-28 EOD (~18:23 MSK)
 
 | Метрика | Значение |
 |--------|----------|
-| **Phase A** | **done** 25–28.08. Extra sealed: 01–04.09, 07–10.09 |
-| **OOS cumulative** | **30** сделок, **+4 138 ₽**, expectancy **~138 ₽/trade**, WR **67%**, labeled SL 100% |
-| **10.09** | **0 сделок** · HI над TOP весь день · training obs confirmed (повтор 09.09) |
-| **09.09** | −94.5 ₽ SELL BOUNCE THROUGH · затем над TOP без входов |
-| **Front** | **BRV6** · exp 2026-10-01 (21 день) |
-| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect |
-| **Training** | `priceAboveTopNoChase`: 08–10.09 · `data/trend-training-observations.json` |
+| **Phase A** | **done** 25–28.08 + full **15.09**. Extra sealed: 01–04.09, 07–11.09, 14/16–18/21–25/**28.09** |
+| **OOS cumulative** | **53** Exclusive, **+17 010 ₽**, expectancy **~321 ₽/trade**, WR **~74%**, labeled SL 100% |
+| **28.09** | **+906.5 ₽** · 3 сделки (TP2×2, THROUGH×1) · gateHits=0 · EOD optional · **не крутить гейты** |
+| **25.09** | **−259 ₽** · 1× THROUGH |
+| **23.09** | **−224 ₽** · 1× SWEEP · smash gateHit=1 |
+| **22.09** | **+707 ₽** · 3/0 |
+| **15.09** | **+7 021 ₽** · 6 сделок · full observe |
+| **Corpus** | Exclusive ~8819 events · 32 decision days · ML collecting |
+| **Front** | **BRV6** · exp 2026-10-01 (~3d) |
+| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect · doNotTuneOnSight |
+| **Ops** | `trend_observe_resume.sh` → JVM + desk poll (Basic) + jvm-watch + wake_arm (double-fork) |
 
-**Завтра:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-11` ~09:55; evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
+**Блок Phase C:** metrics `readyForPhaseC=true`, но **human OOS review + явный go** обязательны. FORTS SL / scale / pad-tune — нет.  
+Пакет для review: `IMOEX/data/trend-oos-human-review.md` (и `.json`) — evidence only, live не включает.
+
+**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-09-29` (~09:55); evening ~18:02. Не крутить гейты. ML/FORTS — только явный go.
 
 ---
 
@@ -151,10 +158,13 @@ HTF UP **не запрещает** шорт от TOP; HTF DOWN **не запре
 ```bash
 cd /Users/ivan/MEGA/Work/TRINITY/IMOEX
 mvn -pl trinity-app -am spring-boot:run
-# профиль operator активируется сам, если есть ../IMOEX-core/pom.xml
+# всегда: Spring profile `dev` (.mvn/maven.config + trinity-app pom) → working tree
+# (IMOEX + ../IMOEX-core), не stale jar / не «чистый» origin без локальных правок
+# профиль Maven `operator` активируется сам, если есть ../IMOEX-core/pom.xml
 # при нехватке RAM: -Dspring-boot.run.jvmArguments='-Xms256m -Xmx1536m'
 ```
 Без `-Poperator` на этой машине нормально. Не путать с public bones clone.
+Не использовать `trend_observe_resume.sh` для рестарта JVM (может переписать settings).
 
 **Утро (~09:55 MSK, после sleep/Mac off):**
 ```bash
@@ -231,9 +241,10 @@ curl -s 'http://127.0.0.1:8080/api/trend/desk?instrument=BRV6&playbook=levels-pr
 
 **Не делать из бэклога без gate:** кластеры/KD/OI как сигналы; DOM «стены → цена пойдёт сюда»; options; биллинг; updater Core; полный ATAS-desk.
 
-**observeCandidatesLater (только лог, не implement):** cooldown после SL режет BOT bounce; mid-shelf HTF DOWN → SWEEP; positional OOM до `both`; tick-trail SL с входа — нет; trail runner после TP1 Exclusive — **DONE 28.08**.
+**observeCandidatesLater (только лог, не implement):** cooldown после SL режет BOT bounce; mid-shelf HTF DOWN → SWEEP; positional OOM до `both`; tick-trail SL с входа — нет; trail runner после TP1 Exclusive — **DONE 28.08**.  
+**§8 anti-pattern 28.09 (void `…BRV6-2026-09-28T17-55`, −259 THROUGH):** не брать **BUY RETEST** у TOP при reclaim **снизу через коробку** — **DONE 28.09** (`retestEntryAllowed` + `heldOutsideAfterLastWrongSide`: нужен свежий hold снаружи после последнего close внутри/ниже; melt-up pierce запрещён).
 
-**Fragility, которую уже чинили и нельзя регрессировать:** day-lock TOP vs HI; HI≈LO infinite loop `ChecklistStructure` (31.08); lastClose leak между lanes; qty filled/planned; wick SL FORMING_BAR vs close M5; два playbook на одном экране.
+**Fragility, которую уже чинили и нельзя регрессировать:** day-lock TOP vs HI; HI≈LO infinite loop `ChecklistStructure` (31.08); lastClose leak между lanes; qty filled/planned; wick SL FORMING_BAR vs close M5; два playbook на одном экране; dual focus TOP+BOT (28.09) — не залипать на пробитом TOP при dump→BOT; §8 reclaim-from-below (28.09).
 
 ---
 

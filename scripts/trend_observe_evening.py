@@ -7,16 +7,17 @@ from __future__ import annotations
 
 import json
 import sys
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from trend_observe_auth import DESK_URL, desk_request  # noqa: E402
+
 DATA = ROOT / "data"
 JOURNAL = DATA / "trend-paper-journal.json"
 ROBOT_JOURNAL = DATA / "trend-robot-journal.json"
 LOG = DATA / "trend-observe-path-log.json"
-DESK_URL = "http://127.0.0.1:8080/api/trend/desk"
 
 GATE_NEEDLES = (
     ("smash", ("вынос через дневную полку", "smash")),
@@ -28,8 +29,18 @@ GATE_NEEDLES = (
 
 def parse_day(s: str | None) -> str:
     if s:
-        return s[:10]
+        day = s.strip()[:10]
+        if len(day) == 10 and day[4] == "-" and day[7] == "-" and day[:4].isdigit():
+            return day
+        raise SystemExit(f"bad day arg {s!r} — expect YYYY-MM-DD")
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def is_calendar_day(d: object) -> bool:
+    if not isinstance(d, dict):
+        return False
+    date = str(d.get("date") or "")
+    return len(date) == 10 and date[4] == "-" and date[7] == "-" and date[:4].isdigit()
 
 
 def load_trades():
@@ -66,8 +77,7 @@ def classify_notes(notes: str) -> str | None:
 
 def desk_snapshot():
     try:
-        with urllib.request.urlopen(DESK_URL, timeout=20) as r:
-            d = json.load(r)
+        d = desk_request(DESK_URL, timeout=20)
     except Exception as e:
         return {"error": str(e)}
     fp = d.get("fairPaper") or {}
@@ -219,16 +229,24 @@ def main():
             log = json.loads(LOG.read_text(encoding="utf-8"))
         except Exception:
             pass
-    days = [d for d in (log.get("days") or []) if d.get("date") != day]
+    raw_days = [d for d in (log.get("days") or []) if is_calendar_day(d)]
+    days = [d for d in raw_days if d.get("date") != day]
     # keep prior midSession/baseline/eod fields if merging same day
-    prev = next((d for d in (log.get("days") or []) if d.get("date") == day), None)
+    prev = next((d for d in raw_days if d.get("date") == day), None)
     if prev:
         for k in ("gatesLiveSince", "afterGates", "midSession", "eod", "ops", "missedSetups"):
             if k in prev:
                 entry.setdefault(k, prev[k])
-        if prev.get("exclusive") and not rows:
-            entry["exclusive"] = prev["exclusive"]
-            entry["verdict"] = prev.get("verdict") or entry["verdict"]
+        # Keep prior closes if this run saw none (journal lag) — but never keep a stale
+        # morning WARN once desk is FORMING_BAR / we already computed a fresh verdict.
+        prev_ex = prev.get("exclusive") if isinstance(prev.get("exclusive"), dict) else {}
+        prev_rows = prev_ex.get("rows") if isinstance(prev_ex, dict) else None
+        if not rows and isinstance(prev_rows, list) and prev_rows:
+            entry["exclusive"] = prev_ex
+            if not str(entry.get("verdict") or "").startswith("WARN"):
+                entry["verdict"] = prev.get("verdict") or entry["verdict"]
+            elif desk.get("fillMode") != "FORMING_BAR":
+                entry["verdict"] = prev.get("verdict") or entry["verdict"]
     days.append(entry)
     days.sort(key=lambda x: x.get("date") or "")
     log["days"] = days

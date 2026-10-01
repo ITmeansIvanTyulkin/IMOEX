@@ -23,7 +23,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -31,8 +33,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Short HTTP smoke after ready: soft-block auto/live on fail, retry to self-heal transients.
- * Does not kill the JVM.
+ * Short HTTP smoke after ready: on fail, persist liveExecution=false and retry.
+ * Paper auto toggles in trend-ui-settings.json are not wiped. JVM stays up.
  */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -107,7 +109,7 @@ public class StartupSmokeRunner implements ApplicationListener<ApplicationReadyE
                 boolean keepBlocked = everFailed.get();
                 status.ok(attempt, retryMax, checks, keepBlocked);
                 if (keepBlocked) {
-                    log.warn("Startup smoke OK after earlier FAIL — auto/live stay off until operator re-enables. {}",
+                    log.warn("Startup smoke OK after earlier FAIL — live stays off until operator re-enables. Paper auto toggles kept. {}",
                             status.get().message());
                 } else {
                     log.info("Startup smoke OK (attempt {}/{})", attempt, retryMax);
@@ -115,7 +117,7 @@ public class StartupSmokeRunner implements ApplicationListener<ApplicationReadyE
                 return;
             }
             everFailed.set(true);
-            softBlockExecution();
+            softBlockLiveExecution();
             String msg = "Startup smoke FAIL attempt " + attempt + "/" + retryMax;
             status.fail(attempt, retryMax, checks, msg);
             log.error("{} — execution soft-blocked. Checks: {}", msg, checks);
@@ -133,36 +135,58 @@ public class StartupSmokeRunner implements ApplicationListener<ApplicationReadyE
     private List<Check> executeChecks() {
         List<Check> out = new ArrayList<>();
         out.add(getOk("actuator.health", "/actuator/health", 200));
-        out.add(getOk("view.trend-signal", "/view/trend-signal", 200));
-        out.add(getOk("view.trend-positional", "/view/trend-positional", 200));
-        out.add(getOk("api.trend.settings", "/api/trend/settings", 200));
-        out.add(getNot5xx("api.trend.desk", "/api/trend/desk"));
+        out.add(getOk("view.gate", "/view", 200));
         if (properties.auth() != null && properties.auth().enabled()) {
+            out.add(getStatus("api.trend.settings.anon", "/api/trend/settings", 401, jsonHeaders()));
+            out.add(getOk("api.trend.settings", "/api/trend/settings", 200, apiAuthHeaders()));
+            out.add(getNot5xx("api.trend.desk", "/api/trend/desk", apiAuthHeaders()));
             out.add(postUnauthorized("api.trend.settings.post.auth", "/api/trend/settings"));
+            out.add(getStatus("view.desk.anon", "/view/trend-signal", 401, jsonHeaders()));
+            out.add(getOk("view.trend-signal", "/view/trend-signal", 200, apiAuthHeaders()));
+            out.add(getOk("view.trend-positional", "/view/trend-positional", 200, apiAuthHeaders()));
         } else {
+            out.add(getOk("api.trend.settings", "/api/trend/settings", 200));
+            out.add(getNot5xx("api.trend.desk", "/api/trend/desk"));
             out.add(new Check("api.trend.settings.post.auth", true, "skipped (imoex.auth.enabled=false)"));
+            out.add(getOk("view.trend-signal", "/view/trend-signal", 200));
+            out.add(getOk("view.trend-positional", "/view/trend-positional", 200));
         }
         return out;
     }
 
     private Check getOk(String name, String path, int expectStatus) {
+        return getOk(name, path, expectStatus, jsonHeaders());
+    }
+
+    private Check getOk(String name, String path, int expectStatus, HttpHeaders headers) {
+        return getStatus(name, path, expectStatus, headers);
+    }
+
+    private Check getStatus(String name, String path, int expectStatus, HttpHeaders headers) {
         try {
             ResponseEntity<String> res = http.exchange(baseUrl + path, HttpMethod.GET,
-                    new HttpEntity<>(jsonHeaders()), String.class);
+                    new HttpEntity<>(headers), String.class);
             int code = res.getStatusCode().value();
             boolean ok = code == expectStatus;
             return new Check(name, ok, "HTTP " + code + (ok ? "" : " expected " + expectStatus));
         } catch (RestClientResponseException ex) {
-            return new Check(name, false, "HTTP " + ex.getStatusCode().value() + " " + truncate(ex.getResponseBodyAsString()));
+            int code = ex.getStatusCode().value();
+            boolean ok = code == expectStatus;
+            return new Check(name, ok, "HTTP " + code + (ok ? "" : " expected " + expectStatus)
+                    + " " + truncate(ex.getResponseBodyAsString()));
         } catch (Exception ex) {
             return new Check(name, false, ex.getClass().getSimpleName() + ": " + ex.getMessage());
         }
     }
 
     private Check getNot5xx(String name, String path) {
+        return getNot5xx(name, path, jsonHeaders());
+    }
+
+    private Check getNot5xx(String name, String path, HttpHeaders headers) {
         try {
             ResponseEntity<String> res = http.exchange(baseUrl + path, HttpMethod.GET,
-                    new HttpEntity<>(jsonHeaders()), String.class);
+                    new HttpEntity<>(headers), String.class);
             int code = res.getStatusCode().value();
             boolean ok = code < 500;
             return new Check(name, ok, "HTTP " + code + (ok ? "" : " server error"));
@@ -191,17 +215,35 @@ public class StartupSmokeRunner implements ApplicationListener<ApplicationReadyE
         }
     }
 
-    private void softBlockExecution() {
+    /**
+     * Live FORTS stays off after a failed smoke. Paper auto toggles (Exclusive / positional)
+     * are operator state in {@code data/trend-ui-settings.json} and must survive the new session.
+     */
+    private void softBlockLiveExecution() {
         TrendSettingsService ts = trendSettings.getIfAvailable();
         if (ts == null) {
             return;
         }
         try {
-            ts.save(new TrendSettingsService.UpdateRequest(false, false, null, null, null));
-            log.warn("Soft-block: trend autoExecution=false liveExecution=false");
+            ts.save(new TrendSettingsService.UpdateRequest(null, false, null, null, null));
+            log.warn("Soft-block: liveExecution=false (paper autoExecution / positionalAutoExecution kept)");
         } catch (Exception ex) {
             log.warn("Soft-block could not update trend settings: {}", ex.getMessage());
         }
+    }
+
+    private HttpHeaders apiAuthHeaders() {
+        HttpHeaders h = jsonHeaders();
+        var auth = properties.auth();
+        if (auth == null || !auth.enabled()) {
+            return h;
+        }
+        String user = auth.username() == null ? "" : auth.username();
+        String pass = auth.password() == null ? "" : auth.password();
+        String raw = user + ":" + pass;
+        h.set(HttpHeaders.AUTHORIZATION,
+                "Basic " + Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
+        return h;
     }
 
     private static HttpHeaders jsonHeaders() {

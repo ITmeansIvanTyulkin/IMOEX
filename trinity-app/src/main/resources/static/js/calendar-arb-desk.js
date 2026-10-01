@@ -18,8 +18,13 @@
   let lastGood = null;
   let everReady = false;
   let lastSeriesKey = "";
+  let lastArbDesk = null;
   let lastSpreadData = [];
   let lastNearData = [];
+  let lastFarData = [];
+  let lastLegs = { near: "", next: "", structure: "", wing: "" };
+  let lastPx = { near: 0, mid: 0, wing: 0 };
+  let arbTapeBound = false;
   let arbScaleLocked = false;
   let syncingRange = false;
   let resizeBound = false;
@@ -241,11 +246,11 @@
     if (settings.autoExecution != null) return !!settings.autoExecution;
     if (data && data.autoExecution != null) return !!data.autoExecution;
     if (fp.autoExecution != null) return !!fp.autoExecution;
-    return true;
+    return null;
   }
 
   function deliveryRu(code, data) {
-    if (!autoOn(data)) return "наблюдение";
+    if (autoOn(data) === false) return "наблюдение";
     const c = String(code || "");
     if (c === "LIVE_FORTS") return "авто · живые заявки";
     if (c === "SANDBOX_FAIR" || c === "AUTO") return "авто · журнал";
@@ -255,14 +260,26 @@
 
   function syncArbAutoSwitch(data) {
     const tog = $("desk-arb-auto-execution");
-    if (!tog || tog.disabled) return;
+    if (!tog) return;
     const on = autoOn(data);
-    tog.checked = on;
-    tog.setAttribute("aria-checked", on ? "true" : "false");
+    if (on == null && tog.dataset.hydrated !== "1") return;
+    const shown = on == null ? !!tog.checked : on;
+    tog.checked = shown;
+    tog.setAttribute("aria-checked", shown ? "true" : "false");
+    tog.dataset.hydrated = "1";
+    tog.disabled = false;
+    const bar = $("arb-auto-wrap");
+    if (bar) bar.hidden = false;
     const sw = tog.closest(".mode-switch");
     if (sw) {
-      sw.classList.toggle("is-auto", on);
-      sw.classList.toggle("is-signal", !on);
+      sw.classList.toggle("is-auto", shown);
+      sw.classList.toggle("is-signal", !shown);
+    }
+    const hint = $("arb-mode-hint");
+    if (hint) {
+      hint.textContent = shown
+        ? "Авто: робот сам открывает и закрывает по правилам."
+        : "Ручная торговля: график без сделок.";
     }
   }
 
@@ -288,6 +305,7 @@
     if (!tog || tog.dataset.bound === "1") return;
     tog.dataset.bound = "1";
     tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
       setArbAutoFromDesk(tog.checked);
     });
   }
@@ -308,7 +326,7 @@
       const view = await res.json();
       syncArbAutoSwitch(view);
       if ($("arb-delivery")) $("arb-delivery").textContent = deliveryRu(view.delivery, view);
-      if ($("arb-robot") && !autoOn(view)) $("arb-robot").textContent = "Наблюдение";
+      if ($("arb-robot") && autoOn(view) === false) $("arb-robot").textContent = "Наблюдение";
       refreshStatus().catch(function () {});
     } catch (err) {
       if (tog) tog.checked = !enabled;
@@ -325,7 +343,7 @@
     if (fp.open) {
       return "В сделке " + (fp.open.pair || "");
     }
-    if (!autoOn(data)) {
+    if (autoOn(data) === false) {
       return "Наблюдение";
     }
     const act = fp.lastAction || "";
@@ -370,7 +388,7 @@
     if ($("arb-desk-meta")) {
       const armed = fp.open
         ? "есть позиция"
-        : (!autoOn(data)
+        : (autoOn(data) === false
           ? "наблюдение"
           : (fp.liveArmed ? "авто · живые заявки, ордеров нет" : "авто · журнал, ордеров нет"));
       $("arb-desk-meta").textContent = "Котировки брокера · " + armed;
@@ -411,6 +429,7 @@
   }
 
   function render(data) {
+    lastArbDesk = data || null;
     const warming = !!data.warming && !everReady;
     const desk = $("calendar-arb-desk");
     if (desk) desk.classList.toggle("is-warming", warming);
@@ -568,7 +587,7 @@
       (warming ? " · загрузка…" : "") +
       (data.stale ? " · локальный снимок" : "") +
       (fp.open ? " · есть позиция"
-        : (!autoOn(data) ? " · наблюдение"
+        : (autoOn(data) === false ? " · наблюдение"
           : (fp.liveArmed ? " · авто · живые заявки, ордеров нет" : " · авто · журнал, ордеров нет")));
   }
 
@@ -870,6 +889,8 @@
     });
   }
 
+  let arbTimeline = null;
+
   function ensureCharts() {
     if (typeof LightweightCharts === "undefined") return;
     const spreadEl = $("arb-chart");
@@ -878,6 +899,10 @@
       chart = LightweightCharts.createChart(spreadEl, whiteChartOpts(spreadEl, spreadEl.clientHeight || 360));
       series = chart.addLineSeries({ color: "#0b7a66", lineWidth: 2 });
       bindArbChartScale(spreadEl, chart, series, function () { return lastSpreadData; }, 0.01);
+      const kit = window.TrinityChartKit;
+      if (kit && typeof kit.attachTimelineRail === "function") {
+        arbTimeline = kit.attachTimelineRail({ hostEl: spreadEl, chart: chart });
+      }
     }
     if (legsEl && !legsChart) {
       legsChart = LightweightCharts.createChart(legsEl, whiteChartOpts(legsEl, legsEl.clientHeight || 280));
@@ -890,6 +915,42 @@
       resizeBound = true;
       window.addEventListener("resize", resizeCharts);
     }
+  }
+
+  function arbRailMarkers(desk, points) {
+    const out = [];
+    if (!desk || !points || !points.length) return out;
+    const lastT = points[points.length - 1].t || points[points.length - 1].time;
+    if (!lastT) return out;
+    const fam = (desk.selected && desk.selected.family) || (desk.settings && desk.settings.family) || "";
+    const skips = desk.sessionSkips || [];
+    skips.forEach(function (s) {
+      if (!s) return;
+      if (fam && s.family && s.family !== fam) return;
+      const act = String(s.action || "");
+      if (act === "SKIP_ROLL" || act.indexOf("ROLL") >= 0 || act.indexOf("EXPIR") >= 0) {
+        out.push({
+          time: lastT,
+          kind: "CONTRACT_EXPIRY",
+          color: "#dc2626",
+          text: "Exp",
+          title: s.reason || "Окно roll / FND",
+          detail: (s.family || "") + (s.structure ? (" · " + s.structure) : "")
+        });
+      }
+    });
+    const fp = desk.fairPaper || {};
+    if (fp.lastAction === "SKIP_ROLL" && fp.lastReason) {
+      out.push({
+        time: lastT,
+        kind: "CONTRACT_EXPIRY",
+        color: "#dc2626",
+        text: "Exp",
+        title: fp.lastReason,
+        detail: "calendar-arb"
+      });
+    }
+    return out;
   }
 
   function toLine(points, field) {
@@ -911,6 +972,14 @@
     const next = toLine(points, "far");
     lastSpreadData = spread;
     lastNearData = near;
+    lastFarData = next;
+    lastLegs = { near: sel.near || "", next: sel.next || "", structure: sel.structure || "", wing: sel.wing || "" };
+    lastPx = {
+      near: Number(sel.nearLast) || 0,
+      mid: Number(sel.nextLast) || 0,
+      wing: Number(sel.wingLast) || 0
+    };
+    subscribeArbTape();
     if (series) setLineDataKeep(chart, series, spread);
     if (nearSeries) setLineDataKeep(legsChart, nearSeries, near);
     if (nextSeries) setLineDataKeep(legsChart, nextSeries, next);
@@ -925,6 +994,41 @@
     }
     paintNav($("arb-chart"));
     paintNav($("arb-legs-chart"));
+    if (arbTimeline && typeof arbTimeline.setMarkers === "function") {
+      arbTimeline.setMarkers(arbRailMarkers(lastArbDesk, points));
+    }
+  }
+
+  function subscribeArbTape() {
+    const kit = window.TrinityChartKit;
+    if (!kit || !kit.tape) return;
+    if (!arbTapeBound) {
+      arbTapeBound = true;
+      kit.tape.onTrade(function (msg) {
+        const px = Number(msg.px);
+        if (!(px > 0)) return;
+        const inst = msg.instrument;
+        if (lastLegs.near && kit.sameTapeInstrument(lastLegs.near, inst)) {
+          lastPx.near = px;
+          kit.applyTradeToLine(nearSeries, lastNearData, px);
+        }
+        if (lastLegs.next && kit.sameTapeInstrument(lastLegs.next, inst)) {
+          lastPx.mid = px;
+          kit.applyTradeToLine(nextSeries, lastFarData, px);
+        }
+        if (lastLegs.wing && kit.sameTapeInstrument(lastLegs.wing, inst)) {
+          lastPx.wing = px;
+        }
+        if (lastLegs.structure === "FLY") {
+          if (lastPx.near > 0 && lastPx.mid > 0 && lastPx.wing > 0) {
+            kit.applyTradeToLine(series, lastSpreadData, lastPx.near - 2 * lastPx.mid + lastPx.wing);
+          }
+        } else if (lastPx.near > 0 && lastPx.mid > 0) {
+          kit.applyTradeToLine(series, lastSpreadData, lastPx.mid - lastPx.near);
+        }
+      });
+    }
+    kit.tape.subscribe([lastLegs.near, lastLegs.next, lastLegs.wing].filter(Boolean));
   }
 
   function bindArbGuide() {
@@ -981,6 +1085,8 @@
   }
 
   function bind() {
+    const arbWrap = $("arb-auto-wrap");
+    if (arbWrap) arbWrap.hidden = true;
     fillFamilySelect(DEFAULT_FAMS, loadFamilyFromUrl());
     bindArbAutoSwitch();
     bindArbGuide();

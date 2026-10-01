@@ -54,7 +54,8 @@
     if (pathIsCharts()) {
       const list = chartInstruments();
       if (list && list.length) return list.join(",");
-      return "all";
+      // Never default to "all" — that loads every family H1 every poll and storms YGC.
+      return "active";
     }
     const sel = $("sig-instrument");
     if (sel && sel.value) return sel.value;
@@ -281,9 +282,22 @@
     location.href = "/view/trend-charts?instrument=" + encodeURIComponent(secid);
   }
 
+  function chromeBottomPx() {
+    let bottom = 0;
+    const nodes = document.querySelectorAll(
+      ".site-header, nav.topnav, nav.topnav-secondary:not([hidden]), .auth-session-bar:not([hidden])"
+    );
+    for (let i = 0; i < nodes.length; i++) {
+      const r = nodes[i].getBoundingClientRect();
+      if (r.bottom > bottom) bottom = r.bottom;
+    }
+    return Math.max(0, Math.ceil(bottom));
+  }
+
   function layoutPlaques(force) {
     const host = $("trinity-plaque-host");
     if (!host) return;
+    const clipTop = chromeBottomPx();
     const pressure = $("signal-pressure-fab");
     const gap = 10;
     const base = 20;
@@ -301,9 +315,12 @@
     });
     const rail = $("trinity-wind-rail");
     const railHidden = !rail || rail.hidden;
-    const key = [pressureH, pressure && pressure.hidden ? 1 : 0, heights.join("x"), railHidden ? 0 : 1, bottom].join("|");
+    const key = [clipTop, pressureH, pressure && pressure.hidden ? 1 : 0, heights.join("x"), railHidden ? 0 : 1, bottom].join("|");
     if (!force && key === lastLayoutKey) return;
     lastLayoutKey = key;
+
+    const nextTop = clipTop + "px";
+    if (host.style.top !== nextTop) host.style.top = nextTop;
 
     let b = bottom;
     robotList.forEach(function (el, i) {
@@ -316,7 +333,8 @@
     if (rail && !rail.hidden) {
       const nextRailBottom = b + "px";
       if (rail.style.bottom !== nextRailBottom) rail.style.bottom = nextRailBottom;
-      const maxH = Math.max(120, window.innerHeight - b - 24) + "px";
+      const hostH = Math.round(host.getBoundingClientRect().height || window.innerHeight);
+      const maxH = Math.max(80, hostH - b - 8) + "px";
       if (rail.style.maxHeight !== maxH) rail.style.maxHeight = maxH;
     }
   }
@@ -445,6 +463,7 @@
     refresh();
     setInterval(refresh, POLL_MS);
     window.addEventListener("resize", function () { scheduleLayout(true); });
+    window.addEventListener("scroll", function () { scheduleLayout(false); }, { passive: true });
     const sigInst = $("sig-instrument");
     if (sigInst) {
       sigInst.addEventListener("change", function () { setTimeout(refresh, 500); });

@@ -3,13 +3,77 @@
   const PASS_KEY = "imoex.ops.pass";
   const SB_TOKEN_KEY = "trinity.supabase.access_token";
   const SB_EMAIL_KEY = "trinity.supabase.user_email";
+  const SB_REFRESH_KEY = "trinity.supabase.refresh_token";
   const WELCOME_SESSION_KEY = "trinity.welcome.played";
+  const DESK_ENTERED_KEY = "trinity.desk.entered";
+  const DESK_ENTERED_UNTIL_KEY = "trinity.desk.enteredUntil";
+  const DESK_BOOT_KEY = "trinity.desk.boot";
+  const DESK_TTL_MS = 8 * 60 * 60 * 1000;
   const ALERTS_ENABLED_KEY = "imoex.alerts.enabled";
   const ALERTS_SOUND_KEY = "imoex.alerts.sound";
   const SEEN_IDS_KEY = "imoex.alerts.seenIds";
   const UPSELL_SHOWN_KEY = "imoex.upsell.shownId";
   const STRATEGY_KEY = "trinity.activeStrategy";
   const POLL_MS = 60000;
+
+  if (!window.__trinityApiAuthFetch && typeof window.fetch === "function") {
+    function apiUrlOf(input) {
+      if (typeof input === "string") return input;
+      if (input && typeof input.url === "string") return input.url;
+      try { return String(input); } catch (_) { return ""; }
+    }
+    function apiNeedsAuth(url) {
+      var s = apiUrlOf(url);
+      var path = s;
+      try {
+        if (/^https?:/i.test(s)) path = new URL(s).pathname || s;
+      } catch (_) {}
+      if (path.indexOf("/api/") < 0) return false;
+      if (/\/api\/auth\/(mode|login|logout)(\?|$)/.test(path)) return false;
+      if (/\/api\/upsell\/events(\?|$)/.test(path)) return false;
+      if (/\/api\/trend\/ws\//.test(path)) return false;
+      return true;
+    }
+    function injectAuthHeaders(headers) {
+      var h = {};
+      if (headers && typeof headers.forEach === "function") {
+        headers.forEach(function (v, k) { h[k] = v; });
+      } else {
+        h = Object.assign({}, headers || {});
+      }
+      if (h.Authorization || h.authorization) return h;
+      try {
+        var token = localStorage.getItem(SB_TOKEN_KEY);
+        if (token && !jwtExpired(token)) {
+          h.Authorization = "Bearer " + token;
+          return h;
+        }
+        var user = (localStorage.getItem(SB_EMAIL_KEY)
+          || localStorage.getItem(USER_KEY) || "").trim();
+        var pass = localStorage.getItem(PASS_KEY) || "";
+        if (user && pass && user.indexOf("@") < 0) {
+          h.Authorization = "Basic " + btoa(unescape(encodeURIComponent(user + ":" + pass)));
+        }
+      } catch (_) {}
+      return h;
+    }
+    const rawFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      if (!apiNeedsAuth(input)) {
+        return rawFetch(input, init);
+      }
+      init = init ? Object.assign({}, init) : {};
+      if (!init.credentials) init.credentials = "same-origin";
+      init.headers = injectAuthHeaders(init.headers);
+      if (input && typeof input === "object" && typeof input.url === "string" && typeof Request === "function") {
+        try {
+          return rawFetch(new Request(input, init));
+        } catch (_) {}
+      }
+      return rawFetch(input, init);
+    };
+    window.__trinityApiAuthFetch = true;
+  }
 
   /** Filled from GET /api/auth/mode — Supabase shares IdP with trinity-landing cabinet. */
   let authMode = {
@@ -78,9 +142,23 @@
     return localStorage.getItem(PASS_KEY) || "";
   }
 
+  function jwtExpired(token) {
+    if (!token) return true;
+    try {
+      var parts = String(token).split(".");
+      if (parts.length < 2) return true;
+      var json = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      json += "=".repeat((4 - (json.length % 4)) % 4);
+      var payload = JSON.parse(atob(json));
+      return !(payload.exp > (Date.now() / 1000) + 15);
+    } catch (_) {
+      return true;
+    }
+  }
+
   function authHeader() {
     const token = localStorage.getItem(SB_TOKEN_KEY);
-    if (token) {
+    if (token && !jwtExpired(token)) {
       return "Bearer " + token;
     }
     const user = readLoginEmail() || "imoex";
@@ -193,6 +271,7 @@
     try {
       res = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json"
@@ -222,6 +301,11 @@
     }
     localStorage.setItem(SB_TOKEN_KEY, data.access_token);
     localStorage.setItem(SB_EMAIL_KEY, (data.email || email));
+    if (data.refresh_token) {
+      try {
+        localStorage.setItem(SB_REFRESH_KEY, data.refresh_token);
+      } catch (_) { /* ignore */ }
+    }
     /* Don't reuse cabinet password as HTTP Basic operator password. */
     try {
       localStorage.removeItem(PASS_KEY);
@@ -235,12 +319,58 @@
       alg = JSON.parse(atob(padded.replace(/-/g, "+").replace(/_/g, "/"))).alg || "";
     } catch (_) { /* ignore */ }
     updateSessionBar();
+    syncCloudSession(data.access_token, data.refresh_token, data.email || email);
     appendLog(
       "Вход выполнен — тот же email/пароль, что в кабинете TRINITY"
         + (alg ? " (JWT " + alg + ")" : "")
-        + ".",
+        + ". Снимок стола уйдёт в кабинет.",
       "ok"
     );
+  }
+
+  /** Hand JWT to the JVM so scheduled desk_snapshots upserts work without re-login. */
+  function syncCloudSession(accessToken, refreshToken, email) {
+    if (!accessToken) return;
+    fetch("/api/desk/cloud-session", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: "Bearer " + accessToken
+      },
+      body: JSON.stringify({
+        email: email || "",
+        accessToken: accessToken,
+        refreshToken: refreshToken || "",
+        expiresIn: 3600
+      })
+    })
+      .then(function (res) {
+        return res.text().then(function (t) {
+          var data = null;
+          try {
+            data = t ? JSON.parse(t) : null;
+          } catch (_) {
+            data = null;
+          }
+          return { ok: res.ok, data: data };
+        });
+      })
+      .then(function (r) {
+        if (r.ok && r.data && r.data.ok) {
+          var closed = r.data.closedCount != null ? r.data.closedCount : r.data.lastClosedCount;
+          appendLog(
+            "Кабинет: снимок отправлен"
+              + (closed != null ? " (сделок: " + closed + ")" : "")
+              + ".",
+            "ok"
+          );
+        } else if (r.data && r.data.publishError) {
+          appendLog("Кабинет: сессия есть, снимок пока не ушёл — " + r.data.publishError, "info");
+        }
+      })
+      .catch(function () { /* ignore */ });
   }
 
   async function prepareAuth() {
@@ -371,9 +501,14 @@
       if (btn) {
         btn.addEventListener("click", function () {
           try {
+            revokeDeskSession();
             localStorage.removeItem(SB_TOKEN_KEY);
             localStorage.removeItem(SB_EMAIL_KEY);
+            localStorage.removeItem(SB_REFRESH_KEY);
+            localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
             sessionStorage.removeItem(WELCOME_SESSION_KEY);
+            sessionStorage.removeItem(DESK_ENTERED_KEY);
+            sessionStorage.removeItem(DESK_BOOT_KEY);
           } catch (_) { /* ignore */ }
           updateSessionBar();
           appendLog("Сессия сброшена — войдите снова.", "info");
@@ -874,19 +1009,80 @@
     }, prefersReducedMotion() ? 4100 : 6900);
   }
 
+  function revokeDeskSession() {
+    try {
+      fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      }).catch(function () {});
+    } catch (_) { /* ignore */ }
+  }
+
+  function markDeskEntered(bootId) {
+    try {
+      sessionStorage.setItem(DESK_ENTERED_KEY, "1");
+      localStorage.setItem(DESK_ENTERED_UNTIL_KEY, String(Date.now() + DESK_TTL_MS));
+      if (bootId) sessionStorage.setItem(DESK_BOOT_KEY, String(bootId));
+      if (bootId) localStorage.setItem(DESK_BOOT_KEY, String(bootId));
+    } catch (_) { /* ignore */ }
+    document.documentElement.classList.remove("trinity-need-gate");
+  }
+
+  function deskSessionReady() {
+    try {
+      const boot = (authMode && authMode.bootId) || "";
+      const savedBoot = sessionStorage.getItem(DESK_BOOT_KEY)
+        || localStorage.getItem(DESK_BOOT_KEY)
+        || "";
+      if (boot && savedBoot && savedBoot !== boot) return false;
+      if (sessionStorage.getItem(DESK_ENTERED_KEY) === "1") return true;
+      const until = parseInt(localStorage.getItem(DESK_ENTERED_UNTIL_KEY) || "0", 10);
+      return until > Date.now();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function invalidateStaleDeskSession() {
+    const boot = (authMode && authMode.bootId) || "";
+    if (!boot) return;
+    try {
+      const prev = sessionStorage.getItem(DESK_BOOT_KEY)
+        || localStorage.getItem(DESK_BOOT_KEY)
+        || "";
+      if (prev && prev !== boot) {
+        revokeDeskSession();
+        localStorage.removeItem(SB_TOKEN_KEY);
+        localStorage.removeItem(SB_REFRESH_KEY);
+        localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
+        localStorage.removeItem(DESK_BOOT_KEY);
+        sessionStorage.removeItem(DESK_ENTERED_KEY);
+        sessionStorage.removeItem(DESK_BOOT_KEY);
+        sessionStorage.removeItem(WELCOME_SESSION_KEY);
+      }
+      const until = parseInt(localStorage.getItem(DESK_ENTERED_UNTIL_KEY) || "0", 10);
+      if (until && until <= Date.now()) {
+        localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
+        sessionStorage.removeItem(DESK_ENTERED_KEY);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
   function maybeShowAuthGate() {
     const sb = authMode.supabase || {};
     if (!sb.enabled) {
+      markDeskEntered(authMode.bootId);
+      closeAuthGateHard();
+      return;
+    }
+    invalidateStaleDeskSession();
+    if (deskSessionReady()) {
       closeAuthGateHard();
       return;
     }
     if (!isDashboardPath()) {
-      /* Gate is a dashboard entrance ritual; other pages keep the session bar. */
-      if (localStorage.getItem(SB_TOKEN_KEY)) closeAuthGateHard();
-      return;
-    }
-    if (localStorage.getItem(SB_TOKEN_KEY)) {
-      closeAuthGateHard();
+      location.replace("/view");
       return;
     }
     openAuthGate();
@@ -903,6 +1099,7 @@
       if ($("gate-user")) localStorage.setItem(USER_KEY, $("gate-user").value || "");
       await ensureSupabaseSession(true);
       if (localStorage.getItem(SB_TOKEN_KEY)) {
+        markDeskEntered(authMode.bootId);
         playWelcomeThenClose();
       }
     } catch (e) {
@@ -1963,16 +2160,13 @@
   }
 
   function brokerSettingsPayload() {
-    return {
+    const payload = {
       enabled: $("broker-enabled") ? $("broker-enabled").checked : false,
       provider: $("broker-provider") ? $("broker-provider").value : "T_INVEST",
       mode: $("broker-mode") ? $("broker-mode").value : "AUTO",
       sandbox: $("broker-sandbox") ? $("broker-sandbox").checked : true,
       token: $("broker-token") ? $("broker-token").value : "",
       accountId: $("broker-account-id") ? $("broker-account-id").value : "",
-      autoExecuteAfterAnalysis: $("settings-pairs-auto-execution")
-        ? $("settings-pairs-auto-execution").checked
-        : ($("broker-auto-execute") ? $("broker-auto-execute").checked : true),
       preferLimitOrders: $("broker-prefer-limit") ? $("broker-prefer-limit").checked : true,
       allowMarketFallback: $("broker-allow-market") ? $("broker-allow-market").checked : false,
       emergencyMarketExitEnabled: $("broker-emergency-exit") ? $("broker-emergency-exit").checked : false,
@@ -1981,6 +2175,11 @@
       maxLegDriftBps: 35,
       killSwitch: $("broker-kill-switch") ? $("broker-kill-switch").checked : false
     };
+    const pairsTog = $("settings-pairs-auto-execution") || $("broker-auto-execute");
+    if (pairsTog && pairsTog.dataset.hydrated === "1") {
+      payload.autoExecuteAfterAnalysis = !!pairsTog.checked;
+    }
+    return payload;
   }
 
   function fillBrokerSettings(view) {
@@ -2066,12 +2265,15 @@
   async function loadTrendDeliverySettings() {
     if (!$("trend-auto-execution") && !$("settings-positional-auto-execution")) return;
     try {
-      const res = await fetch("/api/trend/settings", { headers: { Accept: "application/json" } });
+      const res = await fetch("/api/trend/settings", { headers: withAuthHeaders() });
       if (!res.ok) throw new Error("HTTP " + res.status);
       applyTrendDeliveryView(await res.json());
     } catch (err) {
+      const msg = "Не удалось загрузить режим trend: " + (err.message || err);
       const status = $("trend-delivery-status");
-      if (status) status.textContent = "Не удалось загрузить режим trend: " + (err.message || err);
+      if (status) status.textContent = msg;
+      const pos = $("positional-delivery-status");
+      if (pos) pos.textContent = msg.replace("trend", "positional");
     }
   }
 
@@ -2082,6 +2284,8 @@
     const auto = !!view.autoExecution;
     toggle.checked = auto;
     toggle.setAttribute("aria-checked", auto ? "true" : "false");
+    toggle.dataset.hydrated = "1";
+    if (!toggle.closest(".robot-mode-card.is-off")) toggle.disabled = false;
     const wrap = toggle.closest(".mode-switch");
     if (wrap) {
       wrap.classList.toggle("is-auto", auto);
@@ -2111,6 +2315,8 @@
     const auto = !!view.positionalAutoExecution;
     toggle.checked = auto;
     toggle.setAttribute("aria-checked", auto ? "true" : "false");
+    toggle.dataset.hydrated = "1";
+    if (!toggle.closest(".robot-mode-card.is-off")) toggle.disabled = false;
     const wrap = toggle.closest(".mode-switch");
     if (wrap) {
       wrap.classList.toggle("is-auto", auto);
@@ -2135,7 +2341,7 @@
   async function loadArbDeliverySettings() {
     if (!$("arb-auto-execution") && !$("desk-arb-auto-execution")) return;
     try {
-      const res = await fetch("/api/calendar-arb/settings", { headers: { Accept: "application/json" } });
+      const res = await fetch("/api/calendar-arb/settings", { headers: withAuthHeaders() });
       if (!res.ok) throw new Error("HTTP " + res.status);
       applyArbDeliveryView(await res.json());
     } catch (err) {
@@ -2154,15 +2360,16 @@
     arbAutoToggles().forEach(function (toggle) {
       toggle.checked = auto;
       toggle.setAttribute("aria-checked", auto ? "true" : "false");
+      toggle.dataset.hydrated = "1";
+      if (!toggle.closest(".robot-mode-card.is-off")) toggle.disabled = false;
       const wrap = toggle.closest(".mode-switch");
       if (wrap) {
         wrap.classList.toggle("is-auto", auto);
         wrap.classList.toggle("is-signal", !auto);
-        const labels = wrap.querySelectorAll(".mode-switch-label");
-        if (labels[0]) labels[0].textContent = "Наблюдение";
-        if (labels[1]) labels[1].textContent = "Авто";
       }
     });
+    const deskWrap = $("arb-auto-wrap");
+    if (deskWrap && $("desk-arb-auto-execution")) deskWrap.hidden = false;
     const title = $("arb-delivery-title");
     const hint = $("arb-delivery-hint");
     const status = $("arb-delivery-status");
@@ -2274,6 +2481,8 @@
     if (toggle) {
       toggle.checked = auto;
       toggle.setAttribute("aria-checked", auto ? "true" : "false");
+      toggle.dataset.hydrated = "1";
+      if (!toggle.closest(".robot-mode-card.is-off")) toggle.disabled = false;
       const wrap = toggle.closest(".mode-switch");
       if (wrap) {
         wrap.classList.toggle("is-auto", auto);
@@ -2284,6 +2493,7 @@
     }
     if ($("broker-auto-execute")) {
       $("broker-auto-execute").checked = auto;
+      $("broker-auto-execute").dataset.hydrated = "1";
     }
     const title = $("pairs-delivery-title");
     const hint = $("pairs-delivery-hint");
@@ -2562,6 +2772,7 @@
           );
           try {
             localStorage.removeItem(SB_TOKEN_KEY);
+            localStorage.removeItem(SB_REFRESH_KEY);
           } catch (_) { /* ignore */ }
         } else {
           appendLog(
@@ -2969,26 +3180,31 @@
     }
     if ($("trend-auto-execution")) {
       $("trend-auto-execution").addEventListener("change", function () {
+        if ($("trend-auto-execution").dataset.hydrated !== "1") return;
         setTrendAutoExecution($("trend-auto-execution").checked);
       });
     }
     if ($("settings-positional-auto-execution")) {
       $("settings-positional-auto-execution").addEventListener("change", function () {
+        if ($("settings-positional-auto-execution").dataset.hydrated !== "1") return;
         setPositionalAutoExecution($("settings-positional-auto-execution").checked);
       });
     }
     if ($("settings-pairs-auto-execution")) {
       loadPairsDeliverySettings();
       $("settings-pairs-auto-execution").addEventListener("change", function () {
+        if ($("settings-pairs-auto-execution").dataset.hydrated !== "1") return;
         setPairsAutoExecution($("settings-pairs-auto-execution").checked);
       });
     }
     if ($("arb-auto-execution") || $("desk-arb-auto-execution")) {
+      if ($("arb-auto-wrap")) $("arb-auto-wrap").hidden = true;
       loadArbDeliverySettings();
       arbAutoToggles().forEach(function (toggle) {
         if (toggle.dataset.bound === "1") return;
         toggle.dataset.bound = "1";
         toggle.addEventListener("change", function () {
+          if (toggle.dataset.hydrated !== "1") return;
           setArbAutoExecution(toggle.checked);
         });
       });
@@ -3015,6 +3231,11 @@
       maybeShowAuthGate();
       if (authMode.supabase && authMode.supabase.enabled && localStorage.getItem(SB_TOKEN_KEY)) {
         appendLog("Найдена Supabase-сессия — Bearer для API.", "ok");
+        syncCloudSession(
+          localStorage.getItem(SB_TOKEN_KEY),
+          localStorage.getItem(SB_REFRESH_KEY) || "",
+          localStorage.getItem(SB_EMAIL_KEY) || ""
+        );
       }
       beaconUpsell("page_view", currentPagePath());
     });

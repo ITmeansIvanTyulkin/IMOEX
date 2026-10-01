@@ -169,7 +169,7 @@ imoex:
     min-closed-trades: 4
     exclude-oil-gas: false
     champion-only: true
-    sit-out-if-unproven: true
+    sit-out-if-unproven: false
     min-quality-pairs: 2
     pair-min-closed-trades: 2
     pair-loss-streak: 2
@@ -252,6 +252,8 @@ imoex:
       url: ${SUPABASE_URL:}
       jwt-secret: ${SUPABASE_JWT_SECRET:}
       anon-key: ${SUPABASE_ANON_KEY:}
+      # How often the desk upserts paper/regime into cabinet desk_snapshots
+      snapshot-ms: 60000
   # Short HTTP smoke after ApplicationReady (not full Maven suite).
   # FAIL → soft-block auto/live + retries; JVM stays up. See GET /api/ops/smoke
   smoke:
@@ -407,6 +409,7 @@ trinity:
 
 server:
   port: 8080
+  address: 127.0.0.1
 
 spring:
   application:

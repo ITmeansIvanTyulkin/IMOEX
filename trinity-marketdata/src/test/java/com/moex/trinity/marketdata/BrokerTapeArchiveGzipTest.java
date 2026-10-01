@@ -59,4 +59,40 @@ class BrokerTapeArchiveGzipTest {
         assertEquals(1, archive.loadDay("BRU6", yesterday).size());
         assertEquals(1, archive.loadDay("BRU6", today).size());
     }
+
+    @Test
+    void thinLiveDomKeepsLatestSnapshotPerMinute() throws Exception {
+        BrokerTapeArchive archive = new BrokerTapeArchive(tmp);
+        LocalDate day = LocalDate.of(2026, 9, 22);
+        Path dom = archive.domPathFor("BRV6", day);
+        Files.createDirectories(tmp);
+        StringBuilder sb = new StringBuilder(400_000);
+        // 3 minutes × dense snaps; pad asks so fixture exceeds the 256 KiB thin gate.
+        String padAsks = ",\"asks\":[" + "{\"p\":100.0,\"q\":1},".repeat(40) + "{\"p\":101.0,\"q\":1}]";
+        for (int i = 0; i < 900; i++) {
+            int min = i / 300;          // 0,1,2
+            int sec = (i / 5) % 60;
+            int price = 90 + i;
+            sb.append("{\"time\":\"2026-09-22T10:0").append(min).append(':');
+            if (sec < 10) {
+                sb.append('0');
+            }
+            sb.append(sec).append('.').append(String.format("%03d", (i % 5) * 100))
+                    .append("Z\",\"instrumentId\":\"BRV6\",\"depth\":1,\"consistent\":true,")
+                    .append("\"bids\":[{\"p\":").append(price).append(".0,\"q\":1}]")
+                    .append(padAsks).append("}\n");
+        }
+        Files.writeString(dom, sb.toString());
+        long before = Files.size(dom);
+        assertTrue(before > 256_000L, "fixture must exceed thin threshold");
+
+        assertEquals(1, archive.thinLiveDomToOnePerMinute(day));
+        long after = Files.size(dom);
+        assertTrue(after < before / 20, "dense DOM must collapse toward 1/min");
+        List<DomBook> books = archive.loadDomDay("BRV6", day);
+        assertEquals(3, books.size());
+        assertEquals(389.0, books.get(0).bids().get(0).price(), 1e-9); // last of minute 0
+        assertEquals(689.0, books.get(1).bids().get(0).price(), 1e-9);
+        assertEquals(989.0, books.get(2).bids().get(0).price(), 1e-9);
+    }
 }

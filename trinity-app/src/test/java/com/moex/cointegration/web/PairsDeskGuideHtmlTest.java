@@ -44,8 +44,9 @@ class PairsDeskGuideHtmlTest {
         String src = Files.readString(p, StandardCharsets.UTF_8);
         assertTrue(src.contains("id=\"pairs-guide-open\""), "guide button missing on pairs desk");
         assertTrue(src.contains("pairs-desk-guide.html"), "guide resource not loaded");
-        assertTrue(src.contains("pairs-final-desk.js?v=20260902-guide2"), src);
+        assertTrue(src.contains("pairs-final-desk.js?v=20260919-persist1"), src);
         String js = read("static/js/pairs-final-desk.js");
         assertTrue(js.contains("function bindPairsGuide"), "guide binder missing");
+        assertTrue(js.contains("dataset.hydrated"), "pairs toggle must wait for broker settings");
     }
 }

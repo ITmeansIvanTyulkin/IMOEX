@@ -3,13 +3,8 @@ package com.moex.trinity.marketdata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -27,9 +22,6 @@ public final class PublicEnergyContext {
 
     private static final Logger log = LoggerFactory.getLogger(PublicEnergyContext.class);
     private static final ZoneId NY = ZoneId.of("America/New_York");
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(2))
-            .build();
     private static final String CL_URL =
             "https://query1.finance.yahoo.com/v8/finance/chart/CL=F?interval=1h&range=5d";
     private static final String RB_URL =
@@ -325,17 +317,8 @@ public final class PublicEnergyContext {
         return json.substring(start, b).replace("\"", "");
     }
 
-    private static String get(String url) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(2))
-                .header("User-Agent", "TRINITY-desk/1.0")
-                .GET()
-                .build();
-        HttpResponse<String> res = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
-        if (res.statusCode() < 200 || res.statusCode() >= 300) {
-            throw new IllegalStateException("HTTP " + res.statusCode());
-        }
-        return res.body();
+    private static synchronized String get(String url) throws Exception {
+        return PlainHttp.get(url, 2_000, "TRINITY-desk/1.0");
     }
 
     private static double extractNumber(String json, String key) {

@@ -21,7 +21,7 @@ class StartupSmokeStatusTest {
         status.ok(2, 5, List.of(new StartupSmokeStatus.Check("x", true, "ok")), true);
         assertTrue(status.get().ok());
         assertTrue(status.get().executionBlocked());
-        assertTrue(status.get().message().contains("auto/live"));
+        assertTrue(status.get().message().contains("live remains off"));
 
         Map<String, Object> dto = status.dto();
         assertEquals("OK", dto.get("phase"));
