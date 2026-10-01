@@ -38,6 +38,15 @@ imoex:
 
 Basic (`imoex` / local password) остаётся запасным контуром.
 
-## Cabinet setup
+## Desk → cabinet snapshot
 
-См. в репо лендинга: `docs/SUPABASE_SETUP.md` + `supabase/profiles.sql`.
+После входа тем же email приложение сохраняет JWT (`data/desk-cloud-session.json`) и раз в ~60 с
+upsert'ит paper/regime в таблицу `desk_snapshots` (см. SQL в репо лендинга).
+
+- Логин через `POST /api/auth/login` сразу кладёт сессию на стол.
+- UI дополнительно шлёт `POST /api/desk/cloud-session` (Bearer) и триггерит первый publish.
+- Статус: `GET /api/desk/snapshot`; ручной push: `POST /api/desk/snapshot/publish`.
+- Кабинет на trinity.trading читает свою строку и обновляет цифры раз в минуту.
+
+Поля лицензии (`license_status`, `live_trading`, даты триала) пользовательским JWT не меняются —
+триггер в SQL их замораживает.

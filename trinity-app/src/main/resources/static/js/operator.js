@@ -3,6 +3,7 @@
   const PASS_KEY = "imoex.ops.pass";
   const SB_TOKEN_KEY = "trinity.supabase.access_token";
   const SB_EMAIL_KEY = "trinity.supabase.user_email";
+  const SB_REFRESH_KEY = "trinity.supabase.refresh_token";
   const WELCOME_SESSION_KEY = "trinity.welcome.played";
   const DESK_ENTERED_KEY = "trinity.desk.entered";
   const DESK_ENTERED_UNTIL_KEY = "trinity.desk.enteredUntil";
@@ -300,6 +301,11 @@
     }
     localStorage.setItem(SB_TOKEN_KEY, data.access_token);
     localStorage.setItem(SB_EMAIL_KEY, (data.email || email));
+    if (data.refresh_token) {
+      try {
+        localStorage.setItem(SB_REFRESH_KEY, data.refresh_token);
+      } catch (_) { /* ignore */ }
+    }
     /* Don't reuse cabinet password as HTTP Basic operator password. */
     try {
       localStorage.removeItem(PASS_KEY);
@@ -313,12 +319,58 @@
       alg = JSON.parse(atob(padded.replace(/-/g, "+").replace(/_/g, "/"))).alg || "";
     } catch (_) { /* ignore */ }
     updateSessionBar();
+    syncCloudSession(data.access_token, data.refresh_token, data.email || email);
     appendLog(
       "Вход выполнен — тот же email/пароль, что в кабинете TRINITY"
         + (alg ? " (JWT " + alg + ")" : "")
-        + ".",
+        + ". Снимок стола уйдёт в кабинет.",
       "ok"
     );
+  }
+
+  /** Hand JWT to the JVM so scheduled desk_snapshots upserts work without re-login. */
+  function syncCloudSession(accessToken, refreshToken, email) {
+    if (!accessToken) return;
+    fetch("/api/desk/cloud-session", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: "Bearer " + accessToken
+      },
+      body: JSON.stringify({
+        email: email || "",
+        accessToken: accessToken,
+        refreshToken: refreshToken || "",
+        expiresIn: 3600
+      })
+    })
+      .then(function (res) {
+        return res.text().then(function (t) {
+          var data = null;
+          try {
+            data = t ? JSON.parse(t) : null;
+          } catch (_) {
+            data = null;
+          }
+          return { ok: res.ok, data: data };
+        });
+      })
+      .then(function (r) {
+        if (r.ok && r.data && r.data.ok) {
+          var closed = r.data.closedCount != null ? r.data.closedCount : r.data.lastClosedCount;
+          appendLog(
+            "Кабинет: снимок отправлен"
+              + (closed != null ? " (сделок: " + closed + ")" : "")
+              + ".",
+            "ok"
+          );
+        } else if (r.data && r.data.publishError) {
+          appendLog("Кабинет: сессия есть, снимок пока не ушёл — " + r.data.publishError, "info");
+        }
+      })
+      .catch(function () { /* ignore */ });
   }
 
   async function prepareAuth() {
@@ -452,6 +504,7 @@
             revokeDeskSession();
             localStorage.removeItem(SB_TOKEN_KEY);
             localStorage.removeItem(SB_EMAIL_KEY);
+            localStorage.removeItem(SB_REFRESH_KEY);
             localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
             sessionStorage.removeItem(WELCOME_SESSION_KEY);
             sessionStorage.removeItem(DESK_ENTERED_KEY);
@@ -1001,6 +1054,7 @@
       if (prev && prev !== boot) {
         revokeDeskSession();
         localStorage.removeItem(SB_TOKEN_KEY);
+        localStorage.removeItem(SB_REFRESH_KEY);
         localStorage.removeItem(DESK_ENTERED_UNTIL_KEY);
         localStorage.removeItem(DESK_BOOT_KEY);
         sessionStorage.removeItem(DESK_ENTERED_KEY);
@@ -2718,6 +2772,7 @@
           );
           try {
             localStorage.removeItem(SB_TOKEN_KEY);
+            localStorage.removeItem(SB_REFRESH_KEY);
           } catch (_) { /* ignore */ }
         } else {
           appendLog(
@@ -3176,6 +3231,11 @@
       maybeShowAuthGate();
       if (authMode.supabase && authMode.supabase.enabled && localStorage.getItem(SB_TOKEN_KEY)) {
         appendLog("Найдена Supabase-сессия — Bearer для API.", "ok");
+        syncCloudSession(
+          localStorage.getItem(SB_TOKEN_KEY),
+          localStorage.getItem(SB_REFRESH_KEY) || "",
+          localStorage.getItem(SB_EMAIL_KEY) || ""
+        );
       }
       beaconUpsell("page_view", currentPagePath());
     });

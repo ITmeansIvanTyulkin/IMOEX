@@ -252,6 +252,8 @@ imoex:
       url: ${SUPABASE_URL:}
       jwt-secret: ${SUPABASE_JWT_SECRET:}
       anon-key: ${SUPABASE_ANON_KEY:}
+      # How often the desk upserts paper/regime into cabinet desk_snapshots
+      snapshot-ms: 60000
   # Short HTTP smoke after ApplicationReady (not full Maven suite).
   # FAIL → soft-block auto/live + retries; JVM stays up. See GET /api/ops/smoke
   smoke:

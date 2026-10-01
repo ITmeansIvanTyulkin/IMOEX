@@ -17,6 +17,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.moex.cointegration.TestBootApplication;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.cointegration.config.DeskCloudSessionStore;
 import com.moex.cointegration.config.DeskSessionStore;
 
 import static org.mockito.Mockito.when;
@@ -32,6 +33,9 @@ class AuthModeControllerTest {
 
     @MockBean
     ImoexProperties properties;
+
+    @MockBean
+    DeskCloudSessionStore cloudSessions;
 
     @Test
     void modeExposesSupabaseFlags() throws Exception {
