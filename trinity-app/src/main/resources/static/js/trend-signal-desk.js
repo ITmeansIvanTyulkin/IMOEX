@@ -1031,6 +1031,14 @@
       marketItems.push("<strong>" + esc(impulse.headline) + "</strong>");
     }
 
+    const hunt = data.exclusiveHunt || sit.exclusiveHunt || {};
+    if (hunt.blocksNewArm) {
+      marketItems.push("<strong>Микро · вход отложен</strong>: "
+        + esc(hunt.waitReason || hunt.ru || "стакан/футпринт против стороны"));
+    } else if (hunt.ru) {
+      marketItems.push(esc(hunt.ru));
+    }
+
     const gap = sit.gapFill || {};
     if (gap.present) {
       const gapTitle = gap.title || (gap.filled ? "Ночной гэп — закрыт" : "Ночной (утренний) гэп");
@@ -1168,11 +1176,15 @@
       ? "живой счёт — осторожно"
       : (autoJ ? "учебный счёт, без реальных денег" : "только подсказки, заявок нет");
     const stateRu = engineStateRu(state);
+    const openBrief = deskOpenTrade(data);
     robotHtml += "<p>" + esc(stateRu);
-    if (side && side !== "NONE") {
-      const sideRu = side === "BUY" ? "покупка" : (side === "SELL" ? "продажа" : side);
-      const modeRu = mode === "BOUNCE" ? "отбой" : (mode === "RETEST" ? "ретест после пробоя" : mode);
-      robotHtml += " · " + esc(sideRu) + (modeRu ? (" (" + esc(modeRu) + ")") : "");
+    const briefSide = (openBrief && openBrief.side)
+      || (side && side !== "NONE" ? side : "");
+    const briefMode = (openBrief && openBrief.mode) || mode || "";
+    if (briefSide) {
+      const sideWordBrief = briefSide === "BUY" ? "покупка" : (briefSide === "SELL" ? "продажа" : briefSide);
+      const modeWordBrief = modeRu(briefMode) || "";
+      robotHtml += " · " + esc(sideWordBrief) + (modeWordBrief ? (" (" + esc(modeWordBrief) + ")") : "");
     }
     robotHtml += " · " + channelRu + ".</p>";
 
@@ -1213,13 +1225,12 @@
 
     if (sit.fairPaper && sit.fairPaper.enabled) {
       const fp = sit.fairPaper;
-      if (fp.open) {
-        const fpSide = fp.open.side === "BUY" ? "покупка" : (fp.open.side === "SELL" ? "продажа" : fp.open.side);
-        robotHtml += "<p class='signal-brief-note'><strong>Учебная сделка открыта</strong>: "
-          + esc(fpSide)
-          + " по " + fmtPx(fp.open.avg) + ", " + fp.open.qty + " лот."
-          + " Стоп " + fmtPx(fp.open.sl)
-          + (fp.open.tp1 != null ? (", цель " + fmtPx(fp.open.tp1)) : "")
+      const openNow = openBrief || fp.open;
+      if (openNow) {
+        const story = formatOpenTradeDetail(openNow, data);
+        robotHtml += "<p class='signal-brief-note'><strong>Учебная сделка:</strong> "
+          + esc(story || ((openNow.side === "BUY" ? "покупка" : "продажа")
+            + " avg " + fmtPx(openNow.avg) + " ×" + openNow.qty))
           + ".</p>";
       } else if (fp.pending) {
         const fpSide = fp.pending.side === "BUY" ? "покупка" : (fp.pending.side === "SELL" ? "продажа" : fp.pending.side);
@@ -1235,8 +1246,25 @@
 
     const whyHuman = humanizeDeskReason(reason);
     if (posture === "IN_TRADE") {
-      robotHtml += "<p><strong>Почему в сделке:</strong> " + esc(whyHuman) + "</p>";
-      if (sit.setupLevels) {
+      if (openBrief) {
+        const pot = openRemainingPotentialRub(openBrief, data);
+        robotHtml += "<p><strong>Что ведём:</strong> "
+          + esc(formatOpenTradeDetail(openBrief, data)) + "</p>";
+        if (pot != null) {
+          robotHtml += "<p class='signal-brief-note'>План по деньгам: "
+            + (openBrief.tp1Done
+              ? ("до TP2 ещё ~" + Math.round(pot).toLocaleString("ru-RU") + " ₽ по остатку позиции")
+              : ("до TP1 ~" + Math.round(pot).toLocaleString("ru-RU") + " ₽"))
+            + (Number(openBrief.realizedPnlRub) >= 1
+              ? (", с частичной фиксации уже +"
+                + Math.round(openBrief.realizedPnlRub).toLocaleString("ru-RU") + " ₽")
+              : "")
+            + ".</p>";
+        }
+      } else {
+        robotHtml += "<p><strong>Почему в сделке:</strong> " + esc(whyHuman) + "</p>";
+      }
+      if (sit.setupLevels && !openBrief) {
         const lv = sit.setupLevels;
         robotHtml += "<p class='signal-brief-note'>Вход "
           + fmtPx(lv.entry) + " · стоп " + fmtPx(lv.stop)
@@ -3783,18 +3811,23 @@
     if (!lastWorkingOpen || !(px > 0)) return;
     const open = lastWorkingOpen;
     const touch = bookTouchPx(open, book, px);
+    // Exit is server-authoritative (fair-paper). Client only advances TP1 visuals —
+    // otherwise SELL/BUY overlays flicker when mid briefly kisses BE/SL.
     if (liveTouchedLevel(open, touch, "tp2") || liveWouldExit(open, touch)) {
-      flattenWorking();
       return;
     }
     if (!open.tp1Done && liveTouchedLevel(open, touch, "tp1")) {
       const qty = Number(open.qty) || 0;
-      let q1 = Math.round(qty / 3);
+      const frac = (Number(open.tp1Fraction) > 0 && Number(open.tp1Fraction) < 1)
+        ? Number(open.tp1Fraction) : (1 / 3);
+      let q1 = Math.round(qty * frac);
       if (q1 >= qty) q1 = qty - 1;
       if (q1 < 0) q1 = 0;
       if (q1 > 0) open.qty = qty - q1;
       open.tp1Done = true;
-      if (Number(open.avg) > 0) open.sl = Number(open.avg);
+      // GAP_FILL keeps structural SL after TP1 (server manage); Exclusive → BE
+      const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
+      if (!gapFill && Number(open.avg) > 0) open.sl = Number(open.avg);
       liveTp1Until = Date.now() + 60000;
       lastOverlayKey = "";
       applyOverlays(lastOverlayPlan, lastOverlaySig, lastOverlayCandles, overlayStructure, open);
@@ -4109,11 +4142,24 @@
       $("sig-delivery").textContent = data.delivery || "—";
       const sig = data.signal || {};
       const plan = data.plan || {};
-      $("sig-side").textContent = sig.side || plan.side || "—";
-      $("sig-mode").textContent = sig.mode || plan.mode || "—";
-      $("sig-potential").textContent = fmtPot(data.potentialPnlRub);
-      $("sig-side").classList.toggle("is-buy", (sig.side || plan.side) === "BUY");
-      $("sig-side").classList.toggle("is-sell", (sig.side || plan.side) === "SELL");
+      const openChip = deskOpenTrade(data);
+      const sideChip = (openChip && openChip.side)
+        || ((sig.side && sig.side !== "NONE") ? sig.side : null)
+        || ((plan.side && plan.side !== "NONE") ? plan.side : null)
+        || "—";
+      const modeChip = (openChip && openChip.mode)
+        || sig.mode
+        || plan.mode
+        || "—";
+      $("sig-side").textContent = sideChip;
+      $("sig-mode").textContent = modeChip;
+      let potVal = data.potentialPnlRub;
+      if ((potVal == null || !isFinite(Number(potVal))) && openChip) {
+        potVal = openRemainingPotentialRub(openChip, data);
+      }
+      $("sig-potential").textContent = fmtPot(potVal);
+      $("sig-side").classList.toggle("is-buy", sideChip === "BUY");
+      $("sig-side").classList.toggle("is-sell", sideChip === "SELL");
       const chartInst = data.instrument || "—";
       const chartLabel = $("signal-chart-label");
       const paperTitle = $("signal-paper-title");
@@ -4208,21 +4254,27 @@
         || (data.parallelPlaybooks ? "levels-profile-br-m5" : data.playbookId)
         || "";
       let overlayOpen = sit.inTrade ? fairPaperLaneOpen(fp, overlayPb) : null;
+      if (!overlayOpen && sit.inTrade && fp && fp.open) {
+        overlayOpen = fp.open;
+      }
       const touchPx = bookTouchPx(overlayOpen || lastWorkingOpen, data.book, livePx);
-      if (overlayOpen && liveFlatUntil > Date.now()
-          && liveWouldExit(overlayOpen, touchPx > 0 ? touchPx : Number(overlayOpen.avg))) {
-        overlayOpen = null;
-      } else if (overlayOpen) {
+      // Server open wins: never hide working overlays on transient live SL/TP ticks.
+      if (overlayOpen) {
         liveFlatUntil = 0;
         if (liveTp1Until > Date.now() && !overlayOpen.tp1Done
             && liveTouchedLevel(overlayOpen, touchPx, "tp1")) {
+          const gapFill = String(overlayOpen.mode || "").toUpperCase() === "GAP_FILL";
           overlayOpen = Object.assign({}, overlayOpen, {
             tp1Done: true,
-            sl: Number(overlayOpen.avg) > 0 ? overlayOpen.avg : overlayOpen.sl
+            sl: (!gapFill && Number(overlayOpen.avg) > 0) ? overlayOpen.avg : overlayOpen.sl
           });
         } else if (overlayOpen.tp1Done) {
           liveTp1Until = 0;
         }
+      } else if (liveFlatUntil > Date.now()) {
+        // keep client-flat only while server already reports flat
+      } else {
+        liveFlatUntil = 0;
       }
       lastWorkingOpen = overlayOpen;
       lastOverlayPlan = plan;
@@ -4524,7 +4576,98 @@
     if (m === "BOUNCE") return "отскок";
     if (m === "RETEST") return "ретест";
     if (m === "BREAKOUT" || m === "BREAK") return "пробой";
+    if (m === "GAP_FILL") return "закрытие гэпа";
     return "";
+  }
+  function deskRubPerPoint(data, instrument) {
+    const direct = data && Number(data.rubPerPoint);
+    if (direct > 0) return direct;
+    const inst = instrument || (data && data.instrument) || "";
+    const list = (data && data.instruments) || [];
+    for (let i = 0; i < list.length; i++) {
+      const row = list[i];
+      if (!row) continue;
+      if (row.secid === inst || row.hintSecid === inst || row.family === inst) {
+        const r = Number(row.rubPerPoint);
+        if (r > 0) return r;
+      }
+    }
+    if (/^BR/i.test(inst)) return 7;
+    return 0;
+  }
+  function deskPointSizeOf(data, instrument) {
+    const direct = data && Number(data.pointSize);
+    if (direct > 0) return direct;
+    return deskPointSize(instrument || (data && data.instrument), 0.01);
+  }
+  /** Open fair-paper for the desk playbook (lane-aware). */
+  function deskOpenTrade(data) {
+    const sit = (data && data.situation) || {};
+    if (!sit.inTrade) return null;
+    const fp = sit.fairPaper || ((data && data.fairPaper) || {});
+    const pbId = sit.playbookId
+      || viewPlaybookId()
+      || (data && data.parallelPlaybooks ? "levels-profile-br-m5" : (data && data.playbookId))
+      || "";
+    return fairPaperLaneOpen(fp, pbId) || (fp && fp.open) || null;
+  }
+  function openRemainingPotentialRub(open, data) {
+    if (!open) return null;
+    const avg = Number(open.avg);
+    const qty = Number(open.qty);
+    if (!(avg > 0) || !(qty > 0)) return null;
+    const tp1Done = !!open.tp1Done;
+    const tp1 = Number(open.tp1);
+    const tp2 = Number(open.tp2);
+    const target = (!tp1Done && tp1 > 0) ? tp1 : tp2;
+    if (!(target > 0)) return null;
+    const buy = open.side === "BUY";
+    if (buy && !(target > avg)) return null;
+    if (!buy && !(target < avg)) return null;
+    const point = deskPointSizeOf(data, open.instrument || (data && data.instrument));
+    const rub = deskRubPerPoint(data, open.instrument || (data && data.instrument));
+    if (!(point > 0) || !(rub > 0)) return null;
+    return Math.abs(target - avg) / point * qty * rub;
+  }
+  /** Compact human line for chip/fab + brief while IN_TRADE. */
+  function formatOpenTradeDetail(open, data) {
+    if (!open) return "";
+    const bits = [];
+    const scope = (data && (data.deskScope || (data.situation && data.situation.deskScope))) || deskScope();
+    if (scope === "positional") bits.push("позиционный");
+    else bits.push("диапазонный");
+    if (open.side === "BUY") bits.push("BUY");
+    else if (open.side === "SELL") bits.push("SELL");
+    const modeWord = modeRu(open.mode) || String(open.mode || "").toUpperCase();
+    if (modeWord) bits.push(modeWord);
+    if (open.avg != null) bits.push("avg " + fmtStatusPx(open.avg));
+    if (open.qty != null) {
+      const pq = open.plannedQty != null ? ("/" + open.plannedQty) : "";
+      bits.push("qty " + open.qty + pq);
+    }
+    if (open.tp1Done) {
+      bits.push("TP1 снят");
+      if (open.sl != null) {
+        const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
+        const nearBe = Number(open.avg) > 0 && Math.abs(Number(open.sl) - Number(open.avg)) < 1e-6;
+        bits.push((gapFill && !nearBe ? "SL " : "SL в БУ ") + fmtStatusPx(open.sl));
+      }
+      if (open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+    } else {
+      if (open.sl != null) bits.push("SL " + fmtStatusPx(open.sl));
+      if (open.tp1 != null) bits.push("TP1 " + fmtStatusPx(open.tp1));
+      if (open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+    }
+    const pot = openRemainingPotentialRub(open, data);
+    if (pot != null) {
+      bits.push((open.tp1Done ? "до TP2 ~" : "до TP1 ~")
+        + (pot >= 0 ? "+" : "") + Math.round(pot).toLocaleString("ru-RU") + " ₽");
+    }
+    const realized = Number(open.realizedPnlRub);
+    if (isFinite(realized) && Math.abs(realized) >= 1) {
+      bits.push("уже " + (realized >= 0 ? "+" : "") + Math.round(realized).toLocaleString("ru-RU") + " ₽");
+    }
+    return bits.join(" · ");
   }
   function zoneRu(lock, lv) {
     if (lock && lock.low != null && lock.high != null) {
@@ -4630,20 +4773,9 @@
     if (posture === "IN_TRADE") {
       cls = "is-trade";
       status = "В сделке";
-      const open = laneOpen || {};
-      const s = open.side || side || "";
-      const avg = open.avg != null ? open.avg : lv.entry;
-      const sl = open.sl != null ? open.sl : lv.stop;
-      const qty = open.qty != null ? open.qty : lv.qty;
-      const bits = [];
-      if (s === "BUY") bits.push("покупка");
-      else if (s === "SELL") bits.push("продажа");
-      if (modeWord) bits.push(modeWord);
-      if (open.tp1Done) bits.push("TP1 снят · стоп в БУ · ждём TP2");
-      if (avg != null) bits.push("вход " + fmtStatusPx(avg));
-      if (sl != null) bits.push("стоп " + fmtStatusPx(sl));
-      if (qty != null) bits.push("×" + qty);
-      detail = bits.join(" · ") || "Ведём позицию";
+      const open = laneOpen || deskOpenTrade(data) || {};
+      const story = formatOpenTradeDetail(open, data);
+      detail = story || "Ведём позицию";
     } else if (posture === "WAITING_FILL") {
       cls = "is-armed";
       status = "Ждёт исполнения";
@@ -4705,7 +4837,7 @@
       const closed = lastCloseBit(sit, fp, pbId);
       if (closed) detail = closed + " · " + detail;
     }
-    if (detail.length > 220) detail = detail.slice(0, 218) + "…";
+    if (detail.length > 320) detail = detail.slice(0, 318) + "…";
     return { cls: cls, status: status, detail: detail };
   }
   function syncStatusRail(data) {
