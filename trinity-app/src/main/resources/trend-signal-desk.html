@@ -1,5 +1,5 @@
 <section class="signal-desk" id="trend-signal-desk" data-desk-scope="range">
-  <link rel="stylesheet" href="/css/operator.css?v=20260930-opendetail">
+  <link rel="stylesheet" href="/css/operator.css?v=20261002-microvision">
   <div class="signal-desk-head">
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
@@ -249,6 +249,7 @@
         <a href="#guide-wind">Ветер H1</a>
         <a href="#guide-phase">Фаза дня</a>
         <a href="#guide-entries">Два входа</a>
+        <a href="#guide-micro">Микро</a>
         <a href="#guide-robot">Робот</a>
         <a href="#guide-manual">Без автоторгов</a>
         <a href="#guide-skip">Когда молчит</a>
@@ -548,14 +549,31 @@
         </p>
       </article>
 
+      <article class="signal-guide-section" id="guide-micro" data-guide-scope="range">
+        <h4>Микро · стакан и лента</h4>
+        <p>
+          Перед лимитами робот смотрит ленту и HTF. Жёстко режет только узкий veto
+          (<code>OCT2026_NARROW_MICRO_VETO</code>) — остальное в разборе как мягкий фон.
+        </p>
+        <ul class="signal-guide-list">
+          <li><strong>Нож</strong> — не покупаем в свежий каскад продаж.</li>
+          <li><strong>Импульс против HTF</strong> — сбор стопов / нож / ракета против стороны при встречном часу → вход не ставим.</li>
+          <li><strong>Кит / толпа / spoof</strong> — видно в «как видит робот», но сами по себе лимиты не снимают.</li>
+        </ul>
+        <p class="signal-guide-note">
+          Чек-лист полки может быть зелёным, а нож или импульс против HTF — лимитов не будет.
+        </p>
+      </article>
+
       <article class="signal-guide-section" id="guide-robot" data-guide-scope="range">
         <h4>Если автоторги включены</h4>
         <ol class="signal-guide-steps">
           <li>Сверяет ветер H1, фазу дня, полки M5, gap-fill и стакан.</li>
+          <li>Проверяет микро (стакан / футпринт / сбор стопов) — при ловушке вход не ставит.</li>
           <li>При собранном сценарии и прохождении фильтров — лимиты, стоп, цели.</li>
           <li>Fair-paper исполняет по <strong>закрытым M5</strong> (не по формирующейся свече):
             меньше шума, ближе к чек-листу.</li>
-          <li>В «Робот · …» пишет статус, ветер, фазу, касание, фокус полки.</li>
+          <li>В «Робот · …» и «как видит робот» пишет статус, ветер, фазу и микро.</li>
           <li>Paper / sandbox → statement (виртуальная книга).</li>
         </ol>
         <p class="signal-guide-note">
@@ -588,6 +606,8 @@
           <li>Окно событий (EIA/API), края сессии и <strong>вечерняя сессия</strong> (после 19:00) —
             тонкий рынок, новых сетапов нет. Торгуем только основную сессию ~10:20–18:30.</li>
           <li>Цена в середине между TOP и BOT без сетапа.</li>
+          <li>Микро против: сбор стопов / нож / кит в ленте / толпа в стакане против стороны —
+            в блоке «как видит робот» будет явная ловушка.</li>
         </ul>
         <p>Тишина чаще значит «фильтр сработал», а не «робот сломался».</p>
       </article>
@@ -612,4 +632,4 @@
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20260925-tlmark2"></script>
-<script src="/js/trend-signal-desk.js?v=20261002-exhunt"></script>
+<script src="/js/trend-signal-desk.js?v=20261002-microvision"></script>

@@ -1,7 +1,7 @@
 # Handoff prompt: TRINITY operator (Exclusive observe + desk/playbook)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-10-02 ~09:00 MSK · seals до 01.10; 02.10 resume; BRX6; Phase C NO_GO.  
+> **Обновлено:** 2026-10-02 ~18:02 MSK · seals до 02.10 · week end; BRX6; Phase C NO_GO.  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
@@ -36,24 +36,23 @@ Pairs DAILY и calendar-arb оператор смотрит сам, пока н�
 
 **Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
 
-### Состояние на 2026-10-02 morning (~09:00 MSK) · last seal 01.10
+### Состояние на 2026-10-02 EOD (~18:02 MSK) · week end
 
 | Метрика | Значение |
 |--------|----------|
-| **Phase A** | **done** 25–28.08 + full **15.09**. Extra sealed до **01.10** |
-| **OOS cumulative** | **63** Exclusive, **+18 845 ₽**, expectancy **~299 ₽/trade**, WR **~75%**, labeled SL 100% |
-| **01.10 Exclusive** | **+596.31 ₽** · 6 сделок (TP2×2, SWEEP×3, THROUGH×1) · gateHits=0 · **не крутить гейты** |
-| **01.10 Positional** | NGV6 overnight SELL BOUNCE TP2 **+770**; BRX6 GAP_FILL BE_STOP **−30.63** · вне OOS |
-| **30.09** | Exclusive **+182** overnight BE_STOP/SWEEP |
-| **Corpus** | Exclusive ~9838 events · 36 decision days · armFill ~137 · ML collecting |
+| **Phase A** | **done** 25–28.08 + full **15.09**. Extra sealed до **02.10** |
+| **OOS cumulative** | **64** Exclusive, **+18 621 ₽**, expectancy **~291 ₽/trade**, WR **~73%**, labeled SL 100% |
+| **02.10** | **−224 ₽** · 1× BUY BOUNCE SL/THROUGH · gateHits=0 · **не крутить гейты** |
+| **01.10** | **+596.31 ₽** · 6 сделок · positional NGV6 +770 вне OOS |
+| **Corpus** | Exclusive ~10077 events · 36 decision days · armFill ~139 · ML collecting |
 | **Front** | **BRX6** |
 | **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect · doNotTuneOnSight |
-| **Ops** | `trend_observe_resume.sh` · **02.10 armed** poll/watch/wake · flat |
+| **Ops** | daemons stopped · next resume **2026-10-05** (пн) ~09:00 |
 
 **Блок Phase C:** metrics `readyForPhaseC=true`, но **human OOS review + явный go** обязательны. FORTS SL / scale / pad-tune — нет.  
 Пакет для review: `IMOEX/data/trend-oos-human-review.md` (и `.json`) — evidence only, live не включает.
 
-**Сегодня:** evening seal ~18:02 (`python3 IMOEX/scripts/trend_observe_evening.py 2026-10-02`). Не крутить гейты. ML/FORTS — только явный go.
+**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-10-05` (~09:00); evening ~18:02. Не крутить гейты.
 
 ---
 

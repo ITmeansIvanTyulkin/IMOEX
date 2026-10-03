@@ -730,14 +730,88 @@
     if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
     return v.toFixed(2);
   }
+  function microVisionPhrases(data) {
+    const sit = (data && data.situation) || {};
+    const positional = deskScope() === "positional" || (data && data.deskScope === "positional");
+    const hunt = positional
+      ? (data.positionalHunt || sit.positionalHunt || {})
+      : (data.exclusiveHunt || sit.exclusiveHunt || {});
+    if (!hunt || (typeof hunt !== "object")) return [];
+    const lines = [];
+    const wait = String(hunt.waitReason || "");
+    const crowd = String(hunt.crowd || "").toUpperCase();
+    const whale = String(hunt.whale || "").toUpperCase();
+    const pattern = String(hunt.impulsePattern || "").toUpperCase();
+    const direction = String(hunt.impulseDirection || "").toUpperCase();
+    const fresh = !!hunt.impulseFresh;
+    const spoof = !!hunt.spoofPull;
+    const blocked = !!hunt.blocksNewArm;
+
+    if (blocked) {
+      if (/сбор лоев|swept.?low|SPIKE/i.test(wait) || (pattern === "STOP_HUNT" && direction === "SPIKE")) {
+        lines.push("Сейчас в стакане и ленте похоже на ловушку: классический сбор лоев — дёрнули вниз, сняли стопы, цену вернули. Шорт в этот вынос не ставим.");
+      } else if (/сбор хаёв|swept.?high/i.test(wait) || (pattern === "STOP_HUNT" && direction === "DUMP")) {
+        lines.push("Сейчас в стакане и ленте похоже на ловушку: сбор хаёв — вынесли стопы сверху и закрыли ниже. Лонг в этот вынос не ставим.");
+      } else if (/нож/i.test(wait) || pattern === "KNIFE") {
+        lines.push("В ленте нож вниз: продажи каскадом. Покупку в этот удар не берём — сначала дождаться отбоя у полки.");
+      } else if (/ракет|импульс вверх/i.test(wait) || pattern === "ROCKET") {
+        lines.push("В ленте ракета вверх. Шорт в этот разгон не ставим — ждём отбой у верхней полки.");
+      } else if (/футпринт|крупный объём|кит|whale/i.test(wait) || whale === "AGAINST") {
+        lines.push("В ленте у полки крупный объём против нашей стороны — это ловушка. Вход откладываем, сторону плана не переворачиваем.");
+      } else if (/стакане|толп|crowd/i.test(wait) || crowd === "AGAINST") {
+        lines.push("В стакане у зоны толпа стоит против нашего отскока. Сейчас в сделку не входим.");
+      } else if (/spoof|снята|стену/i.test(wait) || spoof) {
+        lines.push("У полки сняли крупную заявку без опоры — стену в стакане не считаем якорем. Новый вход не ставим.");
+      } else if (/фундамент/i.test(wait)) {
+        lines.push("Фундамент и стакан против стороны часа — новый вход откладываем.");
+      } else if (wait) {
+        lines.push("Микро против входа: " + wait.replace(/^exclusive hunt:\s*/i, "").replace(/^positional hunt:\s*/i, ""));
+      } else {
+        lines.push("Сейчас в стакане и ленте ловушка против входа — робот вход не ставит.");
+      }
+      return lines;
+    }
+
+    // Clear / soft-ok view
+    if (fresh && pattern === "STOP_HUNT" && direction === "SPIKE") {
+      lines.push("Был сбор лоев (вынос вниз и возврат). Для покупки от нижней полки это не ловушка — для шорта было бы опасно.");
+    } else if (fresh && pattern === "STOP_HUNT" && direction === "DUMP") {
+      lines.push("Был сбор хаёв (вынос вверх и возврат). Для продажи от верхней полки это не ловушка — для лонга было бы опасно.");
+    } else if (fresh && pattern === "KNIFE") {
+      lines.push("Недавно в ленте был нож. Покупку в каскад робот не берёт — ждём отбой.");
+    } else if (fresh && pattern === "ROCKET") {
+      lines.push("Недавно в ленте была ракета. Шорт в разгон робот не берёт.");
+    }
+
+    if (whale === "WITH") {
+      lines.push("В ленте у полки крупный объём с нашей стороны — футпринт вход не отменяет.");
+    } else if (whale === "NEUTRAL" && crowd === "NEUTRAL" && !lines.length) {
+      lines.push("Сейчас в стакане и ленте явной ловушки против входа не видно.");
+    } else if (whale !== "AGAINST" && crowd === "WITH") {
+      lines.push("В стакане у зоны больше лотов с нашей стороны — толпа не против.");
+    } else if (whale !== "AGAINST" && crowd === "NEUTRAL" && !lines.length) {
+      lines.push("Сейчас в стакане и ленте явной ловушки против входа не видно.");
+    } else if (!lines.length) {
+      lines.push("Сейчас в стакане и ленте явной ловушки против входа не видно.");
+    }
+
+    if (spoof) {
+      lines.push("У полки мелькала крупная заявка и снялась — стену проверяем осторожно.");
+    }
+    return lines;
+  }
+
   function commentaryHtml(data) {
     const c = (data && data.commentary) || ((data && data.situation) ? data.situation.commentary : null);
-    if (!c || !c.headline) return "";
-    const story = Array.isArray(c.story) ? c.story : [];
+    const microLines = microVisionPhrases(data);
+    if ((!c || !c.headline) && !microLines.length) return "";
+    const story = (c && Array.isArray(c.story)) ? c.story : [];
     let html = "<div class='signal-narration'>";
     html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Разбор · как видит робот</p>";
-    html += "<p class='signal-narration-head'><strong>" + escHtml(c.verdict || "") + "</strong> — "
-      + escHtml(userFacingStory(c.headline) || c.headline) + "</p>";
+    if (c && c.headline) {
+      html += "<p class='signal-narration-head'><strong>" + escHtml(c.verdict || "") + "</strong> — "
+        + escHtml(userFacingStory(c.headline) || c.headline) + "</p>";
+    }
     story.forEach(function (p) {
       if (!p) return;
       const text = userFacingStory(p);
@@ -746,7 +820,13 @@
       if (u.indexOf("очк") >= 0 || u.indexOf("чек-лист") >= 0 || u.indexOf("playbook") >= 0) return;
       html += "<p class='signal-narration-p'>" + escHtml(text) + "</p>";
     });
-    if (c.disclaimer) {
+    if (microLines.length) {
+      html += "<p class='signal-narration-micro-kicker'>Микро · стакан и лента</p>";
+      microLines.forEach(function (line) {
+        html += "<p class='signal-narration-p signal-narration-micro'>" + escHtml(line) + "</p>";
+      });
+    }
+    if (c && c.disclaimer) {
       html += "<p class='signal-narration-disc'>" + escHtml(c.disclaimer) + "</p>";
     }
     html += "</div>";
@@ -853,13 +933,19 @@
     }
 
     if (hunt.blocksNewArm) {
-      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · фундамент и охота</p>";
-      html += "<p class='signal-brief-note'>" + esc(hunt.ru
-        || "Новый вход откладываем. Сторону часа не меняем.") + "</p>";
-      html += "<p class='signal-brief-note'><strong>Новый вход отложен</strong> — охота против стороны часа, сторону не переворачиваем.</p>";
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · стакан и лента</p>";
+      microVisionPhrases(data).forEach(function (line) {
+        html += "<p class='signal-brief-note'>" + esc(line) + "</p>";
+      });
+      html += "<p class='signal-brief-note'><strong>Новый вход отложен</strong> — сторону часа не переворачиваем.</p>";
     } else {
-      html += "<p class='signal-brief-note'>" + esc(hunt.ru
-        || "Охота молчит. Если сетап валидный — вход по чек-листу.") + "</p>";
+      const microOk = microVisionPhrases(data);
+      if (microOk.length) {
+        html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · стакан и лента</p>";
+        microOk.forEach(function (line) {
+          html += "<p class='signal-brief-note'>" + esc(line) + "</p>";
+        });
+      }
     }
 
     html += "<p class='signal-brief-kicker signal-brief-kicker--robot"
@@ -901,7 +987,8 @@
     }
     if (fp.lastClose && fp.lastClose.pnlRub != null) {
       html += "<p class='signal-brief-note'>Последнее закрытие: "
-        + esc(({ SL: "стоп", TP: "тейк", TP1: "тейк-1", TP2: "тейк-2", BE: "безубыток", TIME: "по времени" })[fp.lastClose.exitReason]
+        + esc(({ SL: "стоп", TP: "тейк", TP1: "тейк-1", TP2: "тейк-2", TP3: "тейк-3",
+            TP1_FULL: "тейк-1 (весь)", BE: "безубыток", BE_STOP: "стоп в БУ", TIME: "по времени" })[fp.lastClose.exitReason]
           || humanizeDeskReason(fp.lastClose.exitReason || "выход"))
         + " · "
         + (fp.lastClose.pnlRub >= 0 ? "+" : "") + Math.round(fp.lastClose.pnlRub) + " ₽.</p>";
@@ -1029,14 +1116,6 @@
     const impulse = sit.impulse || {};
     if (impulse.active && impulse.headline && !impulse.headline.match(/EIA|API|CL\s/i)) {
       marketItems.push("<strong>" + esc(impulse.headline) + "</strong>");
-    }
-
-    const hunt = data.exclusiveHunt || sit.exclusiveHunt || {};
-    if (hunt.blocksNewArm) {
-      marketItems.push("<strong>Микро · вход отложен</strong>: "
-        + esc(hunt.waitReason || hunt.ru || "стакан/футпринт против стороны"));
-    } else if (hunt.ru) {
-      marketItems.push(esc(hunt.ru));
     }
 
     const gap = sit.gapFill || {};
@@ -1251,10 +1330,10 @@
         robotHtml += "<p><strong>Что ведём:</strong> "
           + esc(formatOpenTradeDetail(openBrief, data)) + "</p>";
         if (pot != null) {
-          robotHtml += "<p class='signal-brief-note'>План по деньгам: "
-            + (openBrief.tp1Done
-              ? ("до TP2 ещё ~" + Math.round(pot).toLocaleString("ru-RU") + " ₽ по остатку позиции")
-              : ("до TP1 ~" + Math.round(pot).toLocaleString("ru-RU") + " ₽"))
+          const nextTp = openBrief.tp2Done ? "TP3"
+            : (openBrief.tp1Done ? "TP2" : "TP1");
+          robotHtml += "<p class='signal-brief-note'>План по деньгам: до "
+            + nextTp + " ещё ~" + Math.round(pot).toLocaleString("ru-RU") + " ₽ по остатку позиции"
             + (Number(openBrief.realizedPnlRub) >= 1
               ? (", с частичной фиксации уже +"
                 + Math.round(openBrief.realizedPnlRub).toLocaleString("ru-RU") + " ₽")
@@ -1269,6 +1348,7 @@
         robotHtml += "<p class='signal-brief-note'>Вход "
           + fmtPx(lv.entry) + " · стоп " + fmtPx(lv.stop)
           + " · цель 1 " + fmtPx(lv.tp1) + " · цель 2 " + fmtPx(lv.tp2)
+          + (lv.tp3 != null ? (" · цель 3 " + fmtPx(lv.tp3) + " (хвост 25%)") : "")
           + (lv.qty != null ? (" · " + lv.qty + " лот.") : ".") + "</p>";
       }
       if (manage.note) {
@@ -2658,9 +2738,12 @@
       st && st.historicalHigh, st && st.historicalLow, st && st.previousZeroPoint,
       zt, zb, lv,
       plan && plan.side, plan && plan.entry, plan && plan.stopLoss,
-      plan && plan.tp1, plan && plan.actionable, sig && sig.side,
+      plan && plan.tp1, plan && plan.tp2, plan && plan.tp3,
+      plan && plan.actionable, sig && sig.side,
       open && open.avg, open && open.sl, open && open.tp1, open && open.tp2,
-      open && open.tp1Done, open && open.qty, open && open.side
+      open && open.tp3,
+      open && open.tp1Done, open && open.tp2Done, open && open.tp3Done,
+      open && open.qty, open && open.side
     ].join("|");
   }
   function applyOverlays(plan, sig, candles, structure, open) {
@@ -2765,7 +2848,12 @@
         const tp1 = working
           ? (open.tp1Done ? NaN : Number(open.tp1))
           : plan.tp1;
-        const tp2 = working ? Number(open.tp2) : plan.tp2;
+        const tp2 = working
+          ? (open.tp2Done ? NaN : Number(open.tp2))
+          : plan.tp2;
+        const tp3 = working
+          ? (open.tp3Done ? NaN : Number(open.tp3))
+          : plan.tp3;
         const prefix = working ? "" : "план ";
         const sideTag = buy ? "BUY" : "SELL";
         if (finitePrice(entry)) {
@@ -2774,6 +2862,7 @@
         if (finitePrice(sl)) addLine(sl, "#b91c1c", prefix + "SL", { lineWidth: 1, lineStyle: 2 });
         if (finitePrice(tp1)) addLine(tp1, "#16a34a", prefix + "TP1", { lineWidth: 1, lineStyle: 2 });
         if (finitePrice(tp2)) addLine(tp2, "#15803d", prefix + "TP2", { lineWidth: 1, lineStyle: 2 });
+        if (finitePrice(tp3)) addLine(tp3, "#166534", prefix + "TP3", { lineWidth: 1, lineStyle: 2 });
       }
       if ((working || (plan && plan.actionable)) && candles && candles.length) {
         const last = candles[candles.length - 1];
@@ -4617,10 +4706,17 @@
     const qty = Number(open.qty);
     if (!(avg > 0) || !(qty > 0)) return null;
     const tp1Done = !!open.tp1Done;
+    const tp2Done = !!open.tp2Done;
+    const tp3Done = !!open.tp3Done;
     const tp1 = Number(open.tp1);
     const tp2 = Number(open.tp2);
-    const target = (!tp1Done && tp1 > 0) ? tp1 : tp2;
-    if (!(target > 0)) return null;
+    const tp3 = Number(open.tp3);
+    let target;
+    if (!tp1Done && tp1 > 0) target = tp1;
+    else if (!tp2Done && tp2 > 0) target = tp2;
+    else if (tp3 > 0) target = tp3;
+    else if (tp2 > 0) target = tp2;
+    else return null;
     const buy = open.side === "BUY";
     if (buy && !(target > avg)) return null;
     if (!buy && !(target < avg)) return null;
@@ -4628,6 +4724,12 @@
     const rub = deskRubPerPoint(data, open.instrument || (data && data.instrument));
     if (!(point > 0) || !(rub > 0)) return null;
     return Math.abs(target - avg) / point * qty * rub;
+  }
+  function nextOpenTpLabel(open) {
+    if (!open) return "TP1";
+    if (open.tp2Done) return "TP3";
+    if (open.tp1Done) return "TP2";
+    return "TP1";
   }
   /** Compact human line for chip/fab + brief while IN_TRADE. */
   function formatOpenTradeDetail(open, data) {
@@ -4645,22 +4747,26 @@
       const pq = open.plannedQty != null ? ("/" + open.plannedQty) : "";
       bits.push("qty " + open.qty + pq);
     }
+    const hasTp3 = Number(open.tp3) > 0;
     if (open.tp1Done) {
-      bits.push("TP1 снят");
+      bits.push(open.tp2Done ? "TP2 ядро 75%" : "TP1 снят");
       if (open.sl != null) {
         const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
         const nearBe = Number(open.avg) > 0 && Math.abs(Number(open.sl) - Number(open.avg)) < 1e-6;
-        bits.push((gapFill && !nearBe ? "SL " : "SL в БУ ") + fmtStatusPx(open.sl));
+        bits.push((gapFill && !nearBe ? "SL " : "SL в БУ/trail ") + fmtStatusPx(open.sl));
       }
-      if (open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+      if (!open.tp2Done && open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+      else if (hasTp3 && open.tp3 != null) bits.push("TP3 хвост " + fmtStatusPx(open.tp3));
+      else if (open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
     } else {
       if (open.sl != null) bits.push("SL " + fmtStatusPx(open.sl));
       if (open.tp1 != null) bits.push("TP1 " + fmtStatusPx(open.tp1));
       if (open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+      if (hasTp3) bits.push("TP3 " + fmtStatusPx(open.tp3));
     }
     const pot = openRemainingPotentialRub(open, data);
     if (pot != null) {
-      bits.push((open.tp1Done ? "до TP2 ~" : "до TP1 ~")
+      bits.push("до " + nextOpenTpLabel(open) + " ~"
         + (pot >= 0 ? "+" : "") + Math.round(pot).toLocaleString("ru-RU") + " ₽");
     }
     const realized = Number(open.realizedPnlRub);
