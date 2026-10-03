@@ -514,6 +514,42 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         return fetchCandles(figi, fromDay, tillDay, CandleInterval.CANDLE_INTERVAL_HOUR, 40);
     }
 
+    /** Native daily candles (pairs equity fallback when MOEX ISS is down). */
+    public List<BrokerCandle> fetchDayCandles(String figi, LocalDate fromDay, LocalDate tillDay) {
+        return fetchCandles(figi, fromDay, tillDay, CandleInterval.CANDLE_INTERVAL_DAY, 350);
+    }
+
+    /** Resolve TQBR / MOEX share FIGI by ticker (e.g. SBER, BSPB). */
+    public String resolveShareFigi(String ticker) {
+        Optional<String> override = TInvestCredentials.figiOverride(ticker);
+        if (override.isPresent()) {
+            return override.get();
+        }
+        String t = ticker == null ? "" : ticker.trim().toUpperCase(Locale.ROOT);
+        if (t.isEmpty()) {
+            throw new IllegalArgumentException("empty ticker");
+        }
+        for (String board : new String[]{"TQBR", "TQTF", "TQPI"}) {
+            try {
+                var share = api.getInstrumentsService().getShareByTickerSync(t, board);
+                if (share != null && share.getFigi() != null && !share.getFigi().isBlank()) {
+                    return share.getFigi();
+                }
+            } catch (Exception ignored) {
+                // try next board
+            }
+        }
+        try {
+            var inst = api.getInstrumentsService().getInstrumentByTickerSync(t, "TQBR");
+            if (inst != null && inst.getFigi() != null && !inst.getFigi().isBlank()) {
+                return inst.getFigi();
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        throw new IllegalStateException("share FIGI not found for " + t);
+    }
+
     private List<BrokerCandle> fetchCandles(
             String figi,
             LocalDate fromDay,

@@ -8,7 +8,8 @@ imoex:
     p-value-threshold: 0.05
     z-score-entry: 2.0
     z-score-exit: 0.0
-    top-n: 10
+    # D1-first: мало слотов — только лучшие по Sharpe после HL≥5
+    top-n: 3
     use-rolling-z: true
     rolling-z-window: 60
     fdr-q: 0.20
@@ -17,6 +18,34 @@ imoex:
     kalman-ve: 0.001
     # true = вход только после разворота Z за порогом (не на первом касании ±2)
     require-entry-reversal: true
+    # @ExperimentPairs OCT2026_PAIRS_BANKS_BOOTSTRAP — soft FDR + R²≥0.65 BANKS only; not @Experiment
+    experiment-pairs-banks-bootstrap: true
+    # @TakenFromOsEngine OCT2026_TAKEN_FROM_OS_ENGINE — whitelist/research book/corr/lookback; combat Z=2 untouched
+    experiment-os-borrow:
+      enabled: true
+      eg-lookback-bars: 252
+      # BANKS return-corr ≈0.45–0.50; 0.70 глушил whitelist
+      min-correlation: 0.40
+      correlation-confirm: true
+      research-book-enabled: true
+      research-z-entry: 1.75
+      research-z-exit: 0.5
+      research-rolling-z-window: 30
+      # early entry: cross ±1.75 (not late fade). If reversal on — anti-late floor via slack
+      research-require-entry-reversal: false
+      research-reversal-min-abs-slack: 0.25
+      whitelist-pairs: "BSPB/MOEX,BSPB/SVCB"
+      # D1-first: классический HL band ≥5d (не скальп на дневках)
+      experiment-min-half-life-days: 5.0
+      min-align-coverage-percent: 60.0
+      # shared holiday gaps on intersection ≠ OsEngine sync-bug; floor ≥21d in code
+      max-align-gap-calendar-days: 45
+      whitelist-only: true
+      # rolling return-corr confirm (in addition to EG-window corr)
+      rolling-corr-bars: 60
+      # Institutional desk (GGR+EG+HL5-60+quarterly freeze) — off in live; campaign tests on
+      institutional-desk: false
+    # @TakenFromOsEngineEnd
   data-dir: data
   charts-dir: data/charts
   # Labeled engine corpus (training). Not UI. Folder is gitignored; upload later.
@@ -51,16 +80,18 @@ imoex:
     stop-z: 3.5
     max-hold-bars: 40
     reduce-size-factor: 0.5
-    # dual-book: слоты считает CapitalAllocator от equity (не этот ключ)
-    max-open-pairs: 2
+    # dual-book: слоты считает CapitalAllocator; D1-first ≤3 пар
+    max-open-pairs: 3
     max-portfolio-gross: 1.0
     min-sharpe: 0.0
-    max-half-life-days: 90.0
-    min-half-life-days: 1.0
-    # торговый gate для боковика (research top-N может быть шире)
-    trade-max-half-life-days: 15.0
+    max-half-life-days: 60.0
+    # D1-first (Grok/classic): HL < 5d = шум на дневках
+    min-half-life-days: 5.0
+    # торговый gate: практичный band 5–40d
+    trade-max-half-life-days: 40.0
     min-r-squared: 0.70
-    min-trade-count: 8
+    # slower HL → fewer in-sample MR cycles; 4×2=8 closes floor
+    min-trade-count: 4
     borrow-rate-annual: 0.08
     dynamic-sizing: true
     target-spread-sigma: 0.02
@@ -69,7 +100,8 @@ imoex:
     partial-tp-fraction: 0.5
     trail-z: 0.75
     beta-break-pct: 0.35
-    coint-p-break: 0.20
+    # soft: 0.20 резал сделки при p≈0.5–0.8 до mean-reversion; 0.60 = только явный развал
+    coint-p-break: 0.60
     adaptive-stop: true
     adaptive-stop-base: 2.5
     adaptive-stop-cap: 4.0
@@ -86,30 +118,33 @@ imoex:
     reduce-factor: 0.5
     index-board: SNDX
   capital:
-    # операторский профиль: 300 тыс. ₽ — pairs + оба trend playbook (fair-paper)
-    equity-rub: 300000
+    # Product default: ordinary subscription user ~250–300к ₽ (band 50–500к).
+    # Pair slots scale via RetailPairsScale (50к→1 … 500к→6), not fund 15–20 names.
+    equity-rub: 250000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
-    # DAILY paper live; INTRADAY — research-only (доля 0)
+    # Retail pairs: Daily-only (как у крупных парных столов). H1 off — 2026 PF0.33.
+    # No weekly book — desks don't run a W1 pairs sleeve; we don't invent one.
     daily-gross-share: 1.0
     intraday-gross-share: 0.0
     # Focus-слоты: PAIRS | TREND_M5 | TREND_POSITIONAL | ARB | BALANCED
-    # С 300к BALANCED разрешён: pairs + M5 + positional H1.
-    focus-slot: BALANCED
-    pairs-strategy-share: 0.40
-    trend-m5-share: 0.30
-    trend-positional-share: 0.30
+    # For retail pairs product keep PAIRS (trend sleeves need ≥300к BALANCED).
+    focus-slot: PAIRS
+    pairs-strategy-share: 1.0
+    trend-m5-share: 0.0
+    trend-positional-share: 0.0
     arb-share: 0.0
   session:
-    # DUAL keeps dual-book code paths; operator cycle runs DAILY only (INTRADAY via runIntradayOnly).
+    # DUAL code path kept; trading capital is Daily-only (intraday share = 0).
     mode: DUAL
+    # H1 params retained for research campaigns; live capital share = 0
     candle-interval: 60
     hours-per-session: 7
-    hourly-lookback-days: 90
+    hourly-lookback-days: 400
     intraday-rolling-z-window: 48
-    intraday-max-hold-bars: 7
-    intraday-min-half-life-days: 0.25
-    intraday-trade-max-half-life-days: 3.0
+    intraday-max-hold-bars: 14
+    intraday-min-half-life-days: 0.05
+    intraday-trade-max-half-life-days: 2.0
     pre-close-start: "18:30"
     pre-close-end: "18:45"
     session-open: "10:00"
@@ -134,8 +169,7 @@ imoex:
     # До открытия основной сессии (10:00 MSK): прогон по итогам предыдущего дня
     daily-cron: "0 55 9 * * MON-FRI"
     daily-cron-zone: Europe/Moscow
-    # INTRADAY pairs: detached from operator UX / «Анализ + paper» / DAILY cron.
-    # Research entrypoint remains runIntradayOnly + this cron (kept off).
+    # INTRADAY pairs research-only until D1→H4 cascade is validated
     auto-run-intraday: false
     intraday-research-only: true
     intraday-cron: "0 5 10-18 * * MON-FRI"
@@ -172,7 +206,27 @@ imoex:
     sit-out-if-unproven: false
     min-quality-pairs: 2
     pair-min-closed-trades: 2
+    # 2 = бан после двух минусов подряд (1 слишком рано резал recovery)
     pair-loss-streak: 2
+  # @ExperimentPairs OCT2026_PAIR_ELITE_ROSTER — continuously rank & trade only best pairs
+  pair-elite:
+    enabled: true
+    # D1-first: 1–3 лучших пар, не гнаться за частотой
+    max-pairs: 3
+    min-closed-trades: 2
+    min-profit-factor: 1.10
+    loss-streak-ban: 2
+    lookback-months: 6
+    blocked-tickers: "MTLR"
+    roster-file: pair-elite-roster.json
+    sit-out-unproven: true
+    probe-size-fraction: 0.40
+    full-size-min-closed-trades: 2
+    full-size-min-profit-factor: 1.10
+    hard-stop-loss-rub: 800
+    hard-stop-z: 3.0
+    max-research-bootstrap-slots: 2
+  # @ExperimentPairsEnd
   # Simulated SKU for operator UX locks (no billing). Override in Settings at runtime.
   # PAIRS | PAIRS_TREND | FULL
   product:

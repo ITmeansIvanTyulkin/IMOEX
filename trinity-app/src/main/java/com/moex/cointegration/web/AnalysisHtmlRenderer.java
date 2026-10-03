@@ -22,6 +22,7 @@ import com.moex.cointegration.model.RssHeadline;
 import com.moex.cointegration.model.TradingRecommendation;
 import com.moex.cointegration.model.TradingSignal;
 import com.moex.cointegration.model.WalkForwardReport;
+import com.moex.cointegration.service.RetailPairsScale;
 import com.moex.cointegration.service.RssHeadlineService;
 import com.moex.cointegration.universe.SectorCatalog;
 import org.springframework.beans.factory.annotation.Value;
@@ -1971,6 +1972,7 @@ public class AnalysisHtmlRenderer {
         }
         String posture = sitOut ? "sitout" : (enter > 0 ? "armed" : "scan");
         String boot = pairsDeskBootJson(cluster, regime, report);
+        String capitalNote = renderPairsCapitalNote();
         return """
                 <section class="pairs-desk" id="pairs-desk" data-posture="%s" data-watch="%s">
                   <div class="busy-bar" id="ops-busy"></div>
@@ -1985,6 +1987,8 @@ public class AnalysisHtmlRenderer {
                       <span id="pairs-desk-clock">онлайн</span>
                     </div>
                   </header>
+
+                  %s
 
                   <div class="pairs-desk-plaques">
                     <article class="pairs-plaque" id="pairs-plaque-champ">
@@ -2072,6 +2076,7 @@ public class AnalysisHtmlRenderer {
                 escape(posture),
                 escape(watchPair),
                 escape(reason),
+                capitalNote,
                 escape(champ),
                 sitOut ? "sit-out · слоты пустые" : "торгуем только этот сектор",
                 escape(regimeLabel),
@@ -2082,6 +2087,106 @@ public class AnalysisHtmlRenderer {
                 watchPair.isBlank() ? "—" : escape(watchPair),
                 boot
         );
+    }
+
+    /**
+     * Collapsible capital disclaimer: retail book vs desk-scale book at 1M.
+     * Not the same %% — small accounts use narrow soft book (~0.8%% research);
+     * 1M uses wider Daily desk illustration (~2%% from better institutional YTD research).
+     */
+    private String renderPairsCapitalNote() {
+        double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 250_000.0;
+        equity = Math.max(RetailPairsScale.MIN_PRODUCT_EQUITY, equity);
+        // Retail soft elite + HL5 2025 ≈ +0.8% on 250k
+        final double retailIllustrReturn = 0.008;
+        // Desk-scale illustration: better Daily institutional/hybrid 2026 YTD ≈ +1.5…1.8% → use ~2%
+        final double deskIllustrReturn = 0.02;
+        double atUser = equity * retailIllustrReturn;
+        double atMillion = 1_000_000.0 * deskIllustrReturn;
+        int slotsUser = RetailPairsScale.forEquity(equity).dailyMaxPairs();
+        int slotsMillion = Math.max(6, RetailPairsScale.forEquity(1_000_000.0).dailyMaxPairs());
+        String equityLabel = formatPairsEquityShort(equity);
+        String userRub = escape(formatPairsRub(atUser));
+        String millionRub = escape(formatPairsRub(atMillion));
+        String equityFull = escape(formatPairsRub(equity));
+        return """
+                <details class="pairs-capital-note" id="pairs-capital-note">
+                  <summary class="pairs-capital-note-summary">
+                    <span class="pairs-capital-note-kicker">Капитал</span>
+                    <span class="pairs-capital-note-title">На %s (узкая книга) — ~%s · на 1 млн (стол) — ~%s за research-год</span>
+                    <span class="pairs-capital-note-more">подробнее</span>
+                  </summary>
+                  <div class="pairs-capital-note-body">
+                    <p>
+                      Метод как у крупных парных столов, но <strong>книга разная</strong>.
+                      На 50–500 тыс. ₽ — мало слотов, узкий режим, ₽ скромные.
+                      От ~1 млн ₽ — шире корзина и другой порядок абсолюта. Смотрите и %%, и ₽.
+                    </p>
+                    <div class="pairs-capital-compare" role="group" aria-label="Сравнение масштаба">
+                      <div class="pairs-capital-compare-card">
+                        <span class="pairs-capital-compare-kicker">Ваш счёт · узкая книга</span>
+                        <strong>%s</strong>
+                        <span>ориентир ~0,8%% → <b>~%s</b></span>
+                        <span class="pairs-capital-compare-meta">%d %s · soft Daily, без плеча</span>
+                      </div>
+                      <div class="pairs-capital-compare-card is-ref">
+                        <span class="pairs-capital-compare-kicker">Стол от 1 млн · шире книга</span>
+                        <strong>1&nbsp;000&nbsp;000 ₽</strong>
+                        <span>ориентир ~2%% → <b>~%s</b></span>
+                        <span class="pairs-capital-compare-meta">~%d слотов · не «×капитал» от 0,8%%</span>
+                      </div>
+                    </div>
+                    <p class="pairs-capital-note-foot">
+                      Это не «тот же процент × миллион», а два режима. Цифры — иллюстрация по research
+                      (узкая книга ~0,8%%, стол ~2%%), не прогноз. Слабый год у стола тоже бывает в минусе.
+                    </p>
+                  </div>
+                </details>
+                """.formatted(
+                escape(equityLabel),
+                userRub,
+                millionRub,
+                equityFull,
+                userRub,
+                slotsUser,
+                slotsWord(slotsUser),
+                millionRub,
+                slotsMillion
+        );
+    }
+
+    private static String formatPairsEquityShort(double equityRub) {
+        if (equityRub >= 1_000_000) {
+            double m = equityRub / 1_000_000.0;
+            if (Math.abs(m - Math.rint(m)) < 1e-6) {
+                return String.format(Locale.ROOT, "%.0f млн ₽", m);
+            }
+            return String.format(Locale.ROOT, "%.1f млн ₽", m).replace('.', ',');
+        }
+        if (equityRub >= 1000) {
+            double k = equityRub / 1000.0;
+            if (Math.abs(k - Math.rint(k)) < 1e-6) {
+                return String.format(Locale.ROOT, "%.0f тыс. ₽", k);
+            }
+            return String.format(Locale.ROOT, "%.0f тыс. ₽", Math.rint(k));
+        }
+        return String.format(Locale.ROOT, "%.0f ₽", equityRub);
+    }
+
+    private static String slotsWord(int n) {
+        int n10 = n % 10;
+        int n100 = n % 100;
+        if (n10 == 1 && n100 != 11) {
+            return "слот";
+        }
+        if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) {
+            return "слота";
+        }
+        return "слотов";
+    }
+
+    private static String formatPairsRub(double rub) {
+        return UpsellService.formatRub((int) Math.round(Math.max(0, rub))) + " ₽";
     }
 
     private static String pairsDeskBootJson(
