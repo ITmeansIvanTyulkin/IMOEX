@@ -276,9 +276,9 @@ imoex:
       sandbox-broker-stop: true
       sandbox-broker-stop-dry-run: true   # paper: не слать в sandbox (PostStop там всё равно нельзя)
       sandbox-broker-stop-qty: 1
-      # Exclusive-only while positional H1 (hvnHills) OOMs the JVM; restore both after fix
-      playbook: levels-profile-br-m5
-      parallel-playbooks: false
+      # Parallel on after hvnHills VAP/peak caps (was OOM). Collect window — no positional gate tune.
+      playbook: both
+      parallel-playbooks: true
       desk-go-long-rub: 20000
       desk-go-short-rub: 22000
       grid: MODERATE

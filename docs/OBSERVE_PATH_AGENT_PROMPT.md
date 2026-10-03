@@ -219,7 +219,7 @@ curl -s 'http://127.0.0.1:8080/api/trend/desk?instrument=BRV6&playbook=levels-pr
 | Observe scripts | `IMOEX/scripts/trend_observe_*.py`, `trend_observe_resume.sh` |
 | Rules | `IMOEX/.cursor/rules/trinity-roadmap.mdc`, `checklist-fidelity.mdc`, `no-cursor-attribution.mdc` |
 
-Конфиг тренда: `IMOEX/trinity-app/src/main/resources/application.yml` → `imoex.strategies.trend` (`live-execution: false`, `playbook: levels-profile-br-m5`, `parallel-playbooks: false`, `auto-resolve-instrument: BR`).
+Конфиг тренда: `IMOEX/trinity-app/src/main/resources/application.yml` → `imoex.strategies.trend` (`live-execution: false`, `playbook: both`, `parallel-playbooks: true`, `auto-resolve-instrument: BR`). Positional collect window 2026-10 — **не тюнить** positional gates/хвост до ≥8–12 closes (см. agent store `POSITIONAL_IMPROVE_2026-10.md`).
 
 ---
 
