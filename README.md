@@ -617,7 +617,7 @@ IMOEX/
 └── data/                        # свечи, отчёты, paper (gitignore)
 ```
 
-Флаги модулей: `imoex.strategies.pairs|trend|calendar-arb.enabled` (pairs/trend/arb по умолчанию `true`; live-заявки trend/arb выкл).
+Флаги модулей: `imoex.strategies.pairs|trend|calendar-arb.enabled` (**pairs выкл.** с 2026-10-04 — нет >2% год 2025/2026 YTD, архив `IMOEX-core/trinity-pairs/docs/`; trend/arb по умолчанию `true`; live-заявки trend/arb выкл).
 
 ### Локальные артефакты (`data/`)
 

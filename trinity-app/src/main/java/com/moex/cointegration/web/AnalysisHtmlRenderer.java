@@ -2127,7 +2127,7 @@ public class AnalysisHtmlRenderer {
                         <span class="pairs-capital-compare-kicker">Ваш счёт · узкая книга</span>
                         <strong>%s</strong>
                         <span>ориентир ~0,8%% → <b>~%s</b></span>
-                        <span class="pairs-capital-compare-meta">%d %s · soft Daily, без плеча</span>
+                        <span class="pairs-capital-compare-meta">%d %s · @Might 1–2 позы, soft Daily</span>
                       </div>
                       <div class="pairs-capital-compare-card is-ref">
                         <span class="pairs-capital-compare-kicker">Стол от 1 млн · шире книга</span>

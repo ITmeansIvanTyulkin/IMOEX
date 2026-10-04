@@ -53,6 +53,8 @@ imoex:
   research-corpus:
     enabled: true
   news:
+    # Обязательный FA-слой после техники (DAILY): новости + дивиденды as-of + tradability.
+    # Replay использует historical=true → дивиденды as-of без live stale/RSS.
     enabled: true
     lookback-days: 10
     stale-candle-days: 10
@@ -81,6 +83,7 @@ imoex:
     max-hold-bars: 40
     reduce-size-factor: 0.5
     # dual-book: слоты считает CapitalAllocator; D1-first ≤3 пар
+    # Ceiling; live/replay open cap comes from RetailPairsScale (@Might concentrates to 1–2).
     max-open-pairs: 3
     max-portfolio-gross: 1.0
     min-sharpe: 0.0
@@ -119,7 +122,7 @@ imoex:
     index-board: SNDX
   capital:
     # Product default: ordinary subscription user ~250–300к ₽ (band 50–500к).
-    # Pair slots scale via RetailPairsScale (50к→1 … 500к→6), not fund 15–20 names.
+    # Pair slots: RetailPairsScale + @Might OCT2026_RETAIL_CONCENTRATION (50к→1, 250к→2, 500к→3).
     equity-rub: 250000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
@@ -160,12 +163,13 @@ imoex:
     test-bars: 63
     step-bars: 63
   paper:
-    enabled: true
+    # Off with pairs (2026-10-04): see IMOEX-core/trinity-pairs/docs/RESEARCH-SOFT-ELITE.md
+    enabled: false
     # ~30к/нога: 1 пара ≈ 60к gross при β≈1, запас под 2-ю пару / издержки
     notional-per-leg: 30000
     notional-per-leg-pct: 0.30
     journal-file: paper-journal.json
-    auto-run-daily: true
+    auto-run-daily: false
     # До открытия основной сессии (10:00 MSK): прогон по итогам предыдущего дня
     daily-cron: "0 55 9 * * MON-FRI"
     daily-cron-zone: Europe/Moscow
@@ -317,7 +321,8 @@ imoex:
   # Module feature flags (Maven modules trinity-pairs / trinity-trend / trinity-calendar-arb / trinity-marketdata)
   strategies:
     pairs:
-      enabled: true
+      # Off 2026-10-04: soft-elite <2%/year 2025 and 2026 YTD at 250k. Archive: trinity-pairs/docs/
+      enabled: false
     trend:
       enabled: true
       auto-execution: true    # fair-paper live → SANDBOX_FAIR append to trend-paper-journal
