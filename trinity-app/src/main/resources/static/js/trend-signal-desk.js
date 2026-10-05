@@ -95,16 +95,21 @@
   function deskScope() {
     const root = $("trend-signal-desk");
     const s = root && root.getAttribute("data-desk-scope");
-    return s === "positional" ? "positional" : "range";
+    if (s === "positional") return "positional";
+    if (s === "brm") return "brm";
+    return "range";
   }
   function isRangeDesk() {
-    return deskScope() !== "positional";
+    return deskScope() === "range" || deskScope() === "brm";
   }
   function isOilInstrument(secid) {
-    return instrumentFamily(secid) === "BR";
+    const f = instrumentFamily(secid);
+    return f === "BR" || f === "BRM";
   }
   function viewPlaybookId() {
-    return deskScope() === "positional" ? "positional-volume-h1" : "levels-profile-br-m5";
+    if (deskScope() === "positional") return "positional-volume-h1";
+    if (deskScope() === "brm") return "retail-brm-m5";
+    return "levels-profile-br-m5";
   }
   function deskBars(data) {
     if (deskScope() === "positional" || (data && data.deskScope === "positional")) {
@@ -144,6 +149,7 @@
   }
   function applyDeskChrome() {
     const pos = deskScope() === "positional";
+    const brm = deskScope() === "brm";
     const volLab = $("signal-desk-volume-label");
     if (volLab) volLab.textContent = pos ? "Объём H1" : "Объём M5";
     const hint = $("signal-chart-hint");
@@ -151,6 +157,10 @@
       hint.innerHTML = "Часовой график · след / MACD / профиль / линии · "
         + "<a href=\"/view/trend-charts\">терминал графиков</a> · "
         + "вход в промежуточную полку объёма · сетка 1:1:2:4 · стоп и тейк";
+    } else if (hint && brm) {
+      hint.innerHTML = "M5 · BRM мини · тот же чеклист полок, что у диапазонной · "
+        + "для счетов ~50–150 тыс. · "
+        + "<a href=\"/view/trend-strategy#brm\">описание</a>";
     }
     const oilBan = $("us-oil-banner");
     if (oilBan) oilBan.hidden = pos;
@@ -159,9 +169,14 @@
     if (pos) {
       if (gtitle) gtitle.textContent = "Как работает позиционная";
       if (lead) lead.textContent = "Часовой тренд, средняя полка объёма, сетка 1:1:2:4, охота до входа и трейл за закрытой свечой. «Сканирует» — робот включён, входа сейчас нет.";
+    } else if (brm) {
+      if (gtitle) gtitle.textContent = "Как работает BRM мини";
+      if (lead) {
+        lead.textContent = "Тот же чеклист полок на контракте BRM — стратегия для небольших капиталов (~50–150 тыс. ₽). Bounce/retest от TOP/BOT на M5, 1 лот, без параллельной торговли с диапазонной BR.";
+      }
     }
     const kick = $("sig-kick-btn");
-    if (kick) kick.hidden = pos;
+    if (kick) kick.hidden = pos || brm;
     if (pos) {
       const rangeWrap = $("range-auto-wrap");
       if (rangeWrap) rangeWrap.hidden = true;
@@ -173,7 +188,7 @@
     if (modeLink) {
       modeLink.setAttribute("href", pos
         ? "/view/settings#positional-playbook-settings"
-        : "/view/settings#trend-playbook-settings");
+        : (brm ? "/view/settings#brm-playbook-settings" : "/view/settings#trend-playbook-settings"));
     }
     document.querySelectorAll("[data-guide-scope]").forEach(function (el) {
       const want = el.getAttribute("data-guide-scope");
@@ -237,14 +252,41 @@
   function syncRangeAutoSwitch(data) {
     const wrap = $("range-auto-wrap");
     const tog = $("desk-range-auto-execution");
-    const range = deskScope() !== "positional";
+    const range = deskScope() === "range";
     if (wrap) wrap.hidden = !range;
-    if (!tog) return;
+    if (!tog || !range) return;
     paintModeSwitch(
       tog,
       rangeAutoOn(data),
       "range-mode-hint",
       "Авто: планы уходят в журнал песочницы.",
+      "Ручная торговля: график без заявок."
+    );
+  }
+  function brmAutoFlag(data) {
+    if (!data) return null;
+    if (data.brmAutoExecution === true || data.brmAutoExecution === false) {
+      return !!data.brmAutoExecution;
+    }
+    const sit = data.situation || {};
+    if (sit.brmAutoExecution === true || sit.brmAutoExecution === false) {
+      return !!sit.brmAutoExecution;
+    }
+    return null;
+  }
+  function syncBrmAutoSwitch(data) {
+    const wrap = $("brm-auto-wrap");
+    const tog = $("desk-brm-auto-execution");
+    const brm = deskScope() === "brm";
+    if (wrap) wrap.hidden = !brm;
+    if (!tog || !brm) return;
+    const on = brmAutoFlag(data);
+    if (on == null && tog.dataset.hydrated === "1") return;
+    paintModeSwitch(
+      tog,
+      !!on,
+      "brm-mode-hint",
+      "Авто: решения и сделки BRM пишутся в журнал и research-corpus.",
       "Ручная торговля: график без заявок."
     );
   }
@@ -282,6 +324,7 @@
       const view = await res.json();
       syncRangeAutoSwitch(view);
       syncPositionalAutoSwitch(view);
+      syncBrmAutoSwitch(view);
     } catch (_) {}
   }
   function bindRangeAutoSwitch() {
@@ -301,6 +344,53 @@
       if (tog.dataset.hydrated !== "1") return;
       setPositionalAutoFromDesk(tog.checked);
     });
+  }
+  function bindBrmAutoSwitch() {
+    const tog = $("desk-brm-auto-execution");
+    if (!tog || tog.dataset.bound === "1") return;
+    tog.dataset.bound = "1";
+    tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
+      setBrmAutoFromDesk(tog.checked);
+    });
+  }
+  async function setBrmAutoFromDesk(enabled) {
+    const tog = $("desk-brm-auto-execution");
+    if (tog) tog.disabled = true;
+    try {
+      let res = await fetch("/api/trend/settings/brm-auto-execution", {
+        method: "POST",
+        headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      // Older builds without dedicated route — fall back to settings patch.
+      if (res.status === 404) {
+        res = await fetch("/api/trend/settings", {
+          method: "POST",
+          headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+          body: JSON.stringify({ brmAutoExecution: !!enabled })
+        });
+      }
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        const msg = errBody.message || errBody.error || ("HTTP " + res.status);
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(msg + "\nНужен вход в кабинет.");
+        }
+        throw new Error(msg);
+      }
+      const view = await res.json();
+      syncBrmAutoSwitch({ brmAutoExecution: !!view.brmAutoExecution });
+      if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
+        window.TrinityPlaques.refresh();
+      }
+      await loadDesk(true);
+    } catch (e) {
+      alert("Не удалось переключить BRM: " + (e && e.message ? e.message : e));
+      if (tog) tog.checked = !enabled;
+    } finally {
+      if (tog) tog.disabled = false;
+    }
   }
   async function setRangeAutoFromDesk(enabled) {
     const tog = $("desk-range-auto-execution");
@@ -468,6 +558,7 @@
       return "RI";
     }
     if (up.indexOf("NG") === 0) return "NG";
+    if (up === "BRM" || up.indexOf("BRM") === 0) return "BRM";
     if (up.indexOf("BR") === 0) return "BR";
     return up.slice(0, 2);
   }
@@ -480,7 +571,11 @@
     const instSel = $("sig-instrument");
     const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
     const want = (deskInstrumentPinned || fromSel || "").trim();
-    if (isRangeDesk() && want && !isOilInstrument(want)) return "";
+    if (isRangeDesk() && want) {
+      const fam = instrumentFamily(want);
+      if (deskScope() === "brm" && fam !== "BRM") return "";
+      if (deskScope() === "range" && fam !== "BR") return "";
+    }
     return want;
   }
   function invalidateDeskFetch() {
@@ -663,6 +758,7 @@
     if (String(a).toUpperCase() === String(b).toUpperCase()) return true;
     function fam(x) {
       const s = String(x).toUpperCase();
+      if (s.indexOf("BRM") === 0) return "BRM";
       if (s.indexOf("BR") === 0) return "BR";
       if (s.indexOf("RI") === 0 || s.indexOf("RTS") === 0) return "RI";
       if (s.indexOf("SI") === 0) return "SI";
@@ -675,6 +771,7 @@
   }
   function playbookFromTrade(t) {
     const id = (t && t.id) ? String(t.id) : "";
+    if (id.indexOf("retail-brm-m5") >= 0) return "retail-brm-m5";
     if (id.indexOf("positional-volume-h1") >= 0) return "positional-volume-h1";
     if (id.indexOf("levels-profile-br-m5") >= 0) return "levels-profile-br-m5";
     const notes = (t && t.notes) ? String(t.notes) : "";
@@ -4460,6 +4557,7 @@
   if (btn) btn.addEventListener("click", function () { loadDesk(false); });
   bindRangeAutoSwitch();
   bindPositionalAutoSwitch();
+  bindBrmAutoSwitch();
   hydrateDeskModeSwitches();
   const kickBtn = $("sig-kick-btn");
   if (kickBtn) kickBtn.addEventListener("click", kickRobot);

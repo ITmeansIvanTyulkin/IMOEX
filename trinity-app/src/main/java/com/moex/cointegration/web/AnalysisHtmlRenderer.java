@@ -52,6 +52,7 @@ public class AnalysisHtmlRenderer {
     private final boolean strategyPairsEnabled;
     private final boolean strategyTrendEnabled;
     private final boolean strategyCalendarArbEnabled;
+    private final boolean strategyDualClassEnabled;
 
     public AnalysisHtmlRenderer(
             UpsellService upsellService,
@@ -60,9 +61,10 @@ public class AnalysisHtmlRenderer {
             Optional<TrendPaperJournalService> trendPaperJournal,
             Optional<CalendarArbPaperJournalService> calendarArbJournal,
             Optional<TrendFairPaperLiveService> trendFairPaper,
-            @Value("${imoex.strategies.pairs.enabled:true}") boolean strategyPairsEnabled,
+            @Value("${imoex.strategies.pairs.enabled:false}") boolean strategyPairsEnabled,
             @Value("${imoex.strategies.trend.enabled:false}") boolean strategyTrendEnabled,
-            @Value("${imoex.strategies.calendar-arb.enabled:false}") boolean strategyCalendarArbEnabled
+            @Value("${imoex.strategies.calendar-arb.enabled:false}") boolean strategyCalendarArbEnabled,
+            @Value("${imoex.strategies.dual-class.enabled:false}") boolean strategyDualClassEnabled
     ) {
         this.upsellService = upsellService;
         this.capitalProperties = capitalProperties;
@@ -75,6 +77,7 @@ public class AnalysisHtmlRenderer {
         this.strategyPairsEnabled = strategyPairsEnabled;
         this.strategyTrendEnabled = strategyTrendEnabled;
         this.strategyCalendarArbEnabled = strategyCalendarArbEnabled;
+        this.strategyDualClassEnabled = strategyDualClassEnabled;
     }
 
     private static final String PAGE_TEMPLATE = """
@@ -125,6 +128,7 @@ public class AnalysisHtmlRenderer {
             </head>
             <body data-upsell="{{UPSELL}}" data-upsell-phase="{{UPSELL_PHASE}}"
                   data-edition="{{EDITION}}" data-has-trend="{{HAS_TREND}}" data-has-arb="{{HAS_ARB}}"
+                  data-has-spread="{{HAS_SPREAD}}"
                   data-nav-strategy="{{NAV_STRATEGY}}">
               <div id="trinity-auth-gate" class="trinity-auth-gate" hidden aria-hidden="true">
                 <canvas id="trinity-auth-canvas" class="trinity-auth-canvas" aria-hidden="true"></canvas>
@@ -139,12 +143,12 @@ public class AnalysisHtmlRenderer {
                       </div>
                       <p class="trinity-auth-eyebrow">Operator desk</p>
                       <h2 id="trinity-auth-title" class="trinity-auth-title">TRINITY</h2>
-                      <p class="trinity-auth-lead">Три стратегии. Один пульт. Войдите аккаунтом кабинета.</p>
+                      <p class="trinity-auth-lead">Тренд и календарный арбитраж. Один пульт. Войдите аккаунтом кабинета.</p>
                     </div>
                     <form id="trinity-auth-form" class="trinity-auth-form" autocomplete="on">
                       <div class="field">
-                        <label for="gate-user">Email</label>
-                        <input id="gate-user" name="email" type="email" autocomplete="username" spellcheck="false" placeholder="you@example.com" required>
+                        <label for="gate-user">Email кабинета или логин оператора</label>
+                        <input id="gate-user" name="email" type="text" autocomplete="username" spellcheck="false" placeholder="you@example.com или imoex" required>
                       </div>
                       <div class="field">
                         <label for="gate-pass">Пароль</label>
@@ -165,7 +169,7 @@ public class AnalysisHtmlRenderer {
                       <p class="trinity-welcome-kicker">Сессия открыта</p>
                       <h2 class="trinity-welcome-title">Добро пожаловать в TRINITY</h2>
                       <p class="trinity-welcome-copy">
-                        Коинтеграция, тренд и календарный арбитраж — один операторский пульт.
+                        Тренд и календарный арбитраж — один операторский пульт.
                         Сейчас откроется дашборд.
                       </p>
                     </div>
@@ -208,8 +212,8 @@ public class AnalysisHtmlRenderer {
                 <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
               </main>
-              <script src="/js/operator.js?v=20260921-sess8"></script>
-              <script src="/js/trinity-status-plaques.js?v=20260919-chrome1"></script>
+              <script src="/js/operator.js?v=20261005-brm5"></script>
+              <script src="/js/trinity-status-plaques.js?v=20261005-nopairs"></script>
             </body>
             </html>
             """;
@@ -249,13 +253,7 @@ public class AnalysisHtmlRenderer {
                         </div>
                         <button type="button" class="btn btn-ghost" id="ops-save-creds">Войти</button>
                       </div>
-                      <div class="ops-actions">
-                        <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
-                        <button type="button" class="btn btn-secondary" data-ops-action="run-full">Анализ + скачать свечи</button>
-                        <button type="button" class="btn btn-ghost" data-ops-action="news-refresh">Только новости / paper</button>
-                        <button type="button" class="btn btn-ghost" data-ops-action="walk-forward">Walk-forward</button>
-                        <button type="button" class="btn btn-warn" data-ops-action="data-refresh">Скачать свечи</button>
-                      </div>
+                      <p class="meta">Кнопки прогона пар скрыты: стратегия выключена.</p>
                     </div>
                     <div>
                       <div class="status-box" id="ops-log" aria-live="polite"></div>
@@ -274,7 +272,6 @@ public class AnalysisHtmlRenderer {
                     <a href="/view/settings">Настройках</a>.
                   </p>
                   <div class="ops-compact-actions">
-                    <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
                     <a class="btn btn-ghost" href="/view/settings">Настройки</a>
                   </div>
                 </section>
@@ -288,10 +285,9 @@ public class AnalysisHtmlRenderer {
                   <div class="busy-bar" id="ops-busy"></div>
                   <div class="dash-cta-copy">
                     <p class="dash-cta-label">Действие</p>
-                    <p class="dash-cta-text">Обновить сигналы и paper-журнал. Брокер и алерты — в Настройках.</p>
+                    <p class="dash-cta-text">Брокер и алерты — в Настройках.</p>
                   </div>
                   <div class="dash-cta-actions">
-                    <button type="button" class="btn btn-primary" data-ops-action="run-fast">Анализ + paper</button>
                     <a class="btn btn-ghost" href="/view/settings">Настройки</a>
                   </div>
                 </section>
@@ -320,7 +316,6 @@ public class AnalysisHtmlRenderer {
         body.append(dashboardQuietCta());
         body.append("""
                 <nav class="dash-foot-links" aria-label="Ещё">
-                  <a href="/view/final">Пульт пар</a>
                   <a href="/view/statement">Statement</a>
                   <a href="/view/guide">Справка</a>
                   <button type="button" class="btn btn-ghost btn-xs" id="trinity-tour-start" data-tour-start>
@@ -343,12 +338,11 @@ public class AnalysisHtmlRenderer {
         String regimeLabel = regime.label() == null ? "—" : regime.label();
         String adx = Double.isNaN(regime.adx()) ? "—" : String.format(Locale.ROOT, "%.0f", regime.adx());
         String regimeHint = switch (regimeLabel) {
-            case "SIDEWAYS" -> "боковик — pairs ok";
-            case "NEUTRAL" -> "нейтрально — pairs осторожно";
-            case "TREND" -> "тренд — новые pairs стоп";
+            case "SIDEWAYS" -> "боковик";
+            case "NEUTRAL" -> "нейтрально";
+            case "TREND" -> "тренд";
             default -> "режим неизвестен";
         };
-        boolean pairsOn = strategyPairsEnabled;
         boolean trendOn = strategyTrendEnabled;
         boolean arbOn = strategyCalendarArbEnabled;
 
@@ -368,12 +362,6 @@ public class AnalysisHtmlRenderer {
                   </header>
 
                   <section class="dash-robots" aria-label="Роботы сейчас">
-                    <a class="dash-robot-card is-scan" id="dash-robot-pairs" href="/view/final">
-                      <span class="dash-robot-kicker">Коинтеграция</span>
-                      <span class="dash-robot-status">…</span>
-                      <span class="dash-robot-scope">Pairs · DAILY</span>
-                      <span class="dash-robot-detail">Загрузка…</span>
-                    </a>
                     <a class="dash-robot-card is-scan" id="dash-robot-range" href="/view/trend-signal"%s>
                       <span class="dash-robot-kicker">Тренд · диапазон</span>
                       <span class="dash-robot-status">…</span>
@@ -384,6 +372,12 @@ public class AnalysisHtmlRenderer {
                       <span class="dash-robot-kicker">Тренд · позиционная</span>
                       <span class="dash-robot-status">…</span>
                       <span class="dash-robot-scope">H1</span>
+                      <span class="dash-robot-detail">Загрузка…</span>
+                    </a>
+                    <a class="dash-robot-card is-scan" id="dash-robot-brm" href="/view/trend-brm"%s>
+                      <span class="dash-robot-kicker">Тренд · BRM мини</span>
+                      <span class="dash-robot-status">…</span>
+                      <span class="dash-robot-scope">M5 · 1 лот</span>
                       <span class="dash-robot-detail">Загрузка…</span>
                     </a>
                     <a class="dash-robot-card is-scan" id="dash-robot-arb" href="%s"%s>
@@ -414,6 +408,7 @@ public class AnalysisHtmlRenderer {
                 escape(regimeLabel),
                 escape(adx),
                 escape(regimeHint),
+                trendOn ? "" : " data-requires=\"trend\"",
                 trendOn ? "" : " data-requires=\"trend\"",
                 trendOn ? "" : " data-requires=\"trend\"",
                 escape(arbHref),
@@ -464,8 +459,7 @@ public class AnalysisHtmlRenderer {
                   <div class="callout">
                     <label for="product-edition-select"><strong>Активная версия</strong></label>
                     <select id="product-edition-select" class="input-select">
-                      <option value="PAIRS"%s>Коинтеграция (light)</option>
-                      <option value="PAIRS_TREND"%s>Коинтеграция + тренд</option>
+                      <option value="PAIRS_TREND"%s>Тренд</option>
                       <option value="FULL"%s>Full Core</option>
                     </select>
                     <div class="ops-row" style="margin-top:0.75rem">
@@ -477,7 +471,6 @@ public class AnalysisHtmlRenderer {
                 </section>
                 """.formatted(
                 escape(configured),
-                cur == ProductEdition.PAIRS ? " selected" : "",
                 cur == ProductEdition.PAIRS_TREND ? " selected" : "",
                 cur == ProductEdition.FULL ? " selected" : "",
                 escape(cur.labelRu())
@@ -491,8 +484,8 @@ public class AnalysisHtmlRenderer {
                     <p class="settings-eyebrow">Роботы</p>
                     <h2>Наблюдение и авто</h2>
                     <p class="meta">
-                      Четыре независимых тумблера в один ряд. Наблюдение — смотрим. Авто — робот сам
-                      ведёт журнал и заявки по своим правилам.
+                      BRM и диапазонная не торгуют вместе (один сигнал). Выключенный из пары пишет
+                      ENTER/SKIP в свой корпус (shadow) без сделок и аллокации. Позиционная отдельно.
                     </p>
                   </header>
                   <div class="robots-delivery-grid">
@@ -504,15 +497,15 @@ public class AnalysisHtmlRenderer {
                 </section>
                 """.formatted(
                 robotModeCard(
-                        "pairs-playbook-settings",
-                        "Акции индекса",
-                        "Коинтеграция",
-                        "pairs-delivery-title",
-                        "pairs-delivery-hint",
-                        "pairs-delivery-status",
-                        "settings-pairs-auto-execution",
-                        strategyPairsEnabled,
-                        "Парный спред на дневках. Наблюдение пишет разбор в журнал, заявок нет."
+                        "brm-playbook-settings",
+                        "Тренд",
+                        "BRM мини",
+                        "brm-delivery-title",
+                        "brm-delivery-hint",
+                        "brm-delivery-status",
+                        "settings-brm-auto-execution",
+                        strategyTrendEnabled,
+                        "Нефть на мини-контракте, чеклист как у диапазонной. Для счетов 50–150 тыс."
                 ),
                 robotModeCard(
                         "positional-playbook-settings",
@@ -866,7 +859,7 @@ public class AnalysisHtmlRenderer {
     }
 
     /**
-     * Три столпа TRINITY на дашборде: боковик (pairs), тренд (все playbooks), календарный арбитраж.
+     * Столпы на дашборде: тренд + календарный арбитраж (pairs скрыт, пока модуль выключен).
      */
     private String dashboardStrategyPillars(
             String regime,
@@ -874,17 +867,7 @@ public class AnalysisHtmlRenderer {
             boolean trendOn,
             boolean arbOn
     ) {
-        boolean sideways = "SIDEWAYS".equals(regime);
-        boolean trending = "TREND".equals(regime);
-
-        String pairsStatus = !pairsOn ? "выкл"
-                : trending ? "пауза · ADX"
-                : sideways ? "paper live" : "осторожно";
-        String pairsSwatch = !pairsOn ? "slate" : trending ? "warn" : "ok";
-        String pairsCenter = !pairsOn ? "OFF" : trending ? "HOLD" : "ON";
-        int pairsPct = !pairsOn ? 0 : trending ? 35 : 100;
-
-        String trendStatus = !trendOn ? "выкл" : "1 playbook";
+        String trendStatus = !trendOn ? "выкл" : "playbooks";
         String trendSwatch = trendOn ? "accent" : "slate";
         String trendCenter = trendOn ? "BR" : "—";
         int trendPct = trendOn ? 70 : 20;
@@ -894,42 +877,51 @@ public class AnalysisHtmlRenderer {
         String arbCenter = arbOn ? "ON" : "—";
         int arbPct = arbOn ? 70 : 15;
 
+        String pairsCard = "";
+        if (pairsOn) {
+            boolean sideways = "SIDEWAYS".equals(regime);
+            boolean trending = "TREND".equals(regime);
+            String pairsStatus = trending ? "пауза · ADX" : sideways ? "paper live" : "осторожно";
+            String pairsSwatch = trending ? "warn" : "ok";
+            String pairsCenter = trending ? "HOLD" : "ON";
+            int pairsPct = trending ? 35 : 100;
+            pairsCard = flipCard(
+                    "pillar-pairs",
+                    "Боковик · Pairs",
+                    """
+                    <div class="donut" style="--p:%d;--c:var(--ok)">
+                      <div class="donut-center">
+                        <strong>%s</strong>
+                        <span>pairs</span>
+                      </div>
+                    </div>
+                    <div class="widget-meta">
+                      <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
+                      <div class="widget-stat"><span class="k">Книга</span><span class="v">DAILY paper</span></div>
+                      <div class="widget-stat"><span class="k">Gate</span><span class="v">ADX · FA</span></div>
+                    </div>
+                    """.formatted(pairsPct, escape(pairsCenter), pairsSwatch, escape(pairsStatus)),
+                    """
+                    <p class="widget-back-lead">Mean-reversion на парах IMOEX. Модуль в архиве продукта.</p>
+                    <div class="widget-back-stats">
+                      <div class="widget-stat"><span class="k">Модуль</span><span class="v">trinity-pairs</span></div>
+                      <div class="widget-stat"><span class="k">Флаг</span><span class="v">imoex.strategies.pairs</span></div>
+                    </div>
+                    """
+            );
+        }
+
         return """
-                <section class="widget-grid widget-grid-pillars" aria-label="Три стратегии TRINITY">
+                <section class="widget-grid widget-grid-pillars" aria-label="Стратегии TRINITY">
                   %s
                   %s
                   %s
                 </section>
                 """.formatted(
-                flipCard(
-                        "pillar-pairs",
-                        "① Боковик · Pairs",
-                        """
-                        <div class="donut" style="--p:%d;--c:var(--ok)">
-                          <div class="donut-center">
-                            <strong>%s</strong>
-                            <span>pairs</span>
-                          </div>
-                        </div>
-                        <div class="widget-meta">
-                          <div class="widget-stat"><span class="k"><i class="swatch %s"></i>Статус</span><span class="v">%s</span></div>
-                          <div class="widget-stat"><span class="k">Книга</span><span class="v">DAILY paper</span></div>
-                          <div class="widget-stat"><span class="k">Gate</span><span class="v">ADX · FA</span></div>
-                        </div>
-                        """.formatted(pairsPct, escape(pairsCenter), pairsSwatch, escape(pairsStatus)),
-                        """
-                        <p class="widget-back-lead">Стратегия #1 — mean-reversion на коинтегрированных парах IMOEX.
-                          Новые входы в SIDEWAYS; при TREND (ADX) — блок.</p>
-                        <div class="widget-back-stats">
-                          <div class="widget-stat"><span class="k">Модуль</span><span class="v">trinity-pairs</span></div>
-                          <div class="widget-stat"><span class="k">Флаг</span><span class="v">imoex.strategies.pairs</span></div>
-                        </div>
-                        <a class="widget-back-link" href="/view/strategy">О pairs →</a>
-                        """
-                ),
+                pairsCard,
                 flipCard(
                         "pillar-trend",
-                        "② Тренд · Playbooks",
+                        "Тренд · Playbooks",
                         """
                         <div class="donut" style="--p:%d;--c:var(--accent)">
                           <div class="donut-center">
@@ -957,7 +949,7 @@ public class AnalysisHtmlRenderer {
                 ),
                 flipCard(
                         "pillar-arb",
-                        "③ Арбитраж · Calendar",
+                        "Арбитраж · Calendar",
                         """
                         <div class="donut" style="--p:%d;--c:var(--gold)">
                           <div class="donut-center">
@@ -1321,10 +1313,9 @@ public class AnalysisHtmlRenderer {
                     Один счёт, несколько стратегий с разной физикой рынка:
                   </p>
                   <ul>
-                    <li><strong>Pairs (DAILY)</strong> — mean-reversion коинтегрированных пар в боковике (ADX режет TREND).</li>
-                    <li><strong>Trend #1</strong> — «Уровни + профиль» BR M5 (интрадей, чек-лист Exclusive).</li>
-                    <li><strong>Trend #2</strong> — позиционная H1 (<code>positional-volume-h1</code>): промежуточный объёмный диапазон, сетка 1:1:2:4, RTS/нефть/газ.</li>
-                    <li><strong>Arbitrage</strong> — calendar + fly FORTS, котировки T-Invest, fair-paper.</li>
+                    <li><strong>Тренд</strong> — Exclusive BR M5 и позиционная H1.</li>
+                    <li><strong>Календарный арбитраж</strong> — разница месяцев FORTS, котировки T-Invest.</li>
+                    <li><strong>Спред AO/AP</strong> — модуль выключен, с пульта снят (после издержек это шум на 50к–1М).</li>
                   </ul>
                   <p>
                     Live-брокер для trend по умолчанию выключен (<code>live-execution=false</code>): сначала sandbox/fair-paper и OOS.
@@ -1336,10 +1327,8 @@ public class AnalysisHtmlRenderer {
                     <li><strong>Java 17+</strong> и <strong>Maven 3.9+</strong> установлены; вы в корне репозитория (там, где <code>pom.xml</code>).</li>
                     <li>Создайте <code>application-local.yml</code> в корне репо с паролем API и ключом <code>imoex.run.unlock</code> (без них приложение не стартует).</li>
                     <li>Запустите: <code>mvn -pl trinity-app -am spring-boot:run</code> и дождитесь <code>Started TrinityApplication</code>.</li>
-                    <li>Откройте <a href="/view">http://localhost:8080/view</a> — спокойный дашборд (KPI и сигналы).</li>
-                    <li>В <a href="/view/settings">Настройках</a> сохраните логин API; первый раз нажмите
-                      <strong>«Анализ + скачать свечи»</strong> — скачает историю с MOEX ISS (может занять много минут).</li>
-                    <li>Дальше обычно достаточно <strong>«Анализ + paper»</strong> — с дашборда или из настроек.</li>
+                    <li>Откройте <a href="/view">http://localhost:8080/view</a> — дашборд тренда и календаря.</li>
+                    <li>В <a href="/view/settings">Настройках</a> сохраните логин кабинета.</li>
                   </ol>
                   <div class="callout">
                     GET-страницы приложения открываются без пароля. Кнопки пульта шлют POST на API —
@@ -1371,13 +1360,11 @@ public class AnalysisHtmlRenderer {
                   <table class="params">
                     <thead><tr><th>Раздел</th><th>Зачем открывать</th></tr></thead>
                     <tbody>
-                      <tr><td><a href="/view">Дашборд</a></td><td>Спокойный обзор: KPI (Paper / Брокер / Final / Режим), сигналы и топ-пары.</td></tr>
-                      <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера (токен, песочница, сверка).</td></tr>
-                      <tr><td><a href="/view/final">Пульт пар</a></td><td><strong>Пульт пар</strong> — ENTER / REDUCE / WATCH / BLOCK после фундамента, графики, разбор. Сырые сигналы и walk-forward отдельно не вынесены: это шум, решение уже здесь.</td></tr>
-                      <tr><td><a href="/view/statement">Statement</a></td><td>Депозит + стейтменты стратегий (pairs / trend / arb).</td></tr>
-                      <tr><td><a href="/view/strategy">Описание (пары)</a></td><td>Как сейчас торгует парный робот: фаворит отрасли, боковик, окно дивидендов, наблюдение/авто.</td></tr>
-                      <tr><td><a href="/view/trend-strategy">Описание (тренд)</a></td><td>Два разных робота: диапазонная нефть M5 и позиционная сетка на часе. Не путать с парами и календарным спредом.</td></tr>
-                      <tr><td><a href="/view/calendar-arb-strategy">Описание (арбитраж)</a></td><td>Разница месяцев, не ставка на товар. Нефть только в «скучной» кривой, газ — в своём сезоне.</td></tr>
+                      <tr><td><a href="/view">Дашборд</a></td><td>Обзор: роботы тренда и календаря.</td></tr>
+                      <tr><td><a href="/view/settings">Настройки</a></td><td>Пульт оператора, алерты, лог, консоль брокера.</td></tr>
+                      <tr><td><a href="/view/statement">Statement</a></td><td>Paper / research PnL по тренду и календарю.</td></tr>
+                      <tr><td><a href="/view/trend-strategy">Описание (тренд)</a></td><td>Два робота: диапазонная нефть M5 и позиционная сетка на часе.</td></tr>
+                      <tr><td><a href="/view/calendar-arb-strategy">Описание (арбитраж)</a></td><td>Разница месяцев, не ставка на товар.</td></tr>
                     </tbody>
                   </table>
                   <p>
@@ -1439,9 +1426,8 @@ public class AnalysisHtmlRenderer {
                   <ol class="pipeline">
                     <li>Убедиться, что приложение запущено (<code>mvn -pl trinity-app -am spring-boot:run</code>).</li>
                     <li>Нажать «Анализ + paper» (или дождаться вечернего cron — см. ниже).</li>
-                    <li>Открыть <a href="/view/final">Пульт пар</a> — что разрешено по DAILY после FA.</li>
-                    <li>Открыть <a href="/view/statement">Statement</a> — что реально открылось в DAILY / Trend.</li>
-                    <li>При сомнениях — график пары и виджет «Режим рынка» на дашборде (TREND блокирует новые входы).</li>
+                    <li>Открыть <a href="/view/statement">Statement</a> — paper тренда и календаря.</li>
+                    <li>При сомнениях — desk тренда или календарной доски.</li>
                   </ol>
 
                   <h3 id="auto">5. Автопрогоны (cron)</h3>
@@ -1731,11 +1717,22 @@ public class AnalysisHtmlRenderer {
         return page("TRINITY — позиционная торговля", trendDeskHtml("positional"), nav("trend-positional"), OpsMode.NONE);
     }
 
+    /** Тренд #3: Exclusive чеклист на BRM, жёсткий лот. */
+    public String renderTrendBrmPage() {
+        if (!productEdition.hasTrend()) {
+            return renderStrategyLockedPage("TREND", "trend-brm");
+        }
+        return page("TRINITY — BRM мини", trendDeskHtml("brm"), nav("trend-brm"), OpsMode.NONE);
+    }
+
     private String trendDeskHtml(String scope) {
         String html = loadClasspathUtf8("trend-signal-desk.html");
         if ("positional".equals(scope)) {
             html = html.replace("data-desk-scope=\"range\"", "data-desk-scope=\"positional\"");
             html = html.replace(">Диапазонная торговля<", ">Позиционная торговля<");
+        } else if ("brm".equals(scope)) {
+            html = html.replace("data-desk-scope=\"range\"", "data-desk-scope=\"brm\"");
+            html = html.replace(">Диапазонная торговля<", ">BRM мини<");
         }
         return html;
     }
@@ -1775,6 +1772,20 @@ public class AnalysisHtmlRenderer {
             return renderStrategyLockedPage("ARB", "calendar-arb-strategy");
         }
         return page("TRINITY — описание арбитража", loadClasspathUtf8("calendar-arb-strategy.html"), nav("calendar-arb-strategy"), OpsMode.NONE);
+    }
+
+    public String renderSpreadPage() {
+        if (!strategyDualClassEnabled) {
+            return renderStrategyLockedPage("SPREAD", "spread");
+        }
+        return page("TRINITY — торговля спредом", loadClasspathUtf8("spread-desk.html"), nav("spread"), OpsMode.NONE);
+    }
+
+    public String renderSpreadStrategyPage() {
+        if (!strategyDualClassEnabled) {
+            return renderStrategyLockedPage("SPREAD", "spread-strategy");
+        }
+        return page("TRINITY — описание спреда", loadClasspathUtf8("spread-strategy.html"), nav("spread-strategy"), OpsMode.NONE);
     }
 
     private String renderStrategyLockedPage(String strategy, String activeNav) {
@@ -1978,7 +1989,7 @@ public class AnalysisHtmlRenderer {
                   <div class="busy-bar" id="ops-busy"></div>
                   <header class="pairs-desk-head">
                     <div>
-                      <p class="pairs-desk-kicker">Коинтеграция · DAILY</p>
+                      <p class="pairs-desk-kicker">Pairs · DAILY (архив)</p>
                       <h2>Пульт пар</h2>
                       <p class="pairs-desk-lead" id="pairs-desk-lead">%s</p>
                     </div>
@@ -2771,18 +2782,21 @@ public class AnalysisHtmlRenderer {
         });
 
         List<PaperTradeEntry> allEntries = journal.entries() == null ? List.of() : journal.entries();
-        List<PaperTradeEntry> pairsEntries = allEntries.stream()
-                .filter(e -> e.book() == null || e.book().isBlank() || "DAILY".equalsIgnoreCase(e.book()))
-                .toList();
-        long pairsOpen = pairsEntries.stream().filter(e -> "OPEN".equals(e.status())).count();
-        double pairsRealized = pairsEntries.stream()
-                .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
-                .mapToDouble(PaperTradeEntry::pnlRub)
-                .sum();
-        double pairsUnrealized = pairsEntries.stream()
-                .filter(e -> "OPEN".equals(e.status()) && e.unrealizedPnlRub() != null)
-                .mapToDouble(PaperTradeEntry::unrealizedPnlRub)
-                .sum();
+        double pairsRealized = 0;
+        double pairsUnrealized = 0;
+        if (strategyPairsEnabled) {
+            List<PaperTradeEntry> pairsEntries = allEntries.stream()
+                    .filter(e -> e.book() == null || e.book().isBlank() || "DAILY".equalsIgnoreCase(e.book()))
+                    .toList();
+            pairsRealized = pairsEntries.stream()
+                    .filter(e -> "CLOSED".equals(e.status()) && e.pnlRub() != null)
+                    .mapToDouble(PaperTradeEntry::pnlRub)
+                    .sum();
+            pairsUnrealized = pairsEntries.stream()
+                    .filter(e -> "OPEN".equals(e.status()) && e.unrealizedPnlRub() != null)
+                    .mapToDouble(PaperTradeEntry::unrealizedPnlRub)
+                    .sum();
+        }
 
         Map<String, Object> trendSt = Map.of();
         List<Map<String, Object>> trendTrades = List.of();
@@ -2807,7 +2821,7 @@ public class AnalysisHtmlRenderer {
         int arbClosed = (int) num(arbSt.get("closedCount"));
 
         double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
-        double depositNet = pairsRealized + pairsUnrealized
+        double depositNet = (strategyPairsEnabled ? pairsRealized + pairsUnrealized : 0)
                 + (productEdition.hasTrend() ? trendRealized : 0)
                 + (productEdition.hasArb() ? arbRealized : 0);
 
@@ -2832,8 +2846,6 @@ public class AnalysisHtmlRenderer {
         body.append("<h3>Депозит (общий)</h3>");
         body.append("<div class=\"cards\">");
         body.append(card("Equity", String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' '), false));
-        body.append(card("Pairs net", String.format("%.0f", pairsRealized + pairsUnrealized),
-                pairsRealized + pairsUnrealized >= 0));
         if (productEdition.hasTrend()) {
             body.append(card("Trend realized", String.format("%.0f", trendRealized), trendRealized >= 0));
             body.append(card("Trend сегодня", String.format("%.0f", trendToday), trendToday >= 0));
@@ -2848,16 +2860,9 @@ public class AnalysisHtmlRenderer {
         body.append(card("Net* (доступное)", String.format("%.0f", depositNet), depositNet >= 0));
         body.append("</div></section>");
 
-        // Pairs
-        body.append("<section class=\"statement-section\" id=\"pairs\">");
-        body.append("<h3>① Коинтеграция · DAILY</h3>");
-        body.append(renderPairsStatementInner(pairsEntries, pairsOpen, pairsRealized, pairsUnrealized,
-                journal.updatedAt() == null ? null : journal.updatedAt().toString(), dailyRecs));
-        body.append("</section>");
-
         // Trend
         body.append("<section class=\"statement-section\" id=\"trend\">");
-        body.append("<h3>② Тренд · BR</h3>");
+        body.append("<h3>Тренд · BR</h3>");
         if (!productEdition.hasTrend()) {
             body.append(statementLockedBlock("TREND"));
         } else {
@@ -2885,7 +2890,7 @@ public class AnalysisHtmlRenderer {
 
         // Arb
         body.append("<section class=\"statement-section\" id=\"arb\">");
-        body.append("<h3>③ Календарный арбитраж</h3>");
+        body.append("<h3>Календарный арбитраж</h3>");
         if (!productEdition.hasArb()) {
             body.append(statementLockedBlock("ARB"));
         } else {
@@ -3147,7 +3152,9 @@ public class AnalysisHtmlRenderer {
         boolean hasTrend = productEdition.hasTrend();
         boolean hasArb = productEdition.hasArb();
         String pageStrategy = navStrategyHint(a);
-        String pairsActive = "pairs".equals(pageStrategy) ? "active" : "";
+        if ("pairs".equals(pageStrategy) || "spread".equals(pageStrategy)) {
+            pageStrategy = "trend";
+        }
         String trendActive = "trend".equals(pageStrategy) ? "active" : "";
         String arbActive = "arb".equals(pageStrategy) ? "active" : "";
         String trendLock = hasTrend ? "" : " is-locked";
@@ -3161,21 +3168,16 @@ public class AnalysisHtmlRenderer {
                     <a href="/view/guide" class="%s">Справка</a>
                   </div>
                   <div class="strategy-switch" role="tablist" aria-label="Стратегия">
-                    <button type="button" class="strategy-switch-btn %s" data-strategy="pairs"
-                            role="tab" aria-selected="%s">Коинтеграция</button>
                     <button type="button" class="strategy-switch-btn %s%s" data-strategy="trend"
                             data-locked="%s" role="tab" aria-selected="%s">Тренд</button>
                     <button type="button" class="strategy-switch-btn %s%s" data-strategy="arb"
                             data-locked="%s" role="tab" aria-selected="%s">Арбитраж</button>
                   </div>
                 </nav>
-                <nav class="topnav-secondary" data-for="pairs" hidden>
-                  <a href="/view/final" class="%s">Пульт пар</a>
-                  <a href="/view/strategy" class="%s">Описание</a>
-                </nav>
                 <nav class="topnav-secondary" data-for="trend" hidden>
                   <a href="/view/trend-signal" class="%s" data-requires="trend">Диапазонная торговля</a>
                   <a href="/view/trend-positional" class="%s" data-requires="trend">Позиционная торговля</a>
+                  <a href="/view/trend-brm" class="%s" data-requires="trend">BRM мини</a>
                   <a href="/view/trend-charts" class="%s" data-requires="trend">Терминал графиков</a>
                   <a href="/view/trend-strategy" class="%s" data-requires="trend">Описание</a>
                 </nav>
@@ -3190,16 +3192,13 @@ public class AnalysisHtmlRenderer {
                 a.equals("statement") || a.equals("paper") ? "active" : "",
                 a.equals("settings") ? "active" : "",
                 a.equals("guide") ? "active" : "",
-                pairsActive,
-                pairsActive.isEmpty() ? "false" : "true",
                 trendActive, trendLock, hasTrend ? "false" : "true",
                 trendActive.isEmpty() ? "false" : "true",
                 arbActive, arbLock, hasArb ? "false" : "true",
                 arbActive.isEmpty() ? "false" : "true",
-                a.equals("final") ? "active" : "",
-                a.equals("strategy") ? "active" : "",
                 a.equals("trend-signal") ? "active" : "",
                 a.equals("trend-positional") ? "active" : "",
+                a.equals("trend-brm") ? "active" : "",
                 a.equals("trend-charts") ? "active" : "",
                 a.equals("trend-strategy") ? "active" : "",
                 a.equals("calendar-arb") ? "active" : "",
@@ -3215,6 +3214,7 @@ public class AnalysisHtmlRenderer {
 
     private static boolean isTrendNav(String a) {
         return a.equals("trend-signal") || a.equals("trend-positional")
+                || a.equals("trend-brm")
                 || a.equals("trend-charts") || a.equals("trend-strategy");
     }
 
@@ -3222,10 +3222,14 @@ public class AnalysisHtmlRenderer {
         return a.equals("fullcore") || a.equals("calendar-arb") || a.equals("calendar-arb-strategy");
     }
 
+    private static boolean isSpreadNav(String a) {
+        return a.equals("spread") || a.equals("spread-strategy");
+    }
+
     private String navStrategyHint(String active) {
         String a = active == null ? "" : active;
-        if (isPairsNav(a)) {
-            return "pairs";
+        if (isSpreadNav(a) || isPairsNav(a)) {
+            return "trend";
         }
         if (isTrendNav(a)) {
             return "trend";
@@ -3277,6 +3281,7 @@ public class AnalysisHtmlRenderer {
                 .replace("{{EDITION}}", edition.name())
                 .replace("{{HAS_TREND}}", productEdition.hasTrend() ? "1" : "0")
                 .replace("{{HAS_ARB}}", productEdition.hasArb() ? "1" : "0")
+                .replace("{{HAS_SPREAD}}", "0")
                 .replace("{{NAV_STRATEGY}}", navStrategy)
                 .replace("{{NAV}}", nav)
                 .replace("{{OPS}}", opsHtml(opsMode))

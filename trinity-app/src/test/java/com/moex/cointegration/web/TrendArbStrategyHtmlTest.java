@@ -24,7 +24,7 @@ class TrendArbStrategyHtmlTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
-                true, true, calendarArbEnabled
+                true, true, calendarArbEnabled, true
         );
     }
 
@@ -35,9 +35,11 @@ class TrendArbStrategyHtmlTest {
         assertTrue(html.contains(">Описание<"), html);
         assertTrue(html.contains("class=\"active\" data-requires=\"trend\">Описание<")
                 || html.contains("class=\"active\" data-requires=\"trend\">Описание</a>"), html);
-        assertTrue(html.contains("Тренд сейчас: два разных робота"), html);
+        assertTrue(html.contains("Тренд сейчас: три плейбука"), html);
         assertTrue(html.contains("Диапазонная: только нефть"), html);
         assertTrue(html.contains("Позиционная: час и сетка"), html);
+        assertTrue(html.contains("BRM мини"), html);
+        assertTrue(html.contains("для небольших капиталов"), html);
         assertTrue(html.contains("Тумблеры Наблюдение / Авто"), html);
         assertTrue(html.contains("Живые заявки на срочном рынке у диапазонной нефти выключены"), html);
         assertTrue(html.contains("хвост ведём трейлом"), html);
@@ -48,6 +50,19 @@ class TrendArbStrategyHtmlTest {
         assertFalse(html.contains("liveExecution"), html);
         assertFalse(html.contains("§"), html);
         assertFalse(html.contains("/view/trend-strategy</"), html);
+    }
+
+    @Test
+    void spreadStrategyPageIsSameIssuerNotSectorScan() {
+        String html = renderer(true).renderSpreadStrategyPage();
+        assertFalse(html.contains("data-strategy=\"spread\""), html);
+        assertFalse(html.contains(">Спред<"), html);
+        assertTrue(html.contains("Торговля спредом сейчас"), html);
+        assertTrue(html.contains("одного эмитента"), html);
+        assertTrue(html.contains("Наблюдение / Авто") || html.contains("Наблюдение и авто"), html);
+        assertFalse(html.toLowerCase().contains("z-score"), html);
+        assertFalse(html.contains("Kalman") || html.contains("kalman"), html);
+        assertFalse(html.contains("§"), html);
     }
 
     @Test

@@ -318,11 +318,26 @@ imoex:
     on-startup: true
     retry-max: 5
     retry-delay-ms: 15000
-  # Module feature flags (Maven modules trinity-pairs / trinity-trend / trinity-calendar-arb / trinity-marketdata)
+  # Module flags: trinity-pairs / trinity-trend / trinity-calendar-arb / trinity-dual-class / trinity-marketdata
   strategies:
     pairs:
       # Off 2026-10-04: soft-elite <2%/year 2025 and 2026 YTD at 250k. Archive: trinity-pairs/docs/
       enabled: false
+    dual-class:
+      # Off 2026-10-04: AO/AP after costs is noise on 50k–1M. Module stays in repo, desk hidden.
+      enabled: false
+      # Floor vs issuer center, not vs 0. TATN ~6%, SNGS ~−70%.
+      entry-abs-premium-pct: 4.0
+      exit-abs-premium-pct: 1.0
+      min-roundtrip-cost-pct: 0.40
+      max-open-pairs: 1
+      half-spread-below-rub: 150000
+      max-gross-pct: 0.25
+      dividend-layer-ready: false
+      # Только TATN, две ноги, ≤25%. |z|≥2, |остаток|≥4%, не ловим разъезд. Сургут/РТК вне круга.
+      lookback-sessions: 60
+      entry-z: 2.0
+      exit-z: 0.5
     trend:
       enabled: true
       auto-execution: true    # fair-paper live → SANDBOX_FAIR append to trend-paper-journal
@@ -337,6 +352,7 @@ imoex:
       sandbox-broker-stop-qty: 1
       # Parallel on after hvnHills VAP/peak caps (was OOM). Collect window — no positional gate tune.
       playbook: both
+      # both = Exclusive + Positional. all = + retail-brm-m5 (плейбук #3, не четвёртая стратегия).
       parallel-playbooks: true
       desk-go-long-rub: 20000
       desk-go-short-rub: 22000
@@ -393,6 +409,10 @@ imoex:
         tp1-points: 20
         rub-per-point: 7.0
         sl-sweep-buffer-points: 5    # за day-полкой +5 пт против ложного SWEEP; иначе skip если > stop-points
+      # Плейбук #3: тот же чеклист M5, контракт BRM, лестница 1 лот (редко 2). Не отдельная стратегия.
+      brm:
+        enabled: true
+        rub-per-point: 0.7
     calendar-arb:
       enabled: true
       auto-execution: true          # fair-paper fills on T-Invest H1 close
@@ -456,15 +476,14 @@ imoex:
     auto-resolve-instrument: BR
     # instruments: BRU6=FIGI…   # optional override; else auto-resolve future ticker
 
-# Продуктовый бренд (стратегии 2–3 + marketdata — модули; live пока pairs)
+# Актив: тренд (Exclusive M5 + positional H1 + BRM) и календарь FORTS. Спред AO/AP и пары EG выкл.
 trinity:
   name: TRINITY Multi-Strategy Arbitrage
   version: 1.0.0
   slogan: "Three Strategies. One Mission."
   strategies:
-    - cointegration
-    # - trend
-    # - futures-arbitrage
+    - trend
+    - calendar
 
 server:
   port: 8080

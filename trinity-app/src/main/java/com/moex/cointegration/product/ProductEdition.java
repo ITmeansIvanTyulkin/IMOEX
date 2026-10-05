@@ -38,8 +38,8 @@ public enum ProductEdition {
 
     public String labelRu() {
         return switch (this) {
-            case PAIRS -> "Коинтеграция (light)";
-            case PAIRS_TREND -> "Коинтеграция + тренд";
+            case PAIRS -> "Light (архив)";
+            case PAIRS_TREND -> "Тренд";
             case FULL -> "Full Core";
         };
     }

@@ -1,5 +1,5 @@
 /**
- * Global floating plaques: 3 robots on every /view/* page;
+ * Global floating plaques: trend robots on every /view/* page;
  * wind (trend) only on Сигнал + Терминал графиков.
  * Updates text in-place to avoid twitch on poll.
  */

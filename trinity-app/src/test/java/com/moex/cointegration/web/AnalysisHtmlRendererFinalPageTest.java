@@ -38,7 +38,7 @@ class AnalysisHtmlRendererFinalPageTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
-                true, false, false
+                true, false, false, true
         );
 
         String html = renderer.renderFinalTable(
@@ -68,9 +68,8 @@ class AnalysisHtmlRendererFinalPageTest {
         assertFalse(html.contains("href=\"/view/signals\""), "raw signals tab should be off the pairs chrome");
         assertFalse(html.contains("href=\"/view/recommendations\""), "recommendations tab should be off the pairs chrome");
         assertFalse(html.contains("href=\"/view/walk-forward\""), "walk-forward tab should be off the pairs chrome");
-        assertTrue(html.contains("href=\"/view/final\""));
-        assertTrue(html.contains("href=\"/view/strategy\""));
-        assertTrue(html.contains(">Пульт пар<") || html.contains("Пульт пар</a>"), html);
+        assertFalse(html.contains("data-strategy=\"pairs\""), html);
+        assertFalse(html.contains(">Коинтеграция<"), html);
         assertFalse(html.contains("Итог + новости"), html);
     }
 
@@ -88,7 +87,7 @@ class AnalysisHtmlRendererFinalPageTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
-                true, false, false
+                true, false, false, true
         );
 
         TradingRecommendation tech = new TradingRecommendation(

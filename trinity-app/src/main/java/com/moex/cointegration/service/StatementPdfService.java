@@ -16,6 +16,7 @@ import com.moex.cointegration.config.CapitalProperties;
 import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.PaperTradeEntry;
 import com.moex.cointegration.product.ProductEditionService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.awt.Color;
@@ -58,6 +59,7 @@ public class StatementPdfService {
     private final PaperTradingService paperTradingService;
     private final Optional<TrendPaperJournalService> trendPaperJournal;
     private final Optional<CalendarArbPaperJournalService> calendarArbJournal;
+    private final boolean pairsEnabled;
 
     private final BaseFont bfRegular;
     private final BaseFont bfBold;
@@ -67,13 +69,15 @@ public class StatementPdfService {
             ProductEditionService productEdition,
             PaperTradingService paperTradingService,
             Optional<TrendPaperJournalService> trendPaperJournal,
-            Optional<CalendarArbPaperJournalService> calendarArbJournal
+            Optional<CalendarArbPaperJournalService> calendarArbJournal,
+            @Value("${imoex.strategies.pairs.enabled:false}") boolean pairsEnabled
     ) throws IOException, DocumentException {
         this.capitalProperties = capitalProperties;
         this.productEdition = productEdition;
         this.paperTradingService = paperTradingService;
         this.trendPaperJournal = trendPaperJournal;
         this.calendarArbJournal = calendarArbJournal != null ? calendarArbJournal : Optional.empty();
+        this.pairsEnabled = pairsEnabled;
         this.bfRegular = loadFont("fonts/DejaVuSans.ttf");
         this.bfBold = loadFont("fonts/DejaVuSans-Bold.ttf");
     }
@@ -121,7 +125,7 @@ public class StatementPdfService {
         int arbClosed = (int) num(arbSt.get("closedCount"));
 
         double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
-        double depositNet = pairsRealized + pairsUnrealized
+        double depositNet = (pairsEnabled ? pairsRealized + pairsUnrealized : 0)
                 + (productEdition.hasTrend() ? trendRealized : 0)
                 + (productEdition.hasArb() ? arbRealized : 0);
 
@@ -133,34 +137,38 @@ public class StatementPdfService {
         drawHeader(doc, writer);
         addSpacer(doc, 10);
         addSectionTitle(doc, "Депозит (общий)");
-        addKvTable(doc, List.of(
-                new String[]{"Equity", formatRub0(equity)},
-                new String[]{"Pairs net", formatRub0(pairsRealized + pairsUnrealized)},
-                new String[]{"Trend realized", productEdition.hasTrend() ? formatRub0(trendRealized) : "locked"},
-                new String[]{"Trend сегодня", productEdition.hasTrend() ? formatRub0(trendToday) : "—"},
-                new String[]{"Arb realized", productEdition.hasArb() ? formatRub0(arbRealized) : "locked"},
-                new String[]{"Net* (доступное)", formatRub0(depositNet)}
-        ));
+        List<String[]> depositRows = new ArrayList<>();
+        depositRows.add(new String[]{"Equity", formatRub0(equity)});
+        if (pairsEnabled) {
+            depositRows.add(new String[]{"Pairs net", formatRub0(pairsRealized + pairsUnrealized)});
+        }
+        depositRows.add(new String[]{"Trend realized", productEdition.hasTrend() ? formatRub0(trendRealized) : "locked"});
+        depositRows.add(new String[]{"Trend сегодня", productEdition.hasTrend() ? formatRub0(trendToday) : "—"});
+        depositRows.add(new String[]{"Arb realized", productEdition.hasArb() ? formatRub0(arbRealized) : "locked"});
+        depositRows.add(new String[]{"Net* (доступное)", formatRub0(depositNet)});
+        addKvTable(doc, depositRows);
 
-        addSpacer(doc, 14);
-        addSectionTitle(doc, "① Коинтеграция · DAILY");
-        addKvTable(doc, List.of(
-                new String[]{"Всего", String.valueOf(pairsEntries.size())},
-                new String[]{"OPEN", String.valueOf(pairsOpen)},
-                new String[]{"CLOSED", String.valueOf(pairsEntries.stream()
-                        .filter(e -> "CLOSED".equals(e.status())).count())},
-                new String[]{"Realized ₽*", formatRub0(pairsRealized)},
-                new String[]{"Unrealized ₽*", formatRub0(pairsUnrealized)},
-                new String[]{"Net ₽*", formatRub0(pairsRealized + pairsUnrealized)}
-        ));
-        if (pairsEntries.isEmpty()) {
-            addMuted(doc, "Журнал пуст — нет paper-входов DAILY.");
-        } else {
-            addPairsTable(doc, pairsEntries);
+        if (pairsEnabled) {
+            addSpacer(doc, 14);
+            addSectionTitle(doc, "Pairs · DAILY (архив)");
+            addKvTable(doc, List.of(
+                    new String[]{"Всего", String.valueOf(pairsEntries.size())},
+                    new String[]{"OPEN", String.valueOf(pairsOpen)},
+                    new String[]{"CLOSED", String.valueOf(pairsEntries.stream()
+                            .filter(e -> "CLOSED".equals(e.status())).count())},
+                    new String[]{"Realized ₽*", formatRub0(pairsRealized)},
+                    new String[]{"Unrealized ₽*", formatRub0(pairsUnrealized)},
+                    new String[]{"Net ₽*", formatRub0(pairsRealized + pairsUnrealized)}
+            ));
+            if (pairsEntries.isEmpty()) {
+                addMuted(doc, "Журнал пуст — нет paper-входов DAILY.");
+            } else {
+                addPairsTable(doc, pairsEntries);
+            }
         }
 
         addSpacer(doc, 14);
-        addSectionTitle(doc, "② Тренд · BR");
+        addSectionTitle(doc, "Тренд · BR");
         if (!productEdition.hasTrend()) {
             addMuted(doc, "TREND заблокирован в этой редакции.");
         } else {
@@ -190,7 +198,7 @@ public class StatementPdfService {
         }
 
         addSpacer(doc, 14);
-        addSectionTitle(doc, "③ Календарный арбитраж");
+        addSectionTitle(doc, "Календарный арбитраж");
         if (!productEdition.hasArb()) {
             addMuted(doc, "ARB заблокирован в этой редакции.");
         } else {

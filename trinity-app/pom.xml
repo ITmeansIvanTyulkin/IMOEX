@@ -33,6 +33,10 @@
         </dependency>
         <dependency>
             <groupId>com.moex</groupId>
+            <artifactId>trinity-dual-class</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.moex</groupId>
             <artifactId>trinity-runtime</artifactId>
         </dependency>
         <dependency>

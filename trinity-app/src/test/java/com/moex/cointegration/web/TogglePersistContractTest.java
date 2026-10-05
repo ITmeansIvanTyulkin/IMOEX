@@ -29,7 +29,7 @@ class TogglePersistContractTest {
                 "trinity-app/src/main/java/com/moex/cointegration/smoke/StartupSmokeRunner.java");
         assertTrue(src.contains("softBlockLiveExecution"), src);
         assertFalse(src.contains("softBlockExecution("), src);
-        assertTrue(src.contains("new TrendSettingsService.UpdateRequest(null, false, null, null, null)"), src);
+        assertTrue(src.contains("new TrendSettingsService.UpdateRequest(null, false, null, null, null, null)"), src);
         assertFalse(src.contains("new TrendSettingsService.UpdateRequest(false, false"), src);
     }
 

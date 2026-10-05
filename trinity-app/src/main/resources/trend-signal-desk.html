@@ -73,6 +73,15 @@
     </label>
     <p class="strategy-mode-hint" id="positional-mode-hint">Ручная торговля: график есть, входов нет.</p>
   </div>
+  <div class="strategy-mode-bar" id="brm-auto-wrap" hidden>
+    <label class="mode-switch is-signal" title="Ручная торговля: график без заявок. Авто: BRM пишет решения и сделки в журнал и research-corpus.">
+      <span class="mode-switch-label">Ручная торговля</span>
+      <input type="checkbox" id="desk-brm-auto-execution" role="switch" aria-checked="false" disabled>
+      <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+      <span class="mode-switch-label">Авто</span>
+    </label>
+    <p class="strategy-mode-hint" id="brm-mode-hint">Ручная торговля: график без заявок.</p>
+  </div>
   <div class="signal-paper-panel" id="signal-paper-panel" hidden>
     <p class="signal-brief-title" id="signal-paper-title">Сделки сегодня</p>
     <p class="meta" id="signal-paper-meta">—</p>
@@ -266,6 +275,14 @@
         <a href="#guide-robot-pos">Робот</a>
         <a href="#guide-skip-pos">Когда молчит</a>
         <a href="#guide-risk-pos">Риск</a>
+      </nav>
+      <nav class="signal-guide-toc" data-guide-scope="brm" hidden aria-label="Разделы">
+        <a href="#guide-idea-brm">Идея</a>
+        <a href="#guide-capital-brm">Для кого</a>
+        <a href="#guide-how-brm">Как торгует</a>
+        <a href="#guide-mutex-brm">С диапазонной</a>
+        <a href="#guide-robot-brm">Робот</a>
+        <a href="#guide-risk-brm">Риск</a>
       </nav>
 
       <article class="signal-guide-section" id="guide-idea" data-guide-scope="range">
@@ -625,6 +642,83 @@
           и не гарантия прибыли.
         </p>
       </article>
+
+      <article class="signal-guide-section" id="guide-idea-brm" data-guide-scope="brm" hidden>
+        <h4>Идея в одном абзаце</h4>
+        <p>
+          <strong>BRM мини</strong> — тот же чеклист полок, что у диапазонной нефти на M5
+          (TOP/BOT, bounce и retest, ветер H1, фаза дня, сессия ~10:00–19:00),
+          но на контракте <strong>BRM</strong>: 1 баррель, примерно в 10 раз мельче по ₽/пункт, чем BR.
+          Это не отдельная «стратегия вверх», а рукав под небольшой счёт.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-capital-brm" data-guide-scope="brm" hidden>
+        <h4>Создана для небольших капиталов</h4>
+        <p>
+          Плейбук рассчитан на счета примерно <strong>50–150 тыс. ₽</strong> (до ~250 тыс. всё ещё
+          «мини-книга», не стол на полный BR). На полном контракте BR шаг и маржа для такого капитала
+          часто слишком грубые; BRM даёт тот же сценарий с размером 1 лот (редко 2 на верхней границе).
+        </p>
+        <ul class="signal-guide-list">
+          <li>50–100 тыс. — обычно 1 контракт BRM.</li>
+          <li>150–250 тыс. — 1, редко 2; не раздуваем сетку как на BR.</li>
+          <li>Дневной стоп новых входов ≈ −2% капитала.</li>
+        </ul>
+        <p class="signal-guide-note">
+          Если капитал уже тянет полноценную диапазонную на BR — этот рукав не обязателен:
+          включайте BRM, когда нужен тот же чеклист на мини-контракте.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-how-brm" data-guide-scope="brm" hidden>
+        <h4>Как торгует</h4>
+        <p>
+          Карта дня и входы — как у диапазонной: полки по объёму, отскок от TOP/BOT или ретест
+          после пробоя, лимиты у зоны, стоп за полкой, TP1 → часть / БУ / трейл, хвост к TP2.
+          На 1 лоте треть снять нельзя — только безубыток и трейл.
+        </p>
+        <ul class="signal-guide-list">
+          <li>График и paper — по <strong>закрытым M5</strong> на front-month BRM.</li>
+          <li>WTI/CL — фильтр и bias, не «купили потому что дёрнули американцы».</li>
+          <li>Решения пишутся в свой корпус <code>retail-brm-m5</code> (для обучения — отдельно от BR).</li>
+        </ul>
+      </article>
+
+      <article class="signal-guide-section" id="guide-mutex-brm" data-guide-scope="brm" hidden>
+        <h4>С диапазонной нефтью</h4>
+        <p>
+          BRM и диапазонная на BR <strong>не торгуют вместе</strong>: один чеклист — один боевой рукав.
+          Если включён BRM, диапазонная паркуется, но продолжает писать ENTER/SKIP в корпус (shadow).
+          Наоборот: при включённой диапазонной BRM пишет решения в shadow без сделок.
+          Позиционная H1 от этого не зависит.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-robot-brm" data-guide-scope="brm" hidden>
+        <h4>Если автоторги включены</h4>
+        <ol class="signal-guide-steps">
+          <li>Тот же чеклист полок, что у диапазонной, на инструменте BRM.</li>
+          <li>Fair-paper исполняет по закрытым M5; пишет журнал и research-corpus.</li>
+          <li>Тумблер на этом экране = тумблер в
+            <a href="/view/settings#brm-playbook-settings">Настройках · BRM мини</a>.</li>
+        </ol>
+        <p class="signal-guide-note">
+          Сейчас обкатка на paper (SANDBOX_FAIR). Живые заявки на срочном — отдельный флаг, не этот тумблер.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-risk-brm" data-guide-scope="brm" hidden>
+        <h4>Риск</h4>
+        <ul class="signal-guide-list">
+          <li>Шаг в ₽ меньше, чем у BR, но правила те же: стоп за зоной, лимит дня, не ловить середину канала.</li>
+          <li>Не подменяет календарный арбитраж и не смешивается с AO/AP.</li>
+        </ul>
+        <p class="signal-guide-foot">
+          Памятка по playbook «BRM мини · уровни M5» для небольших капиталов — не офер и не гарантия прибыли.
+          Полное описание — <a href="/view/trend-strategy#brm">стратегия тренда · BRM</a>.
+        </p>
+      </article>
     </div>
   </div>
 </div>
@@ -632,4 +726,4 @@
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20260925-tlmark2"></script>
-<script src="/js/trend-signal-desk.js?v=20261002-microvision"></script>
+<script src="/js/trend-signal-desk.js?v=20261005-brm6"></script>

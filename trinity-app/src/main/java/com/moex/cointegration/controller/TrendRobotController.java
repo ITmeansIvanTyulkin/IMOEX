@@ -116,6 +116,17 @@ public class TrendRobotController {
         return trendSettings.setPositionalAutoExecution(next);
     }
 
+    /** BRM mini fair-paper — own lane/corpus; independent of Exclusive / positional. */
+    @PostMapping("/settings/brm-auto-execution")
+    public TrendSettingsService.View toggleBrmAutoExecution(
+            @RequestBody(required = false) ToggleBody body
+    ) {
+        boolean next = body != null && body.enabled() != null
+                ? body.enabled()
+                : !trendSettings.brmAutoExecution();
+        return trendSettings.setBrmAutoExecution(next);
+    }
+
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();

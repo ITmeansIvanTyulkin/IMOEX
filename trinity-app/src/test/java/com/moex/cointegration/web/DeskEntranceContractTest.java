@@ -33,7 +33,7 @@ class DeskEntranceContractTest {
         assertTrue(src.contains("location.replace(\"/view\")"), src);
         assertTrue(src.contains("{{BOOT_ID}}"), src);
         assertTrue(src.contains("trinity-need-gate"), src);
-        assertTrue(src.contains("operator.js?v=20260921-sess8"), src);
+        assertTrue(src.contains("operator.js?v=20261005-brm5"), src);
     }
 
     @Test

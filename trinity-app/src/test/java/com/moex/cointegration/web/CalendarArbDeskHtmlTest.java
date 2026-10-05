@@ -52,7 +52,7 @@ class CalendarArbDeskHtmlTest {
         assertTrue(src.contains("\"arb-auto-execution\""), src);
         assertTrue(src.contains("robotsDeliveryStrip"), "robots delivery strip missing");
         assertTrue(src.contains("\"Арбитраж\""), src);
-        assertTrue(src.contains("\"Коинтеграция\""), src);
+        assertFalse(src.contains("\"Коинтеграция\""), src);
         assertTrue(src.contains("Наблюдение"), src);
         assertFalse(src.contains("Только сигнал"), src);
         assertFalse(src.contains("Z-спред"), src);
