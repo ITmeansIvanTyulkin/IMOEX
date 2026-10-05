@@ -24,6 +24,7 @@ class TrendArbStrategyHtmlTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
+                java.util.Optional.empty(),
                 true, true, calendarArbEnabled, true
         );
     }

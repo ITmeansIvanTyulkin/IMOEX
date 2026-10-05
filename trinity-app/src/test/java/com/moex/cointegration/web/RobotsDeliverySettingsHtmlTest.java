@@ -28,6 +28,7 @@ class RobotsDeliverySettingsHtmlTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
+                java.util.Optional.empty(),
                 pairs, trend, arb, spread
         );
     }

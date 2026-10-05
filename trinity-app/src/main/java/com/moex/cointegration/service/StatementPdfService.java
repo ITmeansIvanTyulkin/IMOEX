@@ -59,6 +59,7 @@ public class StatementPdfService {
     private final PaperTradingService paperTradingService;
     private final Optional<TrendPaperJournalService> trendPaperJournal;
     private final Optional<CalendarArbPaperJournalService> calendarArbJournal;
+    private final Optional<InvestmentsPaperJournalService> investmentsPaperJournal;
     private final boolean pairsEnabled;
 
     private final BaseFont bfRegular;
@@ -70,6 +71,7 @@ public class StatementPdfService {
             PaperTradingService paperTradingService,
             Optional<TrendPaperJournalService> trendPaperJournal,
             Optional<CalendarArbPaperJournalService> calendarArbJournal,
+            Optional<InvestmentsPaperJournalService> investmentsPaperJournal,
             @Value("${imoex.strategies.pairs.enabled:false}") boolean pairsEnabled
     ) throws IOException, DocumentException {
         this.capitalProperties = capitalProperties;
@@ -77,6 +79,7 @@ public class StatementPdfService {
         this.paperTradingService = paperTradingService;
         this.trendPaperJournal = trendPaperJournal;
         this.calendarArbJournal = calendarArbJournal != null ? calendarArbJournal : Optional.empty();
+        this.investmentsPaperJournal = investmentsPaperJournal != null ? investmentsPaperJournal : Optional.empty();
         this.pairsEnabled = pairsEnabled;
         this.bfRegular = loadFont("fonts/DejaVuSans.ttf");
         this.bfBold = loadFont("fonts/DejaVuSans-Bold.ttf");
@@ -124,10 +127,22 @@ public class StatementPdfService {
         double arbToday = num(arbSt.get("todayPnlRub"));
         int arbClosed = (int) num(arbSt.get("closedCount"));
 
+        Map<String, Object> investSt = Map.of();
+        List<Map<String, Object>> investTrades = List.of();
+        if (investmentsPaperJournal.isPresent()) {
+            InvestmentsPaperJournalService svc = investmentsPaperJournal.get();
+            investSt = svc.statement();
+            investTrades = svc.allTradeDtos();
+        }
+        double investRealized = num(investSt.get("realizedPnlRub"));
+        double investToday = num(investSt.get("todayPnlRub"));
+        int investClosed = (int) num(investSt.get("closedCount"));
+
         double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
         double depositNet = (pairsEnabled ? pairsRealized + pairsUnrealized : 0)
                 + (productEdition.hasTrend() ? trendRealized : 0)
-                + (productEdition.hasArb() ? arbRealized : 0);
+                + (productEdition.hasArb() ? arbRealized : 0)
+                + investRealized;
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         Document doc = new Document(PageSize.A4, 36, 36, 40, 36);
@@ -145,6 +160,9 @@ public class StatementPdfService {
         depositRows.add(new String[]{"Trend realized", productEdition.hasTrend() ? formatRub0(trendRealized) : "locked"});
         depositRows.add(new String[]{"Trend сегодня", productEdition.hasTrend() ? formatRub0(trendToday) : "—"});
         depositRows.add(new String[]{"Arb realized", productEdition.hasArb() ? formatRub0(arbRealized) : "locked"});
+        if (investmentsPaperJournal.isPresent()) {
+            depositRows.add(new String[]{"Invest realized (Experiment)", formatRub0(investRealized)});
+        }
         depositRows.add(new String[]{"Net* (доступное)", formatRub0(depositNet)});
         addKvTable(doc, depositRows);
 
@@ -213,6 +231,37 @@ public class StatementPdfService {
                 addMuted(doc, "Statement пуст — закрытых calendar-спредов ещё нет.");
             } else {
                 addTrendTable(doc, arbTrades);
+            }
+        }
+
+        if (investmentsPaperJournal.isPresent()) {
+            addSpacer(doc, 14);
+            addSectionTitle(doc, "Инвестиции · Experiment");
+            addKvTable(doc, List.of(
+                    new String[]{"Closed", String.valueOf(investClosed)},
+                    new String[]{"Wins/Losses",
+                            (int) num(investSt.get("wins")) + "/" + (int) num(investSt.get("losses"))},
+                    new String[]{"Realized ₽*", formatRub0(investRealized)},
+                    new String[]{"Сегодня ₽*", formatRub0(investToday)}
+            ));
+            Object note = investSt.get("note");
+            if (note != null && !String.valueOf(note).isBlank()) {
+                addMuted(doc, String.valueOf(note));
+            }
+            if (investTrades.isEmpty()) {
+                addMuted(doc, "Statement пуст — нет Experiment replay-сделок.");
+            } else {
+                Map<String, List<Map<String, Object>>> byYear = new TreeMap<>((a, b) -> b.compareTo(a));
+                for (Map<String, Object> row : investTrades) {
+                    Object daySrc = row.get("closedAt") != null ? row.get("closedAt") : row.get("openedAt");
+                    byYear.computeIfAbsent(yearOf(daySrc), k -> new ArrayList<>()).add(row);
+                }
+                for (Map.Entry<String, List<Map<String, Object>>> e : byYear.entrySet()) {
+                    double yearPnl = e.getValue().stream().mapToDouble(r -> num(r.get("pnlRub"))).sum();
+                    addMuted(doc, e.getKey() + " · " + e.getValue().size() + " сд. · "
+                            + String.format(Locale.ROOT, "%+.0f ₽", yearPnl));
+                    addTrendTable(doc, e.getValue());
+                }
             }
         }
 

@@ -38,6 +38,7 @@ class AnalysisHtmlRendererFinalPageTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
+                java.util.Optional.empty(),
                 true, false, false, true
         );
 
@@ -84,6 +85,7 @@ class AnalysisHtmlRendererFinalPageTest {
                 com.moex.cointegration.config.CapitalProperties.defaults(),
                 new com.moex.cointegration.product.ProductEditionService(
                         com.moex.cointegration.config.ProductProperties.defaults()),
+                java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),

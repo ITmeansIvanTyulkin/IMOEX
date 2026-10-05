@@ -470,6 +470,10 @@ imoex:
       auto-execution: false   # OBSERVE vs SANDBOX_FAIR paper ladders
       live-execution: false   # LIVE_EQUITY gated separately
       paper-tick-ms: 30000
+      # Daily entry scan + decision/corpus history (independent of auto/live)
+      daily-scan-enabled: true
+      daily-scan-cron: "0 20 10,12,15,18 * * MON-FRI"
+      daily-scan-initial-ms: 45000
       min-avg-daily-turnover-rub: 50000000
       max-spread-bps: 80
       min-market-cap-rub: 30000000000
@@ -478,7 +482,7 @@ imoex:
       risk-per-trade-max-pct: 0.015
       min-reward-risk: 2.0
       max-addon-gap-pct: 0.25
-      require-cluster-tape: false
+      require-cluster-tape: true
       require-uptrend-d1: true
       max-names: 12
       invest-score-min: 0.72

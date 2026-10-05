@@ -1,7 +1,7 @@
 # Handoff prompt: TRINITY operator (Exclusive observe + desk/playbook)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-10-05 ~09:02 MSK · 05.10 resume; playbook=**both** (оператор — не форсить Exclusive-only); BRX6; Phase C NO_GO.  
+> **Обновлено:** 2026-10-05 ~18:29 MSK · seals до 05.10 (0 Exclusive); playbook=both; BRX6; Phase C NO_GO.  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
@@ -36,23 +36,23 @@ Pairs DAILY и calendar-arb оператор смотрит сам, пока н�
 
 **Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
 
-### Состояние на 2026-10-05 morning (~09:02 MSK) · last seal 02.10
+### Состояние на 2026-10-05 EOD (~18:29 MSK)
 
 | Метрика | Значение |
 |--------|----------|
-| **Phase A** | **done** 25–28.08 + full **15.09**. Extra sealed до **02.10** |
+| **Phase A** | **done** 25–28.08 + full **15.09**. Extra sealed до **05.10** |
 | **OOS cumulative** | **64** Exclusive, **+18 621 ₽**, expectancy **~291 ₽/trade**, WR **~73%**, labeled SL 100% |
-| **02.10** | **−224 ₽** · 1× THROUGH · week end |
-| **Playbook** | **both** — оператор явно сказал оставить; OOS/path всё равно считает только Exclusive M5 |
-| **Corpus** | Exclusive ~10544 events · 39 decision days · armFill ~139 · ML collecting |
+| **05.10 Exclusive** | **0** сделок · weak day · FORMING_BAR · flat |
+| **Playbook** | **both** (оператор — keep) · OOS только Exclusive M5 |
+| **Corpus** | Exclusive ~10912 events · 39 decision days · armFill ~141 · ML collecting |
 | **Front** | **BRX6** · exp ~2026-11-02 |
 | **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect · doNotTuneOnSight |
-| **Ops** | `trend_observe_resume.sh` · **05.10 armed** poll/watch/wake · flat |
+| **Ops** | daemons stopped · next resume **2026-10-06** ~09:00 |
 
 **Блок Phase C:** metrics `readyForPhaseC=true`, но **human OOS review + явный go** обязательны. FORTS SL / scale / pad-tune — нет.  
-Пакет для review: `IMOEX/data/trend-oos-human-review.md` (и `.json`) — evidence only, live не включает.
+Пакет для review: `IMOEX/data/trend-oos-human-review.md` (и `.json`).
 
-**Сегодня:** evening seal ~18:02. Не крутить гейты. Не форсить Exclusive-only без просьбы. ML/FORTS — только явный go.
+**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-10-06` (~09:00); keep both; evening ~18:02. Не крутить гейты.
 
 ---
 

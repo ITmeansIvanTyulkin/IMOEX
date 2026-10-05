@@ -9,10 +9,12 @@ import com.moex.cointegration.service.InvestChartHistoryStore;
 import com.moex.cointegration.service.InvestmentsDeskService;
 import com.moex.cointegration.service.InvestmentsFairPaperLiveService;
 import com.moex.cointegration.service.InvestmentsPaperJournalService;
+import com.moex.cointegration.service.InvestmentsReplayStatementImporter;
 import com.moex.cointegration.service.InvestmentsSettingsService;
 import com.moex.cointegration.upsell.UpsellAccess;
 import com.moex.cointegration.upsell.UpsellService;
 import com.moex.trinity.investments.InvestmentsSignal;
+import com.moex.trinity.investments.InvestmentsTapeBuilder;
 import com.moex.trinity.marketdata.PlainHttp;
 import com.moex.trinity.marketdata.TInvestBrokerMarketData;
 import com.moex.trinity.marketdata.TInvestCredentials;
@@ -53,6 +55,7 @@ public class InvestmentsController {
     private final InvestmentsDeskService desk;
     private final InvestmentsFairPaperLiveService fairPaper;
     private final InvestmentsPaperJournalService journal;
+    private final InvestmentsReplayStatementImporter replayImporter;
     private final InvestChartHistoryStore historyStore;
     private final ObjectProvider<TInvestBrokerMarketData> marketData;
     private final ObjectProvider<MoexIssClient> iss;
@@ -64,6 +67,7 @@ public class InvestmentsController {
             InvestmentsDeskService desk,
             InvestmentsFairPaperLiveService fairPaper,
             InvestmentsPaperJournalService journal,
+            InvestmentsReplayStatementImporter replayImporter,
             InvestChartHistoryStore historyStore,
             ObjectProvider<TInvestBrokerMarketData> marketData,
             ObjectProvider<MoexIssClient> iss,
@@ -74,6 +78,7 @@ public class InvestmentsController {
         this.desk = desk;
         this.fairPaper = fairPaper;
         this.journal = journal;
+        this.replayImporter = replayImporter;
         this.historyStore = historyStore;
         this.marketData = marketData;
         this.iss = iss;
@@ -221,7 +226,7 @@ public class InvestmentsController {
             out.put("bars", hit.bars());
             out.put("cached", true);
             out.put("profile", List.of());
-            out.put("footprint", List.of());
+            out.put("footprint", footprintFor(t));
             out.put("chartMarkers", List.of());
             return out;
         }
@@ -319,9 +324,35 @@ public class InvestmentsController {
         out.put("storeTf", storeTf);
         out.put("bars", bars);
         out.put("profile", List.of());
-        out.put("footprint", List.of());
+        out.put("footprint", footprintFor(t));
         out.put("chartMarkers", List.of());
         return out;
+    }
+
+    private List<Map<String, Object>> footprintFor(String ticker) {
+        try {
+            InvestmentsTapeBuilder.TapeResult tape = desk.tapeFor(ticker);
+            if (!tape.present()) {
+                return List.of();
+            }
+            List<Map<String, Object>> dto = InvestmentsTapeBuilder.toFootprintDto(tape.levels());
+            // annotate source for UI/debug
+            if (!dto.isEmpty()) {
+                Map<String, Object> head = new LinkedHashMap<>(dto.get(0));
+                head.put("source", tape.source());
+                head.put("pointSize", tape.pointSize());
+                List<Map<String, Object>> out = new ArrayList<>();
+                out.add(head);
+                for (int i = 1; i < dto.size(); i++) {
+                    out.add(dto.get(i));
+                }
+                return out;
+            }
+            return dto;
+        } catch (Exception ex) {
+            log.debug("invest footprint {}: {}", ticker, ex.getMessage());
+            return List.of();
+        }
     }
 
     /** Always warm the local archive to the max depth for the TF family. */
@@ -437,6 +468,23 @@ public class InvestmentsController {
     public Map<String, Object> forceTick() {
         fairPaper.tickOnce();
         return fairPaper.snapshot();
+    }
+
+    /** Import Experiment-only MSFO year replays into investments paper statement (no baseline). */
+    @PostMapping("/statement/import-replay")
+    public Map<String, Object> importReplayStatement(
+            @RequestParam(defaultValue = "2022") int fromYear,
+            @RequestParam(defaultValue = "2026") int toYear
+    ) throws Exception {
+        return replayImporter.importYears(fromYear, toYear);
+    }
+
+    @GetMapping("/statement")
+    public Map<String, Object> statement() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("statement", journal.statement());
+        m.put("trades", journal.allTradeDtos());
+        return m;
     }
 
     public record ToggleBody(Boolean enabled) {

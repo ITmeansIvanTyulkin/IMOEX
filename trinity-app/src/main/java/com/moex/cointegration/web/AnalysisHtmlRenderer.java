@@ -5,6 +5,7 @@ import com.moex.cointegration.config.ProductProperties;
 import com.moex.cointegration.product.ProductEdition;
 import com.moex.cointegration.product.ProductEditionService;
 import com.moex.cointegration.service.CalendarArbPaperJournalService;
+import com.moex.cointegration.service.InvestmentsPaperJournalService;
 import com.moex.cointegration.service.TrendFairPaperLiveService;
 import com.moex.cointegration.service.TrendPaperJournalService;
 import com.moex.cointegration.upsell.UpsellAccess;
@@ -48,6 +49,7 @@ public class AnalysisHtmlRenderer {
     private final ProductEditionService productEdition;
     private final Optional<TrendPaperJournalService> trendPaperJournal;
     private final Optional<CalendarArbPaperJournalService> calendarArbJournal;
+    private final Optional<InvestmentsPaperJournalService> investmentsPaperJournal;
     private final Optional<TrendFairPaperLiveService> trendFairPaper;
     private final boolean strategyPairsEnabled;
     private final boolean strategyTrendEnabled;
@@ -60,6 +62,7 @@ public class AnalysisHtmlRenderer {
             ProductEditionService productEdition,
             Optional<TrendPaperJournalService> trendPaperJournal,
             Optional<CalendarArbPaperJournalService> calendarArbJournal,
+            Optional<InvestmentsPaperJournalService> investmentsPaperJournal,
             Optional<TrendFairPaperLiveService> trendFairPaper,
             @Value("${imoex.strategies.pairs.enabled:false}") boolean strategyPairsEnabled,
             @Value("${imoex.strategies.trend.enabled:false}") boolean strategyTrendEnabled,
@@ -73,6 +76,7 @@ public class AnalysisHtmlRenderer {
                 : new ProductEditionService(ProductProperties.defaults());
         this.trendPaperJournal = trendPaperJournal != null ? trendPaperJournal : Optional.empty();
         this.calendarArbJournal = calendarArbJournal != null ? calendarArbJournal : Optional.empty();
+        this.investmentsPaperJournal = investmentsPaperJournal != null ? investmentsPaperJournal : Optional.empty();
         this.trendFairPaper = trendFairPaper != null ? trendFairPaper : Optional.empty();
         this.strategyPairsEnabled = strategyPairsEnabled;
         this.strategyTrendEnabled = strategyTrendEnabled;
@@ -2848,10 +2852,22 @@ public class AnalysisHtmlRenderer {
         double arbToday = num(arbSt.get("todayPnlRub"));
         int arbClosed = (int) num(arbSt.get("closedCount"));
 
+        Map<String, Object> investSt = Map.of();
+        List<Map<String, Object>> investTrades = List.of();
+        if (investmentsPaperJournal.isPresent()) {
+            InvestmentsPaperJournalService svc = investmentsPaperJournal.get();
+            investSt = svc.statement();
+            investTrades = svc.allTradeDtos();
+        }
+        double investRealized = num(investSt.get("realizedPnlRub"));
+        double investToday = num(investSt.get("todayPnlRub"));
+        int investClosed = (int) num(investSt.get("closedCount"));
+
         double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
         double depositNet = (strategyPairsEnabled ? pairsRealized + pairsUnrealized : 0)
                 + (productEdition.hasTrend() ? trendRealized : 0)
-                + (productEdition.hasArb() ? arbRealized : 0);
+                + (productEdition.hasArb() ? arbRealized : 0)
+                + investRealized;
 
         StringBuilder body = new StringBuilder();
         body.append("""
@@ -2884,6 +2900,9 @@ public class AnalysisHtmlRenderer {
             body.append(card("Arb realized", String.format("%.0f", arbRealized), arbRealized >= 0));
         } else {
             body.append(card("Arb", "locked", false));
+        }
+        if (investmentsPaperJournal.isPresent()) {
+            body.append(card("Invest realized", String.format("%.0f", investRealized), investRealized >= 0));
         }
         body.append(card("Net* (доступное)", String.format("%.0f", depositNet), depositNet >= 0));
         body.append("</div></section>");
@@ -2937,6 +2956,33 @@ public class AnalysisHtmlRenderer {
             }
         }
         body.append("</section>");
+
+        // Investments (Experiment equity only)
+        body.append("<section class=\"statement-section\" id=\"investments\">");
+        body.append("<h3>Инвестиции · Experiment</h3>");
+        if (investmentsPaperJournal.isEmpty()) {
+            body.append("<div class=\"callout\"><p>Модуль investments выключен.</p></div>");
+        } else {
+            body.append("<div class=\"cards\">");
+            body.append(card("Closed", String.valueOf(investClosed), false));
+            body.append(card("Wins/Losses",
+                    (int) num(investSt.get("wins")) + "/" + (int) num(investSt.get("losses")), false));
+            body.append(card("Realized ₽*", String.format("%.0f", investRealized), investRealized >= 0));
+            body.append(card("Сегодня ₽*", String.format("%.0f", investToday), investToday >= 0));
+            body.append("</div>");
+            Object investNote = investSt.get("note");
+            if (investNote != null && !String.valueOf(investNote).isBlank()) {
+                body.append("<p class=\"meta\">").append(escape(String.valueOf(investNote))).append("</p>");
+            }
+            body.append("<p class=\"meta\"><a href=\"/view/investments\">Открыть пульт →</a> · только Experiment (без baseline)</p>");
+            if (investTrades.isEmpty()) {
+                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — импортируйте replay: ")
+                        .append("<code>POST /api/investments/statement/import-replay</code></p></div>");
+            } else {
+                body.append(renderTrendTradesByYear(investTrades));
+            }
+        }
+        body.append("</section>");
         body.append("</article>");
         return page("TRINITY — Statement", body.toString(), nav("statement"));
     }
@@ -2973,14 +3019,16 @@ public class AnalysisHtmlRenderer {
                     .append("</h4>");
             body.append("<div class=\"table-wrap statement-table-pager\" data-page-size=\"20\">");
             body.append("<table><thead><tr>");
-            body.append("<th>Дата</th><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th>");
+            body.append("<th>Дата</th><th>Instr</th><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th>");
             body.append("</tr></thead><tbody>");
             for (Map<String, Object> t : rows) {
                 double pnl = num(t.get("pnlRub"));
                 String cls = pnl > 0 ? "is-buy" : (pnl < 0 ? "is-sell" : "");
                 Object daySrc = t.get("closedAt") != null ? t.get("closedAt") : t.get("openedAt");
+                Object instr = t.get("instrument") != null ? t.get("instrument") : t.get("ticker");
                 body.append("<tr>");
                 body.append("<td>").append(escape(shortDate(daySrc))).append("</td>");
+                body.append("<td>").append(escape(String.valueOf(instr == null ? "—" : instr))).append("</td>");
                 body.append("<td>").append(escape(shortIso(t.get("openedAt")))).append("</td>");
                 body.append("<td>").append(escape(shortIso(t.get("closedAt")))).append("</td>");
                 body.append("<td>").append(escape(String.valueOf(t.getOrDefault("side", "—")))).append("</td>");

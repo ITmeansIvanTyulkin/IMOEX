@@ -25,6 +25,7 @@ class PairsStrategyHtmlTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
+                java.util.Optional.empty(),
                 true, false, false, true
         );
 
