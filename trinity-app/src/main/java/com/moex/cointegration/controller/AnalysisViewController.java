@@ -160,9 +160,11 @@ public class AnalysisViewController {
         return htmlRenderer.renderTrendBrmPage();
     }
 
-    @GetMapping(value = "/trend-charts", produces = MediaType.TEXT_HTML_VALUE)
-    public String trendCharts() {
-        return htmlRenderer.renderTrendChartsPage();
+    @GetMapping(value = "/trend-charts")
+    public RedirectView trendChartsMoved() {
+        RedirectView rv = new RedirectView("/view/investments");
+        rv.setStatusCode(HttpStatus.MOVED_PERMANENTLY);
+        return rv;
     }
 
     @GetMapping(value = "/trend-strategy", produces = MediaType.TEXT_HTML_VALUE)
@@ -188,5 +190,15 @@ public class AnalysisViewController {
     @GetMapping(value = "/spread-strategy")
     public RedirectView spreadStrategy() {
         return hidePairsDesk();
+    }
+
+    @GetMapping(value = "/investments", produces = MediaType.TEXT_HTML_VALUE)
+    public String investments() {
+        return htmlRenderer.renderInvestmentsDeskPage();
+    }
+
+    @GetMapping(value = "/investments-strategy", produces = MediaType.TEXT_HTML_VALUE)
+    public String investmentsStrategy() {
+        return htmlRenderer.renderInvestmentsStrategyPage();
     }
 }

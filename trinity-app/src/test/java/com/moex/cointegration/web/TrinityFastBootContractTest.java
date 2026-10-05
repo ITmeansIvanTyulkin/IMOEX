@@ -34,7 +34,7 @@ class TrinityFastBootContractTest {
         String[] files = {
                 "src/main/resources/trend-signal-desk.html",
                 "src/main/resources/calendar-arb-desk.html",
-                "src/main/resources/trend-charts-terminal.html",
+                "src/main/resources/investments-desk.html",
                 "src/main/resources/spread-desk.html"
         };
         for (String rel : files) {

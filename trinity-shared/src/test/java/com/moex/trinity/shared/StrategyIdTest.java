@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class StrategyIdTest {
 
     @Test
-    void threePillars() {
-        assertEquals(3, StrategyId.values().length);
+    void fourPillars() {
+        assertEquals(4, StrategyId.values().length);
     }
 }

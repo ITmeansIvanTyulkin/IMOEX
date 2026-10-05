@@ -79,4 +79,24 @@ class TrendArbStrategyHtmlTest {
         assertFalse(html.contains("§"), html);
         assertFalse(html.contains("Kalman") || html.contains("kalman"), html);
     }
+
+    @Test
+    void investmentsStrategyIsThirdSwitcherAndCabinetManual() {
+        String html = renderer(true).renderInvestmentsStrategyPage();
+        assertTrue(html.contains("data-strategy=\"invest\""), html);
+        assertTrue(html.contains("активный отбор акций") || html.contains("Инвестиции"), html);
+        assertTrue(html.contains("/view/investments"), html);
+        assertTrue(html.contains("id=\"investments-playbook-settings\"")
+                || html.contains("/view/settings#investments-playbook-settings"), html);
+    }
+
+    @Test
+    void investmentsDeskHostsChartsAndOps() {
+        String html = renderer(true).renderInvestmentsDeskPage();
+        assertTrue(html.contains("id=\"investments-charts-terminal\""), html);
+        assertTrue(html.contains("id=\"invest-ops-panel\""), html);
+        assertTrue(html.contains("investments-charts-terminal.js"), html);
+        assertTrue(html.contains("investments-desk.js"), html);
+        assertFalse(html.contains("data-nav-strategy=\"trend\""), html);
+    }
 }

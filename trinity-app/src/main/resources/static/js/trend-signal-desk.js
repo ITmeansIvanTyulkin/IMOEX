@@ -155,7 +155,7 @@
     const hint = $("signal-chart-hint");
     if (hint && pos) {
       hint.innerHTML = "Часовой график · след / MACD / профиль / линии · "
-        + "<a href=\"/view/trend-charts\">терминал графиков</a> · "
+        + "<a href=\"/view/investments\">инвестиции · графики</a> · "
         + "вход в промежуточную полку объёма · сетка 1:1:2:4 · стоп и тейк";
     } else if (hint && brm) {
       hint.innerHTML = "M5 · BRM мини · тот же чеклист полок, что у диапазонной · "

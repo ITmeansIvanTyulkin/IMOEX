@@ -46,8 +46,11 @@ imoex:
       # Institutional desk (GGR+EG+HL5-60+quarterly freeze) — off in live; campaign tests on
       institutional-desk: false
     # @TakenFromOsEngineEnd
-  data-dir: data
-  charts-dir: data/charts
+  # Per-machine durable archive (survives app reinstall). Token "user" →
+  # macOS ~/Library/Application Support/TRINITY, Windows %LOCALAPPDATA%\TRINITY,
+  # Linux ~/.local/share/trinity. Override with absolute path or relative "data" (dev).
+  data-dir: user
+  charts-dir: user
   # Labeled engine corpus (training). Not UI. Folder is gitignored; upload later.
   research-corpus-dir: research-corpus
   research-corpus:
@@ -462,6 +465,24 @@ imoex:
       trade-session-close: "19:00"
       no-trade-after-open-minutes: 20
       no-trade-before-close-minutes: 30
+    investments:
+      enabled: true
+      auto-execution: false   # OBSERVE vs SANDBOX_FAIR paper ladders
+      live-execution: false   # LIVE_EQUITY gated separately
+      paper-tick-ms: 30000
+      min-avg-daily-turnover-rub: 50000000
+      max-spread-bps: 80
+      min-market-cap-rub: 30000000000
+      max-sector-weight: 0.20
+      risk-per-trade-min-pct: 0.005
+      risk-per-trade-max-pct: 0.015
+      min-reward-risk: 2.0
+      max-addon-gap-pct: 0.25
+      require-cluster-tape: false
+      require-uptrend-d1: true
+      max-names: 12
+      invest-score-min: 0.72
+      watch-score-min: 0.40
   # Marketplace live DOM/trades — T-Invest only (no ISS tape).
   marketdata:
     enabled: true

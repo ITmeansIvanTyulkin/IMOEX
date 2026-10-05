@@ -48,6 +48,12 @@ class RobotsDeliverySettingsHtmlTest {
         assertTrue(html.contains(">Позиционная торговля<"));
         assertTrue(html.contains(">Диапазонная торговля<"));
         assertTrue(html.contains(">Арбитраж<"));
+        assertTrue(html.contains("id=\"investments-playbook-settings\""));
+        assertTrue(html.contains("id=\"settings-invest-auto-execution\""));
+        assertTrue(html.contains(">Инвестиции<"));
+        assertTrue(html.contains("/view/investments"));
+        assertTrue(html.contains("fair-paper") || html.contains("Пульт"));
+        assertTrue(html.contains("data-strategy=\"invest\""));
         assertTrue(html.contains("robots-delivery-grid"));
         assertFalse(html.contains("Trend playbook"), html);
         assertFalse(html.contains("Только сигнал"), html);

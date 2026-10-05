@@ -1,17 +1,24 @@
-<section class="charts-terminal" id="trend-charts-terminal" data-nav-strategy="trend">
+<section class="charts-terminal investments-workspace" id="investments-charts-terminal" data-nav-strategy="invest">
   <link rel="stylesheet" href="/css/operator.css?v=20260925-tlmark2">
   <div class="charts-terminal-head">
     <div>
-      <p class="meta"><a href="/view/trend-signal">← диапазонная торговля</a>
-        · <a href="/view/trend-positional">позиционная</a></p>
-      <h2>Терминал графиков · Trend</h2>
-      <p class="meta" id="charts-terminal-meta">Рисунки сохраняются под логином, пока сами не удалите. Панель действует на активный график (синяя рамка).</p>
+      <p class="meta"><a href="/view/investments-strategy">Описание стратегии</a>
+        · <a href="/view/settings#investments-playbook-settings">Настройки</a></p>
+      <h2>Инвестиции · пульт</h2>
+      <p class="meta" id="charts-terminal-meta">Графики + автоотбор по чек-листу. Рисунки сохраняются под логином. Панель справа — pipeline и кандидаты.</p>
     </div>
     <div class="charts-terminal-actions">
+      <label class="check-label" style="margin-right:0.75rem">
+        <input type="checkbox" id="invest-auto-execution"> Авто (paper)
+      </label>
+      <button type="button" class="btn btn-ghost" id="invest-desk-refresh">Скан</button>
       <button type="button" class="btn btn-ghost" id="charts-fit">Весь график</button>
       <button type="button" class="btn btn-ghost" id="charts-refresh">Обновить</button>
       <button type="button" class="btn btn-ghost" id="charts-exit-fs" hidden>Выйти из полного экрана</button>
     </div>
+  </div>
+  <div class="invest-ops-strip" id="invest-ops-strip" aria-label="Pipeline">
+    <span class="meta">Pipeline…</span>
   </div>
   <div class="charts-tv-toolbar" id="charts-tv-toolbar" role="toolbar" aria-label="Инструменты активного графика">
     <div class="charts-tv-active" id="charts-active-chip" title="Клик по графику делает его активным">
@@ -115,9 +122,12 @@
     <div class="charts-dock-block">
       <div class="charts-dock-h">ТФ</div>
       <div class="charts-tf" id="charts-tf" role="group">
-        <button type="button" class="charts-tf-btn is-on" data-tf="M5">M5</button>
-        <button type="button" class="charts-tf-btn" data-tf="M15">M15</button>
+        <button type="button" class="charts-tf-btn" data-tf="MN">MN</button>
+        <button type="button" class="charts-tf-btn" data-tf="W1">W1</button>
+        <button type="button" class="charts-tf-btn is-on" data-tf="D1">D1</button>
         <button type="button" class="charts-tf-btn" data-tf="H1">H1</button>
+        <button type="button" class="charts-tf-btn" data-tf="M15">M15</button>
+        <button type="button" class="charts-tf-btn" data-tf="M5">M5</button>
         <button type="button" class="charts-tf-btn" data-tf="TICK">Tick</button>
         <button type="button" class="charts-tf-btn" data-tf="RENKO">Renko</button>
         <button type="button" class="charts-tf-btn" data-tf="RANGE">Range</button>
@@ -153,15 +163,98 @@
     </div>
   </aside>
   <div class="charts-terminal-grid" id="charts-terminal-grid" aria-label="Графики инструментов"></div>
+  <aside class="invest-ops-panel" id="invest-ops-panel" aria-label="Стратегия инвестиции">
+    <div class="charts-dock-h">Кандидаты</div>
+    <div id="invest-counts" class="meta" style="margin-bottom:0.4rem">—</div>
+    <div id="invest-candidates" class="invest-cand-list"><div class="charts-dock-empty">скан…</div></div>
+    <div class="charts-dock-h" style="margin-top:0.75rem">Позиции / лимитки</div>
+    <div id="invest-positions" class="invest-pos-list"><div class="charts-dock-empty">нет</div></div>
+    <div class="charts-dock-h" style="margin-top:0.75rem">Метрики журнала</div>
+    <div id="invest-metrics" class="meta">—</div>
+  </aside>
   </div>
 </section>
 <style>
 .charts-workbench {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr;
+  grid-template-columns: minmax(200px, 240px) 1fr minmax(260px, 320px);
   gap: 0.75rem;
   align-items: start;
 }
+/* True analysis fullscreen: viewport shell, dock + toolbar stay, ops panel hides */
+body.invest-chart-fs { overflow: hidden; }
+.investments-workspace.is-chart-fs {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: #f4f6f8;
+  padding: 0.45rem 0.65rem 0.65rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.investments-workspace.is-chart-fs .charts-terminal-head { flex: 0 0 auto; }
+.investments-workspace.is-chart-fs .invest-ops-strip { flex: 0 0 auto; }
+.investments-workspace.is-chart-fs .charts-tv-toolbar {
+  flex: 0 0 auto;
+  display: flex !important;
+  margin-bottom: 0.45rem;
+}
+.investments-workspace.is-chart-fs .invest-ops-panel { display: none !important; }
+.investments-workspace.is-chart-fs .charts-workbench {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  height: 100%;
+}
+.investments-workspace.is-chart-fs .charts-dock {
+  display: block;
+  max-height: none;
+  height: 100%;
+  overflow: auto;
+}
+.investments-workspace.is-chart-fs .charts-terminal-grid.is-fullscreen {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr);
+}
+.investments-workspace.is-chart-fs .charts-pane.is-fs-target {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.investments-workspace.is-chart-fs .charts-pane.is-fs-target .charts-pane-head { flex: 0 0 auto; }
+.investments-workspace.is-chart-fs .charts-pane.is-fs-target .charts-pane-chart {
+  flex: 1 1 auto;
+  height: auto !important;
+  min-height: 0;
+}
+.invest-ops-strip {
+  display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.65rem;
+}
+.invest-stage {
+  font-size: 0.68rem; padding: 0.2rem 0.45rem; border-radius: 999px;
+  border: 1px solid #d5dde2; background: #fff; color: #334155;
+}
+.invest-stage.is-pass { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; }
+.invest-stage.is-weak { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
+.invest-stage.is-fail, .invest-stage.is-skip { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+.invest-ops-panel {
+  position: sticky; top: 0.5rem; max-height: calc(100vh - 8rem); overflow: auto;
+  background: #f7f8f9; border: 1px solid #e2e8ed; border-radius: 12px; padding: 0.55rem 0.65rem;
+}
+.invest-cand-row {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 0.35rem;
+  font: 11px/1.35 ui-monospace, Menlo, monospace; padding: 0.25rem 0.2rem;
+  border-bottom: 1px solid #e8eef2; cursor: pointer;
+}
+.invest-cand-row:hover, .invest-cand-row.is-on { background: #e8eef2; }
+.invest-cand-row .cat { color: #64748b; }
 .charts-dock {
   position: sticky;
   top: 0.5rem;
@@ -187,6 +280,7 @@
   font-size: 0.72rem; padding: 0.15rem 0.4rem; cursor: pointer;
 }
 .charts-tf-btn.is-on { background: #1a2228; color: #fff; border-color: #1a2228; }
+.charts-tf-btn.is-loading { opacity: 0.55; }
 .charts-watch-row, .charts-alert-item {
   display: flex; justify-content: space-between; gap: 0.4rem;
   font: 12px/1.4 ui-monospace, Menlo, monospace; cursor: pointer;
@@ -205,9 +299,9 @@
 .charts-alert-row { display: flex; gap: 4px; margin-bottom: 4px; }
 .charts-alert-row input, #charts-templates { flex: 1; min-width: 0; font-size: 0.78rem; }
 .charts-alert-row select { width: 3.4rem; font-size: 0.78rem; }
-@media (max-width: 980px) {
+@media (max-width: 1100px) {
   .charts-workbench { grid-template-columns: 1fr; }
-  .charts-dock { position: static; max-height: none; }
+  .charts-dock, .invest-ops-panel { position: static; max-height: none; }
 }
 .charts-tv-toolbar {
   display: flex;
@@ -406,4 +500,5 @@
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20260925-tlmark2"></script>
-<script src="/js/trend-charts-terminal.js?v=20260925-tlmark2"></script>
+<script src="/js/investments-charts-terminal.js?v=20261005-invest4"></script>
+<script src="/js/investments-desk.js?v=20261005-invest4"></script>

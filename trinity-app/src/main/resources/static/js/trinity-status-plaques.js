@@ -1,6 +1,6 @@
 /**
  * Global floating plaques: trend robots on every /view/* page;
- * wind (trend) only on Сигнал + Терминал графиков.
+ * wind (trend) only on Сигнал desks (not Investments charts).
  * Updates text in-place to avoid twitch on poll.
  */
 (function () {
@@ -23,11 +23,8 @@
     return location.pathname.indexOf("/view/trend-signal") >= 0
       || location.pathname.indexOf("/view/trend-positional") >= 0;
   }
-  function pathIsCharts() {
-    return location.pathname.indexOf("/view/trend-charts") >= 0;
-  }
   function wantsWind() {
-    return pathIsSignal() || pathIsCharts();
+    return pathIsSignal();
   }
 
   function chartInstruments() {
@@ -279,7 +276,7 @@
       }
       return;
     }
-    location.href = "/view/trend-charts?instrument=" + encodeURIComponent(secid);
+    location.href = "/view/investments?instrument=" + encodeURIComponent(secid);
   }
 
   function chromeBottomPx() {

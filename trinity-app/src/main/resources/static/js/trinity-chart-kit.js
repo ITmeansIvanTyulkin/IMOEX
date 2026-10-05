@@ -1,6 +1,6 @@
 /**
  * Shared chart tools: stretch VAP on candle range, trend lines, configurable MAs, layout persist.
- * Used by trend signal desk and /view/trend-charts terminal.
+ * Used by trend signal desk and /view/investments chart terminal.
  */
 (function (global) {
   "use strict";
@@ -4176,7 +4176,9 @@
     function sendSub() {
       if (!ws || ws.readyState !== 1) return;
       try {
-        ws.send(JSON.stringify(all ? { all: true } : { instruments: want }));
+        const payload = { instruments: want };
+        if (all) payload.all = true;
+        ws.send(JSON.stringify(payload));
       } catch (_) {}
     }
     function emitTrade(msg) {
@@ -4244,6 +4246,7 @@
       subscribe: function (list, opts) {
         all = !!(opts && opts.all);
         want = (list || []).map(function (s) { return String(s || "").trim().toUpperCase(); }).filter(Boolean);
+        // Always send instrument ids — {all:true} alone never warms equity FIGIs on the stream.
         connect();
         sendSub();
       },

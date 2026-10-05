@@ -212,7 +212,7 @@ public class AnalysisHtmlRenderer {
                 <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
               </main>
-              <script src="/js/operator.js?v=20261005-brm5"></script>
+              <script src="/js/operator.js?v=20261005-inv1"></script>
               <script src="/js/trinity-status-plaques.js?v=20261005-nopairs"></script>
             </body>
             </html>
@@ -494,6 +494,7 @@ public class AnalysisHtmlRenderer {
                     %s
                     %s
                   </div>
+                  %s
                 </section>
                 """.formatted(
                 robotModeCard(
@@ -539,8 +540,34 @@ public class AnalysisHtmlRenderer {
                         "arb-auto-execution",
                         strategyCalendarArbEnabled,
                         "Разница ближнего и дальнего месяца. Тумблер тот же, что на экране арбитража."
-                )
+                ),
+                investmentsModeCard()
         );
+    }
+
+    private String investmentsModeCard() {
+        return """
+                <article class="robot-mode-card is-wide" id="investments-playbook-settings">
+                  <div class="robot-mode-copy">
+                    <p class="robot-mode-kicker">Пульт · графики + авто</p>
+                    <h3>Инвестиции</h3>
+                    <strong id="invest-delivery-title">Наблюдение</strong>
+                    <p class="meta" id="invest-delivery-hint">
+                      Стол — <a href="/view/investments">Пульт</a> (графики, pipeline, кандидаты).
+                      Наблюдение: скан без заявок. Авто: fair-paper лестницы по чек-листу.
+                    </p>
+                  </div>
+                  <div class="robot-mode-actions">
+                    <label class="mode-switch is-signal" title="Наблюдение: смотрим. Авто: отбор здесь, без ручного клика по акциям.">
+                      <span class="mode-switch-label">Наблюдение</span>
+                      <input type="checkbox" id="settings-invest-auto-execution" role="switch" aria-checked="false">
+                      <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+                      <span class="mode-switch-label">Авто</span>
+                    </label>
+                    <p class="meta robot-mode-status" id="invest-delivery-status">Загрузка режима…</p>
+                  </div>
+                </article>
+                """;
     }
 
     private String robotModeCard(
@@ -1737,14 +1764,6 @@ public class AnalysisHtmlRenderer {
         return html;
     }
 
-    /** Multi-instrument chart terminal (ATAS-like study desk). */
-    public String renderTrendChartsPage() {
-        if (!productEdition.hasTrend()) {
-            return renderStrategyLockedPage("TREND", "trend-charts");
-        }
-        return page("TRINITY — терминал графиков", loadClasspathUtf8("trend-charts-terminal.html"), nav("trend-charts"), OpsMode.NONE);
-    }
-
     /** Полное описание трендовых роботов (диапазонная + позиционная). */
     public String renderTrendStrategyPage() {
         if (!productEdition.hasTrend()) {
@@ -1772,6 +1791,15 @@ public class AnalysisHtmlRenderer {
             return renderStrategyLockedPage("ARB", "calendar-arb-strategy");
         }
         return page("TRINITY — описание арбитража", loadClasspathUtf8("calendar-arb-strategy.html"), nav("calendar-arb-strategy"), OpsMode.NONE);
+    }
+
+    /** Investments workspace: chart terminal + auto/manual strategy panel. */
+    public String renderInvestmentsDeskPage() {
+        return page("TRINITY — инвестиции", loadClasspathUtf8("investments-desk.html"), nav("investments"), OpsMode.NONE);
+    }
+
+    public String renderInvestmentsStrategyPage() {
+        return page("TRINITY — описание инвестиций", loadClasspathUtf8("investments-strategy.html"), nav("investments-strategy"), OpsMode.NONE);
     }
 
     public String renderSpreadPage() {
@@ -3157,6 +3185,7 @@ public class AnalysisHtmlRenderer {
         }
         String trendActive = "trend".equals(pageStrategy) ? "active" : "";
         String arbActive = "arb".equals(pageStrategy) ? "active" : "";
+        String investActive = "invest".equals(pageStrategy) ? "active" : "";
         String trendLock = hasTrend ? "" : " is-locked";
         String arbLock = hasArb ? "" : " is-locked";
         return """
@@ -3172,19 +3201,25 @@ public class AnalysisHtmlRenderer {
                             data-locked="%s" role="tab" aria-selected="%s">Тренд</button>
                     <button type="button" class="strategy-switch-btn %s%s" data-strategy="arb"
                             data-locked="%s" role="tab" aria-selected="%s">Арбитраж</button>
+                    <button type="button" class="strategy-switch-btn %s" data-strategy="invest"
+                            data-locked="false" role="tab" aria-selected="%s">Инвестиции</button>
                   </div>
                 </nav>
                 <nav class="topnav-secondary" data-for="trend" hidden>
                   <a href="/view/trend-signal" class="%s" data-requires="trend">Диапазонная торговля</a>
                   <a href="/view/trend-positional" class="%s" data-requires="trend">Позиционная торговля</a>
                   <a href="/view/trend-brm" class="%s" data-requires="trend">BRM мини</a>
-                  <a href="/view/trend-charts" class="%s" data-requires="trend">Терминал графиков</a>
                   <a href="/view/trend-strategy" class="%s" data-requires="trend">Описание</a>
                 </nav>
                 <nav class="topnav-secondary" data-for="arb" hidden>
                   <a href="/view/calendar-arb" class="%s" data-requires="arb">Календарный arb</a>
                   <a href="/view/calendar-arb-strategy" class="%s" data-requires="arb">Описание</a>
                   <a href="/view/full-core" class="%s">Full Core</a>
+                </nav>
+                <nav class="topnav-secondary" data-for="invest" hidden>
+                  <a href="/view/investments" class="%s">Пульт</a>
+                  <a href="/view/investments-strategy" class="%s">Описание</a>
+                  <a href="/view/settings#investments-playbook-settings">Настройки</a>
                 </nav>
                 """.formatted(
                 escape(pageStrategy),
@@ -3196,14 +3231,17 @@ public class AnalysisHtmlRenderer {
                 trendActive.isEmpty() ? "false" : "true",
                 arbActive, arbLock, hasArb ? "false" : "true",
                 arbActive.isEmpty() ? "false" : "true",
+                investActive,
+                investActive.isEmpty() ? "false" : "true",
                 a.equals("trend-signal") ? "active" : "",
                 a.equals("trend-positional") ? "active" : "",
                 a.equals("trend-brm") ? "active" : "",
-                a.equals("trend-charts") ? "active" : "",
                 a.equals("trend-strategy") ? "active" : "",
                 a.equals("calendar-arb") ? "active" : "",
                 a.equals("calendar-arb-strategy") ? "active" : "",
-                a.equals("fullcore") ? "active" : ""
+                a.equals("fullcore") ? "active" : "",
+                a.equals("investments") ? "active" : "",
+                a.equals("investments-strategy") ? "active" : ""
         );
     }
 
@@ -3215,11 +3253,15 @@ public class AnalysisHtmlRenderer {
     private static boolean isTrendNav(String a) {
         return a.equals("trend-signal") || a.equals("trend-positional")
                 || a.equals("trend-brm")
-                || a.equals("trend-charts") || a.equals("trend-strategy");
+                || a.equals("trend-strategy");
     }
 
     private static boolean isArbNav(String a) {
         return a.equals("fullcore") || a.equals("calendar-arb") || a.equals("calendar-arb-strategy");
+    }
+
+    private static boolean isInvestNav(String a) {
+        return a.equals("investments") || a.equals("investments-strategy");
     }
 
     private static boolean isSpreadNav(String a) {
@@ -3236,6 +3278,9 @@ public class AnalysisHtmlRenderer {
         }
         if (isArbNav(a)) {
             return "arb";
+        }
+        if (isInvestNav(a)) {
+            return "invest";
         }
         return "";
     }

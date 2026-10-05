@@ -37,10 +37,41 @@
   }
 
   function toChartTime(iso) {
-    if (!iso) return null;
-    const ms = Date.parse(String(iso).replace(" ", "T"));
+    if (iso == null || iso === "") return null;
+    if (typeof iso === "object" && iso.year) return iso;
+    if (typeof iso === "number" && isFinite(iso)) {
+      return iso > 1e12 ? Math.floor(iso / 1000) : Math.floor(iso);
+    }
+    const s = String(iso).trim();
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const n = Number(s);
+      if (!isFinite(n)) return null;
+      return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+    }
+    const ms = Date.parse(s.replace(" ", "T"));
     if (!isFinite(ms)) return null;
     return Math.floor(ms / 1000);
+  }
+
+  function mergeLayoutDocs(a, b) {
+    const out = Object.assign({}, a || {}, b || {});
+    const ia = (a && a.investTerminal) || {};
+    const ib = (b && b.investTerminal) || {};
+    const by = Object.assign({}, ia.byInstrument || {}, ib.byInstrument || {});
+    Object.keys(ia.byInstrument || {}).forEach(function (id) {
+      const prev = ia.byInstrument[id];
+      const next = by[id];
+      if (drawingPayloadEmpty(next) && !drawingPayloadEmpty(prev)) by[id] = prev;
+    });
+    out.investTerminal = Object.assign({}, ia, ib, { byInstrument: by });
+    if (a && a.desk && !out.desk) out.desk = a.desk;
+    if (a && a.terminal && !out.terminal) out.terminal = a.terminal;
+    const templates = [];
+    [a, b].forEach(function (d) {
+      (d && Array.isArray(d.templates) ? d.templates : []).forEach(function (t) { templates.push(t); });
+    });
+    if (templates.length) out.templates = templates;
+    return out;
   }
 
   function scheduleSave() {
@@ -56,15 +87,23 @@
       && !(st.vapRange && st.vapRange.from != null);
   }
 
+  function investLayout(doc) {
+    doc = doc || {};
+    if (!doc.investTerminal) doc.investTerminal = {};
+    return doc.investTerminal;
+  }
+
   async function persist() {
     if (hydrating) return;
     if (!window.TrinityChartKit) return;
     try {
-      const cur = layoutDoc || await TrinityChartKit.loadLayouts();
-      cur.terminal = cur.terminal || {};
-      cur.terminal.active = activeId;
-      cur.terminal.instruments = instruments.map(function (o) { return o.secid; });
-      cur.terminal.byInstrument = cur.terminal.byInstrument || {};
+      let cur = {};
+      try { cur = await TrinityChartKit.loadLayouts(); } catch (_) { cur = layoutDoc || {}; }
+      if (layoutDoc) cur = mergeLayoutDocs(cur, layoutDoc);
+      const term = investLayout(cur);
+      term.active = activeId;
+      term.instruments = Object.keys(panes);
+      term.byInstrument = term.byInstrument || {};
       cur.templates = Array.isArray(layoutDoc && layoutDoc.templates)
         ? layoutDoc.templates
         : (Array.isArray(cur.templates) ? cur.templates : []);
@@ -73,7 +112,8 @@
         if (p && p.tools) {
           const st = p.tools.getState() || {};
           if (p.flow && typeof p.flow.getState === "function") st.flow = p.flow.getState();
-          const prev = cur.terminal.byInstrument[id];
+          st.tf = p.tf || "D1";
+          const prev = term.byInstrument[id];
           if (!p.layoutDirty && drawingPayloadEmpty(st) && prev && !drawingPayloadEmpty(prev)) {
             st.marks = prev.marks;
             st.trendLines = prev.trendLines;
@@ -81,24 +121,28 @@
             st.vapRange = prev.vapRange;
             if (prev.flow && !st.flow) st.flow = prev.flow;
           }
-          cur.terminal.byInstrument[id] = st;
+          term.byInstrument[id] = st;
+          p.layoutDirty = false;
         }
         if (p && p.barSpacing > 0) {
-          cur.terminal.scaleByInstrument = cur.terminal.scaleByInstrument || {};
-          cur.terminal.scaleByInstrument[id] = {
+          term.scaleByInstrument = term.scaleByInstrument || {};
+          term.scaleByInstrument[id] = {
             barSpacing: p.barSpacing,
             logical: p.logical || null
           };
         }
       });
       layoutDoc = await TrinityChartKit.saveLayouts(cur);
+      try {
+        localStorage.setItem("trinity.invest.layouts.local", JSON.stringify(layoutDoc));
+      } catch (_) {}
       const meta = $("charts-terminal-meta");
       if (meta) {
-        meta.textContent = "Сохранено · " + TrinityChartKit.currentUserKey()
+        meta.textContent = "Рисунки сохранены · " + TrinityChartKit.currentUserKey()
           + " · " + (layoutDoc.updatedAt || "");
       }
     } catch (e) {
-      console.warn("terminal layout save", e);
+      console.warn("invest terminal layout save", e);
     }
   }
 
@@ -189,19 +233,20 @@
 
     const el = wrap.querySelector(".charts-pane-chart");
     const chart = LightweightCharts.createChart(el, {
-      width: el.clientWidth || 480,
-      height: 320,
+      width: Math.max(280, el.clientWidth || 480),
+      height: Math.max(280, el.clientHeight || 320),
       layout: { backgroundColor: "#ffffff", textColor: "#1a2228" },
       grid: { vertLines: { color: "#eef1f3" }, horzLines: { color: "#eef1f3" } },
-      rightPriceScale: { borderColor: "#d5dde2" },
+      rightPriceScale: { borderColor: "#d5dde2", autoScale: true },
       timeScale: {
         borderColor: "#d5dde2",
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 8,
-        lockVisibleTimeRangeOnResize: true
+        rightOffset: 6,
+        lockVisibleTimeRangeOnResize: false,
+        barSpacing: 8
       },
-      handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
     });
     const series = chart.addCandlestickSeries({
@@ -217,8 +262,7 @@
       chart: chart,
       candleSeries: series,
       hostEl: el,
-      pointSize: (window.TrinityChartKit && TrinityChartKit.pointSizeFor)
-        ? TrinityChartKit.pointSizeFor(secid) : (secid.toUpperCase().indexOf("RI") === 0 ? 10 : 0.01),
+      pointSize: 0.01,
       overlayId: "vap-" + secid,
       barSec: 300,
       getBars: function () { return (panes[secid] && panes[secid].bars) || []; },
@@ -231,8 +275,9 @@
       legendEl: hud.legendEl || null
     });
     panes[secid] = { wrap: wrap, el: el, chart: chart, series: series, tools: tools, bars: [],
-      m5Bars: [], ticks: [], tf: "M5",
-      scaleLocked: false, barSpacing: null, logical: null, nav: null, flow: null, timeline: null };
+      m5Bars: [], tfCache: {}, ticks: [], tf: "D1",
+      scaleLocked: false, barSpacing: null, logical: null, nav: null, flow: null, timeline: null,
+      layoutDirty: false };
     if (kit && typeof kit.attachTimelineRail === "function") {
       panes[secid].timeline = kit.attachTimelineRail({ hostEl: el, chart: chart });
     }
@@ -242,7 +287,7 @@
         series: series,
         hostEl: el,
         barSec: 300,
-        pointSize: (kit.pointSizeFor) ? kit.pointSizeFor(secid) : 0.01,
+        pointSize: 0.01,
         timeOf: toChartTime,
         getBars: function () { return (panes[secid] && panes[secid].bars) || []; },
         isDrawing: function () { return !!(tools && tools.getMode()); },
@@ -264,7 +309,7 @@
         lockBtn: hud.lockBtn,
         goLiveBtn: hud.goLiveBtn,
         barSec: 300,
-        pointSize: (kit.pointSizeFor) ? kit.pointSizeFor(secid) : 0.01,
+        pointSize: 0.01,
         getBars: function () { return (panes[secid] && panes[secid].bars) || []; },
         isDrawing: function () {
           const p = panes[secid];
@@ -289,19 +334,26 @@
       });
     }
     bindPaneScale(panes[secid]);
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(function () { resizePane(secid); });
+      ro.observe(el);
+      panes[secid].ro = ro;
+    }
     return panes[secid];
   }
 
   async function paintPaneFromCache(secid) {
     const p = panes[secid];
     if (!p || !window.TrinityChartKit || typeof TrinityChartKit.barCacheGet !== "function") return;
-    const row = await TrinityChartKit.barCacheGet(secid, "M5")
-      || await TrinityChartKit.barCacheGet(secid, "H1");
-    if (!row || !row.bars || !row.bars.length) return;
-    const bars = row.raw || row.bars;
-    if (!deskBarsMatchPane(secid, row, bars)) return;
-    p.bars = bars;
-    try { p.series.setData(row.bars); } catch (_) {}
+    const row = await TrinityChartKit.barCacheGet(secid, "D1")
+      || await TrinityChartKit.barCacheGet(secid, "W1")
+      || await TrinityChartKit.barCacheGet(secid, "H1")
+      || await TrinityChartKit.barCacheGet(secid, "M5");
+    if (!cacheRowOk(row)) return;
+    paintCandles(p, row.raw || row.bars);
+    const key = String(row.tf || "D1").toUpperCase();
+    p.tfCache = p.tfCache || {};
+    p.tfCache[key] = (row.raw && row.raw.length) ? row.raw : sanitizeCandles(row.bars);
   }
 
   function snapshotPaneScale(p) {
@@ -318,6 +370,31 @@
     if (!(n > 0) || !isFinite(n)) return 8;
     return Math.max(2, Math.min(120, n));
   }
+  function showRecentBars(p) {
+    if (!p || !p.chart) return;
+    const n = (p.bars && p.bars.length) || 0;
+    const tf = String(p.tf || "D1").toUpperCase();
+    let want = 90;
+    if (tf === "MN") want = 36;
+    else if (tf === "W1") want = 80;
+    else if (tf === "H1") want = 120;
+    else if (tf === "M5" || tf === "M15") want = 150;
+    if (gridFullscreen()) want = Math.round(want * 1.4);
+    const vis = Math.min(want, Math.max(12, n));
+    try {
+      p.chart.timeScale().applyOptions({
+        barSpacing: gridFullscreen() ? 10 : (tf === "MN" || tf === "W1" ? 12 : 8),
+        rightOffset: 4
+      });
+      if (n > 0) {
+        p.chart.timeScale().setVisibleLogicalRange({ from: n - vis, to: n + 3 });
+      }
+    } catch (_) {
+      try { p.chart.timeScale().fitContent(); } catch (__) {}
+    }
+    p.scaleLocked = false;
+  }
+
   function restorePaneScale(p) {
     if (!p || !p.chart || !(p.barSpacing > 0)) return false;
     try {
@@ -367,6 +444,12 @@
       });
     }
     if (pane && pane.flow && typeof pane.flow.layout === "function") pane.flow.layout();
+    const dom = $("charts-dom");
+    if (dom) {
+      dom.innerHTML = "<div class=\"charts-dock-empty\">подключаем стрим "
+        + (secid || "") + "…</div>";
+    }
+    seedTapeFromBars([secid]);
     scheduleSave();
   }
 
@@ -389,14 +472,19 @@
     wrap.classList.remove("is-fs-motion");
   }
 
+  function workspaceRoot() {
+    return document.getElementById("investments-charts-terminal")
+      || document.querySelector(".investments-workspace");
+  }
+
   function enterFullscreen(secid) {
     const p = panes[secid];
     if (!p) return;
     const grid = $("charts-terminal-grid");
-    const wrap = p.wrap;
-    const first = wrap.getBoundingClientRect();
-    const instant = prefersReducedMotion() || fsBusy;
+    const root = workspaceRoot();
     fsBusy = true;
+    if (root) root.classList.add("is-chart-fs");
+    document.body.classList.add("invest-chart-fs");
     grid.classList.add("is-fullscreen");
     Object.keys(panes).forEach(function (id) {
       panes[id].wrap.classList.toggle("is-fs-target", id === secid);
@@ -405,104 +493,37 @@
     });
     setActive(secid);
     syncFsChrome();
-    resizeAll();
-    if (instant) {
-      fsBusy = false;
-      return;
-    }
-    const last = wrap.getBoundingClientRect();
-    const sx = last.width > 1 ? first.width / last.width : 1;
-    const sy = last.height > 1 ? first.height / last.height : 1;
-    const dx = first.left - last.left;
-    const dy = first.top - last.top;
-    wrap.classList.add("is-fs-motion");
-    wrap.style.zIndex = "6";
-    wrap.style.transformOrigin = "top left";
-    wrap.style.transition = "none";
-    wrap.style.transform = "translate(" + dx + "px," + dy + "px) scale(" + sx + "," + sy + ")";
-    wrap.style.boxShadow = "0 8px 24px rgba(15, 23, 42, 0.08)";
-    void wrap.offsetWidth;
     requestAnimationFrame(function () {
-      wrap.style.transition = "transform 0.52s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.52s ease";
-      wrap.style.transform = "none";
-      wrap.style.boxShadow = "0 28px 80px rgba(15, 23, 42, 0.18)";
+      resizePane(secid);
+      requestAnimationFrame(function () {
+        resizePane(secid);
+        if (!p.scaleLocked) showRecentBars(p);
+        fsBusy = false;
+      });
     });
-    window.setTimeout(function () {
-      clearPaneMotion(wrap);
-      wrap.classList.add("is-fs-target");
-      fsBusy = false;
-      resizeAll();
-    }, 540);
   }
 
   function exitFullscreen() {
     const grid = $("charts-terminal-grid");
+    const root = workspaceRoot();
     let targetId = null;
     Object.keys(panes).forEach(function (id) {
       if (panes[id].wrap.classList.contains("is-fs-target")) targetId = id;
     });
-    const wrap = targetId && panes[targetId] ? panes[targetId].wrap : null;
-    const first = wrap ? wrap.getBoundingClientRect() : null;
-    const instant = prefersReducedMotion() || !wrap;
+    if (root) root.classList.remove("is-chart-fs");
+    document.body.classList.remove("invest-chart-fs");
     grid.classList.remove("is-fullscreen");
     Object.keys(panes).forEach(function (id) {
       panes[id].wrap.hidden = false;
-      if (id !== targetId) panes[id].wrap.classList.remove("is-fs-target");
+      panes[id].wrap.classList.remove("is-fs-target");
+      clearPaneMotion(panes[id].wrap);
     });
     syncFsChrome();
-    resizeAll();
-    if (instant || !first) {
-      if (wrap) {
-        wrap.classList.remove("is-fs-target");
-        clearPaneMotion(wrap);
-      }
-      fsBusy = false;
-      return;
-    }
-    fsBusy = true;
-    const last = wrap.getBoundingClientRect();
-    const sx = last.width > 1 ? first.width / last.width : 1;
-    const sy = last.height > 1 ? first.height / last.height : 1;
-    const dx = first.left - last.left;
-    const dy = first.top - last.top;
-    wrap.style.zIndex = "8";
-    wrap.style.transformOrigin = "top left";
-    wrap.style.transition = "none";
-    wrap.style.transform = "translate(" + dx + "px," + dy + "px) scale(" + sx + "," + sy + ")";
-    wrap.style.boxShadow = "0 32px 90px rgba(15, 23, 42, 0.22)";
-    Object.keys(panes).forEach(function (id) {
-      if (id === targetId) return;
-      const other = panes[id].wrap;
-      other.classList.add("is-fs-ghost");
-      other.style.opacity = "0";
-      other.style.transform = "translateY(10px) scale(0.975)";
-    });
-    void wrap.offsetWidth;
+    fsBusy = false;
     requestAnimationFrame(function () {
-      wrap.style.transition = "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.55s ease";
-      wrap.style.transform = "none";
-      wrap.style.boxShadow = "0 0 0 1px rgba(37, 99, 235, 0.2)";
-      Object.keys(panes).forEach(function (id) {
-        if (id === targetId) return;
-        const other = panes[id].wrap;
-        other.style.transition = "opacity 0.42s ease 0.08s, transform 0.48s cubic-bezier(0.22, 1, 0.36, 1) 0.06s";
-        other.style.opacity = "1";
-        other.style.transform = "none";
-      });
-    });
-    window.setTimeout(function () {
-      wrap.classList.remove("is-fs-target");
-      clearPaneMotion(wrap);
-      Object.keys(panes).forEach(function (id) {
-        const other = panes[id].wrap;
-        other.classList.remove("is-fs-ghost");
-        other.style.opacity = "";
-        other.style.transform = "";
-        other.style.transition = "";
-      });
-      fsBusy = false;
       resizeAll();
-    }, 580);
+      if (targetId) resizePane(targetId);
+    });
   }
 
   function togglePaneFullscreen(secid) {
@@ -546,31 +567,95 @@
     } catch (_) {}
   }
 
+  function resizePane(secid) {
+    const p = panes[secid];
+    if (!p || !p.el || p.wrap.hidden) return;
+    const w = Math.max(240, p.el.clientWidth || p.wrap.clientWidth || 480);
+    const h = Math.max(240, p.el.clientHeight || 320);
+    try { p.chart.applyOptions({ width: w, height: h }); } catch (_) {}
+    if (p.tools && typeof p.tools.layoutStretchedVap === "function") p.tools.layoutStretchedVap();
+    if (p.flow && typeof p.flow.layout === "function") p.flow.layout();
+    if (p.timeline && typeof p.timeline.layout === "function") p.timeline.layout();
+  }
+
   function resizeAll() {
-    Object.keys(panes).forEach(function (id) {
-      const p = panes[id];
-      if (!p || p.wrap.hidden) return;
-      const w = p.el.clientWidth || 480;
-      const h = gridFullscreen() ? Math.max(480, window.innerHeight - 180) : 320;
-      try { p.chart.applyOptions({ width: w, height: h }); } catch (_) {}
-      if (p.tools) p.tools.layoutStretchedVap();
-      if (p.flow) p.flow.layout();
-    });
+    Object.keys(panes).forEach(function (id) { resizePane(id); });
   }
 
   function gridFullscreen() {
     return $("charts-terminal-grid").classList.contains("is-fullscreen");
   }
 
-  async function loadDeskFor(secid) {
-    const kit = window.TrinityChartKit;
-    const fam = kit && kit.familyOf ? kit.familyOf(secid) : "";
-    const oil = fam === "BR";
-    let url = "/api/trend/desk?instrument=" + encodeURIComponent(secid) + "&study=1";
-    if (!oil) url += "&playbook=positional-volume-h1";
-    const res = await authFetch(url);
-    if (!res.ok) throw new Error("desk HTTP " + res.status);
+  const BAR_CACHE_V = 4;
+  const HISTORY_YEARS = 5;
+
+  function apiTfFor(tf) {
+    const u = String(tf || "D1").toUpperCase();
+    if (u === "M5" || u === "M15") return "M5";
+    if (u === "H1" || u === "RENKO" || u === "RANGE" || u === "TICK") return "H1";
+    if (u === "W1" || u === "WEEK" || u === "MN" || u === "MONTH") return "W1";
+    return "D1";
+  }
+
+  function looksLikeSyntheticStairs(bars) {
+    if (!bars || bars.length < 40) return false;
+    const first = Number(bars[0].open != null ? bars[0].open : bars[0].close);
+    const last = Number(bars[bars.length - 1].close);
+    if (!(first > 90 && first < 115 && last > 230 && last < 290)) return false;
+    let up = 0;
+    for (let i = 1; i < Math.min(bars.length, 80); i++) {
+      if (Number(bars[i].close) >= Number(bars[i - 1].close)) up++;
+    }
+    return up / Math.min(bars.length - 1, 79) > 0.92;
+  }
+
+  function aggregateCalendarBars(bars, mode) {
+    const out = [];
+    let cur = null;
+    (bars || []).forEach(function (b) {
+      const t = toChartTime(b.time != null ? b.time : b.begin);
+      if (t == null) return;
+      const d = new Date(t * 1000);
+      let bucket;
+      if (mode === "month" || mode === "MN") {
+        bucket = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000);
+      } else {
+        const day = d.getUTCDay();
+        const diff = (day + 6) % 7;
+        bucket = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diff) / 1000);
+      }
+      const o = Number(b.open), h = Number(b.high), l = Number(b.low), c = Number(b.close);
+      if (![o, h, l, c].every(function (x) { return isFinite(x) && x > 0; })) return;
+      if (!cur || cur.time !== bucket) {
+        if (cur) out.push(cur);
+        cur = { time: bucket, open: o, high: h, low: l, close: c, volume: Number(b.volume) || 0 };
+      } else {
+        if (h > cur.high) cur.high = h;
+        if (l < cur.low) cur.low = l;
+        cur.close = c;
+        cur.volume += Number(b.volume) || 0;
+      }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  async function loadDeskFor(secid, forceTf) {
+    const p = panes[secid];
+    const tfBtn = document.querySelector("#charts-tf .charts-tf-btn.is-on");
+    const tf = forceTf || (p && p.tf) || (tfBtn && tfBtn.getAttribute("data-tf")) || "D1";
+    const chartTf = apiTfFor(tf);
+    let url = "/api/investments/chart/" + encodeURIComponent(secid) + "?tf=" + encodeURIComponent(chartTf);
+    const res = await authFetch(url, { ms: 25000 });
+    if (!res.ok) throw new Error("invest chart HTTP " + res.status);
     const data = await res.json();
+    if (data && String(data.source || "").toUpperCase() === "SYNTHETIC") {
+      data.bars = [];
+    }
+    if (data && looksLikeSyntheticStairs(data.bars || [])) {
+      data.bars = [];
+      data.source = "NONE";
+    }
     if (data && (!data.bars || !data.bars.length) && data.barsH1 && data.barsH1.length) {
       data.bars = data.barsH1;
       data.timeframe = data.timeframe || "H1";
@@ -579,170 +664,400 @@
   }
 
   function deskBarsMatchPane(secid, data, bars) {
-    const kit = window.TrinityChartKit;
-    if (!kit) return !!(bars && bars.length);
-    if (data && data.instrument && kit.familyOf(data.instrument) !== kit.familyOf(secid)) {
+    // Equity terminal: never apply FORTS family price gates (SIBN≠Si, ROSN≠BR).
+    if (!bars || !bars.length) return false;
+    if (looksLikeSyntheticStairs(bars)) return false;
+    if (data && data.instrument) {
+      const a = String(data.instrument).trim().toUpperCase();
+      const b = String(secid || "").trim().toUpperCase();
+      if (a && b && a !== b) return false;
+    }
+    const last = bars[bars.length - 1];
+    const px = Number(last && (last.close != null ? last.close : last.value));
+    return px > 0 && isFinite(px);
+  }
+
+  function sanitizeCandles(raw) {
+    const out = [];
+    const seen = Object.create(null);
+    (raw || []).forEach(function (b) {
+      const t = toChartTime(b.time != null ? b.time : b.begin);
+      if (t == null) return;
+      let o = Number(b.open), h = Number(b.high), l = Number(b.low), c = Number(b.close);
+      if (![o, h, l, c].every(function (x) { return isFinite(x) && x > 0; })) return;
+      h = Math.max(h, o, c);
+      l = Math.min(l, o, c);
+      if (h < l) { const tmp = h; h = l; l = tmp; }
+      // LW rejects duplicate times — keep last
+      seen[t] = { time: t, open: o, high: h, low: l, close: c };
+    });
+    Object.keys(seen).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
+      out.push(seen[k]);
+    });
+    return out;
+  }
+
+  function paintCandles(p, raw, opts) {
+    if (!p || !p.series) return false;
+    opts = opts || {};
+    const candles = sanitizeCandles(raw);
+    if (!candles.length) return false;
+    if (looksLikeSyntheticStairs(candles)) return false;
+    const vols = Object.create(null);
+    (raw || []).forEach(function (b) {
+      const t = toChartTime(b.time != null ? b.time : b.begin);
+      if (t != null) vols[t] = Number(b.volume) || 0;
+    });
+    p.bars = candles.map(function (c) {
+      return {
+        time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+        volume: vols[c.time] || 0
+      };
+    });
+    if (p.line) {
+      try { p.chart.removeSeries(p.line); } catch (_) {}
+      p.line = null;
+    }
+    try {
+      p.series.applyOptions({
+        visible: true,
+        upColor: "#16a34a", downColor: "#dc2626",
+        borderUpColor: "#16a34a", borderDownColor: "#dc2626",
+        wickUpColor: "#16a34a", wickDownColor: "#dc2626"
+      });
+    } catch (_) {}
+    try { p.series.setData(candles); } catch (e) {
+      console.warn("paintCandles setData", e);
       return false;
     }
-    if (!bars || !bars.length) return false;
-    const last = bars[bars.length - 1];
-    const px = last && (last.close != null ? last.close : last.value);
-    if (typeof kit.quotesMatchInstrument === "function") {
-      return kit.quotesMatchInstrument(secid, px);
+    try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
+    if (!opts.keepView) {
+      p.scaleLocked = false;
+      showRecentBars(p);
+    } else if (p.scaleLocked && p.barSpacing > 0) {
+      restorePaneScale(p);
     }
+    const sid = p.wrap && p.wrap.dataset ? p.wrap.dataset.secid : null;
+    if (sid) resizePane(sid);
+    if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
+    if (p.tools && typeof p.tools.refreshOverlays === "function") p.tools.refreshOverlays();
     return true;
+  }
+
+  function cacheRowOk(row) {
+    if (!row || row.v !== BAR_CACHE_V) return false;
+    const src = String(row.source || "").toUpperCase();
+    if (src === "SYNTHETIC" || src === "NONE") return false;
+    const bars = row.raw || row.bars || [];
+    if (!bars.length || looksLikeSyntheticStairs(bars)) return false;
+    return true;
+  }
+
+  async function ensureTfBars(secid, tf, opts) {
+    const p = panes[secid];
+    if (!p) return [];
+    opts = opts || {};
+    p.tfCache = p.tfCache || {};
+    const key = apiTfFor(tf);
+    if (!opts.forceNetwork && p.tfCache[key] && p.tfCache[key].length
+        && !looksLikeSyntheticStairs(p.tfCache[key])) {
+      return p.tfCache[key];
+    }
+    if (!opts.forceNetwork && window.TrinityChartKit && typeof TrinityChartKit.barCacheGet === "function") {
+      try {
+        const row = await TrinityChartKit.barCacheGet(secid, key);
+        if (cacheRowOk(row)) {
+          const candles = sanitizeCandles(row.raw || row.bars || []);
+          if (candles.length) {
+            p.tfCache[key] = (row.raw && row.raw.length) ? row.raw : candles;
+            if (key === "M5") p.m5Bars = p.tfCache[key].slice();
+            return p.tfCache[key];
+          }
+        }
+      } catch (_) {}
+    }
+    try {
+      const data = await loadDeskFor(secid, tf);
+      const candles = sanitizeCandles(data.bars || []);
+      if (!deskBarsMatchPane(secid, data, candles)) return p.tfCache[key] || [];
+      const toolBars = candles.map(function (c) {
+        return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: 0 };
+      });
+      const volByT = Object.create(null);
+      (data.bars || []).forEach(function (b) {
+        const t = toChartTime(b.time);
+        if (t != null) volByT[t] = Number(b.volume) || 0;
+      });
+      toolBars.forEach(function (b) { b.volume = volByT[b.time] || 0; });
+      p.tfCache[key] = toolBars;
+      if (key === "M5") p.m5Bars = toolBars.slice();
+      if (window.TrinityChartKit && typeof TrinityChartKit.barCachePut === "function") {
+        TrinityChartKit.barCachePut(secid, key, {
+          v: BAR_CACHE_V,
+          source: data.source || "LIVE",
+          instrument: (data && data.instrument) || secid,
+          tf: key,
+          bars: candles,
+          raw: toolBars
+        });
+      }
+      return toolBars;
+    } catch (e) {
+      console.warn("ensureTfBars", secid, tf, e);
+      return p.tfCache[key] || [];
+    }
   }
 
   async function refreshPane(secid) {
     const p = panes[secid];
     if (!p) return;
     try {
-      const data = await loadDeskFor(secid);
-      const raw = data.bars || [];
-      const candles = [];
-      const toolBars = [];
-      raw.forEach(function (b) {
-        const t = toChartTime(b.time);
-        if (t == null) return;
-        candles.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close });
-        toolBars.push({
-          time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume
-        });
-      });
-      if (!deskBarsMatchPane(secid, data, toolBars.length ? toolBars : candles)) {
-        console.warn("refreshPane skip foreign bars", secid, data && data.instrument);
-        return;
+      const wantTf = String((p.tf || "D1")).toUpperCase();
+      // Bust in-memory cache so Обновить / bootstrap always pull live bars.
+      if (p.tfCache) {
+        delete p.tfCache[apiTfFor(wantTf)];
+        if (wantTf === "W1" || wantTf === "MN") delete p.tfCache.W1;
       }
-      p.bars = toolBars;
-      const nativeH1 = String(data.timeframe || "").toUpperCase() === "H1";
-      p.m5Bars = nativeH1 ? [] : toolBars.slice();
-      if (nativeH1 && (!p.tf || p.tf === "M5")) p.tf = "H1";
-      const kit = window.TrinityChartKit;
-      const cacheTf = nativeH1 ? "H1" : "M5";
-      if (kit && typeof kit.barCachePut === "function") {
-        kit.barCachePut(secid, cacheTf, {
-          instrument: (data && data.instrument) || secid,
-          tf: cacheTf,
-          bars: candles,
-          raw: toolBars
-        });
-      }
-      if (p.scaleLocked && p.barSpacing > 0) {
-        if (kit && typeof kit.setSeriesDataKeepView === "function") {
-          kit.setSeriesDataKeepView(p.chart, p.series, candles);
-        } else {
-          p.series.setData(candles);
-        }
-        restorePaneScale(p);
-      } else {
-        if (kit && typeof kit.setSeriesDataKeepView === "function") {
-          kit.setSeriesDataKeepView(p.chart, p.series, candles);
-        } else {
-          p.series.setData(candles);
-        }
-        try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
-        try {
-          p.chart.timeScale().applyOptions({ barSpacing: 8 });
-          p.chart.timeScale().scrollToRealTime();
-        } catch (_) {}
-        p.barSpacing = 8;
-        p.scaleLocked = true;
-      }
-      if (p.flow) {
-        p.flow.setProfile(data.profile || []);
-        p.flow.setFootprints(data.footprint || []);
-      }
-      if (p.timeline && typeof p.timeline.setMarkers === "function") {
-        p.timeline.setMarkers(data.chartMarkers || []);
-      }
-      if (p.tools) p.tools.refreshOverlays();
-      if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
+      await applyTf(wantTf, secid);
       if (p.flow && typeof p.flow.layout === "function") p.flow.layout();
       if (p.timeline && typeof p.timeline.layout === "function") p.timeline.layout();
-      if (p.tf && p.tf !== "M5" && !nativeH1) applyTf(p.tf, secid);
+      resizePane(secid);
     } catch (e) {
       console.warn("refreshPane", secid, e);
     }
   }
 
   async function bootstrap() {
-    // Fast path: catalog first — never block grid paint on a slow /api/trend/desk.
+    // Paint equity panes immediately — never wait on full /desk scan.
     const FALLBACK = [
-      { secid: "BRV6", name: "Нефть (BR)", family: "BR" },
-      { secid: "RIZ6", name: "RTS (Ri)", family: "RI" },
-      { secid: "NGV6", name: "Газ (NG)", family: "NG" },
-      { secid: "SiZ6", name: "Si (USD/RUB)", family: "SI" },
-      { secid: "GDZ6", name: "GOLD (GD)", family: "GD" },
-      { secid: "MXZ6", name: "MIX (IMOEX/MX)", family: "MX" }
+      { secid: "SBER", name: "Сбер" },
+      { secid: "LKOH", name: "Лукойл" },
+      { secid: "GAZP", name: "Газпром" },
+      { secid: "GMKN", name: "Норникель" },
+      { secid: "MGNT", name: "Магнит" },
+      { secid: "MTSS", name: "МТС" }
     ];
     instruments = FALLBACK.slice();
     try {
-      const deskRes = await authFetch("/api/trend/desk?playbook=levels-profile-br-m5", { ms: 8000 });
-      const desk = deskRes.ok ? await deskRes.json() : {};
-      if (desk.instruments && desk.instruments.length) {
-        instruments = desk.instruments;
+      const wlRes = await authFetch("/api/investments/watchlist", { ms: 8000 });
+      const wl = wlRes.ok ? await wlRes.json() : {};
+      if (wl.instruments && wl.instruments.length) {
+        instruments = wl.instruments;
+      } else if (wl.watchlist && wl.watchlist.length) {
+        instruments = wl.watchlist.map(function (t) { return { secid: t, name: t }; });
       }
     } catch (_) {}
     try {
       layoutDoc = await TrinityChartKit.loadLayouts();
     } catch (_) {
-      layoutDoc = { terminal: {} };
+      layoutDoc = {};
     }
-    const savedIds = (layoutDoc.terminal && layoutDoc.terminal.instruments) || null;
-    const list = savedIds && savedIds.length
+    try {
+      const raw = localStorage.getItem("trinity.invest.layouts.local")
+        || localStorage.getItem("trinity.chart.layouts.local");
+      if (raw) layoutDoc = mergeLayoutDocs(JSON.parse(raw), layoutDoc);
+    } catch (_) {
+      if (!layoutDoc) layoutDoc = { investTerminal: {} };
+    }
+    const term = investLayout(layoutDoc);
+    const savedIds = (term.instruments && term.instruments.length) ? term.instruments : null;
+    // At most 6 panes on first paint (full universe stays in the select / ops panel).
+    const catalog = instruments;
+    const list = (savedIds && savedIds.length
       ? savedIds.map(function (id) {
-          return instruments.find(function (o) { return o.secid === id; }) || { secid: id, name: id };
+          return catalog.find(function (o) { return o.secid === id; }) || { secid: id, name: id };
         })
-      : instruments;
+      : catalog
+    ).slice(0, 6);
 
     const sel = $("charts-instrument");
     sel.innerHTML = "";
-    list.forEach(function (o) {
+    catalog.forEach(function (o) {
       const opt = document.createElement("option");
       opt.value = o.secid;
       opt.textContent = (o.name || o.family || o.secid) + " · " + o.secid;
       sel.appendChild(opt);
+    });
+    list.forEach(function (o) {
       createPane(o.secid, o.name || o.secid);
     });
 
-    activeId = (layoutDoc.terminal && layoutDoc.terminal.active) || list[0].secid;
+    activeId = term.active || list[0].secid;
     if (!panes[activeId]) activeId = list[0].secid;
     setActive(activeId);
 
     await Promise.all(list.map(function (o) { return paintPaneFromCache(o.secid); }));
 
-    // Parallel live refresh (TrinityFastBoot) — sequential was multi-minute cold boots.
+    // Parallel live refresh — then restore drawings/MA/VAP from investTerminal.
     await Promise.allSettled(list.map(async function (o) {
-      const by = (layoutDoc.terminal && layoutDoc.terminal.byInstrument) || {};
-      const sc = ((layoutDoc.terminal && layoutDoc.terminal.scaleByInstrument) || {})[o.secid];
+      const by = term.byInstrument || {};
+      const sc = (term.scaleByInstrument || {})[o.secid];
       const pane = panes[o.secid];
-      if (sc && sc.barSpacing > 0 && pane) {
-        pane.scaleLocked = true;
-        pane.barSpacing = sc.barSpacing;
-        pane.logical = sc.logical || null;
-        restorePaneScale(pane);
-      }
+      const saved = by[o.secid];
+      if (saved && saved.tf && pane) pane.tf = saved.tf;
       await refreshPane(o.secid);
-      if (by[o.secid] && panes[o.secid]) {
-        panes[o.secid].tools.setState(by[o.secid]);
-        if (by[o.secid].flow && panes[o.secid].flow) {
-          panes[o.secid].flow.setState(by[o.secid].flow);
+      if (saved && panes[o.secid]) {
+        panes[o.secid].tools.setState(saved);
+        if (saved.flow && panes[o.secid].flow) {
+          panes[o.secid].flow.setState(saved.flow);
         }
+        panes[o.secid].layoutDirty = false;
       }
       if (sc && sc.barSpacing > 0 && panes[o.secid]) {
         panes[o.secid].scaleLocked = true;
         panes[o.secid].barSpacing = sc.barSpacing;
         panes[o.secid].logical = sc.logical || null;
         restorePaneScale(panes[o.secid]);
+      } else if (panes[o.secid]) {
+        showRecentBars(panes[o.secid]);
       }
     }));
     resizeAll();
     syncToolButtons();
     syncFsChrome();
     hydrating = false;
+    scheduleSave();
     bindTerminalTape(list);
+    // Operator / any subscription: warm multi-year D1 (+H1) into IndexedDB for experiments.
+    warmLocalHistory(list).catch(function (e) { console.warn("warmLocalHistory", e); });
     if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
       window.TrinityPlaques.refresh();
+    }
+  }
+
+  function historyFresh(row, minBars, minYears) {
+    if (!cacheRowOk(row)) return false;
+    const needYears = minYears != null ? minYears : HISTORY_YEARS;
+    if (needYears > 0 && !(Number(row.years) >= needYears)) return false;
+    const bars = row.raw || row.bars || [];
+    if (bars.length < (minBars || 400)) return false;
+    const age = Date.now() - Number(row.savedAt || 0);
+    return age >= 0 && age < 20 * 60 * 60 * 1000;
+  }
+
+  async function storeWarmBars(secid, tf, data, years) {
+    const candles = sanitizeCandles((data && data.bars) || []);
+    if (!deskBarsMatchPane(secid, data, candles)) return 0;
+    const toolBars = candles.map(function (c) {
+      return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: 0 };
+    });
+    const volByT = Object.create(null);
+    (data.bars || []).forEach(function (b) {
+      const t = toChartTime(b.time);
+      if (t != null) volByT[t] = Number(b.volume) || 0;
+    });
+    toolBars.forEach(function (b) { b.volume = volByT[b.time] || 0; });
+    const p = panes[secid];
+    if (p) {
+      p.tfCache = p.tfCache || {};
+      p.tfCache[tf] = toolBars;
+      if (tf === "M5") p.m5Bars = toolBars.slice();
+    }
+    if (window.TrinityChartKit && typeof TrinityChartKit.barCachePut === "function") {
+      await TrinityChartKit.barCachePut(secid, tf, {
+        v: BAR_CACHE_V,
+        years: years || 0,
+        source: (data && data.source) || "LIVE",
+        instrument: secid,
+        tf: tf,
+        bars: candles,
+        raw: toolBars,
+        savedAt: Date.now()
+      });
+    }
+    return toolBars.length;
+  }
+
+  async function warmLocalHistory(list) {
+    const meta = $("charts-terminal-meta");
+    let entitlement = {
+      allowed: false, years: HISTORY_YEARS, h1Days: 400, m5Days: 20, localArchive: true, reason: "login"
+    };
+    try {
+      const res = await authFetch("/api/investments/history-cache", { ms: 8000 });
+      if (res.ok) entitlement = await res.json();
+    } catch (_) {}
+    if (!entitlement.allowed) {
+      if (meta) {
+        meta.textContent = "Кэш истории недоступен (" + (entitlement.reason || "locked")
+          + ") — нужна подписка или вход оператора.";
+      }
+      return;
+    }
+    const years = Number(entitlement.years) > 0 ? Number(entitlement.years) : HISTORY_YEARS;
+    const ids = (list || []).map(function (o) { return o.secid; }).filter(Boolean);
+    if (!ids.length) return;
+    if (meta) {
+      meta.textContent = "Локальный архив истории (" + years + "г D1 / H1 / M5) · 0/" + ids.length
+        + " · на этот компьютер · " + (entitlement.reason || "ok");
+    }
+    let done = 0;
+    async function pullTf(id, tf, y, minBars, minYears) {
+      let row = null;
+      if (window.TrinityChartKit && typeof TrinityChartKit.barCacheGet === "function") {
+        row = await TrinityChartKit.barCacheGet(id, tf);
+      }
+      if (historyFresh(row, minBars, minYears)) {
+        if (panes[id] && tf === "D1") {
+          panes[id].tfCache = panes[id].tfCache || {};
+          panes[id].tfCache.D1 = (row.raw && row.raw.length) ? row.raw : sanitizeCandles(row.bars);
+        }
+        return row;
+      }
+      const q = y > 0 ? ("?tf=" + tf + "&years=" + y) : ("?tf=" + tf);
+      const res = await authFetch(
+        "/api/investments/chart/" + encodeURIComponent(id) + q,
+        { ms: 60000 }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      await storeWarmBars(id, tf, data, y > 0 ? y : 1);
+      return data;
+    }
+    async function one(id) {
+      try {
+        const data = await pullTf(id, "D1", years, 500, years);
+        if (data && panes[id]) {
+          const d1 = panes[id].tfCache && panes[id].tfCache.D1
+            ? panes[id].tfCache.D1
+            : sanitizeCandles(data.bars || []);
+          const w1 = aggregateCalendarBars(d1 || [], "week");
+          const mn = aggregateCalendarBars(d1 || [], "month");
+          if (w1.length) {
+            await storeWarmBars(id, "W1", { bars: w1, source: data.source, instrument: id }, years);
+          }
+          if (mn.length && window.TrinityChartKit) {
+            await TrinityChartKit.barCachePut(id, "MN", {
+              v: BAR_CACHE_V, years: years, source: data.source, instrument: id, tf: "MN",
+              bars: sanitizeCandles(mn), raw: mn, savedAt: Date.now()
+            });
+          }
+        }
+        await pullTf(id, "H1", 1, 200, 1);
+        await pullTf(id, "M5", 0, 80, 0);
+      } catch (e) {
+        console.warn("warm", id, e);
+      } finally {
+        done++;
+        if (meta) {
+          meta.textContent = "Архив на диске → браузер " + done + "/" + ids.length
+            + " · D1/H1/M5 · " + (entitlement.reason || "");
+        }
+      }
+    }
+    // Two at a time — don't stampede ISS / T-Invest on first fill.
+    const q = ids.slice();
+    async function worker() {
+      while (q.length) {
+        const id = q.shift();
+        if (id) await one(id);
+      }
+    }
+    await Promise.all([worker(), worker()]);
+    if (meta) {
+      meta.textContent = "Локальный архив готов · " + ids.length + " тикеров · "
+        + years + "г D1 + H1 + M5 (остаётся после обновления приложения) · "
+        + (entitlement.user || entitlement.reason || "");
     }
   }
 
@@ -750,16 +1065,17 @@
     const kit = window.TrinityChartKit;
     if (!kit || !kit.tape) return;
     const ids = (list || []).map(function (o) { return o.secid; }).filter(Boolean);
-    kit.tape.subscribe(ids, { all: true });
+    // Exact tickers only — {all:true} without ids never warmed equity FIGIs.
+    kit.tape.subscribe(ids, { all: false });
     kit.tape.onTrade(function (msg) {
       const px = Number(msg.px);
       if (!(px > 0)) return;
+      const inst = String(msg.instrument || "").toUpperCase();
       noteWatch(msg);
       checkAlerts(msg);
       Object.keys(panes).forEach(function (id) {
-        if (!kit.sameTapeInstrument(id, msg.instrument)) return;
-        if (typeof kit.quotesMatchInstrument === "function"
-            && !kit.quotesMatchInstrument(id, px)) return;
+        // Equity: match ticker exactly (FORTS familyOf would map SIBN→Si).
+        if (String(id).toUpperCase() !== inst) return;
         const p = panes[id];
         if (!p || !p.series) return;
         if (!p.ticks) p.ticks = [];
@@ -774,39 +1090,78 @@
         } else if (tf === "TICK" && p.line) {
           try { p.line.update(p.ticks[p.ticks.length - 1]); } catch (_) {}
         } else if (tf === "RENKO" || tf === "RANGE") {
-          applyTf(tf, id);
+          rebuildSpecialTf(p, tf);
         }
         if (p.flow && typeof p.flow.ingestPrint === "function") {
           p.flow.ingestPrint(px, msg.qty || 1, msg.side, Math.floor(Date.now() / 1000));
         }
         if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
       });
-      if (kit.sameTapeInstrument(activeId, msg.instrument)
-          && (!kit.quotesMatchInstrument || kit.quotesMatchInstrument(activeId, px))) {
+      if (String(activeId || "").toUpperCase() === inst) {
         appendTermTape(msg);
       }
     });
     kit.tape.onBook(function (book) {
-      if (!kit.sameTapeInstrument(activeId, book.instrument)) return;
+      if (String(activeId || "").toUpperCase() !== String(book.instrument || "").toUpperCase()) return;
       renderTermDom(book);
     });
+    seedTapeFromBars(ids);
+    pollEquityLast(ids);
     renderWatchlist();
     renderAlerts();
     renderTemplates();
+  }
+
+  function seedTapeFromBars(ids) {
+    (ids || Object.keys(panes)).forEach(function (id) {
+      const p = panes[id];
+      const bars = p && p.bars;
+      if (!bars || !bars.length) return;
+      const last = bars[bars.length - 1];
+      const px = Number(last.close);
+      if (!(px > 0)) return;
+      noteWatch({ instrument: id, px: px });
+      if (String(id).toUpperCase() === String(activeId || "").toUpperCase()) {
+        const dom = $("charts-dom");
+        if (dom && /ждём ленту/i.test(dom.textContent || "")) {
+          dom.innerHTML = "<div class=\"charts-dock-empty\">подключаем стрим " + id + "…</div>";
+        }
+      }
+    });
+  }
+
+  let equityPollTimer = 0;
+  function pollEquityLast(ids) {
+    const list = (ids || Object.keys(panes)).slice();
+    if (!list.length) return;
+    async function tick() {
+      await Promise.allSettled(list.map(async function (id) {
+        try {
+          const res = await authFetch("/api/marketdata/iss-last?secid=" + encodeURIComponent(id), { ms: 2500 });
+          if (!res.ok) return;
+          const d = await res.json();
+          const px = Number(d && d.px);
+          if (px > 0) noteWatch({ instrument: id, px: px });
+        } catch (_) {}
+      }));
+    }
+    tick();
+    clearInterval(equityPollTimer);
+    equityPollTimer = setInterval(tick, 8000);
   }
 
   const quotes = Object.create(null);
   function noteWatch(msg) {
     const px = Number(msg.px);
     if (!(px > 0)) return;
-    if (window.TrinityChartKit && typeof TrinityChartKit.quotesMatchInstrument === "function"
-        && !TrinityChartKit.quotesMatchInstrument(msg.instrument, px)) return;
-    const fam = (window.TrinityChartKit && TrinityChartKit.familyOf(msg.instrument)) || msg.instrument;
-    let row = quotes[fam];
-    if (!row) row = quotes[fam] = { px: 0, prev: 0, inst: msg.instrument };
+    const id = String(msg.instrument || "").trim().toUpperCase();
+    if (!id) return;
+    // Investments panes are equities — never fold SIBN into Si via familyOf.
+    let row = quotes[id];
+    if (!row) row = quotes[id] = { px: 0, prev: 0, inst: id };
     if (row.px > 0) row.prev = row.px;
-    row.px = Number(msg.px);
-    row.inst = msg.instrument;
+    row.px = px;
+    row.inst = id;
     renderWatchlist();
   }
   function renderWatchlist() {
@@ -814,8 +1169,7 @@
     if (!el) return;
     const ids = Object.keys(panes);
     el.innerHTML = ids.map(function (id) {
-      const fam = (window.TrinityChartKit && TrinityChartKit.familyOf(id)) || id;
-      const q = quotes[fam];
+      const q = quotes[String(id).toUpperCase()] || quotes[id];
       const px = q ? q.px : 0;
       const up = q && q.prev && px >= q.prev;
       return "<div class=\"charts-watch-row" + (id === activeId ? " is-on" : "") + "\" data-id=\"" + id + "\">"
@@ -907,39 +1261,89 @@
     if (changed) saveAlerts(list.filter(function (a) { return !a.fired; }));
     if (changed) renderAlerts();
   }
-  function applyTf(tf, paneId) {
+  function rebuildSpecialTf(p, tf) {
+    const kit = window.TrinityChartKit;
+    if (!p || !kit) return;
+    const src = (p.tfCache && (p.tfCache.H1 || p.tfCache.M5 || p.tfCache.D1 || p.tfCache.W1)) || [];
+    if (!src.length) return;
+    let out = src;
+    if (tf === "RENKO" && kit.buildRenko) out = kit.buildRenko(src, 0.04);
+    else if (tf === "RANGE" && kit.buildRangeBars) out = kit.buildRangeBars(src, 0.08);
+    paintCandles(p, out);
+  }
+
+  function tickLineFromBars(bars) {
+    return (bars || []).slice(-240).map(function (b) {
+      return { time: toChartTime(b.time), value: Number(b.close) };
+    }).filter(function (x) { return x.time != null && x.value > 0; });
+  }
+
+  let tfSeq = 0;
+  async function applyTf(tf, paneId) {
     const target = paneId || activeId;
+    tf = String(tf || "D1").toUpperCase();
+    if (tf === "WEEK") tf = "W1";
+    if (tf === "MONTH") tf = "MN";
     if (!paneId || target === activeId) {
       document.querySelectorAll(".charts-tf-btn").forEach(function (b) {
         b.classList.toggle("is-on", b.getAttribute("data-tf") === tf);
+        b.classList.toggle("is-loading", false);
       });
+      const onBtn = document.querySelector('.charts-tf-btn[data-tf="' + tf + '"]');
+      if (onBtn) onBtn.classList.add("is-loading");
     }
     const kit = window.TrinityChartKit;
     const p = panes[target];
-    if (!p || !kit) return;
+    if (!p) return;
     p.tf = tf;
-    const src = p.m5Bars || p.bars || [];
-    const pt = kit.pointSizeFor ? kit.pointSizeFor(target) : 0.01;
-    let candles = src;
-    if (tf === "M15") candles = kit.aggregateBars(src, 15);
-    else if (tf === "H1") candles = kit.aggregateBars(src, 60);
-    else if (tf === "RENKO") candles = kit.buildRenko(src, Math.max(pt * 4, 0.04));
-    else if (tf === "RANGE") candles = kit.buildRangeBars(src, Math.max(pt * 8, 0.08));
-    if (tf === "TICK") {
-      if (!p.line) {
-        p.line = p.chart.addLineSeries({ color: "#0f766e", lineWidth: 1 });
+    const seq = ++tfSeq;
+    try {
+      if (tf === "TICK") {
+        const base = (p.tfCache && (p.tfCache.H1 || p.tfCache.M5 || p.tfCache.D1)) || p.bars || [];
+        if (!base.length) await ensureTfBars(target, "H1", { forceNetwork: true });
+        const srcBars = (p.tfCache && (p.tfCache.H1 || p.tfCache.M5 || p.tfCache.D1)) || p.bars || [];
+        const lineData = (p.ticks && p.ticks.length) ? p.ticks : tickLineFromBars(srcBars);
+        if (!p.line) {
+          p.line = p.chart.addLineSeries({ color: "#0f766e", lineWidth: 2 });
+        }
+        try { p.series.applyOptions({ visible: false }); } catch (_) {}
+        try { p.line.applyOptions({ visible: true }); } catch (_) {}
+        try { p.line.setData(lineData); } catch (_) {}
+        try { p.chart.timeScale().fitContent(); } catch (_) {}
+        if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
+        return;
       }
-      try { p.series.applyOptions({ visible: false }); } catch (_) {}
-      try { p.line.applyOptions({ visible: true }); } catch (_) {}
-      try { p.line.setData(p.ticks || []); } catch (_) {}
-      return;
+
+      let src = [];
+      if (tf === "D1" || tf === "H1" || tf === "M5") {
+        src = await ensureTfBars(target, tf, { forceNetwork: !p.tfCache || !p.tfCache[apiTfFor(tf)] });
+      } else if (tf === "W1" || tf === "MN") {
+        src = await ensureTfBars(target, "W1", { forceNetwork: !p.tfCache || !p.tfCache.W1 });
+        if (!src.length) src = await ensureTfBars(target, "D1", { forceNetwork: true });
+        src = aggregateCalendarBars(src, tf === "MN" ? "month" : "week");
+      } else if (tf === "M15") {
+        src = await ensureTfBars(target, "M5", { forceNetwork: !p.tfCache || !p.tfCache.M5 });
+        if (src.length && kit && kit.aggregateBars) src = kit.aggregateBars(src, 15);
+        if (!src.length) src = await ensureTfBars(target, "H1", { forceNetwork: true });
+      } else if (tf === "RENKO" || tf === "RANGE") {
+        src = await ensureTfBars(target, "H1", { forceNetwork: !p.tfCache || !p.tfCache.H1 });
+        if (!src.length) src = await ensureTfBars(target, "D1", { forceNetwork: true });
+        if (tf === "RENKO" && kit && kit.buildRenko) src = kit.buildRenko(src, 0.04);
+        else if (tf === "RANGE" && kit && kit.buildRangeBars) src = kit.buildRangeBars(src, 0.08);
+      } else {
+        src = (p.tfCache && (p.tfCache[apiTfFor(tf)] || p.tfCache.D1)) || p.bars || [];
+      }
+      if (seq !== tfSeq && target === activeId) return;
+      if (!src.length) return;
+      paintCandles(p, src);
+      if (p.flow && typeof p.flow.layout === "function") p.flow.layout();
+      resizePane(target);
+    } finally {
+      document.querySelectorAll(".charts-tf-btn.is-loading").forEach(function (b) {
+        b.classList.remove("is-loading");
+      });
+      if (!hydrating) scheduleSave();
     }
-    if (p.line) {
-      try { p.line.applyOptions({ visible: false }); } catch (_) {}
-    }
-    try { p.series.applyOptions({ visible: true }); } catch (_) {}
-    p.bars = candles;
-    try { p.series.setData(candles); } catch (_) {}
   }
   function renderTemplates() {
     const sel = $("charts-templates");
@@ -955,7 +1359,7 @@
   });
   document.querySelectorAll(".charts-tf-btn").forEach(function (b) {
     b.addEventListener("click", function () {
-      applyTf(b.getAttribute("data-tf") || "M5");
+      applyTf(b.getAttribute("data-tf") || "D1");
     });
   });
   const alertAdd = $("charts-alert-add");
@@ -1108,10 +1512,7 @@
       p.logical = null;
       try { p.series.applyOptions({ autoscaleInfoProvider: undefined }); } catch (_) {}
       try { p.series.priceScale().applyOptions({ autoScale: true }); } catch (_) {}
-      try {
-        p.chart.timeScale().applyOptions({ barSpacing: 8 });
-        p.chart.timeScale().scrollToRealTime();
-      } catch (_) {}
+      showRecentBars(p);
       if (p.flow) p.flow.layout();
     });
     scheduleSave();

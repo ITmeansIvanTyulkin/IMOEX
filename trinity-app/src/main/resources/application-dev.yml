@@ -5,7 +5,14 @@ spring:
   application:
     name: trinity-dev
 
+# Keep candle archive / journals under the repo for day-to-day Maven boots.
+# Packaged release uses imoex.data-dir=user (OS Application Support) from application.yml.
+imoex:
+  data-dir: data
+  charts-dir: data/charts
+
 logging:
   level:
     com.moex.trinity: INFO
     com.moex.cointegration: INFO
+

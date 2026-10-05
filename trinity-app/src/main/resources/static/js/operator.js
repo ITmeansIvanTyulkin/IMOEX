@@ -93,7 +93,8 @@
     "/view/trend-signal": "Диапазонная торговля",
     "/view/trend-positional": "Позиционная торговля",
     "/view/trend-brm": "BRM мини",
-    "/view/trend-charts": "Терминал графиков",
+    "/view/investments": "Инвестиции",
+    "/view/investments-strategy": "Инвестиции · описание",
     "/view/trend-strategy": "Описание тренда",
     "/view/walk-forward": "Walk-forward",
     "/view/strategy": "Дашборд",
@@ -2395,6 +2396,62 @@
     if (card) card.classList.toggle("is-auto", auto);
   }
 
+  async function loadInvestDeliverySettings() {
+    if (!$("settings-invest-auto-execution")) return;
+    try {
+      const res = await fetch("/api/investments/settings", { headers: withAuthHeaders() });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyInvestDeliveryView(await res.json());
+    } catch (err) {
+      const status = $("invest-delivery-status");
+      if (status) status.textContent = "Не удалось загрузить режим инвестиций: " + (err.message || err);
+    }
+  }
+
+  function applyInvestDeliveryView(view) {
+    const toggle = $("settings-invest-auto-execution");
+    if (!toggle || !view) return;
+    const auto = !!view.autoExecution;
+    toggle.checked = auto;
+    toggle.setAttribute("aria-checked", auto ? "true" : "false");
+    toggle.dataset.hydrated = "1";
+    toggle.disabled = false;
+    const wrap = toggle.closest(".mode-switch");
+    if (wrap) {
+      wrap.classList.toggle("is-auto", auto);
+      wrap.classList.toggle("is-signal", !auto);
+    }
+    const title = $("invest-delivery-title");
+    const hint = $("invest-delivery-hint");
+    const status = $("invest-delivery-status");
+    if (title) title.textContent = auto ? "Авто · paper на пульте" : "Наблюдение";
+    if (hint) {
+      hint.textContent = auto
+        ? "Fair-paper лестницы по чек-листу на /view/investments. Live equity — отдельный флаг."
+        : "Скан и графики на пульте без заявок. Включите Авто для paper-исполнения.";
+    }
+    if (status) status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
+    const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
+    if (card) card.classList.toggle("is-auto", auto);
+  }
+
+  async function setInvestAutoExecution(enabled) {
+    const toggle = $("settings-invest-auto-execution");
+    try {
+      const res = await fetch("/api/investments/settings/auto-execution", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, withAuthHeaders()),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyInvestDeliveryView(await res.json());
+      appendLog(enabled ? "Инвестиции: авто-отбор здесь." : "Инвестиции: наблюдение.", "ok");
+    } catch (err) {
+      appendLog("Не удалось переключить инвестиции: " + (err.message || err), "err");
+      if (toggle) toggle.checked = !enabled;
+    }
+  }
+
   async function loadArbDeliverySettings() {
     if (!$("arb-auto-execution") && !$("desk-arb-auto-execution")) return;
     try {
@@ -3070,10 +3127,10 @@
 
   function resolveActiveStrategy() {
     const page = (document.body.getAttribute("data-nav-strategy") || "").trim();
-    if (page === "trend" || page === "arb") return page;
+    if (page === "trend" || page === "arb" || page === "invest") return page;
     try {
       const stored = localStorage.getItem(STRATEGY_KEY);
-      if (stored === "trend" || stored === "arb") return stored;
+      if (stored === "trend" || stored === "arb" || stored === "invest") return stored;
     } catch (_) {}
     return "trend";
   }
@@ -3115,6 +3172,8 @@
           location.href = "/view/trend-signal";
         } else if (s === "arb") {
           location.href = "/view/calendar-arb";
+        } else if (s === "invest") {
+          location.href = "/view/investments";
         }
       });
     });
@@ -3412,6 +3471,13 @@
       $("settings-brm-auto-execution").addEventListener("change", function () {
         if ($("settings-brm-auto-execution").dataset.hydrated !== "1") return;
         setBrmAutoExecution($("settings-brm-auto-execution").checked);
+      });
+    }
+    if ($("settings-invest-auto-execution")) {
+      loadInvestDeliverySettings();
+      $("settings-invest-auto-execution").addEventListener("change", function () {
+        if ($("settings-invest-auto-execution").dataset.hydrated !== "1") return;
+        setInvestAutoExecution($("settings-invest-auto-execution").checked);
       });
     }
     maybeShowRetailCapitalGuide();
