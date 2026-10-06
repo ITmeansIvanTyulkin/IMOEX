@@ -1875,7 +1875,10 @@
     });
     (robots || []).forEach(function (r) {
       if (!r || r.posture !== "IN_TRADE") return;
-      const label = r.key === "oil" ? "Диапазонная" : (r.key === "positional" ? "Позиционная" : r.title);
+      const label = r.key === "oil" ? "Диапазонная"
+        : (r.key === "positional" ? "Позиционная"
+          : (r.key === "brm" ? "BRM мини"
+            : (r.key === "investments" ? "Инвестиции" : r.title)));
       rows.push({
         key: "r:" + r.key,
         text: label + " · " + (r.instrument || "—") + " · в сделке"
@@ -1904,6 +1907,7 @@
           if (r.key === "oil") applyDashRobotCard("dash-robot-range", r);
           if (r.key === "positional") applyDashRobotCard("dash-robot-pos", r);
           if (r.key === "brm") applyDashRobotCard("dash-robot-brm", r);
+          if (r.key === "investments") applyDashRobotCard("dash-robot-invest", r);
         });
         return robots;
       })

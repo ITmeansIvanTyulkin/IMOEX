@@ -100,4 +100,15 @@ class TrendArbStrategyHtmlTest {
         assertTrue(html.contains("investments-desk.js"), html);
         assertFalse(html.contains("data-nav-strategy=\"trend\""), html);
     }
+
+    @Test
+    void dashboardShowsInvestmentsRobotCard() {
+        String html = renderer(true).renderDashboard(null, java.util.List.of(), null);
+        assertTrue(html.contains("id=\"dash-robot-range\""), html);
+        assertTrue(html.contains("id=\"dash-robot-pos\""), html);
+        assertTrue(html.contains("id=\"dash-robot-brm\""), html);
+        assertTrue(html.contains("id=\"dash-robot-arb\""), html);
+        assertTrue(html.contains("id=\"dash-robot-invest\""), html);
+        assertTrue(html.contains("/view/investments"), html);
+    }
 }

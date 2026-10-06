@@ -19,6 +19,11 @@
     return p === "/view" || p === "/view/";
   }
 
+  function pathIsCharts() {
+    return location.pathname.indexOf("/view/investments") >= 0
+      || location.pathname.indexOf("/view/charts") >= 0;
+  }
+
   function pathIsSignal() {
     return location.pathname.indexOf("/view/trend-signal") >= 0
       || location.pathname.indexOf("/view/trend-positional") >= 0;
@@ -253,6 +258,14 @@
       location.href = "/view/trend-signal";
       return;
     }
+    if (pb.indexOf("retail-brm") >= 0 || pb.indexOf("brm") >= 0) {
+      location.href = "/view/trend-brm";
+      return;
+    }
+    if ((robot && robot.key) === "investments" || pb.indexOf("invest") >= 0) {
+      location.href = "/view/investments";
+      return;
+    }
     location.href = (robot && robot.href) || "/view";
   }
 
@@ -437,7 +450,7 @@
     try {
       const wq = windsQuery();
       const url = "/api/desk/plaques" + (wq ? ("?winds=" + encodeURIComponent(wq)) : "");
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      const res = await fetch(url, { credentials: "include", headers: plaqueAuthHeaders() });
       if (!res.ok) return;
       render(await res.json());
     } catch (_) {

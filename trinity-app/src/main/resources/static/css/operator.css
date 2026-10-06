@@ -791,8 +791,14 @@ main {
 
 .dash-robots {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+@media (max-width: 1180px) {
+  .dash-robots {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 960px) {
@@ -5482,10 +5488,10 @@ a.signal-tool {
   width: 12.2rem;
   z-index: 45;
   pointer-events: none;
-  overflow: hidden;
-  transform: translateZ(0);
+  overflow: visible;
 }
-.trinity-plaque-host .signal-pressure-fab {
+.trinity-plaque-host .signal-pressure-fab,
+.trinity-plaque-robot {
   pointer-events: auto;
 }
 .trinity-plaque-stack {
