@@ -1,283 +1,283 @@
-# Handoff prompt: TRINITY operator (Exclusive observe + desk/playbook)
+# Handoff prompt: TRINITY operator (чат 06.10.2026 — диапазонная, TP3, плашки, investments)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-10-05 ~18:29 MSK · seals до 05.10 (0 Exclusive); playbook=both; BRX6; Phase C NO_GO.  
+> **Обновлено:** 2026-10-06 ~22:50 MSK · после коммитов `IMOEX@1298f03` + `IMOEX-core@351a4f4` (оба запушены в `origin/dev`).  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
 
 ## PROMPT FOR NEW AGENT
 
-Ты продолжаешь работу оператора TRINITY на машине Ивана.
+Ты продолжаешь работу оператора TRINITY на машине Ивана. Ниже — **все правила**, **вся работа из чата 06.10.2026**, и **как судить, стало ли по диапазонной лучше или хуже**. Не переспрашивай историю — она здесь. Не «улучшай» стратегию на глаз.
 
 Workspace: `/Users/ivan/MEGA/Work/TRINITY/`  
 - `IMOEX/` — публичный git (оболочка, UI, `application.yml`, scripts, docs). Remote `origin` → `ITmeansIvanTyulkin/IMOEX.git`, ветка **`dev`**.  
-- `IMOEX-core/` — закрытое ядро (`trinity-trend` / `trinity-pairs` / `trinity-calendar-arb` / `trinity-runtime`). Remote `origin` → `ITmeansIvanTyulkin/IMOEX-core.git`, ветка **`dev`**.  
-Unlock = ядро на classpath. Не коммитить `/data/`, секреты, `application-local.yml`, токены.
+- `IMOEX-core/` — закрытое ядро (`trinity-trend` / `trinity-pairs` / `trinity-calendar-arb` / `trinity-runtime` / investments). Remote `origin` → `ITmeansIvanTyulkin/IMOEX-core.git`, ветка **`dev`**.  
+Unlock = ядро на classpath (`-Poperator` если есть `../IMOEX-core`). Не коммитить `/data/`, секреты, `application-local.yml`, токены.
 
-Две оси работы **не смешивать без явной просьбы оператора:**
+Две оси **не смешивать без явной просьбы:**
 
-1. **observePathToReal** (главная торговая цель) — честное наблюдение **Trend Exclusive #1, BR M5 fair-paper**, без крутилок pad/knife/smash/buffer.  
-2. **Продукт desk / UX / разделение плейбуков** — только если оператор просит UI, копирайт, график, изоляцию сделок. Это **не** повод ретьюнить стратегию.
+1. **observePathToReal** — честное наблюдение **Trend Exclusive #1, BR M5 fair-paper** (диапазонная / «Уровни + объёмы»).  
+2. **Продукт desk / UX** — UI, плашки, investments, копирайт. Это **не** повод ретьюнить стратегию.
 
 Pairs DAILY и calendar-arb оператор смотрит сам, пока не попросил иначе.
-
-### Активная цель observePathToReal (не закрыта)
-
-```
-Наблюдать Trend Exclusive fair-paper после гейтов 2026-08-24 по пути к реалу:
-(1) 2–3+ торговых дня FORMING_BAR + вечерний journal (SWEEP/THROUGH/skip/smash/knife) без новых крутилок;
-(2) стабильный paper/OOS expectancy;
-(3) только потом FORTS SL в стакане малым размером;
-(4) scale при совпадении с journal.
-
-Жёстко: doNotTuneOnSight — не крутить pad/knife/smash/buffer «на глаз».
-```
-
-**Критерий «цель достигнута»:** live FORTS SL 1 лот работает, journal совпадает с paper, оператор явно дал go. **Phase C заблокирован кодом + human OOS.** Не объявляй цель выполненной.
-
-### Состояние на 2026-10-05 EOD (~18:29 MSK)
-
-| Метрика | Значение |
-|--------|----------|
-| **Phase A** | **done** 25–28.08 + full **15.09**. Extra sealed до **05.10** |
-| **OOS cumulative** | **64** Exclusive, **+18 621 ₽**, expectancy **~291 ₽/trade**, WR **~73%**, labeled SL 100% |
-| **05.10 Exclusive** | **0** сделок · weak day · FORMING_BAR · flat |
-| **Playbook** | **both** (оператор — keep) · OOS только Exclusive M5 |
-| **Corpus** | Exclusive ~10912 events · 39 decision days · armFill ~141 · ML collecting |
-| **Front** | **BRX6** · exp ~2026-11-02 |
-| **Mode** | FORMING_BAR · live=false · **Phase C NO_GO** · collect · doNotTuneOnSight |
-| **Ops** | daemons stopped · next resume **2026-10-06** ~09:00 |
-
-**Блок Phase C:** metrics `readyForPhaseC=true`, но **human OOS review + явный go** обязательны. FORTS SL / scale / pad-tune — нет.  
-Пакет для review: `IMOEX/data/trend-oos-human-review.md` (и `.json`).
-
-**Следующая сессия:** `bash IMOEX/scripts/trend_observe_resume.sh 2026-10-06` (~09:00); keep both; evening ~18:02. Не крутить гейты.
 
 ---
 
 ### Жёсткие правила (всегда)
 
 1. **`doNotTuneOnSight: true`** — не менять `sl-sweep-buffer-points` (5), smash-gate, deep-poke knife, `allow-zone-pad`, `stop-points`/`tp1-points` BR без явного research gate + OOS и без просьбы оператора.  
-2. **Checklist fidelity** — при конфликте EXT vs §8/§14 **побеждает чеклист**. Side law #1: BOT=BUY bounce, TOP=SELL bounce. §8 RETEST long только пока close **≥ TOP↑**; §8 short только пока close **≤ BOT↓**. Close **внутри коробки** = bounce, не «зависший» retest. Gate: `ExclusiveSide`. HTF / CL / макро / one-setup **не переворачивают сторону**.  
-3. **Side law #2 (позиционная):** H1 UP → только LONG, H1 DOWN → только SHORT; вход в промежуточный HVN последних трёх полок; сетка 1:1:2:4. Exclusive M5 session/gap/TOP-BOT **не отменяет** валидную позиционную пирамиду. Gate: `PositionalSide`.  
-4. **`liveExecution=true` для trend — запрещён** без Phase C code + human OOS + явный go оператора. Smoke FAIL не поднимать live автоматически.  
-5. **Не restore `playbook: both` / `parallel-playbooks: true`**, пока positional hvnHills OOM не починен и оператор не сказал. Desk-вкладки «позиционная» всё равно существуют — это UI, не второй armed робот.  
+2. **Checklist fidelity** — при конфликте EXT vs чеклист **побеждает чеклист**. Side law #1: BOT=BUY bounce, TOP=SELL bounce. RETEST long только пока close **≥ TOP↑**; short только пока close **≤ BOT↓**. Close **внутри коробки** = bounce. Gate: `ExclusiveSide`. HTF / CL / макро / one-setup **не переворачивают сторону**.  
+3. **Side law #2 (позиционная):** H1 UP → только LONG, H1 DOWN → только SHORT; HVN последних трёх полок; сетка 1:1:2:4. Gate: `PositionalSide`.  
+4. **`liveExecution=true` для trend — запрещён** без Phase C code + human OOS + явный go.  
+5. **Коммиты и push** — только по просьбе. Без `Co-authored-by` / Cursor trailer. Репы **отдельно**, ветка **`dev`**.  
 6. **Не commit `/data/`**, journals, path-log, tape/DOM архив, секреты.  
-7. **Коммиты и push** — только по просьбе. Без `Co-authored-by` / Cursor trailer. Репы: IMOEX и IMOEX-core **отдельно**, обычно ветка **`dev`**.  
-8. **Не смешивать стратегии на desk:** таблица «Сделки сегодня» на позиционной ≠ сделки Exclusive, и наоборот. История — в **Statement** (меню сверху). Не подмешивать `latestClose` / `fp.lastClose` чужого lane.  
-9. **Пользовательский UI:** не писать пути `/view/statement#trend` в текст; ссылка словом «Statement» или пункт меню. Не показывать `§14`/`§8` оператору. Кухня HTF=/RANGE:/SANDBOX_FAIR в брифах — фильтровать (`humanizeDeskReason` / `userFacingStory` / `deMark`).  
-10. **План на графике (ENTRY/SL/TP, «план BUY/SELL»)** рисуется **только** при `actionable` сетке или открытой сделке. ZONE_READY / «ждём закрытый отбой» **без линий — норма**, не баг разметки.  
-11. **Не трогать calendar-arb `live-execution`** и pairs INTRADAY live, если задача — Exclusive observe.  
-12. **Product truth:** research / decision-support, не black-box автоторг и не обещание доходности.
-
-### Гейты 2026-08-24 (не трогать без gate)
-
-1. SL за day TOP/BOT (геометрия дневной полки).  
-2. Smash-gate на §8 (вынос через дневную полку).  
-3. `sl-sweep-buffer-points: 5` — стоп за полкой +5 пт; иначе skip, если стоп > speculative 20.  
-4. Dump/melt knife на §8 **только** при deep-poke/smash; чистый break+hold **не режем**.
-
-Journal: `slObserveNote` → notes + `lastClose.slKind` (`SWEEP` / `THROUGH` / `GAP`). Skip-гейты: `data/trend-gate-observe.jsonl` (robot journal пишет в основном actionable).
-
-Крутить **не сейчас**. Когда можно (после phase A + явный research): много SWEEP + мелкий reclaim → buffer↑; много skip при спокойном §8 → buffer↓; dump режет в нож → deep-poke↑.
+7. **Не смешивать стратегии на desk:** «Сделки сегодня» только своего lane. История — **Statement**. Не подмешивать `latestClose` / `fp.lastClose` чужого lane.  
+8. **UI для оператора:** не писать пути `/view/...` в видимый текст; не светить `§N`. Кухню HTF=/RANGE:/SANDBOX_FAIR фильтровать.  
+9. **План на графике** (ENTRY/SL/TP) — только при `actionable` сетке или открытой сделке. ZONE_READY без линий — норма.  
+10. **Не трогать** calendar-arb / pairs live «заодно», если задача — Exclusive observe или UI.  
+11. **Product truth:** research / decision-support, не black-box и не обещание доходности.  
+12. **Документ `docs/OBSERVE_PATH_AGENT_PROMPT.md`** — handoff; коммитить его только если оператор явно попросил (в чате 06.10 его часто **исключали** из коммитов).
 
 ---
 
-### Exclusive #1 — как робот думает (обязательный контекст)
+### Состояние на 2026-10-06 вечер (~22:50 MSK)
 
-Playbook: «Уровни + объёмы», только **нефть BR M5**, полки дня TOP/BOT (обычно 15–20 пт). `a-setup-bounce-only: false` — полный чеклист: bounce **и** retest после пробоя.
+| Метрика | Значение |
+|--------|----------|
+| **Front** | **BRX6** |
+| **06.10 Exclusive** | **+483 ₽** · 5 сделок · выходы: TP3×1, SL×2, BE_STOP×2 · 4 из 5 с qty=1 при planned=3 |
+| **Playbook yml** | `both` / parallel — смотри актуальный `application.yml`; OOS-фокус оператора = Exclusive M5 |
+| **Mode** | FORMING_BAR · `live=false` · **Phase C NO_GO** · `doNotTuneOnSight` |
+| **Git** | IMOEX `1298f03` · IMOEX-core `351a4f4` · оба на `origin/dev` |
+| **Нож** | фикс `a595b28` (3 свечи + full-series hunt) — на сделку −336 в 12:00 **ещё не успел** |
+| **TP3** | с `351a4f4`: хвост только на **полном** гриде; малый набор → весь объём на TP2 |
 
-**Карта дня на графике:** HI/LO дня; **TOP·день** / **BOT·день** — торговые полки (day-lock, TOP не «подтягивается» под каждый новый HI — иначе убивается §8). HIST/ZERO/ACCUM — карта, не вход с середины. `prefer-structural-entries: true`.
-
-**Два сценария входа**
-
-| Сценарий | Когда | Сторона |
-|----------|--------|---------|
-| Отскок (BOUNCE) | Полка **не** удержана снаружи; касание + **закрытая** свеча-отбой (`require-bounce-confirm: true`) | TOP → SELL, BOT → BUY |
-| Ретест после пробоя | Полка **пробита и удержана** (close снаружи), цена **вернулась проверить** с правильной стороны, дистанция ≤ `retest-arm-max-distance-points` (10) | TOP hold above → LONG; BOT hold below → SHORT |
-
-Прокол HI / фитиль над TOP↑ **сам по себе не сигнал**. Пример 01.09 ~15:45: 15:35–15:40 закрылись над 92.65, 15:45 закрылась **внутри** 92.50–92.65 → робот ждал **отбой short**, не покупку пробоя; план на графике пустой — **ожидаемо**. Close обратно внутрь коробки снимает «зависший» BUY RETEST (`cancel stale §8 … close back inside`).
-
-**Dual shelf (доработка 01.09, IMOEX-core `e2fdb9a`):**  
-Каждый бар в игре **обе** полки дня. Live bounce / §8 побеждает; иначе ближайшая. **Запрещено** трактовать «несколько баров жили ниже TOP» как unstick и бросать TOP в пользу BOT (это уже ломало шорт от TOP в ралли). `ChecklistStructure.pickActive` в TREND_UP **не прячет** TOP.  
-Waiting copy в движке может быть `TOP+BOT in play — focus TREND_HI …`; в UI это переводится человеческим русским.
-
-**Против часа (симметрично, не «запрет стороны»):**  
-HTF UP **не запрещает** шорт от TOP; HTF DOWN **не запрещает** лонг от BOT. Против ветра bounce требует **extra gate**: `bounceConfirmed` + touchQ≥3 + (close **вышла из коробки** ИЛИ H1 замедляется ИЛИ 2 close за mid). С ветром / FLAT — обычный §14 confirm. §8 continuation extra-gate **не душит**. Размер против ветра режется (`counter-trend-size-fraction: 0.6`), не сторона.  
-Код: `PlaybookIntelligence.allowsCounterTrendShelfBounce` → `allowsRallyDayTopBounce` / `allowsDumpDayBotBounce`.
-
-**Фаза дня:** dump ≥80 пт → приоритет отскока BOT; rally → TOP; иначе continuation по HTF или баланс.
-
-**Gap-fill (Exclusive M5):** ночной/утренний гэп к prior close. Против заполнения не торгуем, пока гэп открыт; «сделку на закрытие гэпа» без согласия HTF пропускаем. **§8 после пробоя и удержания не блокируется.** В UI не писать `§8`.
-
-**Gap-fill (Positional H1, отдельно):** `TrendTradeMode.GAP_FILL` / `PositionalH1GapStrategy` — не HVN bounce. Arm только &lt;10:00 при classify+micro (DOM fail-closed); against confirm = SKIP (не fade). Bounce спит пока overnight gap openUnfilled — и после 10:00 — до touch priorClose.
-
-**Сессия Exclusive:** основная ~10:20–18:30 (open+20 / close−30). Вечерка 19–23:50 — новых сетапов нет. `max-setups-per-day: 4`, `max-day-loss-rub: 1500`.
-
-**Макро / CL:** smart knife на dump; CL — контекст открытия, **сторону Exclusive не крутит**. UsOilGate может задержать вход после гэпа CL.
-
-**Экспирация FORTS:** last trade day — **новые** сетапы block (M5 и H1). Открытое — SL/TP на **том же secid** до закрытия. LTD: ISS → T-Invest `getFutureByTicker` / list → month-code estimate (BRV6→1-е число месяца поставки). Fail-closed только если concrete SECID нельзя разобрать. Стол / paper / settings / DOM переезжают на новый front-month **только в день last trade / после** (`pickLiveMonth` + `TrendFrontMonthSettingsSync`); пустой DOM/REST mid-life **не** roll (баг 10.09: BRV6→BRX6). Pending на старом месяце сбрасывается. Пример: BRU6 → BRV6. Overnight через roll: бары/SL по secid позиции (`barsForLiveClockExact`).
-
-**Скорость desk (навсегда, все стратегии):** `trinity-fast-boot.js` — cache-first paint, параллельный DOM/status, AbortController ≤25s. Не возвращать sequential cold boot на charts-terminal и не убирать таймауты fetch.
-
-### Позиционная #2 (если трогаешь desk)
-
-Отдельная вкладка `/view/trend-positional`, H1, другие семьи (BR/RI/NG/Si/GD/MIX) — **ротация одной семьи**, не параллельные гриды. Не дублировать Exclusive-сделки в её «Сделки сегодня». Если сегодня по H1 сделок нет — **скрыть таблицу**, не подставлять M5. `fairPaperLastCloseForPlaybook` **не** отдаёт чужой lane и **не** фолбэчит unscoped `lastClose` в positional.
-
-Пока `parallel-playbooks: false`, fair-paper #2 не должен считаться «включённым роботом». Плашка «Пауза · Позиционная» на range-desk — ок.
-
-### UI / копирайт (доработки 01.09, IMOEX `7fe9a8a`)
-
-- Мета сделок: `Сегодня · 1 сделка · PnL +434 ₽ · Statement` (ссылка на `/view/statement`, **видимый текст — не путь**). Русские плюрали.  
-- Фильтр сделок: `playbookFromTrade` **обязан** совпасть с `viewPlaybookId()`; unknown playbook **выбрасывать**. `latestClose` unshift только своего playbook.  
-- Бриф: `humanizeDeskReason`, `userFacingStory` (отрезать engine-lead с `§` / TREND_HI / RANGE: BUY). Hover свечей — живой русский, без Exclusive-кухни.  
-- Справка «Как торгует робот»: без номеров параграфов («ретест после пробоя»).  
-- Кэш JS: `trend-signal-desk.js?v=20260901-desk5` (при правке JS — bump). CSS: `operator.css?v=20260901-hover2`.  
-- После правки static — копировать в `trinity-app/target/classes/` если 8080 уже запущен; Java — рестарт `mvn -pl trinity-app -am spring-boot:run`.
-
-### Фазы paper → real
-
-| Фаза | Статус | Что делать |
-|------|--------|------------|
-| **A** | ✅ 25–28.08 | FORMING_BAR + evening journal, gateHits=0, labeled SL |
-| **B** | ✅ metrics + **NO_GO 04.09** | копим историю; FORTS не включаем |
-| **C** | ⛔ NO_GO | код live PostStop не начинать, пока оператор не скажет иначе |
-| **D** | ⏳ | Scale после Phase C |
-
-Режим сейчас: **observe + corpus** (Exclusive FORMING_BAR, evening seals, operator labels). ML/обучение — только по явному go. Не крутить buffer/knife/smash.
+**Phase C:** metrics могут врать «ready» — нужен **human OOS + явный go**. FORTS SL / scale / pad-tune — нет.
 
 ---
 
-### Ops runbook
+## Диапазонная стратегия: что меняли, зачем, и как отвечать «лучше / хуже»
 
-**Запуск 8080 (если down):**
+### A. Базовый движок входа (не ломали, не откатывать)
+
+Робот **по-прежнему** руководствуется чеклистом при arm bounce/retest:
+
+| Слой | Роль сейчас | Код |
+|------|-------------|-----|
+| Полка дня TOP/BOT | жёстко: геометрия дня, day-lock | `LevelsProfileBrPlaybook`, `DayZoneLock` |
+| Закрытый отбой | жёстко при bounce | `requireBounceConfirm` / `bounceConfirmed` |
+| Касания (touchQ) | жёстко: poke+reject; против HTF строже (≥3) | `PlaybookIntelligence.touchQuality` |
+| HTF / фаза дня | сторона не переворачивается; против ветра — extra gate (вынос из зоны / торможение H1 / 2 close за mid) | `allowsDumpDayBotBounce` / `allowsRallyDayTopBounce` |
+| Стакан (DOM) | **мягкий бонус** к touch, **не veto** | `domSoftBonus` |
+| Кластеры / дельта у полки | в rationale / очки, **не hard skip** | `ShelfClusterPoints` |
+| Кит / толпа / спуф | **считаются**, пишутся в hunt UI, **hard skip нет** (см. B) | `ExclusiveHuntExt` |
+| Нож + импульс против HTF | **hard veto** (см. B) | `OCT2026_NARROW_MICRO_VETO` |
+
+Оператор путалась: «раньше микро было мягче». Правда по истории чата:
+
+1. Чеклист (полка / касания / отбой / HTF) **всегда** был жёстким для входа.  
+2. Кит/толпа/спуф одно время ужесточали (hard), потом **3.10** сузили эксперимент `OCT2026_NARROW_MICRO_VETO` — снова **мягкие** (только нож на BUY и импульс против HTF = hard).  
+3. Стакан/кластеры/дельта **не были** жёстким гейтом входа; они soft / observe.  
+4. «Раньше плюс дня жирнее» — в основном из‑за **формы выхода (полный TP2)**, не из‑за того что микро было мягче.
+
+### B. Микро-veto (эксперимент октября)
+
+Файл: `IMOEX-core/.../ExclusiveHuntExt.java`, тег `@Experiment OCT2026_NARROW_MICRO_VETO`.
+
+**Hard block сейчас только:**
+- свежий **KNIFE** при **BUY**;
+- свежий импульс (нож/ракета/stop-hunt) **против стороны** при HTF against.
+
+**Не hard:** whale AGAINST, crowd AGAINST bounce, spoof — soft / UI.
+
+**Фикс ножа `a595b28` (чат 06.10):** раньше latest-tag на текущем баре мог перезаписать KNIFE, и forming-bar hunt смотрел 1 бар → нож «не сработал», сделка −336. Сейчас: freshKnife держит **3 свечи**, hunt по **полной** серии. Если октябрьский OOS провалится — grep `OCT2026_NARROW_MICRO_VETO` и снять блок (как помечено в коде).
+
+`TrendFairPaperLiveService`: `hunt.blocksNewArm()` → skip fill.
+
+### C. Управление выходом / TP3 (главный сдвиг «прибыли дня»)
+
+**Задумка 3.10:** TP3 = «старый полный TP2 + чуть-чуть хвоста».
+- inflate размера ×4/3;
+- на TP2 снять ~75% (≈ старый полный объём);
+- ~25% runner на **TP3 = TP2 ± 0.5R**.
+
+**Проблема на 06.10:** сетка часто набирала **1/3** (qty=1, planned=3). Тогда leave≥qty → ядро 75% не снималось, весь мелкий лот бежал в `BE_STOP` / `SL` / редкий `TP3`. День **+483**, но не серия солидных TP2 как 17.09 (+2554) / 28.09 (+1166).
+
+**Решение оператора + коммит `351a4f4`:**
+- **малый / неполный набор** → закрывать **весь** объём на **TP2** (как «былое»);
+- **полный грид** (filled ≥ planned и planned ≥ 3) → TP3 runner (75% + хвост);
+- поле `filledQty` на open; `hasTp3Runner()` в `FairPaperSimulator`.
+
+Playbook rationale: `TP2 … TP3=(полный грид: 75%+хвост)`.
+
+**Важно для нового агента:** на сделках **до** рестарта JVM с `351a4f4` поведение ещё старое. После рестарта — новое. Не сравнивай 06.10 с «уже починенным TP3» как будто фикс уже торговал весь день.
+
+### D. Журнал: цифры для вердикта «лучше / хуже»
+
+Источник: `IMOEX/data/trend-paper-journal.json`, сделки `mode ∈ {BOUNCE, RETEST}` (Exclusive sandbox).
+
+| Окно | n | PnL | avg win | avg loss | Выходы (часто) |
+|------|---|-----|---------|----------|----------------|
+| **до 2026-10-03** | 115 | +58 840 ₽ | ~910 | ~−348 | TP2×56, BE_STOP×23, SL×34 |
+| **с 2026-10-03** (факты до фикса TP3) | 5 (все 06.10) | +483 ₽ | ~305 | ~−215 | TP3×1, BE_STOP×2, SL×2 |
+| **06.10 по qty** | 4× qty=1 planned=3; 1× qty=3 SL −336 (нож) | | | | |
+
+Интерпретация, согласованная в чате с оператором:
+
+- **Не** «чеклист сломался» и не «улучшения во вред» целиком.  
+- **Да** — форма плюса изменилась: меньше полных TP2, больше частичных/BE, узкий veto пускает больше попыток.  
+- **Да** — дыра ножа −336 = баг окна hunt (закрыт `a595b28`, после факта).  
+- **Частичный откат выхода** (TP3 только на полном гриде) — осознанный шаг «ближе к былому плюсу» без отката всего октября.  
+- Вердикт «стало хуже стратегии» по **одному дню из 5 сделок** — **недостаточен**. Смотреть 2–3+ торговых дня **после** `351a4f4` + `a595b28`, сравнивая: долю полных TP2, avg win, число BE_STOP на qty=1, пропуски ножа.
+
+**Как отвечать оператору на «стало лучше или хуже?»**
+
+1. Разделить: **вход** (чеклист/микро) vs **выход** (TP2/TP3) vs **баги** (нож).  
+2. Вход: чеклист тот же; микро кит/толпа снова мягкие (= ближе к «раньше»); нож жёстче и исправлен.  
+3. Выход: до `351a4f4` на частичном наборе было **хуже старого полного TP2**; после фикса — ожидаем снова солидные TP2 на малых входах и хвост только на полных.  
+4. Итог дня 06.10 (+483) ≠ приговор; жирные дни сентября = много TP2 ~430–900₽ за сделку.  
+5. Не крутить pad/buffer/smash по скрину 06.10.
+
+### E. GAP_FILL / positional (рядом, не путать с Exclusive M5)
+
+В том же периоде (не вся = этот чат, но в репо): ужесточение GAP_FILL (open с 07:00, hunt до arm, шире SL) — commits `ce1072d` и void BRX6 06.10 GAP_FILL `221c4e1` / UI `ea90caa`. Не смешивать эти строки с Exclusive bounce/retest при разборе «диапазонной».
+
+---
+
+## Работа UI / продукт из этого чата (уже в git)
+
+### Плашки роботов справа (все strategy desks)
+
+Проблема: плашки пропадали / уезжали поверх графика / верх «криво» / низ обрезан.
+
+Итог `IMOEX@1298f03` (+ CSS/JS `plaques5`):
+- host: правая колонка 12.2rem, скролл, spacer `::before` → низ при коротком стеке, полный скролл при длинном;
+- «Ветер» и роботы **один** правый край (`padding 1.15rem`, `align-items: flex-end`);
+- `chromeBottomPx()` — колонка под nav; padding снизу учитывает book-pressure fab;
+- при переполнении `scrollTop = scrollHeight` (видны нижние / текущий стол);
+- cookie-first fetch без stale Bearer (иначе 401);
+- плашки на всех `/view/*` кроме dashboard; calendar-arb / investments в navigate;
+- core: `DeskPlaquesService` — плашка инвестиций + календарного арбитража.
+
+Не возвращать `inset:0` overlay / pin к DOM — это и сбило вёрстку.
+
+### Investments desk
+
+- Universe = `InvestmentsUniverse.DEFAULT_TICKERS` (**27** имён) — это то, что мониторит робот; watchlist слева = первые 6; клик по тикеру в списке «Робот» открывает график (max 6 панелей).  
+- Тумблер **Наблюдение / Авто** как на других столах; hydrate из `/api/investments/settings`; не красить auto из stale desk snapshot; без stale Bearer.  
+- Кнопка «Как торгует робот» — объяснить 27 (не «победители дня»; число может меняться если правят universe).  
+- Не путать с «перенесли из FORTS» — список тот же universe.
+
+### Прочее из сессии (контекст)
+
+- Knife hole checklist / fair-paper hunt order — закрыто `a595b28`.  
+- Вопрос «почему не купил отскок» — чаще UTC↔MSK, сессия 10:20, UsOil wait, don’t chase; не баг разметки.  
+- Коммиты по просьбе; OBSERVE md часто **не** коммитили.
+
+---
+
+## Критерий observePathToReal (не закрыт)
+
+```
+Наблюдать Exclusive fair-paper после гейтов 2026-08-24:
+(1) 2–3+ торговых дня FORMING_BAR + вечерний journal без новых крутилок pad/knife/smash/buffer;
+(2) стабильный paper/OOS expectancy;
+(3) только потом FORTS SL в стакане малым размером;
+(4) scale при совпадении с journal.
+doNotTuneOnSight.
+```
+
+**Цель достигнута** только когда live FORTS SL 1 лот работает, journal ≈ paper, оператор дал go. Phase C заблокирован. Не объявляй выполненным.
+
+После `351a4f4` в evening seal специально отмечай: сколько сделок с полным гридом получили TP3 vs сколько закрылись полным TP2 на частичном наборе.
+
+---
+
+## Гейты 2026-08-24 (не трогать без gate)
+
+1. SL за day TOP/BOT.  
+2. Smash-gate на retest.  
+3. `sl-sweep-buffer-points: 5`.  
+4. Dump/melt knife на retest только при deep-poke/smash; чистый break+hold не режем.
+
+Крутить не сейчас. Journal: `slObserveNote` → `SWEEP` / `THROUGH` / `GAP`.
+
+---
+
+## Ops
+
 ```bash
+# JVM
 cd /Users/ivan/MEGA/Work/TRINITY/IMOEX
 mvn -pl trinity-app -am spring-boot:run
-# всегда: Spring profile `dev` (.mvn/maven.config + trinity-app pom) → working tree
-# (IMOEX + ../IMOEX-core), не stale jar / не «чистый» origin без локальных правок
-# профиль Maven `operator` активируется сам, если есть ../IMOEX-core/pom.xml
-# при нехватке RAM: -Dspring-boot.run.jvmArguments='-Xms256m -Xmx1536m'
-```
-Без `-Poperator` на этой машине нормально. Не путать с public bones clone.
-Не использовать `trend_observe_resume.sh` для рестарта JVM (может переписать settings).
+# profile dev + operator если есть ../IMOEX-core
 
-**Утро (~09:55 MSK, после sleep/Mac off):**
-```bash
+# Утро
 bash IMOEX/scripts/trend_observe_resume.sh YYYY-MM-DD
-```
 
-**Вечер (~18:02 MSK, сессия закрыта — робот уже не торгует):**
-```bash
+# Вечер
 cd IMOEX && python3 scripts/trend_observe_evening.py [YYYY-MM-DD]
 python3 scripts/trend_observe_expectancy.py
-python3 scripts/trend_corpus_inventory.py   # объём corpus → data/trend-corpus-inventory.json
 ```
 
-**Desk poll (skip-гейты в сессию):** `python3 scripts/trend_observe_desk_poll.py`
+После правки static — копировать в `trinity-app/target/classes/` + bump `?v=…`. Java — рестарт.
 
-**Health / Exclusive desk:**
-```bash
-curl -sf http://127.0.0.1:8080/actuator/health
-curl -s 'http://127.0.0.1:8080/api/trend/desk?instrument=BRV6&playbook=levels-profile-br-m5' \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("situation") or {}; print(d.get("engineState"), s.get("posture"), d.get("actionable"), (s.get("why") or d.get("summary") or "")[:240])'
-```
+**Страницы (не писать пути оператору в UI-тексте):** дашборд · диапазонная · позиционная · BRM · investments · calendar-arb · Statement · settings.
 
-**Страницы:**  
-`/view` дашборд · `/view/trend-signal` диапазонная · `/view/trend-positional` позиционная · `/view/trend-charts` терминал · `/view/statement` журнал · `/view/settings` пульт.
+**Local state (не git):**  
+`data/trend-paper-journal.json`, `trend-fair-paper-state.json`, `trend-observe-path-log.json`, `trend-ui-settings.json`, `investments-ui-settings.json`, corpus/gate jsonl.
 
-### Local state (не git)
+### Ключевой код (чат 06.10)
 
-| Файл | Зачем |
-|------|--------|
-| `data/trend-observe-path-log.json` | дни, EOD, phase A/B/C, candidates |
-| `data/trend-corpus-inventory.json` | объём exclusive/positional corpus + readiness (не ML) |
-| `data/trend-fair-paper-state.json` | open, lastProcessedBar, lanes |
-| `data/trend-paper-journal.json` | SANDBOX_FAIR |
-| `data/trend-gate-observe.jsonl` | skip hits с desk poll |
-| `data/trend-robot-journal.json` | engine actionable |
-| `data/trend-ui-settings.json` | instrument/playbook/live с пульта |
-| `data/trend-event-calendar.json` | EIA/API blackout |
-
-### Ключевой код
-
-| Область | Где |
-|---------|-----|
-| Playbook #1 | `IMOEX-core/trinity-trend/.../LevelsProfileBrPlaybook.java` |
-| Dual shelf / HTF extra | `PlaybookIntelligence.java`, `ChecklistStructure.java` |
-| Side law | `ExclusiveSide.java`, `PositionalSide.java` |
-| Compliance | `ChecklistCompliance.java` |
-| Engine | `TrendRobotEngine.java` |
-| Fair paper | `trinity-runtime/.../TrendFairPaperLiveService.java` |
-| Desk API / lastClose lanes | `TrendDeskService.java` |
-| Front month | `IMOEX/trinity-marketdata/.../FrontMonthBookRoller.java`, `TrendFrontMonthSettingsSync.java` |
-| Expiry | `TrendContractExpiry.java` |
-| Markers | `TrendChartMarkers.java` |
-| Bridge | `TrendExecutionBridge.java` (journal only) |
-| Desk UI | `IMOEX/.../static/js/trend-signal-desk.js`, `trinity-chart-kit.js`, `trend-signal-desk.html` |
-| Observe scripts | `IMOEX/scripts/trend_observe_*.py`, `trend_observe_resume.sh` |
-| Rules | `IMOEX/.cursor/rules/trinity-roadmap.mdc`, `checklist-fidelity.mdc`, `no-cursor-attribution.mdc` |
-
-Конфиг тренда: `IMOEX/trinity-app/src/main/resources/application.yml` → `imoex.strategies.trend` (`live-execution: false`, `playbook: both`, `parallel-playbooks: true`, `auto-resolve-instrument: BR`). Positional collect window 2026-10 — **не тюнить** positional gates/хвост до ≥8–12 closes (см. agent store `POSITIONAL_IMPROVE_2026-10.md`).
+| Тема | Где |
+|------|-----|
+| Exclusive playbook / size×4/3 / TP3 prices | `LevelsProfileBrPlaybook.java` |
+| TP3 only full fill | `FairPaperSimulator.hasTp3Runner` / `filledQty` |
+| Micro veto + knife 3-bar | `ExclusiveHuntExt.java` |
+| Live skip on hunt | `TrendFairPaperLiveService` |
+| Plaques API | `DeskPlaquesService.java` |
+| Plaques UI | `trinity-status-plaques.js`, `operator.css` |
+| Investments UI | `investments-desk.js/html`, `investments-charts-terminal.js` |
+| Universe | `InvestmentsUniverse.java` |
 
 ---
 
-### TRINITY roadmap (контекст; не прыгать вперёд)
+## Что НЕ делать
 
-Порядок столпов: **(1) Pairs DAILY live paper** → **(2) Trend #1/#2 sandbox** → **(3) Calendar arb sandbox** → дальше отложенное.
-
-**Сейчас по столпам**
-
-1. **Pairs** — DAILY live paper: tech → cluster → FA → paper. INTRADAY research-only. OIL_GAS вне pairs. Чемпион сектора, иначе sit-out.  
-2. **Trend** — #1 Exclusive observe (твой торговый scope). #2 positional — desk есть, armed parallel **выкл** из-за OOM.  
-3. **Calendar arb** — T-Invest only (не ISS), sandbox fair-paper. **Не** путать yml `calendar-arb.live-execution: true` с trend live — не включать/не «чинить» без задачи на arb.  
-4. **Volume desk / clusters / DOM walls** — **не сейчас**. Mid-Sep 2026+; soft EXT у полки, не предиктор цены, не flip стороны. Копить tape/DOM.  
-5. **Delivery Instance vs Core** — autumn–winter 2026 (не путать с IP Bones vs `IMOEX-core` — IP уже начат).  
-6. **Load ≥1000 + fragility pack** — перед public Instance и перед `liveExecution` trend. EXT vs §8 — контрактные тесты.
-
-**Не делать из бэклога без gate:** кластеры/KD/OI как сигналы; DOM «стены → цена пойдёт сюда»; options; биллинг; updater Core; полный ATAS-desk.
-
-**observeCandidatesLater (только лог, не implement):** cooldown после SL режет BOT bounce; mid-shelf HTF DOWN → SWEEP; positional OOM до `both`; tick-trail SL с входа — нет; trail runner после TP1 Exclusive — **DONE 28.08**.  
-**§8 anti-pattern 28.09 (void `…BRV6-2026-09-28T17-55`, −259 THROUGH):** не брать **BUY RETEST** у TOP при reclaim **снизу через коробку** — **DONE 28.09** (`retestEntryAllowed` + `heldOutsideAfterLastWrongSide`: нужен свежий hold снаружи после последнего close внутри/ниже; melt-up pierce запрещён).
-
-**Fragility, которую уже чинили и нельзя регрессировать:** day-lock TOP vs HI; HI≈LO infinite loop `ChecklistStructure` (31.08); lastClose leak между lanes; qty filled/planned; wick SL FORMING_BAR vs close M5; два playbook на одном экране; dual focus TOP+BOT (28.09) — не залипать на пробитом TOP при dump→BOT; §8 reclaim-from-below (28.09).
-
----
-
-### Что НЕ делать
-
-- ❌ Tuning buffer/knife/smash/pad по одному дню или скрину  
-- ❌ `liveExecution=true` / боевой PostStop без Phase C + go  
-- ❌ `playbook: both` пока OOM  
-- ❌ Смешивать сделки Exclusive и positional на desk; дублировать Statement  
-- ❌ Писать `/view/...` в видимый текст; светить `§N` пользователю  
-- ❌ Рисовать план BUY/SELL на «пробое глазом», пока нет `actionable`  
-- ❌ Unstick TOP из-за баров «под полкой»  
-- ❌ Запрещать TOP short только потому что HTF UP (нужен extra-confirm, не veto стороны)  
+- ❌ Tuning buffer/knife/smash/pad по одному дню или скрину 06.10  
+- ❌ Откатывать весь октябрь «как было» целиком (чеклист + мягкое микро трогать не надо)  
+- ❌ Снова включать hard whale/crowd/spoof без OOS  
+- ❌ Вернуть TP3-хвост на qty=1 / неполный грид  
+- ❌ `liveExecution=true` / Phase C без go  
+- ❌ Смешивать Exclusive и positional / GAP_FILL в разборе дня  
+- ❌ Писать `/view/...` и `§N` в видимый UI  
 - ❌ Commit `/data/`, secrets; Co-authored-by  
-- ❌ Объявлять observePathToReal выполненным до live FORTS SL + alignment journal  
-- ❌ Прыгать в clusters/DOM-walls/Instance delivery «заодно»
+- ❌ Ломать правую колонку плашек overlay/pin  
+- ❌ Объявлять observePathToReal выполненным  
 
-### Первый шаг
+---
 
-1. Прочитай `data/trend-observe-path-log.json` (хвост `eod01`, `phaseB_expectancy`, `phaseC_blocker`).  
-2. `curl` health + desk BRV6: posture, why, open, live=false.  
-3. Если задача — **observe**: утро resume / вечер seal, журнал, **не** код стратегии.  
-4. Если задача — **баг UI / «нет плана на пробое»**: сначала сверь last **close** vs TOP box и `actionable`; не чини «разметку» под chase.  
-5. Коммит/push — только если оператор сказал; два репо, `dev`.
+## Первый шаг новому агенту
+
+1. Прочитай этот файл + хвост `data/trend-observe-path-log.json`.  
+2. `curl` health + desk Exclusive BRX6: posture, why, open, live=false.  
+3. Если вопрос «лучше/хуже по диапазонной» — ответь по разделу **D** (вход / выход / баг ножа / мало сделок после фикса TP3).  
+4. Если observe — утро resume / вечер seal, **не** код стратегии.  
+5. Коммит/push — только если сказали; два репо, `dev`; OBSERVE md — только по явной просьбе.
 
 ---
 
 ## Краткая версия (лимит контекста)
 
 ```
-TRINITY /Users/ivan/MEGA/Work/TRINITY = IMOEX (public) + IMOEX-core (private), ветка dev.
-Цель: observePathToReal — Exclusive BR M5 fair-paper → human OOS → FORTS SL 1 lot → scale.
-Phase A done (25–28.08). 01.09 paper: BRU6 TP2 +434 + BRV6 TP2 +301; OOS 14 trades +2180₽ ~156/trade. live=false, FORMING_BAR, playbook Exclusive-only (positional OOM — не both). Phase C blocked (нет single-leg PostStop; sandbox can't stop).
-Front: BRV6. Dual shelf: TOP+BOT каждый бар, без unstick TOP. Против HTF bounce — extra confirm, не запрет стороны. §8 только снаружи коробки; close внутри = bounce. План на графике только при actionable.
-Desk: не смешивать сделки плейбуков; не писать /view/ пути и §N в UI. Statement в меню.
-Завтра: trend_observe_resume.sh 2026-09-02; evening ~18:02. doNotTuneOnSight. Log: data/trend-observe-path-log.json.
-Коммиты только по просьбе, без Co-authored-by, push в соответствующие origin/dev.
-Roadmap: pairs DAILY → trend sandbox → arb sandbox; clusters/DOM/Instance — later. Product = research, not black-box.
+TRINITY = IMOEX + IMOEX-core, ветка dev (запушено: IMOEX 1298f03, core 351a4f4).
+Exclusive BRX6 M5 fair-paper, live=false, Phase C NO_GO, doNotTuneOnSight.
+06.10 Exclusive +483 (5 trades): много qty=1/planned=3 → старый TP3-хвост портил плюс; нож −336 до фикса a595b28.
+С 351a4f4: TP3 только полный грид (≥3 и filled=planned), иначе весь объём на TP2.
+Микро OCT2026_NARROW_MICRO_VETO: hard только KNIFE@BUY и импульс против HTF; кит/толпа/спуф soft.
+Чеклист полка/касания/отбой/HTF — жёсткий вход; DOM/кластеры soft. «Жирнее дни раньше» ≈ полные TP2, не «мягче микро».
+Вердикт better/worse — после 2–3 дней post-fix, не по одному 06.10.
+UI: плашки правая колонка+скролл plaques5; investments 27 universe, тумблер Авто, гайд.
+Коммиты только по просьбе, без Co-authored-by; /data не коммитить.
 ```
