@@ -98,6 +98,14 @@ class TrendArbStrategyHtmlTest {
         assertTrue(html.contains("id=\"invest-ops-panel\""), html);
         assertTrue(html.contains("investments-charts-terminal.js"), html);
         assertTrue(html.contains("investments-desk.js"), html);
+        assertTrue(html.contains("trinity-status-plaques.js"), html);
+        assertTrue(html.contains("Как торгует робот"), html);
+        assertTrue(html.contains("id=\"invest-guide-modal\""), html);
+        assertTrue(html.contains("фиксированный универсум"), html);
+        assertTrue(html.contains("id=\"invest-auto-execution\""), html);
+        assertTrue(html.contains("mode-switch-track"), html);
+        assertTrue(html.contains("role=\"switch\""), html);
+        assertFalse(html.contains("Авто (paper)"), html);
         assertFalse(html.contains("data-nav-strategy=\"trend\""), html);
     }
 

@@ -94,7 +94,7 @@ public class AnalysisHtmlRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="/css/operator.css?v=20261006-plaques">
+              <link rel="stylesheet" href="/css/operator.css?v=20261006-plaques5">
               <script>
               (function () {
                 var E = "trinity.desk.entered";
@@ -217,7 +217,7 @@ public class AnalysisHtmlRenderer {
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
               </main>
               <script src="/js/operator.js?v=20261005-inv1"></script>
-              <script src="/js/trinity-status-plaques.js?v=20261006-plaques"></script>
+              <script src="/js/trinity-status-plaques.js?v=20261006-plaques5"></script>
             </body>
             </html>
             """;

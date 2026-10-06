@@ -5479,7 +5479,7 @@ a.signal-tool {
   }
 }
 
-/* —— Global plaque host (all /view pages) —— */
+/* —— Global plaque host: right column, bottom-aligned, scroll when tall —— */
 .trinity-plaque-host {
   position: fixed;
   right: 0;
@@ -5488,20 +5488,47 @@ a.signal-tool {
   width: 12.2rem;
   z-index: 45;
   pointer-events: none;
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  padding: 0.5rem 0 0.35rem;
+  scrollbar-width: thin;
+}
+/* Spacer pushes plaques to the bottom when the stack is short; shrinks when tall so all are scrollable. */
+.trinity-plaque-host::before {
+  content: "";
+  flex: 1 1 auto;
+  min-height: 0.5rem;
+  pointer-events: none;
 }
 .trinity-plaque-host .signal-pressure-fab,
 .trinity-plaque-robot {
   pointer-events: auto;
 }
 .trinity-plaque-stack {
-  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 0.65rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 1.15rem 1.35rem;
+  pointer-events: none;
+  flex: 0 0 auto;
 }
 .trinity-plaque-robot {
-  /* bottom set in JS; keep width lock from .signal-pressure-fab */
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
   z-index: 46;
   animation: none;
   transition: none;
+  flex: 0 0 auto;
+  margin: 0;
 }
 .trinity-plaque-wind {
   animation: none;
@@ -5512,18 +5539,20 @@ a.signal-tool {
   transform: none;
 }
 .trinity-plaque-rail {
-  position: fixed;
-  right: 1.15rem;
+  position: relative;
+  right: auto;
   z-index: 47;
   display: flex;
   flex-direction: column-reverse;
+  align-items: flex-end;
   gap: 0.65rem;
-  width: 9.75rem;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-bottom: 0.15rem;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 1.15rem 0.65rem;
+  overflow: visible;
   pointer-events: auto;
-  scrollbar-width: thin;
+  flex: 0 0 auto;
 }
 .trinity-plaque-rail[hidden] {
   display: none !important;
@@ -5534,6 +5563,7 @@ a.signal-tool {
   right: auto !important;
   bottom: auto !important;
   flex: 0 0 auto;
+  margin: 0;
 }
 .signal-wind-ticker {
   font-size: 0.62rem;
@@ -5545,7 +5575,7 @@ a.signal-tool {
 }
 @media (max-width: 720px) {
   .trinity-plaque-host {
-    left: 0;
+    inset: 0;
     width: auto;
   }
   .trinity-plaque-rail {

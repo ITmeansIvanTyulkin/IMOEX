@@ -33,6 +33,31 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(html.contains("id=\"charts-tape\""), "tape missing");
         assertTrue(html.contains("id=\"invest-ops-panel\""), "invest ops panel missing");
         assertTrue(html.contains("data-nav-strategy=\"invest\""), "must be invest strategy");
+        assertTrue(html.contains("mode-switch-track"), "auto must be a mode switch");
+        assertTrue(html.contains("id=\"invest-guide-open\""), "invest how-the-robot-trades missing");
+    }
+
+    @Test
+    void investAutoHydratesFromSettingsNotDeskScan() throws Exception {
+        String js = read("src/main/resources/static/js/investments-desk.js");
+        assertTrue(js.contains("/api/investments/settings"), "must load persisted auto before desk scan");
+        assertTrue(js.contains("function hydrateAuto"), "hydrateAuto missing");
+        assertTrue(js.contains("function paintAuto"), "paintAuto missing");
+        assertTrue(js.contains("function bindGuide"), "invest guide modal must bind");
+        assertTrue(js.contains("is-auto"), "mode-switch is-auto class missing");
+        assertFalse(js.contains("fromDesk"), "stale desk snapshot must not snap the toggle back");
+    }
+
+    @Test
+    void plaquesShowOnEveryStrategyDesk() throws Exception {
+        String js = read("src/main/resources/static/js/trinity-status-plaques.js");
+        assertTrue(js.contains("function pathWantsPlaques"), "must show plaques on strategy desks");
+        assertTrue(js.contains("view/investments"), "investments is a strategy desk");
+        assertTrue(js.contains("calendar-arb"), "calendar-arb plaque click");
+        assertFalse(js.contains("trinity.supabase.access_token"),
+                "must not send a stored Bearer that 401s over the desk cookie");
+        String html = read("src/main/java/com/moex/cointegration/web/AnalysisHtmlRenderer.java");
+        assertTrue(html.contains("trinity-status-plaques.js"), "all pages must load plaques");
     }
 
     @Test
@@ -50,6 +75,10 @@ class TrendChartsTerminalTvContractTest {
         assertTrue(js.contains("mergeDomBook"), "terminal DOM must keep both shelves");
         assertTrue(js.contains("/api/investments/chart/"), "equity chart API missing");
         assertTrue(js.contains("/api/investments/watchlist"), "invest watchlist bootstrap missing");
+        assertTrue(js.contains("function openInstrument"), "clicking robot universe must open chart");
+        assertTrue(js.contains("MAX_OPEN_PANES"), "grid stays capped");
+        assertTrue(js.contains("deskVerdict"), "watchlist shows robot verdict");
+        assertTrue(js.contains("TrinityInvestCharts"), "desk candidates must open the same chart");
         assertFalse(js.contains("/api/trend/desk"), "must not load FORTS trend desk");
         assertTrue(js.contains("function deskBarsMatchPane"), "foreign-family bars must not paint");
         assertTrue(js.contains("investTerminal"), "drawings must persist under investTerminal");

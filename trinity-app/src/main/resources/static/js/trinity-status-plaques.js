@@ -1,6 +1,6 @@
 /**
- * Global floating plaques: trend robots on every /view/* page;
- * wind (trend) only on Сигнал desks (not Investments charts).
+ * Global floating plaques on every strategy desk (/view/* except dashboard).
+ * Wind (trend) only on Сигнал desks. Cookie session — do not send a stale Bearer.
  * Updates text in-place to avoid twitch on poll.
  */
 (function () {
@@ -16,7 +16,13 @@
 
   function pathIsDashboard() {
     const p = location.pathname;
-    return p === "/view" || p === "/view/";
+    return p === "/view" || p === "/view/" || p === "/";
+  }
+
+  function pathWantsPlaques() {
+    const p = location.pathname || "";
+    if (pathIsDashboard()) return false;
+    return p.indexOf("/view/") === 0;
   }
 
   function pathIsCharts() {
@@ -26,7 +32,8 @@
 
   function pathIsSignal() {
     return location.pathname.indexOf("/view/trend-signal") >= 0
-      || location.pathname.indexOf("/view/trend-positional") >= 0;
+      || location.pathname.indexOf("/view/trend-positional") >= 0
+      || location.pathname.indexOf("/view/trend-brm") >= 0;
   }
   function wantsWind() {
     return pathIsSignal();
@@ -232,20 +239,9 @@
   }
 
   function plaqueAuthHeaders(extra) {
-    const headers = Object.assign({ Accept: "application/json" }, extra || {});
-    try {
-      const token = localStorage.getItem("trinity.supabase.access_token");
-      if (token) {
-        headers.Authorization = "Bearer " + token;
-        return headers;
-      }
-      const user = (localStorage.getItem("imoex.ops.user") || "").trim();
-      const pass = localStorage.getItem("imoex.ops.pass") || "";
-      if (user && pass && user.indexOf("@") < 0) {
-        headers.Authorization = "Basic " + btoa(unescape(encodeURIComponent(user + ":" + pass)));
-      }
-    } catch (_) {}
-    return headers;
+    /* Do not attach a stored Bearer here: an expired JWT 401s and skips the
+     * trinity.desk cookie. trinity-fast-boot injects a live token when it can. */
+    return Object.assign({ Accept: "application/json" }, extra || {});
   }
 
   function navigateRobot(robot) {
@@ -264,6 +260,14 @@
     }
     if ((robot && robot.key) === "investments" || pb.indexOf("invest") >= 0) {
       location.href = "/view/investments";
+      return;
+    }
+    if ((robot && robot.key) === "calendar-arb" || pb.indexOf("calendar") >= 0) {
+      location.href = "/view/calendar-arb";
+      return;
+    }
+    if ((robot && robot.key) === "spread" || pb.indexOf("dual") >= 0) {
+      location.href = "/view/spread";
       return;
     }
     location.href = (robot && robot.href) || "/view";
@@ -309,43 +313,39 @@
     if (!host) return;
     const clipTop = chromeBottomPx();
     const pressure = $("signal-pressure-fab");
-    const gap = 10;
-    const base = 20;
-    let bottom = base;
-    let pressureH = 0;
+    let padBottom = 22;
     if (pressure && !pressure.hidden) {
-      pressureH = Math.round(pressure.getBoundingClientRect().height || 0);
-      bottom += Math.max(pressureH, 48) + gap;
+      const ph = Math.round(pressure.getBoundingClientRect().height || 0);
+      padBottom = Math.max(padBottom, Math.max(ph, 48) + 18);
     }
-    const robots = host.querySelectorAll(".trinity-plaque-robot");
-    const robotList = Array.prototype.slice.call(robots).reverse();
-    const heights = [];
-    robotList.forEach(function (el) {
-      heights.push(Math.round(el.getBoundingClientRect().height || 0));
-    });
-    const rail = $("trinity-wind-rail");
-    const railHidden = !rail || rail.hidden;
-    const key = [clipTop, pressureH, pressure && pressure.hidden ? 1 : 0, heights.join("x"), railHidden ? 0 : 1, bottom].join("|");
+    const key = [clipTop, padBottom, host.scrollHeight, host.clientHeight].join("|");
     if (!force && key === lastLayoutKey) return;
     lastLayoutKey = key;
 
-    const nextTop = clipTop + "px";
-    if (host.style.top !== nextTop) host.style.top = nextTop;
+    host.style.top = clipTop + "px";
+    host.style.right = "0";
+    host.style.bottom = "0";
+    host.style.width = "12.2rem";
+    host.style.paddingBottom = padBottom + "px";
 
-    let b = bottom;
-    robotList.forEach(function (el, i) {
-      const nextBottom = b + "px";
-      if (el.style.bottom !== nextBottom) el.style.bottom = nextBottom;
-      el.style.position = "fixed";
-      el.style.right = "1.15rem";
-      b += Math.max(heights[i] || 0, 72) + gap;
+    const robots = host.querySelectorAll(".trinity-plaque-robot");
+    robots.forEach(function (el) {
+      el.style.position = "";
+      el.style.right = "";
+      el.style.bottom = "";
+      el.style.left = "";
     });
-    if (rail && !rail.hidden) {
-      const nextRailBottom = b + "px";
-      if (rail.style.bottom !== nextRailBottom) rail.style.bottom = nextRailBottom;
-      const hostH = Math.round(host.getBoundingClientRect().height || window.innerHeight);
-      const maxH = Math.max(80, hostH - b - 8) + "px";
-      if (rail.style.maxHeight !== maxH) rail.style.maxHeight = maxH;
+    const rail = $("trinity-wind-rail");
+    if (rail) {
+      rail.style.right = "";
+      rail.style.bottom = "";
+      rail.style.maxHeight = "";
+    }
+    /* Keep the lower plaques (current desk) in view; scroll up for the rest. */
+    if (host.scrollHeight > host.clientHeight) {
+      host.scrollTop = host.scrollHeight;
+    } else {
+      host.scrollTop = 0;
     }
   }
 
@@ -376,7 +376,7 @@
 
   function render(data) {
     const host = ensureHost();
-    if (pathIsDashboard()) {
+    if (!pathWantsPlaques()) {
       host.hidden = true;
       return;
     }
@@ -444,20 +444,34 @@
     }
   }
 
+  let refreshRetryTimer = 0;
+
   async function refresh() {
     if (refreshInFlight) return;
     refreshInFlight = true;
     try {
       const wq = windsQuery();
       const url = "/api/desk/plaques" + (wq ? ("?winds=" + encodeURIComponent(wq)) : "");
-      const res = await fetch(url, { credentials: "include", headers: plaqueAuthHeaders() });
-      if (!res.ok) return;
+      let res = await fetch(url, { credentials: "include", headers: plaqueAuthHeaders() });
+      if (res.status === 401) {
+        res = await fetch(url, { credentials: "include", headers: { Accept: "application/json" } });
+      }
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      if (!res.ok || ct.indexOf("json") < 0) {
+        scheduleRefreshRetry();
+        return;
+      }
       render(await res.json());
     } catch (_) {
-      // silent
+      scheduleRefreshRetry();
     } finally {
       refreshInFlight = false;
     }
+  }
+
+  function scheduleRefreshRetry() {
+    clearTimeout(refreshRetryTimer);
+    refreshRetryTimer = setTimeout(refresh, 2500);
   }
 
   function hideLocalDuplicates() {
