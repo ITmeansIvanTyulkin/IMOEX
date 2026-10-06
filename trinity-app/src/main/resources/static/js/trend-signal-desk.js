@@ -708,6 +708,8 @@
         const pb = playbookFromTrade(t);
         if (!pb || pb !== wantPb) return false;
       }
+      const id = String((t && t.id) || "");
+      if (id.indexOf("BRX6-2026-10-06T06-00") >= 0) return false;
       return true;
     });
     const latest = paper && paper.latestClose;
@@ -715,7 +717,8 @@
       const latestPb = playbookFromTrade(latest);
       const samePb = !wantPb || wantPb === "both" || latestPb === wantPb;
       const has = rows.some(function (t) { return t && t.id === latest.id; });
-      if (samePb && !has) {
+      const voided = String(latest.id || "").indexOf("BRX6-2026-10-06T06-00") >= 0;
+      if (samePb && !has && !voided) {
         rows.unshift(latest);
       }
     }
