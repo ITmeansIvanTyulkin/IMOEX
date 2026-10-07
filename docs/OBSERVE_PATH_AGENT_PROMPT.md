@@ -1,7 +1,7 @@
 # Handoff prompt: TRINITY operator (чат 06.10.2026 — диапазонная, TP3, плашки, investments)
 
 > **Как использовать:** скопируй блок «PROMPT FOR NEW AGENT» целиком в новый чат Cursor.  
-> **Обновлено:** 2026-10-06 ~22:50 MSK · после коммитов `IMOEX@1298f03` + `IMOEX-core@351a4f4` (оба запушены в `origin/dev`).  
+> **Обновлено:** 2026-10-07 ~11:30 MSK · chat 07.10: UI «ждём/В СДЕЛКЕ», backlog лёгкого микро; ядро по-прежнему `351a4f4` (+ knife `a595b28`).  
 > **Язык оператора:** русский, коротко и по делу. Не сыпать `§14` / путями `/view/...` в UI; в коде и этом промпте чеклист-номера допустимы.
 
 ---
@@ -173,7 +173,19 @@ Playbook rationale: `TP2 … TP3=(полный грид: 75%+хвост)`.
 
 - Knife hole checklist / fair-paper hunt order — закрыто `a595b28`.  
 - Вопрос «почему не купил отскок» — чаще UTC↔MSK, сессия 10:20, UsOil wait, don’t chase; не баг разметки.  
-- Коммиты по просьбе; OBSERVE md часто **не** коммитили.
+- Коммиты по просьбе; OBSERVE md часто **не** коммитили.  
+- **07.10 UI:** линии на графике — не «план», а **«ждём …»** до fill / **«В СДЕЛКЕ …»** после fill (`trend-signal-desk.js?v=20261007-waitfill`).  
+- **07.10 Exclusive (к обеду):** BUY 10:45 BE_STOP +140; SELL 10:55 TP2 +812; BUY 11:15 BOT bounce SL −112 (H1 DOWN видел; микро soft against — arm ok).
+
+---
+
+## План работ / backlog (не исполнять без go + OOS)
+
+| ID | Что | Статус | Где |
+|----|-----|--------|-----|
+| **MICRO-LIGHT-1** | **Лёгкое** ужесточение микро Exclusive: кандидат — hard на **whale AGAINST** и/или **spoof** (не весь старый hard whale/crowd/spoof). Дельта/кластеры — отдельное решение. Только после **2–3+ торговых дней** post `351a4f4`+`a595b28` и явного go оператора. | **Отложено** — ждём больше сделок (чат 07.10) | ClickUp [869fd6143](https://app.clickup.com/t/869fd6143); код `ExclusiveHuntExt` / `OCT2026_NARROW_MICRO_VETO` |
+
+Триггер идеи: 07.10 BUY от BOT при H1 DOWN + whale/spoof/delta against → SL −112; «если микро чуть жёстче — обрезали бы», но **не крутить сейчас**.
 
 ---
 
@@ -245,9 +257,9 @@ python3 scripts/trend_observe_expectancy.py
 
 ## Что НЕ делать
 
-- ❌ Tuning buffer/knife/smash/pad по одному дню или скрину 06.10  
+- ❌ Tuning buffer/knife/smash/pad по одному дню или скрину 06.10 / 07.10  
 - ❌ Откатывать весь октябрь «как было» целиком (чеклист + мягкое микро трогать не надо)  
-- ❌ Снова включать hard whale/crowd/spoof без OOS  
+- ❌ Снова включать hard whale/crowd/spoof без OOS (см. backlog **MICRO-LIGHT-1** — только лёгкий кандидат + go)  
 - ❌ Вернуть TP3-хвост на qty=1 / неполный грид  
 - ❌ `liveExecution=true` / Phase C без go  
 - ❌ Смешивать Exclusive и positional / GAP_FILL в разборе дня  
@@ -271,13 +283,12 @@ python3 scripts/trend_observe_expectancy.py
 ## Краткая версия (лимит контекста)
 
 ```
-TRINITY = IMOEX + IMOEX-core, ветка dev (запушено: IMOEX 1298f03, core 351a4f4).
+TRINITY = IMOEX + IMOEX-core, ветка dev (core 351a4f4 + knife a595b28; shell handoff/UI могут быть впереди 1298f03).
 Exclusive BRX6 M5 fair-paper, live=false, Phase C NO_GO, doNotTuneOnSight.
-06.10 Exclusive +483 (5 trades): много qty=1/planned=3 → старый TP3-хвост портил плюс; нож −336 до фикса a595b28.
-С 351a4f4: TP3 только полный грид (≥3 и filled=planned), иначе весь объём на TP2.
+06.10 Exclusive +483; с 351a4f4 TP3 только полный грид, иначе весь объём на TP2.
 Микро OCT2026_NARROW_MICRO_VETO: hard только KNIFE@BUY и импульс против HTF; кит/толпа/спуф soft.
-Чеклист полка/касания/отбой/HTF — жёсткий вход; DOM/кластеры soft. «Жирнее дни раньше» ≈ полные TP2, не «мягче микро».
-Вердикт better/worse — после 2–3 дней post-fix, не по одному 06.10.
-UI: плашки правая колонка+скролл plaques5; investments 27 universe, тумблер Авто, гайд.
+BACKLOG MICRO-LIGHT-1 (НЕ сейчас): лёгкий hard whale AGAINST и/или spoof после 2–3+ дней + go — ClickUp https://app.clickup.com/t/869fd6143
+07.10: UI «ждём/В СДЕЛКЕ» вместо «план»; BUY BOT −112 при H1 DOWN — микро soft, ждать больше сделок.
+Вердикт better/worse — после 2–3 дней post-fix, не по одному дню.
 Коммиты только по просьбе, без Co-authored-by; /data не коммитить.
 ```

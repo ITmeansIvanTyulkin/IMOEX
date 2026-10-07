@@ -1458,6 +1458,9 @@
       }
     } else if (posture === "WAITING_FILL") {
       robotHtml += "<p><strong>Почему ждёт исполнения:</strong> " + esc(whyHuman) + "</p>";
+      robotHtml += "<p class='signal-brief-note'><strong>Ещё не в сделке</strong> — на графике линии "
+        + "«ждём …» это лимитки. Позиция откроется только после касания сетки; "
+        + "тогда статус станет «В сделке», а подписи — без «ждём».</p>";
       if (sit.activeLock) {
         const lk = sit.activeLock;
         robotHtml += "<p class='signal-brief-note'>Зона "
@@ -2827,13 +2830,27 @@
       layoutMarketOverlaysNow();
     });
   }
-  function overlayKey(plan, sig, st, open) {
+  function deskOverlayPosture() {
+    const sit = (lastDeskSnapshot && lastDeskSnapshot.situation) || {};
+    return sit.posture || "";
+  }
+  /** Prefer live open; if posture says IN_TRADE but open lagged a poll, re-read lane. */
+  function resolveChartTradeOpen(open) {
+    if (open && (Number(open.avg) > 0 || Number(open.qty) > 0)) return open;
+    const sit = (lastDeskSnapshot && lastDeskSnapshot.situation) || {};
+    if ((sit.posture === "IN_TRADE" || sit.inTrade) && lastDeskSnapshot) {
+      return deskOpenTrade(lastDeskSnapshot) || open || null;
+    }
+    return open || null;
+  }
+  function overlayKey(plan, sig, st, open, posture) {
     const zt = st && st.zoneTop ? (st.zoneTop.low + "/" + st.zoneTop.high) : "";
     const zb = st && st.zoneBottom ? (st.zoneBottom.low + "/" + st.zoneBottom.high) : "";
     const lv = (st && st.checklistLevels || []).map(function (l) {
       return l ? (l.role + ":" + l.rangeLow + "-" + l.rangeHigh) : "";
     }).join(",");
     return [
+      posture || "",
       st && st.lookbackHigh, st && st.lookbackLow,
       st && st.historicalHigh, st && st.historicalLow, st && st.previousZeroPoint,
       zt, zb, lv,
@@ -2849,7 +2866,9 @@
   function applyOverlays(plan, sig, candles, structure, open) {
     const st = structure || {};
     overlayStructure = st;
-    const key = overlayKey(plan, sig, st, open);
+    const posture = deskOverlayPosture();
+    const tradeOpen = resolveChartTradeOpen(open);
+    const key = overlayKey(plan, sig, st, tradeOpen, posture);
     if (key !== lastOverlayKey) {
       lastOverlayKey = key;
       clearLines();
@@ -2936,45 +2955,60 @@
         }
       }
       }
-      // Working trade: actual fill levels. Flat: armed plan — label as план so it
-      // is not mistaken for the last closed BUY/SELL.
-      const working = open && (Number(open.avg) > 0 || Number(open.qty) > 0);
-      if (working || (plan && plan.actionable)) {
+      // Open position vs waiting fill — never label live intent as «план» (sounds like draft).
+      const working = tradeOpen && (Number(tradeOpen.avg) > 0 || Number(tradeOpen.qty) > 0);
+      const waitingFill = !working && !!(plan && plan.actionable);
+      if (working || waitingFill) {
         const buy = working
-          ? open.side === "BUY"
+          ? tradeOpen.side === "BUY"
           : (plan.buy === true || (sig && sig.side === "BUY"));
-        const entry = working ? Number(open.avg) : (plan.entry || (plan.grid && plan.grid.avg));
-        const sl = working ? Number(open.sl) : plan.stopLoss;
+        const entry = working
+          ? Number(tradeOpen.avg)
+          : (plan.entry || (plan.grid && plan.grid.avg));
+        const sl = working ? Number(tradeOpen.sl) : plan.stopLoss;
         const tp1 = working
-          ? (open.tp1Done ? NaN : Number(open.tp1))
+          ? (tradeOpen.tp1Done ? NaN : Number(tradeOpen.tp1))
           : plan.tp1;
         const tp2 = working
-          ? (open.tp2Done ? NaN : Number(open.tp2))
+          ? (tradeOpen.tp2Done ? NaN : Number(tradeOpen.tp2))
           : plan.tp2;
         const tp3 = working
-          ? (open.tp3Done ? NaN : Number(open.tp3))
+          ? (tradeOpen.tp3Done ? NaN : Number(tradeOpen.tp3))
           : plan.tp3;
-        const prefix = working ? "" : "план ";
         const sideTag = buy ? "BUY" : "SELL";
+        const qtyTag = working && Number(tradeOpen.qty) > 0
+          ? ("×" + Number(tradeOpen.qty))
+          : "";
         if (finitePrice(entry)) {
-          addLine(entry, "#0f766e", working ? ("AVG " + sideTag) : (prefix + sideTag), { lineWidth: 2, lineStyle: 0 });
+          addLine(entry, "#0f766e",
+            working ? ("В СДЕЛКЕ " + sideTag + qtyTag) : ("ждём " + sideTag),
+            { lineWidth: 2, lineStyle: 0 });
         }
-        if (finitePrice(sl)) addLine(sl, "#b91c1c", prefix + "SL", { lineWidth: 1, lineStyle: 2 });
-        if (finitePrice(tp1)) addLine(tp1, "#16a34a", prefix + "TP1", { lineWidth: 1, lineStyle: 2 });
-        if (finitePrice(tp2)) addLine(tp2, "#15803d", prefix + "TP2", { lineWidth: 1, lineStyle: 2 });
-        if (finitePrice(tp3)) addLine(tp3, "#166534", prefix + "TP3", { lineWidth: 1, lineStyle: 2 });
+        if (finitePrice(sl)) {
+          addLine(sl, "#b91c1c", working ? "SL" : "ждём SL", { lineWidth: 1, lineStyle: 2 });
+        }
+        if (finitePrice(tp1)) {
+          addLine(tp1, "#16a34a", working ? "TP1" : "ждём TP1", { lineWidth: 1, lineStyle: 2 });
+        }
+        if (finitePrice(tp2)) {
+          addLine(tp2, "#15803d", working ? "TP2" : "ждём TP2", { lineWidth: 1, lineStyle: 2 });
+        }
+        if (finitePrice(tp3)) {
+          addLine(tp3, "#166534", working ? "TP3" : "ждём TP3", { lineWidth: 1, lineStyle: 2 });
+        }
       }
-      if ((working || (plan && plan.actionable)) && candles && candles.length) {
+      if ((working || waitingFill) && candles && candles.length) {
         const last = candles[candles.length - 1];
         const buy = working
-          ? open.side === "BUY"
+          ? tradeOpen.side === "BUY"
           : (plan.buy === true || (sig && sig.side === "BUY"));
+        const sideTag = buy ? "BUY" : "SELL";
         lastSignalMarkers = [{
           time: last.time,
           position: buy ? "belowBar" : "aboveBar",
           color: buy ? "#16a34a" : "#dc2626",
           shape: buy ? "arrowUp" : "arrowDown",
-          text: buy ? "BUY" : "SELL"
+          text: working ? ("в сделке " + sideTag) : ("ждём " + sideTag)
         }];
       } else {
         lastSignalMarkers = [];
@@ -4982,17 +5016,17 @@
       status = "В сделке";
       const open = laneOpen || deskOpenTrade(data) || {};
       const story = formatOpenTradeDetail(open, data);
-      detail = story || "Ведём позицию";
+      detail = story || "Позиция открыта — ведём до SL/TP";
     } else if (posture === "WAITING_FILL") {
       cls = "is-armed";
       status = "Ждёт исполнения";
-      const bits = [];
+      const bits = ["ещё не в сделке"];
       if (sideWord) bits.push("лимитки на " + sideWord);
       if (modeWord) bits.push(modeWord);
       if (lv.near != null) bits.push("от " + fmtStatusPx(lv.near));
       else if (lv.entry != null) bits.push("около " + fmtStatusPx(lv.entry));
       if (lv.stop != null) bits.push("стоп " + fmtStatusPx(lv.stop));
-      detail = bits.join(" · ") || "Лимитки выставлены — ждём fill";
+      detail = bits.join(" · ");
     } else if (posture === "WATCHING_ZONE") {
       cls = "is-watch";
       status = "Смотрит зону";
