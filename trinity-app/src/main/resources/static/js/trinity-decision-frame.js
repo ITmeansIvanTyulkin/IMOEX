@@ -126,20 +126,6 @@
       });
     }
 
-    function detailsHtml(frame) {
-      var rows = Array.isArray(frame.details) ? frame.details : [];
-      var html = "";
-      rows.forEach(function (d) {
-        if (!d || !d.text) return;
-        var src = d.source ? String(d.source) : "";
-        html += "<li data-source=\"" + esc(src) + "\">"
-          + "<span class=\"decision-frame-source\">" + esc(sourceRu(src)) + "</span>"
-          + esc(d.text)
-          + "</li>";
-      });
-      return html || "<li>Фактов в кадре пока нет.</li>";
-    }
-
     function paintMeta(frame) {
       if (!metaEl) return;
       var bits = [];
@@ -255,11 +241,26 @@
     };
   }
 
+  function detailsHtml(frame) {
+    var rows = frame && Array.isArray(frame.details) ? frame.details : [];
+    var html = "";
+    rows.forEach(function (d) {
+      if (!d || !d.text) return;
+      var src = d.source ? String(d.source) : "";
+      html += "<li data-source=\"" + esc(src) + "\">"
+        + "<span class=\"decision-frame-source\">" + esc(sourceRu(src)) + "</span>"
+        + esc(d.text)
+        + "</li>";
+    });
+    return html || "<li>Фактов в кадре пока нет.</li>";
+  }
+
   global.TrinityDecisionFrame = {
     create: create,
     sourceRu: sourceRu,
     statusRu: statusRu,
     triggerRu: triggerRu,
+    detailsHtml: detailsHtml,
     SOURCE_RU: SOURCE_RU
   };
 })(typeof window !== "undefined" ? window : globalThis);

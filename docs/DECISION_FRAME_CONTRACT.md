@@ -1,10 +1,11 @@
 # Decision Frame — контракт кадра (DF-0)
 
-> Статус: **DF-0 + DF-2 DoD на `dev`** — контракт, desk API (слои 1–4 по фактам), UI live без flicker, эталон BRX6.  
-> Задача: [DF-0](https://app.clickup.com/t/869fegd5k). Эпик: [Decision Frame USP](https://app.clickup.com/t/869fegd2j).  
+> Статус: **DF-0 + DF-2 + DF-3 DoD на `dev`** — контракт, desk API, UI live, журнал кадров (JSONL).  
+> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) · [DF-2](https://app.clickup.com/t/869fegda5) · [DF-3](https://app.clickup.com/t/869fegdb2).  
+> Эпик: [Decision Frame USP](https://app.clickup.com/t/869fegd2j).  
 > Handoff: `docs/DECISION_FRAME_AGENT_PROMPT.md`. Тексты свечи: `docs/IMPULSE_CANDLE_TOOLTIP_PROMPT.md`.  
-> Код: `IMOEX-core/.../DecisionFrame.java`, `DecisionFrameAssembler.java`; деск → `body.decisionFrame`.  
-> Тест-эталон формы: `DecisionFrameAssemblerTest`.
+> Код: `IMOEX-core/.../DecisionFrame.java`, `DecisionFrameAssembler.java`, `DecisionFrameJournalService.java`; деск → `body.decisionFrame` + `body.decisionFrames`.  
+> Тест-эталон формы: `DecisionFrameAssemblerTest`; журнал: `DecisionFrameJournalServiceTest`.
 
 Первый срез — Exclusive / BR, playbook `levels-profile-br-m5`, слои **1 (картина)** и **4 (решение)**. Слои 2 и 3 в кадре можно опустить. Пока их нет, сводка **не говорит** про норму часа и про RI/BRM.
 
@@ -171,6 +172,18 @@ Mount: trend-desk (range/BRM/positional), calendar-arb, investments — плаш
 
 Поведение: клик ↔ факты live; под chart; при наличии кадра блок «Сейчас на рынке» сжимается до короткого companion (без дубля why). Тултип свечи = микро-why.
 
+## DF-3 — Журнал кадров
+
+Persist: `data/decision-frame/YYYY-MM-DD.jsonl` (не в git). Запись при смене decision-moment (`instrument|playbook|barTime|trigger|robot.status`); dedupe устойчив к смене playbook и рестарту JVM (ключи из файла дня). Опрос деска без нового триггера не плодит строки.
+
+| API | Назначение |
+|-----|------------|
+| desk `decisionFrames` | фрагмент дня для текущего instrument/playbook |
+| `GET /api/trend/decision-frames` | фильтры `day`, `instrument` (family как paper: BR↔BRX6), `playbook` (`both`/`all` = все), `kind` (`wait`\|`enter`\|`skip`; `why`→`wait`), `limit` |
+| `GET /api/trend/decision-frames/export` | JSON того же фильтра (UI качает через `fetch` + auth) |
+
+UI: блок «Журнал кадров» на trend-desk — фильтры ждёт/вошёл/пропуск (пустой фильтр → явное «нет кадров»), раскрытие того же `details[]`, кнопка экспорт.
+
 ## DoD DF-0 + DF-2 (закрыто)
 
 - [x] Контракт + desk API `decisionFrame`
@@ -180,3 +193,10 @@ Mount: trend-desk (range/BRM/positional), calendar-arb, investments — плаш
 - [x] Нет дубля «Импульс Импульс»; пункты импульса — абсолютные
 - [x] Нет дубля essay под кадром на trend-desk
 - [x] Живой эталон BRX6 + юнит-тесты
+
+## DoD DF-3 (закрыто на `dev`)
+
+- [x] Persist JSONL день / инструмент / playbook / kind
+- [x] Фильтры API + desk fragment
+- [x] UI список + detail-пакет + экспорт
+- [x] За сессию paper можно отфильтровать «ждёт» и «вошёл» с полными фактами

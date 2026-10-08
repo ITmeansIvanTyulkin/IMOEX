@@ -195,4 +195,5 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 
 Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`.  
 **Готово:** DF-0 + **DF-2 DoD** (UI live, слои 1–4 по фактам, mount trend/arb/invest).  
-**Дальше:** DF-3 журнал кадров → углубление DF-1/DF-4.
+**Сделано на `dev`:** DF-0 + DF-2 + DF-3 (журнал JSONL + UI фильтры/экспорт).  
+**Дальше:** углубление DF-1 / DF-4.

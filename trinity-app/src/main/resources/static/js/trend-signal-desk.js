@@ -213,6 +213,152 @@
     ui.render(data && data.decisionFrame);
   }
 
+  let dfJournalKind = "";
+  let dfJournalCache = null;
+  let dfJournalBound = false;
+
+  function dfJournalExportQuery(payload) {
+    const q = [];
+    if (payload && payload.day) q.push("day=" + encodeURIComponent(payload.day));
+    const inst = wantedDeskInstrument()
+      || (payload && payload.entries && payload.entries[0] && payload.entries[0].instrument);
+    const pb = viewPlaybookId();
+    if (inst) q.push("instrument=" + encodeURIComponent(inst));
+    if (pb && pb !== "both") q.push("playbook=" + encodeURIComponent(pb));
+    if (dfJournalKind) q.push("kind=" + encodeURIComponent(dfJournalKind));
+    return q;
+  }
+
+  async function exportDecisionFrameJournal() {
+    const q = dfJournalExportQuery(dfJournalCache);
+    const url = "/api/trend/decision-frames/export" + (q.length ? ("?" + q.join("&")) : "");
+    try {
+      const res = await fetch(url, {
+        headers: deskAuthHeaders({ Accept: "application/json" }),
+        credentials: "same-origin"
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      const day = (dfJournalCache && dfJournalCache.day) || "today";
+      const a = document.createElement("a");
+      const href = URL.createObjectURL(blob);
+      a.href = href;
+      a.download = "decision-frames-" + day + ".json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(href); }, 2000);
+    } catch (err) {
+      console.warn("df journal export failed", err);
+      const meta = $("signal-df-journal-meta");
+      if (meta) meta.textContent = "Экспорт не удался — проверьте вход в кабинет";
+    }
+  }
+
+  function bindDfJournalFilters() {
+    if (dfJournalBound) return;
+    const filters = $("signal-df-journal-filters");
+    if (!filters) return;
+    dfJournalBound = true;
+    filters.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-df-kind]")
+        : null;
+      if (!btn) return;
+      dfJournalKind = btn.getAttribute("data-df-kind") || "";
+      filters.querySelectorAll(".signal-df-kind").forEach(function (el) {
+        el.classList.toggle("is-active", el === btn);
+      });
+      paintDecisionFrameJournal(dfJournalCache);
+    });
+    const list = $("signal-df-journal-list");
+    if (list) {
+      list.addEventListener("click", function (ev) {
+        const btn = ev.target && ev.target.closest
+          ? ev.target.closest("[data-df-toggle]")
+          : null;
+        if (!btn) return;
+        const item = btn.closest(".signal-df-journal-item");
+        if (!item) return;
+        const details = item.querySelector(".signal-df-journal-details");
+        if (!details) return;
+        const open = details.hidden;
+        details.hidden = !open;
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+    }
+    const exportBtn = $("signal-df-journal-export");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        exportDecisionFrameJournal();
+      });
+    }
+  }
+
+  function paintDecisionFrameJournal(payload) {
+    bindDfJournalFilters();
+    dfJournalCache = payload || null;
+    const panel = $("signal-df-journal");
+    const listEl = $("signal-df-journal-list");
+    const meta = $("signal-df-journal-meta");
+    const title = $("signal-df-journal-title");
+    if (!panel || !listEl) return;
+    const entries = (payload && Array.isArray(payload.entries)) ? payload.entries : [];
+    const kinds = (payload && payload.kinds) || {};
+    const filtered = dfJournalKind
+      ? entries.filter(function (e) { return e && e.kind === dfJournalKind; })
+      : entries;
+    if (!entries.length) {
+      panel.hidden = true;
+      listEl.innerHTML = "";
+      if (meta) meta.textContent = "";
+      return;
+    }
+    panel.hidden = false;
+    if (title) {
+      const day = (payload && payload.day) || "";
+      title.textContent = "Журнал кадров" + (day ? (" · " + day) : "");
+    }
+    if (meta) {
+      meta.textContent = "Показано " + filtered.length
+        + " / " + entries.length
+        + " · ждёт " + (kinds.wait || 0)
+        + " · вошёл " + (kinds.enter || 0)
+        + " · пропуск " + (kinds.skip || 0)
+        + (filtered.length === 0 && dfJournalKind
+          ? " · нет кадров с этим фильтром"
+          : "");
+    }
+    const statusRu = (window.TrinityDecisionFrame && TrinityDecisionFrame.statusRu)
+      || function (s) { return s || "—"; };
+    const detailsHtml = (window.TrinityDecisionFrame && TrinityDecisionFrame.detailsHtml)
+      || function () { return "<li>—</li>"; };
+    if (!filtered.length) {
+      listEl.innerHTML = "<li class=\"signal-df-journal-empty\">Нет кадров с этим фильтром.</li>";
+      return;
+    }
+    listEl.innerHTML = filtered.map(function (e) {
+      const frame = e.frame || {};
+      const robot = frame.robot || {};
+      const status = e.robotStatus || robot.status || "";
+      const t = shortTime(e.barTime || e.recordedAt || frame.barTime);
+      return "<li class=\"signal-df-journal-item\">"
+        + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
+        + " aria-expanded=\"false\">"
+        + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(status) + "\">"
+        + escHtml(statusRu(status)) + "</span>"
+        + "<span class=\"signal-df-journal-summary\">" + escHtml(e.summary || frame.summary || "—")
+        + "</span>"
+        + "<span class=\"signal-df-journal-time\">" + escHtml(t) + "</span>"
+        + "</button>"
+        + "<div class=\"signal-df-journal-details decision-frame-details\" hidden>"
+        + "<ul class=\"decision-frame-details-list\">" + detailsHtml(frame) + "</ul>"
+        + "</div>"
+        + "</li>";
+    }).join("");
+  }
+
   function paintRobotChip(data) {
     const chip = $("sig-robot-chip");
     const el = $("sig-robot-status");
@@ -4391,6 +4537,7 @@
       fillDeskSelects(data);
       paintRobotChip(data);
       paintDecisionFrame(data);
+      paintDecisionFrameJournal(data.decisionFrames);
       if (deskScope() === "positional") {
         syncPositionalAutoSwitch(data);
       } else {
