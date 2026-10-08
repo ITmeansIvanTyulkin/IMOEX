@@ -193,4 +193,6 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 
 Начни с DF-0. Не распыляйся на DF-5/6 и не трогай observe-тюнинг.
 
-Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`. DF-0 + vertical slice 1+4 + UI сводка — на `dev`. Дальше: слой 2 → DF-3 журнал → DF-4.
+Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`.  
+**Готово:** DF-0 + **DF-2 DoD** (UI live, слои 1–4 по фактам, mount trend/arb/invest).  
+**Дальше:** DF-3 журнал кадров → углубление DF-1/DF-4.

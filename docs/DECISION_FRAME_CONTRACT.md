@@ -1,6 +1,6 @@
 # Decision Frame — контракт кадра (DF-0)
 
-> Статус: **внедрено на `dev`** — DTO + сборщик + `decisionFrame` в desk API + UI сводка/плашка (DF-2).  
+> Статус: **DF-0 + DF-2 DoD на `dev`** — контракт, desk API (слои 1–4 по фактам), UI live без flicker, эталон BRX6.  
 > Задача: [DF-0](https://app.clickup.com/t/869fegd5k). Эпик: [Decision Frame USP](https://app.clickup.com/t/869fegd2j).  
 > Handoff: `docs/DECISION_FRAME_AGENT_PROMPT.md`. Тексты свечи: `docs/IMPULSE_CANDLE_TOOLTIP_PROMPT.md`.  
 > Код: `IMOEX-core/.../DecisionFrame.java`, `DecisionFrameAssembler.java`; деск → `body.decisionFrame`.  
@@ -130,47 +130,53 @@ Lead/lag, когда появится, **не** запрещает вход са
 
 ## Эталон: живой BRX6 (Exclusive), 2026-10-08
 
-Снято с `GET /api/trend/desk?instrument=BRX6&playbook=levels-profile-br-m5` на localhost (`dev`), barCount≈3k, источник баров `disk-archive+broker-tail+tape`, chartBar `2026-10-08T20:05`.  
-Фикстура теста: `IMOEX-core/trinity-trend/src/test/resources/decision-frame/brx6-2026-10-08-live.json` (`DecisionFrameLiveCaptureTest`).
+Снято с `GET /api/trend/desk?instrument=BRX6&playbook=levels-profile-br-m5` на localhost (`dev`).  
+Фикстура: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json` (`DecisionFrameLiveCaptureTest`).
 
-Вечерняя сессия: окно входов закрыто → робот **пропускает** (`MODE` / `SKIP`). Слои 1+4 заполнены; `sessionNorm` и `leadLag` отсутствуют.
+Вечер: окно входов закрыто → `MODE` / `SKIP`. Слои 1–4 заполнены фактами (без выдумок).
 
 ```json
 {
-  "frameId": "BRX6|levels-profile-br-m5|2026-10-08T20:05:00|MODE|1",
-  "asOf": "2026-10-08T20:05:00",
-  "instrument": "BRX6",
-  "playbookId": "levels-profile-br-m5",
-  "lane": "range",
-  "timeframe": "M5",
-  "barTime": "2026-10-08T20:05:00",
+  "frameId": "BRX6|levels-profile-br-m5|2026-10-08T20:25:00|MODE|1",
   "trigger": "MODE",
-  "summary": "Дельта footprint -5013. Стакан: аски толще бидов в ближних 5 уровнях (bid 861 / ask 1281). Робот пропускает: окно входов закрыто правилом сессии.",
-  "robot": {
-    "status": "SKIP",
-    "side": "NONE",
-    "mode": "NONE",
-    "checklistIds": ["EXT_SESSION_EDGE"]
-  },
+  "summary": "Дельта footprint …. Стакан: …. Норма сессии: окно новых входов закрыто …. Робот пропускает: ….",
+  "robot": { "status": "SKIP", "checklistIds": ["EXT_SESSION_EDGE"] },
   "details": [
-    { "source": "delta", "layer": 1, "text": "Дельта footprint -5013.", "value": -5013 },
-    { "source": "dom", "layer": 1, "text": "Стакан: аски толще бидов в ближних 5 уровнях (bid 861 / ask 1281).", "value": -420.0 },
-    { "source": "shelf", "layer": 1, "text": "Полка BOT 102.16–102.35.", "value": 102.255 },
-    { "source": "poc", "layer": 1, "text": "POC профиля около 104.", "value": 104.0 },
-    { "source": "footprint", "layer": 1, "text": "Импульс Импульс вниз · -21 пт (LIQUIDITY).", "value": -21 },
-    { "source": "robot", "layer": 4, "text": "Робот пропускает: окно входов закрыто правилом сессии." }
+    { "source": "delta", "layer": 1 },
+    { "source": "dom", "layer": 1 },
+    { "source": "shelf", "layer": 1 },
+    { "source": "poc", "layer": 1 },
+    { "source": "footprint", "layer": 1, "text": "Импульс вверх · 28 пт …", "value": 28 },
+    { "source": "sessionNorm", "layer": 2 },
+    { "source": "leadLag", "layer": 3, "text": "Связка за день: BR …, BRM …, RI …" },
+    { "source": "robot", "layer": 4 }
   ]
 }
 ```
 
+Полный JSON — в фикстуре теста (числа меняются от бара к бару).
+
 ---
 
-## DoD DF-0 + vertical slice 1+4
+## DF-2 — UI
 
-- [x] Схема `summary` + `details[]` + триггеры + словарь робота
-- [x] Связь с тултипом: тултип не равен кадру
-- [x] Код на `dev`: `decisionFrame` в ответе `/api/trend/desk`
-- [x] UI сводка + плашка details live (`trend-signal-desk`, DF-2 минимум)
-- [x] Юнит-эталон формы (`DecisionFrameAssemblerTest`)
-- [x] Живой эталон BRX6 в доке + `DecisionFrameLiveCaptureTest`
-- [x] Слои 1+4 только; слой 2/3 не выдумываются
+Компонент: `trinity-app/.../static/js/trinity-decision-frame.js` → `TrinityDecisionFrame.create({ root })`.  
+Mount: trend-desk (range/BRM/positional), calendar-arb, investments — плашка видна только если API отдал `decisionFrame`.
+
+| Состояние | Когда |
+|-----------|--------|
+| `idle` | кадр отрисован |
+| `updating` | первый load / тихий refresh без мигания текста |
+| `stale` | ошибка/таймаут desk или нет кадра / давно без обновления |
+
+Поведение: клик ↔ факты live; под chart; при наличии кадра блок «Сейчас на рынке» сжимается до короткого companion (без дубля why). Тултип свечи = микро-why.
+
+## DoD DF-0 + DF-2 (закрыто)
+
+- [x] Контракт + desk API `decisionFrame`
+- [x] Слои 1–4 из фактов (`sessionNorm` / `leadLag` только при данных)
+- [x] UI сводка + плашка + idle/updating/stale без flicker
+- [x] `TrinityDecisionFrame` на trend / arb / investments
+- [x] Нет дубля «Импульс Импульс»; пункты импульса — абсолютные
+- [x] Нет дубля essay под кадром на trend-desk
+- [x] Живой эталон BRX6 + юнит-тесты

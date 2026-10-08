@@ -90,11 +90,20 @@
   let lastDeskSnapshot = null;
   let liveFlatUntil = 0;
   let liveTp1Until = 0;
-  let decisionFrameOpen = false;
-  let decisionFrameBound = false;
-  let lastDecisionFrameId = "";
+  let decisionFrameUi = null;
 
   function $(id) { return document.getElementById(id); }
+  function ensureDecisionFrameUi() {
+    if (decisionFrameUi) return decisionFrameUi;
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") {
+      return null;
+    }
+    decisionFrameUi = TrinityDecisionFrame.create({
+      root: "decision-frame",
+      staleAfterMs: Math.max(DESK_MS * 3, 45000)
+    });
+    return decisionFrameUi;
+  }
   function deskScope() {
     const root = $("trend-signal-desk");
     const s = root && root.getAttribute("data-desk-scope");
@@ -198,69 +207,10 @@
       el.hidden = !!(want && want !== "both" && want !== deskScope());
     });
   }
-  function decisionFrameStatusRu(status) {
-    if (status === "ENTER") return "входит";
-    if (status === "WAIT") return "ждёт";
-    if (status === "SKIP") return "пропускает";
-    return "—";
-  }
-
-  function bindDecisionFrameUi() {
-    if (decisionFrameBound) return;
-    const btn = $("decision-frame-summary");
-    if (!btn) return;
-    decisionFrameBound = true;
-    btn.addEventListener("click", function () {
-      decisionFrameOpen = !decisionFrameOpen;
-      const details = $("decision-frame-details");
-      const hint = $("decision-frame-hint");
-      btn.setAttribute("aria-expanded", decisionFrameOpen ? "true" : "false");
-      if (details) details.hidden = !decisionFrameOpen;
-      if (hint) hint.textContent = decisionFrameOpen ? "свернуть" : "подробнее";
-    });
-  }
-
   function paintDecisionFrame(data) {
-    bindDecisionFrameUi();
-    const root = $("decision-frame");
-    const textEl = $("decision-frame-text");
-    const statusEl = $("decision-frame-status");
-    const listEl = $("decision-frame-details-list");
-    const details = $("decision-frame-details");
-    const btn = $("decision-frame-summary");
-    const hint = $("decision-frame-hint");
-    if (!root || !textEl || !statusEl) return;
-    const frame = data && data.decisionFrame;
-    if (!frame || !frame.summary) {
-      root.hidden = true;
-      return;
-    }
-    root.hidden = false;
-    const robot = frame.robot || {};
-    const statusRu = decisionFrameStatusRu(robot.status);
-    statusEl.textContent = statusRu;
-    statusEl.dataset.status = robot.status || "";
-    textEl.textContent = frame.summary;
-    root.dataset.trigger = frame.trigger || "";
-    root.dataset.frameId = frame.frameId || "";
-    if (btn) btn.setAttribute("aria-expanded", decisionFrameOpen ? "true" : "false");
-    if (hint) hint.textContent = decisionFrameOpen ? "свернуть" : "подробнее";
-    if (details) details.hidden = !decisionFrameOpen;
-    // Live refresh of open plaque when the frame changes.
-    if (listEl && (decisionFrameOpen || frame.frameId !== lastDecisionFrameId)) {
-      const rows = Array.isArray(frame.details) ? frame.details : [];
-      let html = "";
-      rows.forEach(function (d) {
-        if (!d || !d.text) return;
-        const src = d.source ? String(d.source) : "";
-        html += "<li data-source=\"" + escHtml(src) + "\">"
-          + "<span class=\"decision-frame-source\">" + escHtml(src) + "</span>"
-          + escHtml(d.text)
-          + "</li>";
-      });
-      listEl.innerHTML = html || "<li>Фактов в кадре пока нет.</li>";
-    }
-    lastDecisionFrameId = frame.frameId || "";
+    const ui = ensureDecisionFrameUi();
+    if (!ui) return;
+    ui.render(data && data.decisionFrame);
   }
 
   function paintRobotChip(data) {
@@ -1189,6 +1139,31 @@
     return html;
   }
   function buildOperatorBrief(data) {
+    // Decision Frame is the why — do not duplicate market/robot essay underneath.
+    if (data && data.decisionFrame && data.decisionFrame.summary) {
+      const esc = function (t) {
+        return String(t == null ? "" : t)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      };
+      let html = "<p class='signal-brief-kicker signal-brief-kicker--gold'>Дополнительно</p>";
+      html += "<p class='signal-brief-note'>Полный why — в <strong>кадре решения</strong> выше "
+        + "(тултип свечи остаётся микро-why одного бара).</p>";
+      const sit = data.situation || {};
+      if (sit.structureNote) {
+        html += "<p class='signal-brief-note'>" + esc(sit.structureNote) + "</p>";
+      }
+      const paper = data.paper || {};
+      if (paper.todayCount != null || paper.todayPnlRub != null) {
+        html += "<p class='signal-brief-note'>Бумага сегодня: "
+          + esc(String(paper.todayCount != null ? paper.todayCount : "—"))
+          + " сделок"
+          + (paper.todayPnlRub != null
+            ? (", PnL " + Math.round(paper.todayPnlRub).toLocaleString("ru-RU") + " ₽")
+            : "")
+          + ".</p>";
+      }
+      return html;
+    }
     const bars = deskBars(data);
     const last = bars.length ? bars[bars.length - 1] : null;
     const close = last && typeof last.close === "number" ? last.close : null;
@@ -4374,6 +4349,8 @@
     const meta = $("signal-desk-meta");
     const wantInst = wantedDeskInstrument();
     const startedAt = Date.now();
+    const dfUi = ensureDecisionFrameUi();
+    if (dfUi) dfUi.markUpdating();
     if (meta && (!meta.textContent || meta.textContent.indexOf("Загрузка") === 0
         || meta.textContent.indexOf("локальный архив") === 0
         || meta.textContent.indexOf("Ошибка") === 0
@@ -4636,6 +4613,8 @@
         ? ("Таймаут desk (" + (DESK_FETCH_MS / 1000) + "с) — жми Обновить")
         : ("Ошибка desk: " + (err && err.message ? err.message : err));
       if (meta) meta.textContent = failMsg;
+      const dfFail = ensureDecisionFrameUi();
+      if (dfFail) dfFail.markStale(aborted ? "таймаут desk" : "ошибка desk");
       const brief = $("signal-brief");
       if (brief && (/Загрузка|грузим/i.test(brief.textContent || "") || !brief.textContent)) {
         brief.textContent = failMsg;

@@ -180,16 +180,21 @@
         <span class="lg-hi">HI/LO</span> ·
         <span class="lg-zone">TOP/BOT</span> · ENTRY/SL/TP
       </p>
-      <div class="decision-frame" id="decision-frame" hidden>
+      <div class="decision-frame is-idle" id="decision-frame" data-state="idle" hidden
+           data-df-mount="trend">
         <button type="button" class="decision-frame-summary" id="decision-frame-summary"
                 aria-expanded="false" aria-controls="decision-frame-details">
-          <span class="decision-frame-kicker">Кадр решения</span>
+          <span class="decision-frame-kicker-row">
+            <span class="decision-frame-kicker">Кадр решения</span>
+            <span class="decision-frame-state" id="decision-frame-state" hidden></span>
+          </span>
           <span class="decision-frame-status" id="decision-frame-status">—</span>
           <span class="decision-frame-text" id="decision-frame-text">Загрузка…</span>
           <span class="decision-frame-hint" id="decision-frame-hint">подробнее</span>
+          <span class="decision-frame-meta" id="decision-frame-meta" hidden></span>
         </button>
         <div class="decision-frame-details" id="decision-frame-details" hidden>
-          <p class="decision-frame-details-title">Факты кадра</p>
+          <p class="decision-frame-details-title">Факты кадра · не тултип свечи</p>
           <ul class="decision-frame-details-list" id="decision-frame-details-list"></ul>
         </div>
       </div>
@@ -739,4 +744,5 @@
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/trend-signal-desk.js?v=20261008-df2"></script>
+<script src="/js/trinity-decision-frame.js?v=20261008-df2c"></script>
+<script src="/js/trend-signal-desk.js?v=20261008-df2c"></script>

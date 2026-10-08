@@ -428,11 +428,22 @@
     render(data);
   }
 
+  let decisionFrameUi = null;
+  function paintDecisionFrame(data) {
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") return;
+    if (!decisionFrameUi) {
+      decisionFrameUi = TrinityDecisionFrame.create({ root: "decision-frame" });
+    }
+    if (!decisionFrameUi) return;
+    decisionFrameUi.render(data && data.decisionFrame);
+  }
+
   function render(data) {
     lastArbDesk = data || null;
     const warming = !!data.warming && !everReady;
     const desk = $("calendar-arb-desk");
     if (desk) desk.classList.toggle("is-warming", warming);
+    paintDecisionFrame(data);
 
     const sel = data.selected || {};
     const settings = data.settings || {};

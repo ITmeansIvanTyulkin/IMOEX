@@ -152,11 +152,22 @@
     }
   }
 
+  let decisionFrameUi = null;
+  function paintDecisionFrame(data) {
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") return;
+    if (!decisionFrameUi) {
+      decisionFrameUi = TrinityDecisionFrame.create({ root: "decision-frame" });
+    }
+    if (!decisionFrameUi) return;
+    decisionFrameUi.render(data && data.decisionFrame);
+  }
+
   async function refreshDesk() {
     const statusEl = $("invest-counts");
     if (statusEl) statusEl.textContent = "скан чек-листа…";
     const desk = await api("/api/investments/desk");
     window.__investDeskCache = desk;
+    paintDecisionFrame(desk);
     const counts = desk.counts || {};
     const cEl = $("invest-counts");
     if (cEl) {
