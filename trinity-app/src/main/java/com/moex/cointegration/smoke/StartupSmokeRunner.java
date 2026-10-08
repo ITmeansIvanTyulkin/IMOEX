@@ -225,8 +225,8 @@ public class StartupSmokeRunner implements ApplicationListener<ApplicationReadyE
             return;
         }
         try {
-            ts.save(new TrendSettingsService.UpdateRequest(null, false, null, null, null));
-            log.warn("Soft-block: liveExecution=false (paper autoExecution / positionalAutoExecution kept)");
+            ts.save(new TrendSettingsService.UpdateRequest(null, false, null, null, null, null));
+            log.warn("Soft-block: liveExecution=false (paper autos / brmAuto kept)");
         } catch (Exception ex) {
             log.warn("Soft-block could not update trend settings: {}", ex.getMessage());
         }

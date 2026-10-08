@@ -1,17 +1,34 @@
-<section class="charts-terminal" id="trend-charts-terminal" data-nav-strategy="trend">
-  <link rel="stylesheet" href="/css/operator.css?v=20260925-tlmark2">
+<section class="charts-terminal investments-workspace" id="investments-charts-terminal" data-nav-strategy="invest">
+  <link rel="stylesheet" href="/css/operator.css?v=20261006-plaques5">
   <div class="charts-terminal-head">
     <div>
-      <p class="meta"><a href="/view/trend-signal">← диапазонная торговля</a>
-        · <a href="/view/trend-positional">позиционная</a></p>
-      <h2>Терминал графиков · Trend</h2>
-      <p class="meta" id="charts-terminal-meta">Рисунки сохраняются под логином, пока сами не удалите. Панель действует на активный график (синяя рамка).</p>
+      <p class="meta"><a href="/view/investments-strategy">Описание стратегии</a>
+        · <a href="/view/settings#investments-playbook-settings">Настройки</a></p>
+      <h2>Инвестиции · пульт</h2>
+      <p class="meta" id="charts-terminal-meta">Графики + автоотбор по чек-листу. Рисунки сохраняются под логином. Панель справа — pipeline и кандидаты.</p>
     </div>
     <div class="charts-terminal-actions">
+      <div class="strategy-mode-bar invest-mode-bar" id="invest-auto-wrap">
+        <label class="mode-switch is-signal" title="Наблюдение: скан без заявок. Авто: fair-paper лестницы по чек-листу.">
+          <span class="mode-switch-label">Наблюдение</span>
+          <input type="checkbox" id="invest-auto-execution" role="switch" aria-checked="false">
+          <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+          <span class="mode-switch-label">Авто</span>
+        </label>
+        <p class="strategy-mode-hint" id="invest-mode-hint">Загрузка режима…</p>
+      </div>
+      <button type="button" class="btn btn-ghost signal-guide-btn" id="invest-guide-open"
+              aria-haspopup="dialog" aria-controls="invest-guide-modal">
+        Как торгует робот
+      </button>
+      <button type="button" class="btn btn-ghost" id="invest-desk-refresh">Скан</button>
       <button type="button" class="btn btn-ghost" id="charts-fit">Весь график</button>
       <button type="button" class="btn btn-ghost" id="charts-refresh">Обновить</button>
       <button type="button" class="btn btn-ghost" id="charts-exit-fs" hidden>Выйти из полного экрана</button>
     </div>
+  </div>
+  <div class="invest-ops-strip" id="invest-ops-strip" aria-label="Pipeline">
+    <span class="meta">Pipeline…</span>
   </div>
   <div class="charts-tv-toolbar" id="charts-tv-toolbar" role="toolbar" aria-label="Инструменты активного графика">
     <div class="charts-tv-active" id="charts-active-chip" title="Клик по графику делает его активным">
@@ -109,15 +126,18 @@
   <div class="charts-workbench">
   <aside class="charts-dock" id="charts-dock">
     <div class="charts-dock-block">
-      <div class="charts-dock-h">Вотчлист</div>
+      <div class="charts-dock-h">Робот <span id="charts-watch-n" class="charts-watch-n"></span></div>
       <div id="charts-watchlist"></div>
     </div>
     <div class="charts-dock-block">
       <div class="charts-dock-h">ТФ</div>
       <div class="charts-tf" id="charts-tf" role="group">
-        <button type="button" class="charts-tf-btn is-on" data-tf="M5">M5</button>
-        <button type="button" class="charts-tf-btn" data-tf="M15">M15</button>
+        <button type="button" class="charts-tf-btn" data-tf="MN">MN</button>
+        <button type="button" class="charts-tf-btn" data-tf="W1">W1</button>
+        <button type="button" class="charts-tf-btn is-on" data-tf="D1">D1</button>
         <button type="button" class="charts-tf-btn" data-tf="H1">H1</button>
+        <button type="button" class="charts-tf-btn" data-tf="M15">M15</button>
+        <button type="button" class="charts-tf-btn" data-tf="M5">M5</button>
         <button type="button" class="charts-tf-btn" data-tf="TICK">Tick</button>
         <button type="button" class="charts-tf-btn" data-tf="RENKO">Renko</button>
         <button type="button" class="charts-tf-btn" data-tf="RANGE">Range</button>
@@ -153,15 +173,122 @@
     </div>
   </aside>
   <div class="charts-terminal-grid" id="charts-terminal-grid" aria-label="Графики инструментов"></div>
+  <aside class="invest-ops-panel" id="invest-ops-panel" aria-label="Стратегия инвестиции">
+    <div class="charts-dock-h">Кандидаты</div>
+    <div id="invest-counts" class="meta" style="margin-bottom:0.4rem">—</div>
+    <div id="invest-candidates" class="invest-cand-list"><div class="charts-dock-empty">скан…</div></div>
+    <div class="charts-dock-h" style="margin-top:0.75rem">Позиции / лимитки</div>
+    <div id="invest-positions" class="invest-pos-list"><div class="charts-dock-empty">нет</div></div>
+    <div class="charts-dock-h" style="margin-top:0.75rem">Метрики журнала</div>
+    <div id="invest-metrics" class="meta">—</div>
+  </aside>
   </div>
 </section>
 <style>
+.charts-terminal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+}
+.invest-mode-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  margin: 0;
+  position: relative;
+  z-index: 5;
+  pointer-events: auto;
+}
+.invest-mode-bar .mode-switch { position: relative; }
+.invest-mode-bar .strategy-mode-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #64748b;
+  max-width: 16rem;
+  text-align: right;
+}
 .charts-workbench {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr;
+  grid-template-columns: minmax(200px, 240px) 1fr minmax(260px, 320px);
   gap: 0.75rem;
   align-items: start;
 }
+/* True analysis fullscreen: viewport shell, dock + toolbar stay, ops panel hides */
+body.invest-chart-fs { overflow: hidden; }
+.investments-workspace.is-chart-fs {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: #f4f6f8;
+  padding: 0.45rem 0.65rem 0.65rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.investments-workspace.is-chart-fs .charts-terminal-head { flex: 0 0 auto; }
+.investments-workspace.is-chart-fs .invest-ops-strip { flex: 0 0 auto; }
+.investments-workspace.is-chart-fs .charts-tv-toolbar {
+  flex: 0 0 auto;
+  display: flex !important;
+  margin-bottom: 0.45rem;
+}
+.investments-workspace.is-chart-fs .invest-ops-panel { display: none !important; }
+.investments-workspace.is-chart-fs .charts-workbench {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  height: 100%;
+}
+.investments-workspace.is-chart-fs .charts-dock {
+  display: block;
+  max-height: none;
+  height: 100%;
+  overflow: auto;
+}
+.investments-workspace.is-chart-fs .charts-terminal-grid.is-fullscreen {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr);
+}
+.investments-workspace.is-chart-fs .charts-pane.is-fs-target {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.investments-workspace.is-chart-fs .charts-pane.is-fs-target .charts-pane-head { flex: 0 0 auto; }
+.investments-workspace.is-chart-fs .charts-pane.is-fs-target .charts-pane-chart {
+  flex: 1 1 auto;
+  height: auto !important;
+  min-height: 0;
+}
+.invest-ops-strip {
+  display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.65rem;
+}
+.invest-stage {
+  font-size: 0.68rem; padding: 0.2rem 0.45rem; border-radius: 999px;
+  border: 1px solid #d5dde2; background: #fff; color: #334155;
+}
+.invest-stage.is-pass { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; }
+.invest-stage.is-weak { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
+.invest-stage.is-fail, .invest-stage.is-skip { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+.invest-ops-panel {
+  position: sticky; top: 0.5rem; max-height: calc(100vh - 8rem); overflow: auto;
+  background: #f7f8f9; border: 1px solid #e2e8ed; border-radius: 12px; padding: 0.55rem 0.65rem;
+}
+.invest-cand-row {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 0.35rem;
+  font: 11px/1.35 ui-monospace, Menlo, monospace; padding: 0.25rem 0.2rem;
+  border-bottom: 1px solid #e8eef2; cursor: pointer;
+}
+.invest-cand-row:hover, .invest-cand-row.is-on { background: #e8eef2; }
+.invest-cand-row .cat { color: #64748b; }
 .charts-dock {
   position: sticky;
   top: 0.5rem;
@@ -187,11 +314,19 @@
   font-size: 0.72rem; padding: 0.15rem 0.4rem; cursor: pointer;
 }
 .charts-tf-btn.is-on { background: #1a2228; color: #fff; border-color: #1a2228; }
+.charts-tf-btn.is-loading { opacity: 0.55; }
+#charts-watchlist { max-height: 22rem; overflow: auto; }
+.charts-watch-n { letter-spacing: 0; text-transform: none; color: #94a3b8; }
 .charts-watch-row, .charts-alert-item {
   display: flex; justify-content: space-between; gap: 0.4rem;
   font: 12px/1.4 ui-monospace, Menlo, monospace; cursor: pointer;
+  padding: 0.12rem 0.15rem; border-radius: 4px;
 }
+.charts-watch-row.is-open { color: #1a2228; }
 .charts-watch-row.is-on { background: #e8eef2; }
+.charts-watch-row .v { font-size: 0.62rem; color: #94a3b8; margin-left: 0.25rem; }
+.charts-watch-row .v.is-invest { color: #15803d; }
+.charts-watch-row .v.is-watch { color: #b45309; }
 .charts-watch-px.is-up { color: #15803d; }
 .charts-watch-px.is-down { color: #b91c1c; }
 .charts-dom, .charts-tape { max-height: 12rem; overflow: auto; font: 11px/1.3 ui-monospace, Menlo, monospace; }
@@ -205,9 +340,9 @@
 .charts-alert-row { display: flex; gap: 4px; margin-bottom: 4px; }
 .charts-alert-row input, #charts-templates { flex: 1; min-width: 0; font-size: 0.78rem; }
 .charts-alert-row select { width: 3.4rem; font-size: 0.78rem; }
-@media (max-width: 980px) {
+@media (max-width: 1100px) {
   .charts-workbench { grid-template-columns: 1fr; }
-  .charts-dock { position: static; max-height: none; }
+  .charts-dock, .invest-ops-panel { position: static; max-height: none; }
 }
 .charts-tv-toolbar {
   display: flex;
@@ -403,7 +538,121 @@
 .chart-draw-handle.is-level-h { cursor: ns-resize; }
 .chart-draw-handle.is-level-v { cursor: ew-resize; }
 </style>
+
+<div class="signal-guide-gate" id="invest-guide-modal" hidden aria-hidden="true">
+  <div class="signal-guide-backdrop" data-invest-guide-close tabindex="-1" aria-hidden="true"></div>
+  <div class="signal-guide-modal" role="dialog" aria-modal="true"
+       aria-labelledby="invest-guide-title" tabindex="-1">
+    <header class="signal-guide-head">
+      <div>
+        <p class="signal-guide-kicker">TRINITY · Инвестиции</p>
+        <h3 id="invest-guide-title">Как торгует робот</h3>
+        <p class="signal-guide-lead">Среднесрок 1–3 месяца по акциям MOEX. Сначала широкий список наблюдения, потом чек-лист решает, кого брать.</p>
+      </div>
+      <button type="button" class="signal-guide-close" id="invest-guide-close"
+              data-invest-guide-close aria-label="Закрыть">×</button>
+    </header>
+    <div class="signal-guide-body">
+      <nav class="signal-guide-toc" aria-label="Разделы">
+        <a href="#invest-guide-idea">Идея</a>
+        <a href="#invest-guide-list">Список слева</a>
+        <a href="#invest-guide-scan">Чек-лист</a>
+        <a href="#invest-guide-entry">Когда входит</a>
+        <a href="#invest-guide-auto">Наблюдение и авто</a>
+        <a href="#invest-guide-risk">Риск</a>
+      </nav>
+
+      <article class="signal-guide-section" id="invest-guide-idea">
+        <h4>Идея в одном абзаце</h4>
+        <p>
+          Робот не гоняется за внутридневным импульсом. Он держит
+          <strong>список ликвидных акций</strong>, несколько раз за сессию прогоняет каждую
+          через чек-лист (фонд, категория, ликвидность, макро, события, тренд D1, зоны H4,
+          объём и кластеры) и ставит лестницу лимиток только если вердикт
+          <strong>invest</strong>.
+        </p>
+        <p class="signal-guide-note">
+          Это не прогноз индекса. Бумага может быть в списке слева годами и при этом
+          почти всегда быть skip — список наблюдения шире, чем сделки.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="invest-guide-list">
+        <h4>Почему слева именно эти компании</h4>
+        <p>
+          Сейчас в колонке «Робот» <strong id="invest-guide-universe-n">27</strong> тикеров.
+          Это <strong>фиксированный универсум наблюдения</strong>, а не результат сегодняшнего отбора.
+          Имена заданы заранее: ликвидный широкий рынок MOEX (нефть, металлы, банки, ритейл, IT).
+          Робот <em>мониторит всех</em> из этого списка на каждом скане.
+        </p>
+        <ul class="signal-guide-list">
+          <li>Попасть в колонку слева <strong>не значит</strong> «прошла отбор на покупку».</li>
+          <li>Отбор на действие — справа, в кандидатах: <strong>invest / watch / skip</strong>.</li>
+          <li>На графиках одновременно не больше шести панелей; клик по тикеру в списке открывает график.</li>
+        </ul>
+        <p>
+          <strong>Может ли быть больше или меньше?</strong> Да. Число не магическое: универсум можно
+          расширить или сузить (добавить/убрать бумаги в списке наблюдения). Сейчас нет живого
+          фильтра «биржа сама решает, кого смотреть» — пока 27 имён, пока так записано.
+          Если список поменяют, слева станет столько, сколько в универсуме.
+        </p>
+        <p class="signal-guide-note">
+          Дневной скан не выкидывает тикер из колонки. Skip — это «сегодня не берём», а не «забыть бумагу».
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="invest-guide-scan">
+        <h4>Что проверяет чек-лист</h4>
+        <ol class="signal-guide-steps">
+          <li>Режим рынка IMOEX — можно ли лонг (или шорт в медвежьем рукаве).</li>
+          <li>Фундамент и категория 1–3; четвёртая — не берём.</li>
+          <li>Ликвидность, макро/сектор, корпоративные события.</li>
+          <li>D1 в нужную сторону, зона покупки на H4 / профиле.</li>
+          <li>Объём, кумулятивная дельта, кластеры Bid×Ask на M5 внутри зоны.</li>
+        </ol>
+        <p class="signal-guide-note">
+          Pipeline над графиками — те же ступени по выбранному тикеру. Красная ступень = этот вход сейчас закрыт.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="invest-guide-entry">
+        <h4>Когда ставит заявки</h4>
+        <p>
+          Только вердикт <strong>invest</strong>. Тогда при включённом Авто робот ведёт
+          paper-лестницу лимиток (часть в ближней зоне, часть на докупку), пишет журнал и statement.
+        </p>
+        <p>
+          <strong>watch</strong> — интерес есть, входа нет (мало подтверждения, событие, слабая лента).
+          <strong>skip</strong> — чек-лист закрыл бумагу на этот скан.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="invest-guide-auto">
+        <h4>Наблюдение и авто</h4>
+        <ul class="signal-guide-list">
+          <li><strong>Наблюдение</strong> — скан и графики без заявок. Список слева всё равно полный.</li>
+          <li><strong>Авто</strong> — те же решения, плюс paper-лестницы и журнал.</li>
+          <li>Тумблер тот же, что в Настройках. Live-заявки брокера — отдельный флаг, по умолчанию выкл.</li>
+        </ul>
+      </article>
+
+      <article class="signal-guide-section" id="invest-guide-risk">
+        <h4>Риск</h4>
+        <ul class="signal-guide-list">
+          <li>Горизонт 1–3 месяца, не внутридневная охота.</li>
+          <li>Риск на сделку в доле капитала sleeve; цель с запасом к стопу (RR не ниже двух).</li>
+          <li>Категория 4 и перегретый сектор в портфель не идут.</li>
+        </ul>
+        <p class="signal-guide-note">
+          Research / decision-support, не индивидуальная рекомендация и не обещание доходности.
+        </p>
+      </article>
+    </div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
-<script src="/js/trinity-chart-kit.js?v=20260925-tlmark2"></script>
-<script src="/js/trend-charts-terminal.js?v=20260925-tlmark2"></script>
+<script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
+<script src="/js/investments-charts-terminal.js?v=20261006-invest7"></script>
+<script src="/js/investments-desk.js?v=20261006-invest9"></script>

@@ -8,7 +8,8 @@ imoex:
     p-value-threshold: 0.05
     z-score-entry: 2.0
     z-score-exit: 0.0
-    top-n: 10
+    # D1-first: мало слотов — только лучшие по Sharpe после HL≥5
+    top-n: 3
     use-rolling-z: true
     rolling-z-window: 60
     fdr-q: 0.20
@@ -17,13 +18,46 @@ imoex:
     kalman-ve: 0.001
     # true = вход только после разворота Z за порогом (не на первом касании ±2)
     require-entry-reversal: true
-  data-dir: data
-  charts-dir: data/charts
+    # @ExperimentPairs OCT2026_PAIRS_BANKS_BOOTSTRAP — soft FDR + R²≥0.65 BANKS only; not @Experiment
+    experiment-pairs-banks-bootstrap: true
+    # @TakenFromOsEngine OCT2026_TAKEN_FROM_OS_ENGINE — whitelist/research book/corr/lookback; combat Z=2 untouched
+    experiment-os-borrow:
+      enabled: true
+      eg-lookback-bars: 252
+      # BANKS return-corr ≈0.45–0.50; 0.70 глушил whitelist
+      min-correlation: 0.40
+      correlation-confirm: true
+      research-book-enabled: true
+      research-z-entry: 1.75
+      research-z-exit: 0.5
+      research-rolling-z-window: 30
+      # early entry: cross ±1.75 (not late fade). If reversal on — anti-late floor via slack
+      research-require-entry-reversal: false
+      research-reversal-min-abs-slack: 0.25
+      whitelist-pairs: "BSPB/MOEX,BSPB/SVCB"
+      # D1-first: классический HL band ≥5d (не скальп на дневках)
+      experiment-min-half-life-days: 5.0
+      min-align-coverage-percent: 60.0
+      # shared holiday gaps on intersection ≠ OsEngine sync-bug; floor ≥21d in code
+      max-align-gap-calendar-days: 45
+      whitelist-only: true
+      # rolling return-corr confirm (in addition to EG-window corr)
+      rolling-corr-bars: 60
+      # Institutional desk (GGR+EG+HL5-60+quarterly freeze) — off in live; campaign tests on
+      institutional-desk: false
+    # @TakenFromOsEngineEnd
+  # Per-machine durable archive (survives app reinstall). Token "user" →
+  # macOS ~/Library/Application Support/TRINITY, Windows %LOCALAPPDATA%\TRINITY,
+  # Linux ~/.local/share/trinity. Override with absolute path or relative "data" (dev).
+  data-dir: user
+  charts-dir: user
   # Labeled engine corpus (training). Not UI. Folder is gitignored; upload later.
   research-corpus-dir: research-corpus
   research-corpus:
     enabled: true
   news:
+    # Обязательный FA-слой после техники (DAILY): новости + дивиденды as-of + tradability.
+    # Replay использует historical=true → дивиденды as-of без live stale/RSS.
     enabled: true
     lookback-days: 10
     stale-candle-days: 10
@@ -51,16 +85,19 @@ imoex:
     stop-z: 3.5
     max-hold-bars: 40
     reduce-size-factor: 0.5
-    # dual-book: слоты считает CapitalAllocator от equity (не этот ключ)
-    max-open-pairs: 2
+    # dual-book: слоты считает CapitalAllocator; D1-first ≤3 пар
+    # Ceiling; live/replay open cap comes from RetailPairsScale (@Might concentrates to 1–2).
+    max-open-pairs: 3
     max-portfolio-gross: 1.0
     min-sharpe: 0.0
-    max-half-life-days: 90.0
-    min-half-life-days: 1.0
-    # торговый gate для боковика (research top-N может быть шире)
-    trade-max-half-life-days: 15.0
+    max-half-life-days: 60.0
+    # D1-first (Grok/classic): HL < 5d = шум на дневках
+    min-half-life-days: 5.0
+    # торговый gate: практичный band 5–40d
+    trade-max-half-life-days: 40.0
     min-r-squared: 0.70
-    min-trade-count: 8
+    # slower HL → fewer in-sample MR cycles; 4×2=8 closes floor
+    min-trade-count: 4
     borrow-rate-annual: 0.08
     dynamic-sizing: true
     target-spread-sigma: 0.02
@@ -69,7 +106,8 @@ imoex:
     partial-tp-fraction: 0.5
     trail-z: 0.75
     beta-break-pct: 0.35
-    coint-p-break: 0.20
+    # soft: 0.20 резал сделки при p≈0.5–0.8 до mean-reversion; 0.60 = только явный развал
+    coint-p-break: 0.60
     adaptive-stop: true
     adaptive-stop-base: 2.5
     adaptive-stop-cap: 4.0
@@ -86,30 +124,33 @@ imoex:
     reduce-factor: 0.5
     index-board: SNDX
   capital:
-    # операторский профиль: 300 тыс. ₽ — pairs + оба trend playbook (fair-paper)
-    equity-rub: 300000
+    # Product default: ordinary subscription user ~250–300к ₽ (band 50–500к).
+    # Pair slots: RetailPairsScale + @Might OCT2026_RETAIL_CONCENTRATION (50к→1, 250к→2, 500к→3).
+    equity-rub: 250000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
-    # DAILY paper live; INTRADAY — research-only (доля 0)
+    # Retail pairs: Daily-only (как у крупных парных столов). H1 off — 2026 PF0.33.
+    # No weekly book — desks don't run a W1 pairs sleeve; we don't invent one.
     daily-gross-share: 1.0
     intraday-gross-share: 0.0
     # Focus-слоты: PAIRS | TREND_M5 | TREND_POSITIONAL | ARB | BALANCED
-    # С 300к BALANCED разрешён: pairs + M5 + positional H1.
-    focus-slot: BALANCED
-    pairs-strategy-share: 0.40
-    trend-m5-share: 0.30
-    trend-positional-share: 0.30
+    # For retail pairs product keep PAIRS (trend sleeves need ≥300к BALANCED).
+    focus-slot: PAIRS
+    pairs-strategy-share: 1.0
+    trend-m5-share: 0.0
+    trend-positional-share: 0.0
     arb-share: 0.0
   session:
-    # DUAL keeps dual-book code paths; operator cycle runs DAILY only (INTRADAY via runIntradayOnly).
+    # DUAL code path kept; trading capital is Daily-only (intraday share = 0).
     mode: DUAL
+    # H1 params retained for research campaigns; live capital share = 0
     candle-interval: 60
     hours-per-session: 7
-    hourly-lookback-days: 90
+    hourly-lookback-days: 400
     intraday-rolling-z-window: 48
-    intraday-max-hold-bars: 7
-    intraday-min-half-life-days: 0.25
-    intraday-trade-max-half-life-days: 3.0
+    intraday-max-hold-bars: 14
+    intraday-min-half-life-days: 0.05
+    intraday-trade-max-half-life-days: 2.0
     pre-close-start: "18:30"
     pre-close-end: "18:45"
     session-open: "10:00"
@@ -125,17 +166,17 @@ imoex:
     test-bars: 63
     step-bars: 63
   paper:
-    enabled: true
+    # Off with pairs (2026-10-04): see IMOEX-core/trinity-pairs/docs/RESEARCH-SOFT-ELITE.md
+    enabled: false
     # ~30к/нога: 1 пара ≈ 60к gross при β≈1, запас под 2-ю пару / издержки
     notional-per-leg: 30000
     notional-per-leg-pct: 0.30
     journal-file: paper-journal.json
-    auto-run-daily: true
+    auto-run-daily: false
     # До открытия основной сессии (10:00 MSK): прогон по итогам предыдущего дня
     daily-cron: "0 55 9 * * MON-FRI"
     daily-cron-zone: Europe/Moscow
-    # INTRADAY pairs: detached from operator UX / «Анализ + paper» / DAILY cron.
-    # Research entrypoint remains runIntradayOnly + this cron (kept off).
+    # INTRADAY pairs research-only until D1→H4 cascade is validated
     auto-run-intraday: false
     intraday-research-only: true
     intraday-cron: "0 5 10-18 * * MON-FRI"
@@ -172,7 +213,27 @@ imoex:
     sit-out-if-unproven: false
     min-quality-pairs: 2
     pair-min-closed-trades: 2
+    # 2 = бан после двух минусов подряд (1 слишком рано резал recovery)
     pair-loss-streak: 2
+  # @ExperimentPairs OCT2026_PAIR_ELITE_ROSTER — continuously rank & trade only best pairs
+  pair-elite:
+    enabled: true
+    # D1-first: 1–3 лучших пар, не гнаться за частотой
+    max-pairs: 3
+    min-closed-trades: 2
+    min-profit-factor: 1.10
+    loss-streak-ban: 2
+    lookback-months: 6
+    blocked-tickers: "MTLR"
+    roster-file: pair-elite-roster.json
+    sit-out-unproven: true
+    probe-size-fraction: 0.40
+    full-size-min-closed-trades: 2
+    full-size-min-profit-factor: 1.10
+    hard-stop-loss-rub: 800
+    hard-stop-z: 3.0
+    max-research-bootstrap-slots: 2
+  # @ExperimentPairsEnd
   # Simulated SKU for operator UX locks (no billing). Override in Settings at runtime.
   # PAIRS | PAIRS_TREND | FULL
   product:
@@ -260,10 +321,26 @@ imoex:
     on-startup: true
     retry-max: 5
     retry-delay-ms: 15000
-  # Module feature flags (Maven modules trinity-pairs / trinity-trend / trinity-calendar-arb / trinity-marketdata)
+  # Module flags: trinity-pairs / trinity-trend / trinity-calendar-arb / trinity-dual-class / trinity-marketdata
   strategies:
     pairs:
-      enabled: true
+      # Off 2026-10-04: soft-elite <2%/year 2025 and 2026 YTD at 250k. Archive: trinity-pairs/docs/
+      enabled: false
+    dual-class:
+      # Off 2026-10-04: AO/AP after costs is noise on 50k–1M. Module stays in repo, desk hidden.
+      enabled: false
+      # Floor vs issuer center, not vs 0. TATN ~6%, SNGS ~−70%.
+      entry-abs-premium-pct: 4.0
+      exit-abs-premium-pct: 1.0
+      min-roundtrip-cost-pct: 0.40
+      max-open-pairs: 1
+      half-spread-below-rub: 150000
+      max-gross-pct: 0.25
+      dividend-layer-ready: false
+      # Только TATN, две ноги, ≤25%. |z|≥2, |остаток|≥4%, не ловим разъезд. Сургут/РТК вне круга.
+      lookback-sessions: 60
+      entry-z: 2.0
+      exit-z: 0.5
     trend:
       enabled: true
       auto-execution: true    # fair-paper live → SANDBOX_FAIR append to trend-paper-journal
@@ -276,9 +353,10 @@ imoex:
       sandbox-broker-stop: true
       sandbox-broker-stop-dry-run: true   # paper: не слать в sandbox (PostStop там всё равно нельзя)
       sandbox-broker-stop-qty: 1
-      # Exclusive-only while positional H1 (hvnHills) OOMs the JVM; restore both after fix
-      playbook: levels-profile-br-m5
-      parallel-playbooks: false
+      # Parallel on after hvnHills VAP/peak caps (was OOM). Collect window — no positional gate tune.
+      playbook: both
+      # both = Exclusive + Positional. all = + retail-brm-m5 (плейбук #3, не четвёртая стратегия).
+      parallel-playbooks: true
       desk-go-long-rub: 20000
       desk-go-short-rub: 22000
       grid: MODERATE
@@ -334,6 +412,10 @@ imoex:
         tp1-points: 20
         rub-per-point: 7.0
         sl-sweep-buffer-points: 5    # за day-полкой +5 пт против ложного SWEEP; иначе skip если > stop-points
+      # Плейбук #3: тот же чеклист M5, контракт BRM, лестница 1 лот (редко 2). Не отдельная стратегия.
+      brm:
+        enabled: true
+        rub-per-point: 0.7
     calendar-arb:
       enabled: true
       auto-execution: true          # fair-paper fills on T-Invest H1 close
@@ -383,6 +465,28 @@ imoex:
       trade-session-close: "19:00"
       no-trade-after-open-minutes: 20
       no-trade-before-close-minutes: 30
+    investments:
+      enabled: true
+      auto-execution: false   # OBSERVE vs SANDBOX_FAIR paper ladders
+      live-execution: false   # LIVE_EQUITY gated separately
+      paper-tick-ms: 30000
+      # Daily entry scan + decision/corpus history (independent of auto/live)
+      daily-scan-enabled: true
+      daily-scan-cron: "0 20 10,12,15,18 * * MON-FRI"
+      daily-scan-initial-ms: 45000
+      min-avg-daily-turnover-rub: 50000000
+      max-spread-bps: 80
+      min-market-cap-rub: 30000000000
+      max-sector-weight: 0.20
+      risk-per-trade-min-pct: 0.005
+      risk-per-trade-max-pct: 0.015
+      min-reward-risk: 2.0
+      max-addon-gap-pct: 0.25
+      require-cluster-tape: true
+      require-uptrend-d1: true
+      max-names: 12
+      invest-score-min: 0.72
+      watch-score-min: 0.40
   # Marketplace live DOM/trades — T-Invest only (no ISS tape).
   marketdata:
     enabled: true
@@ -397,15 +501,14 @@ imoex:
     auto-resolve-instrument: BR
     # instruments: BRU6=FIGI…   # optional override; else auto-resolve future ticker
 
-# Продуктовый бренд (стратегии 2–3 + marketdata — модули; live пока pairs)
+# Актив: тренд (Exclusive M5 + positional H1 + BRM) и календарь FORTS. Спред AO/AP и пары EG выкл.
 trinity:
   name: TRINITY Multi-Strategy Arbitrage
   version: 1.0.0
   slogan: "Three Strategies. One Mission."
   strategies:
-    - cointegration
-    # - trend
-    # - futures-arbitrage
+    - trend
+    - calendar
 
 server:
   port: 8080

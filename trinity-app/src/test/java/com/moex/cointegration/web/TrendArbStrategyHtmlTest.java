@@ -24,7 +24,8 @@ class TrendArbStrategyHtmlTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
-                true, true, calendarArbEnabled
+                java.util.Optional.empty(),
+                true, true, calendarArbEnabled, true
         );
     }
 
@@ -35,9 +36,11 @@ class TrendArbStrategyHtmlTest {
         assertTrue(html.contains(">Описание<"), html);
         assertTrue(html.contains("class=\"active\" data-requires=\"trend\">Описание<")
                 || html.contains("class=\"active\" data-requires=\"trend\">Описание</a>"), html);
-        assertTrue(html.contains("Тренд сейчас: два разных робота"), html);
+        assertTrue(html.contains("Тренд сейчас: три плейбука"), html);
         assertTrue(html.contains("Диапазонная: только нефть"), html);
         assertTrue(html.contains("Позиционная: час и сетка"), html);
+        assertTrue(html.contains("BRM мини"), html);
+        assertTrue(html.contains("для небольших капиталов"), html);
         assertTrue(html.contains("Тумблеры Наблюдение / Авто"), html);
         assertTrue(html.contains("Живые заявки на срочном рынке у диапазонной нефти выключены"), html);
         assertTrue(html.contains("хвост ведём трейлом"), html);
@@ -48,6 +51,19 @@ class TrendArbStrategyHtmlTest {
         assertFalse(html.contains("liveExecution"), html);
         assertFalse(html.contains("§"), html);
         assertFalse(html.contains("/view/trend-strategy</"), html);
+    }
+
+    @Test
+    void spreadStrategyPageIsSameIssuerNotSectorScan() {
+        String html = renderer(true).renderSpreadStrategyPage();
+        assertFalse(html.contains("data-strategy=\"spread\""), html);
+        assertFalse(html.contains(">Спред<"), html);
+        assertTrue(html.contains("Торговля спредом сейчас"), html);
+        assertTrue(html.contains("одного эмитента"), html);
+        assertTrue(html.contains("Наблюдение / Авто") || html.contains("Наблюдение и авто"), html);
+        assertFalse(html.toLowerCase().contains("z-score"), html);
+        assertFalse(html.contains("Kalman") || html.contains("kalman"), html);
+        assertFalse(html.contains("§"), html);
     }
 
     @Test
@@ -63,5 +79,44 @@ class TrendArbStrategyHtmlTest {
         assertFalse(html.toLowerCase().contains("z-score"), html);
         assertFalse(html.contains("§"), html);
         assertFalse(html.contains("Kalman") || html.contains("kalman"), html);
+    }
+
+    @Test
+    void investmentsStrategyIsThirdSwitcherAndCabinetManual() {
+        String html = renderer(true).renderInvestmentsStrategyPage();
+        assertTrue(html.contains("data-strategy=\"invest\""), html);
+        assertTrue(html.contains("активный отбор акций") || html.contains("Инвестиции"), html);
+        assertTrue(html.contains("/view/investments"), html);
+        assertTrue(html.contains("id=\"investments-playbook-settings\"")
+                || html.contains("/view/settings#investments-playbook-settings"), html);
+    }
+
+    @Test
+    void investmentsDeskHostsChartsAndOps() {
+        String html = renderer(true).renderInvestmentsDeskPage();
+        assertTrue(html.contains("id=\"investments-charts-terminal\""), html);
+        assertTrue(html.contains("id=\"invest-ops-panel\""), html);
+        assertTrue(html.contains("investments-charts-terminal.js"), html);
+        assertTrue(html.contains("investments-desk.js"), html);
+        assertTrue(html.contains("trinity-status-plaques.js"), html);
+        assertTrue(html.contains("Как торгует робот"), html);
+        assertTrue(html.contains("id=\"invest-guide-modal\""), html);
+        assertTrue(html.contains("фиксированный универсум"), html);
+        assertTrue(html.contains("id=\"invest-auto-execution\""), html);
+        assertTrue(html.contains("mode-switch-track"), html);
+        assertTrue(html.contains("role=\"switch\""), html);
+        assertFalse(html.contains("Авто (paper)"), html);
+        assertFalse(html.contains("data-nav-strategy=\"trend\""), html);
+    }
+
+    @Test
+    void dashboardShowsInvestmentsRobotCard() {
+        String html = renderer(true).renderDashboard(null, java.util.List.of(), null);
+        assertTrue(html.contains("id=\"dash-robot-range\""), html);
+        assertTrue(html.contains("id=\"dash-robot-pos\""), html);
+        assertTrue(html.contains("id=\"dash-robot-brm\""), html);
+        assertTrue(html.contains("id=\"dash-robot-arb\""), html);
+        assertTrue(html.contains("id=\"dash-robot-invest\""), html);
+        assertTrue(html.contains("/view/investments"), html);
     }
 }

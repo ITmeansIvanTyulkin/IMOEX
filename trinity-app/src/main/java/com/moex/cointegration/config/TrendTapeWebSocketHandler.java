@@ -6,7 +6,11 @@ import com.moex.trinity.marketdata.DomBook;
 import com.moex.trinity.marketdata.MarketDataFeed;
 import com.moex.trinity.marketdata.TapeTickBus;
 import com.moex.trinity.marketdata.TInvestBrokerMarketData;
+import com.moex.trinity.marketdata.TInvestCredentials;
+import com.moex.trinity.marketdata.TInvestMarketDataFeed;
 import com.moex.trinity.marketdata.TradePrint;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -17,12 +21,16 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class TrendTapeWebSocketHandler extends TextWebSocketHandler implements TapeTickBus.Listener {
 
+    private static final Logger log = LoggerFactory.getLogger(TrendTapeWebSocketHandler.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int BOOK_LEVELS = 50;
 
@@ -43,8 +52,14 @@ public class TrendTapeWebSocketHandler extends TextWebSocketHandler implements T
     private final ConcurrentHashMap<String, DomBook> pendingBooks = new ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<QueuedPrint> tradeQ =
             new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final Set<String> warming = ConcurrentHashMap.newKeySet();
     private final ScheduledExecutorService flushExec = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "trend-tape-ws");
+        t.setDaemon(true);
+        return t;
+    });
+    private final ExecutorService warmExec = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "trend-tape-warm");
         t.setDaemon(true);
         return t;
     });
@@ -65,6 +80,7 @@ public class TrendTapeWebSocketHandler extends TextWebSocketHandler implements T
     void stop() {
         bus.removeListener(this);
         flushExec.shutdownNow();
+        warmExec.shutdownNow();
     }
 
     @Override
@@ -95,7 +111,86 @@ public class TrendTapeWebSocketHandler extends TextWebSocketHandler implements T
             return;
         }
         applySubscribe(c, message.getPayload());
+        warmStreamInstruments(c.instruments);
         snapshot(c);
+    }
+
+    /**
+     * Investments / equity panes subscribe ROSN,NVTK,… — stream usually starts with FORTS only.
+     * Resolve share FIGIs and subscribe trades+DOM so tape/DOM are not stuck on «ждём ленту».
+     */
+    private void warmStreamInstruments(List<String> instruments) {
+        MarketDataFeed md = feed.orElse(null);
+        if (!(md instanceof TInvestMarketDataFeed tFeed) || instruments == null || instruments.isEmpty()) {
+            return;
+        }
+        List<String> need = new ArrayList<>();
+        for (String raw : instruments) {
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            String t = raw.trim().toUpperCase(Locale.ROOT);
+            if (tFeed.subscribedTickers().contains(t)) {
+                continue;
+            }
+            if (warming.add(t)) {
+                need.add(t);
+            }
+        }
+        if (need.isEmpty()) {
+            return;
+        }
+        warmExec.execute(() -> {
+            try {
+                TInvestCredentials creds = TInvestCredentials.resolve();
+                if (!creds.present()) {
+                    return;
+                }
+                try (TInvestBrokerMarketData broker = new TInvestBrokerMarketData(creds)) {
+                    Map<String, String> extra = new LinkedHashMap<>();
+                    for (String t : need) {
+                        try {
+                            String figi;
+                            try {
+                                figi = broker.resolveShareFigi(t);
+                            } catch (Exception shareFail) {
+                                figi = broker.resolveFigi(t);
+                            }
+                            if (figi == null || figi.isBlank()) {
+                                continue;
+                            }
+                            extra.put(t, figi);
+                            try {
+                                DomBook book = broker.fetchOrderBook(t, figi, BOOK_LEVELS);
+                                if (book != null && !book.emptyLevels()) {
+                                    tFeed.putBook(book);
+                                }
+                            } catch (Exception bookEx) {
+                                log.debug("warm book {}: {}", t, bookEx.getMessage());
+                            }
+                        } catch (Exception ex) {
+                            log.debug("warm figi {}: {}", t, ex.getMessage());
+                        } finally {
+                            warming.remove(t);
+                        }
+                    }
+                    if (!extra.isEmpty()) {
+                        tFeed.addInstruments(extra);
+                        log.info("Tape stream +{} equity/FORTS legs: {}", extra.size(), extra.keySet());
+                        for (Client c : clients.values()) {
+                            try {
+                                snapshot(c);
+                            } catch (Exception ignored) {
+                                // next flush / reconnect
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                log.debug("warmStreamInstruments: {}", ex.getMessage());
+                need.forEach(warming::remove);
+            }
+        });
     }
 
     @Override

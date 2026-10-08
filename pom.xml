@@ -37,6 +37,8 @@
                 <module>../IMOEX-core/trinity-pairs</module>
                 <module>../IMOEX-core/trinity-trend</module>
                 <module>../IMOEX-core/trinity-calendar-arb</module>
+                <module>../IMOEX-core/trinity-investments</module>
+                <module>../IMOEX-core/trinity-dual-class</module>
                 <module>../IMOEX-core/trinity-runtime</module>
                 <module>trinity-app</module>
             </modules>
@@ -78,6 +80,16 @@
             <dependency>
                 <groupId>com.moex</groupId>
                 <artifactId>trinity-calendar-arb</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-investments</artifactId>
+                <version>${trinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.moex</groupId>
+                <artifactId>trinity-dual-class</artifactId>
                 <version>${trinity.version}</version>
             </dependency>
             <dependency>

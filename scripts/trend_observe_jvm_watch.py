@@ -80,7 +80,8 @@ def wake(wake_path: Path, kind: str, detail: dict) -> None:
     _last_wake_at[kind] = now
     prompt = (
         "Goal observePathToReal: JVM watch "
-        f"{kind}. Проверь health/desk/poll; при flat — resume/daemon restart. "
+        f"{kind}. Проверь health/desk/poll/Exclusive open; "
+        "рестарт JVM только если flat (open → не рестартить). "
         "НЕ крути пад/knife. Phase C NO_GO."
     )
     row = {

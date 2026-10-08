@@ -72,43 +72,19 @@ public class AnalysisViewController {
         return htmlRenderer.renderDashboard(report.get(), recommendations, marketRegimeService.current());
     }
 
-    @GetMapping(value = "/recommendations", produces = MediaType.TEXT_HTML_VALUE)
-    public String allRecommendations() throws IOException {
-        if (storage.loadReport().isEmpty()) {
-            return htmlRenderer.renderEmpty();
-        }
-        return htmlRenderer.renderAllRecommendations(recommendationService.getLastRecommendations());
+    @GetMapping(value = "/recommendations")
+    public RedirectView allRecommendations() {
+        return hidePairsDesk();
     }
 
-    @GetMapping(value = "/signals", produces = MediaType.TEXT_HTML_VALUE)
-    public String signals() throws IOException {
-        if (storage.loadReport().isEmpty()) {
-            return htmlRenderer.renderEmpty();
-        }
-        return htmlRenderer.renderSignals(recommendationService.getActionableSignals());
+    @GetMapping(value = "/signals")
+    public RedirectView signals() {
+        return hidePairsDesk();
     }
 
-    @GetMapping(value = "/final", produces = MediaType.TEXT_HTML_VALUE)
-    public String finalTable() throws IOException {
-        Optional<AnalysisReport> report = storage.loadReport();
-        if (report.isEmpty()) {
-            return htmlRenderer.renderEmpty();
-        }
-        List<FinalTradeRecommendation> rows = finalRecommendationService.getLastFinal();
-        ClusterReviewReport cluster = null;
-        try {
-            cluster = storage.loadClusterReview().orElse(null);
-        } catch (IOException ignored) {
-            cluster = null;
-        }
-        return htmlRenderer.renderFinalTable(
-                rows,
-                recommendationService.getLastRecommendations(),
-                marketRegimeService.currentOrRefresh(),
-                report.get(),
-                rssHeadlineService.current(),
-                cluster
-        );
+    @GetMapping(value = "/final")
+    public RedirectView finalTable() {
+        return hidePairsDesk();
     }
 
     @GetMapping(value = "/statement", produces = MediaType.TEXT_HTML_VALUE)
@@ -127,17 +103,9 @@ public class AnalysisViewController {
         return rv;
     }
 
-    @GetMapping(value = "/walk-forward", produces = MediaType.TEXT_HTML_VALUE)
-    public String walkForward() throws IOException {
-        Optional<WalkForwardReport> report = walkForwardService.getLastReport()
-                .or(() -> {
-                    try {
-                        return storage.loadWalkForwardReport();
-                    } catch (IOException e) {
-                        return Optional.empty();
-                    }
-                });
-        return htmlRenderer.renderWalkForward(report.orElse(null));
+    @GetMapping(value = "/walk-forward")
+    public RedirectView walkForward() {
+        return hidePairsDesk();
     }
 
     @GetMapping(value = "/settings", produces = MediaType.TEXT_HTML_VALUE)
@@ -145,9 +113,9 @@ public class AnalysisViewController {
         return htmlRenderer.renderSettings();
     }
 
-    @GetMapping(value = "/strategy", produces = MediaType.TEXT_HTML_VALUE)
-    public String strategy() {
-        return htmlRenderer.renderStrategy();
+    @GetMapping(value = "/strategy")
+    public RedirectView strategy() {
+        return hidePairsDesk();
     }
 
     @GetMapping(value = "/full-core", produces = MediaType.TEXT_HTML_VALUE)
@@ -162,12 +130,19 @@ public class AnalysisViewController {
         return htmlRenderer.renderGuide();
     }
 
-    @GetMapping(value = "/charts/{tickerY}/{tickerX}", produces = MediaType.TEXT_HTML_VALUE)
-    public String pairChart(
+    @GetMapping(value = "/charts/{tickerY}/{tickerX}")
+    public RedirectView pairChart(
             @PathVariable String tickerY,
             @PathVariable String tickerX
     ) {
-        return htmlRenderer.renderChartPage(tickerY.toUpperCase(), tickerX.toUpperCase());
+        return hidePairsDesk();
+    }
+
+    /** Pairs desk hidden until a later revisit. Routes stay so old bookmarks do not 404. */
+    private static RedirectView hidePairsDesk() {
+        RedirectView rv = new RedirectView("/view");
+        rv.setStatusCode(HttpStatus.FOUND);
+        return rv;
     }
 
     @GetMapping(value = "/trend-signal", produces = MediaType.TEXT_HTML_VALUE)
@@ -180,9 +155,16 @@ public class AnalysisViewController {
         return htmlRenderer.renderTrendPositionalPage();
     }
 
-    @GetMapping(value = "/trend-charts", produces = MediaType.TEXT_HTML_VALUE)
-    public String trendCharts() {
-        return htmlRenderer.renderTrendChartsPage();
+    @GetMapping(value = "/trend-brm", produces = MediaType.TEXT_HTML_VALUE)
+    public String trendBrm() {
+        return htmlRenderer.renderTrendBrmPage();
+    }
+
+    @GetMapping(value = "/trend-charts")
+    public RedirectView trendChartsMoved() {
+        RedirectView rv = new RedirectView("/view/investments");
+        rv.setStatusCode(HttpStatus.MOVED_PERMANENTLY);
+        return rv;
     }
 
     @GetMapping(value = "/trend-strategy", produces = MediaType.TEXT_HTML_VALUE)
@@ -198,5 +180,25 @@ public class AnalysisViewController {
     @GetMapping(value = "/calendar-arb-strategy", produces = MediaType.TEXT_HTML_VALUE)
     public String calendarArbStrategy() {
         return htmlRenderer.renderCalendarArbStrategyPage();
+    }
+
+    @GetMapping(value = "/spread")
+    public RedirectView spread() {
+        return hidePairsDesk();
+    }
+
+    @GetMapping(value = "/spread-strategy")
+    public RedirectView spreadStrategy() {
+        return hidePairsDesk();
+    }
+
+    @GetMapping(value = "/investments", produces = MediaType.TEXT_HTML_VALUE)
+    public String investments() {
+        return htmlRenderer.renderInvestmentsDeskPage();
+    }
+
+    @GetMapping(value = "/investments-strategy", produces = MediaType.TEXT_HTML_VALUE)
+    public String investmentsStrategy() {
+        return htmlRenderer.renderInvestmentsStrategyPage();
     }
 }

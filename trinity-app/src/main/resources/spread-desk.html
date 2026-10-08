@@ -1,0 +1,98 @@
+<section class="signal-desk" id="spread-desk">
+  <div class="signal-desk-head">
+    <div>
+      <p class="meta"><a href="/view">← дашборд</a></p>
+      <h2>Торговля спредом</h2>
+      <p class="meta" id="spread-desk-meta">Только Татнефть, две ноги, ≤25% капитала. Не паритет — z к своей 60д медиане.</p>
+    </div>
+    <div class="signal-desk-actions">
+      <button type="button" class="btn btn-ghost" id="spread-desk-refresh">Обновить</button>
+      <button type="button" class="btn btn-ghost" id="spread-guide-open">Как торгует робот</button>
+      <a class="btn btn-ghost" href="/view/settings#spread-playbook-settings">Режим</a>
+    </div>
+  </div>
+  <div class="signal-desk-strip" id="spread-desk-strip">
+    <div class="signal-chip"><span class="k">Робот</span><strong id="spread-robot">спред</strong></div>
+    <div class="signal-chip"><span class="k">Данные</span><strong id="spread-source">ISS last</strong></div>
+    <div class="signal-chip"><span class="k">Режим</span><strong id="spread-delivery">—</strong></div>
+    <div class="signal-chip"><span class="k">Книга</span><strong id="spread-book">—</strong></div>
+    <div class="signal-chip"><span class="k">Пол от центра</span><strong id="spread-floor">—</strong></div>
+    <div class="signal-chip"><span class="k">Открыто</span><strong id="spread-open">0</strong></div>
+    <div class="signal-chip"><span class="k">Сделки сегодня</span>
+      <strong><a id="spread-paper-today" href="/view/statement">нет журнала</a></strong>
+    </div>
+  </div>
+  <div class="strategy-mode-bar" id="spread-auto-wrap" hidden>
+    <label class="mode-switch is-signal" title="Наблюдение: смотрим щель. Авто: позже журнал. Живых заявок нет.">
+      <span class="mode-switch-label">Наблюдение</span>
+      <input type="checkbox" id="desk-spread-auto-execution" role="switch" aria-checked="false" disabled>
+      <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+      <span class="mode-switch-label">Авто</span>
+    </label>
+    <p class="strategy-mode-hint" id="spread-mode-hint">Наблюдение: график и таблица без сделок.</p>
+  </div>
+  <p class="meta" id="spread-reason">—</p>
+  <div class="signal-paper-panel" id="spread-table-panel">
+    <p class="signal-brief-title">Whitelist</p>
+    <table class="signal-paper-table">
+      <thead>
+        <tr>
+          <th>Эмитент</th>
+          <th>Ноги</th>
+          <th>Щель %</th>
+          <th>Центр</th>
+          <th>Остаток</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody id="spread-body">
+        <tr><td colspan="6">Загрузка…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">Сбер, Сургут, Ростелеком и Башнефть — смотрим, не торгуем. Транснефть и Мечел в книгу не берём.</p>
+</section>
+
+<div class="signal-guide-gate" id="spread-guide-modal" hidden aria-hidden="true">
+  <div class="signal-guide-backdrop" data-spread-guide-close tabindex="-1" aria-hidden="true"></div>
+  <div class="signal-guide-modal" role="dialog" aria-modal="true"
+       aria-labelledby="spread-guide-title" tabindex="-1">
+    <header class="signal-guide-head">
+      <div>
+        <p class="signal-guide-kicker">TRINITY · Торговля спредом</p>
+        <h3 id="spread-guide-title">Как торгует робот</h3>
+        <p class="signal-guide-lead">Покупаем класс, который дешевле своего обычного места у этого эмитента. Не «АО должно стоить как АП».</p>
+      </div>
+      <button type="button" class="signal-guide-close" id="spread-guide-close"
+              data-spread-guide-close aria-label="Закрыть">×</button>
+    </header>
+    <div class="signal-guide-body">
+      <article class="signal-guide-section" id="spread-guide-idea">
+        <h4>Идея</h4>
+        <p>
+          Покупаем дешёвый класс и продаём дорогой у одного эмитента.
+          Центр — скользящая 60-дневная медиана щели, не «АО = АП».
+          Для малого капитала торгуем только Татнефть: одинаковый дивиденд, обе ноги ликвидны.
+        </p>
+      </article>
+      <article class="signal-guide-section" id="spread-guide-capital">
+        <h4>Капитал 50 тыс–1 млн</h4>
+        <ol class="signal-guide-steps">
+          <li>Всегда две ноги. Одна нога — это ставка на акцию, не спред.</li>
+          <li>Не больше 25% капитала, без плеча. Если лот не влезает — не торгуем.</li>
+          <li>Вход: |z|≥2, |остаток|≥4%, щель уже не расширяется. Пауза 5 сессий после выхода. Заём шорта 12% годовых.</li>
+          <li>Окно дивиденда не торгуем. Боевого входа нет, пока слой отсечки не готов.</li>
+        </ol>
+      </article>
+      <article class="signal-guide-section" id="spread-guide-robot">
+        <h4>Наблюдение и авто</h4>
+        <ol class="signal-guide-steps">
+          <li><strong>Наблюдение</strong> — last с биржи и остаток от центра. Сделок нет.</li>
+          <li><strong>Авто</strong> — тумблер есть. Журнал ещё не подключён.</li>
+        </ol>
+      </article>
+    </div>
+  </div>
+</div>
+<script src="/js/trinity-fast-boot.js?v=20261004-spread3"></script>
+<script src="/js/spread-desk.js?v=20261004-spread3"></script>

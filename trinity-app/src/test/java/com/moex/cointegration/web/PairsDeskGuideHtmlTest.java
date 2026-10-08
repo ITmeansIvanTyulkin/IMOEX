@@ -27,6 +27,8 @@ class PairsDeskGuideHtmlTest {
         assertTrue(html.toLowerCase().contains("парн"), html);
         assertTrue(html.contains("фаворит отрасли") || html.contains("Фаворит отрасли"), html);
         assertTrue(html.contains("закрытия реестра"), "dividend window missing from pairs guide");
+        assertTrue(html.contains("id=\"pairs-guide-capital\""), "capital expectations section missing");
+        assertTrue(html.contains("1 млн") || html.contains("миллион"), "capital scale hint missing");
         assertFalse(html.contains("mean-reversion"), html);
         assertFalse(html.toLowerCase().contains("z-score"), html);
         assertFalse(html.contains("Kalman") || html.contains("kalman"), html);
@@ -43,6 +45,9 @@ class PairsDeskGuideHtmlTest {
         }
         String src = Files.readString(p, StandardCharsets.UTF_8);
         assertTrue(src.contains("id=\"pairs-guide-open\""), "guide button missing on pairs desk");
+        assertTrue(src.contains("id=\"pairs-capital-note\""), "capital note missing on pairs desk");
+        assertTrue(src.contains("<details class=\"pairs-capital-note\""), "capital note must be collapsible");
+        assertTrue(src.contains("renderPairsCapitalNote"), "capital note builder missing");
         assertTrue(src.contains("pairs-desk-guide.html"), "guide resource not loaded");
         assertTrue(src.contains("pairs-final-desk.js?v=20260919-persist1"), src);
         String js = read("static/js/pairs-final-desk.js");

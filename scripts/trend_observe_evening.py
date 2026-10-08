@@ -77,7 +77,8 @@ def classify_notes(notes: str) -> str | None:
 
 def desk_snapshot():
     try:
-        d = desk_request(DESK_URL, timeout=20)
+        # Exclusive lane — playbook query keeps fillMode/open/expiry on the right desk.
+        d = desk_request(f"{DESK_URL}?playbook=levels-profile-br-m5", timeout=20)
     except Exception as e:
         return {"error": str(e)}
     fp = d.get("fairPaper") or {}

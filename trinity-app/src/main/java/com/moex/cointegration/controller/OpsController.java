@@ -35,6 +35,7 @@ public class OpsController {
     private final StartupSmokeStatus smokeStatus;
     private final ObjectProvider<StartupSmokeRunner> smokeRunner;
     private final com.moex.cointegration.ops.LiveExecutionGate liveExecutionGate;
+    private final com.moex.cointegration.service.RetailCapitalGuideService retailCapitalGuide;
 
     public OpsController(
             PaperAlertService alertService,
@@ -43,7 +44,8 @@ public class OpsController {
             ProductEditionService productEdition,
             StartupSmokeStatus smokeStatus,
             ObjectProvider<StartupSmokeRunner> smokeRunner,
-            com.moex.cointegration.ops.LiveExecutionGate liveExecutionGate
+            com.moex.cointegration.ops.LiveExecutionGate liveExecutionGate,
+            com.moex.cointegration.service.RetailCapitalGuideService retailCapitalGuide
     ) {
         this.alertService = alertService;
         this.tradeToasts = tradeToasts;
@@ -52,6 +54,7 @@ public class OpsController {
         this.smokeStatus = smokeStatus;
         this.smokeRunner = smokeRunner;
         this.liveExecutionGate = liveExecutionGate;
+        this.retailCapitalGuide = retailCapitalGuide;
     }
 
     /**
@@ -108,6 +111,21 @@ public class OpsController {
         Map<String, Object> out = new LinkedHashMap<>(productEdition.dto());
         out.put("applied", next.name());
         return out;
+    }
+
+    /** GET /api/ops/retail-capital-guide — mini-book BRM onboarding modal. */
+    @GetMapping("/retail-capital-guide")
+    public Map<String, Object> retailCapitalGuide() {
+        return retailCapitalGuide.prompt();
+    }
+
+    /**
+     * POST /api/ops/retail-capital-guide — dismiss modal; body {@code {"apply":true}} applies BRM defaults.
+     */
+    @PostMapping("/retail-capital-guide")
+    public Map<String, Object> retailCapitalGuideAck(@RequestBody(required = false) Map<String, Object> body) {
+        boolean apply = body == null || !Boolean.FALSE.equals(body.get("apply"));
+        return retailCapitalGuide.acknowledge(apply);
     }
 
     /**

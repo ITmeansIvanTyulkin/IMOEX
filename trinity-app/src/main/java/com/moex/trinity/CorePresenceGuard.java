@@ -24,6 +24,7 @@ public class CorePresenceGuard {
             "com.moex.cointegration.quant.EngleGrangerTest",
             "com.moex.cointegration.config.CapitalAllocator",
             "com.moex.trinity.calendararb.CalendarArbPlaybook",
+            "com.moex.trinity.investments.InvestmentsPlaybook",
             "com.moex.cointegration.service.TrendDeskService",
             "com.moex.cointegration.service.TrendFairPaperLiveService"
     };

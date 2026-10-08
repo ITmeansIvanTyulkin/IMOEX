@@ -19,7 +19,8 @@
 
 | Модуль | Что делает |
 |---|---|
-| **Данные** | MOEX ISS: дневные + 1H OHLCV (`data/candles/`, `data/candles-1h/`) — без TradingView |
+| **Данные** | MOEX ISS (+ retry): дневные + 1H OHLCV; при сбое ISS — T-Invest daily fallback; существующий store не затирается пустым ответом |
+| **Pairs research (`@TakenFromOsEngine`)** | Whitelist + research book (Z 1.75 / exit 0.5 / Z-window 30 / no reversal), corr confirm, EG lookback 252, anti sync-gap; combat Z=2+reversal не трогаем |
 | **Universe filter** | Pre-filter: медианный оборот, мин. цена, отсев preferred `*P`; **INTRADAY tier-1** (~30 голубых фишек) |
 | **ATAS внутри TRINITY** | INTRADAY execution-слой: volume/spread/delta, **footprint, clusters, DOM, iceberg**, POC/VA, session edges; partial TP у POC |
 | **Data coverage** | `coveragePercent` + `warning` в `analysis-report.json`; пары с покрытием &lt; 85% отсекаются risk-фильтром |
@@ -616,7 +617,7 @@ IMOEX/
 └── data/                        # свечи, отчёты, paper (gitignore)
 ```
 
-Флаги модулей: `imoex.strategies.pairs|trend|calendar-arb.enabled` (pairs/trend/arb по умолчанию `true`; live-заявки trend/arb выкл).
+Флаги модулей: `imoex.strategies.pairs|trend|calendar-arb.enabled` (**pairs выкл.** с 2026-10-04 — нет >2% год 2025/2026 YTD, архив `IMOEX-core/trinity-pairs/docs/`; trend/arb по умолчанию `true`; live-заявки trend/arb выкл).
 
 ### Локальные артефакты (`data/`)
 

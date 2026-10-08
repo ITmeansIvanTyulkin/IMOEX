@@ -6,5 +6,6 @@ package com.moex.trinity.shared;
 public enum StrategyId {
     PAIRS,
     TREND,
-    CALENDAR_ARB
+    CALENDAR_ARB,
+    INVESTMENTS
 }

@@ -95,16 +95,21 @@
   function deskScope() {
     const root = $("trend-signal-desk");
     const s = root && root.getAttribute("data-desk-scope");
-    return s === "positional" ? "positional" : "range";
+    if (s === "positional") return "positional";
+    if (s === "brm") return "brm";
+    return "range";
   }
   function isRangeDesk() {
-    return deskScope() !== "positional";
+    return deskScope() === "range" || deskScope() === "brm";
   }
   function isOilInstrument(secid) {
-    return instrumentFamily(secid) === "BR";
+    const f = instrumentFamily(secid);
+    return f === "BR" || f === "BRM";
   }
   function viewPlaybookId() {
-    return deskScope() === "positional" ? "positional-volume-h1" : "levels-profile-br-m5";
+    if (deskScope() === "positional") return "positional-volume-h1";
+    if (deskScope() === "brm") return "retail-brm-m5";
+    return "levels-profile-br-m5";
   }
   function deskBars(data) {
     if (deskScope() === "positional" || (data && data.deskScope === "positional")) {
@@ -144,13 +149,18 @@
   }
   function applyDeskChrome() {
     const pos = deskScope() === "positional";
+    const brm = deskScope() === "brm";
     const volLab = $("signal-desk-volume-label");
     if (volLab) volLab.textContent = pos ? "Объём H1" : "Объём M5";
     const hint = $("signal-chart-hint");
     if (hint && pos) {
       hint.innerHTML = "Часовой график · след / MACD / профиль / линии · "
-        + "<a href=\"/view/trend-charts\">терминал графиков</a> · "
+        + "<a href=\"/view/investments\">инвестиции · графики</a> · "
         + "вход в промежуточную полку объёма · сетка 1:1:2:4 · стоп и тейк";
+    } else if (hint && brm) {
+      hint.innerHTML = "M5 · BRM мини · тот же чеклист полок, что у диапазонной · "
+        + "для счетов ~50–150 тыс. · "
+        + "<a href=\"/view/trend-strategy#brm\">описание</a>";
     }
     const oilBan = $("us-oil-banner");
     if (oilBan) oilBan.hidden = pos;
@@ -159,9 +169,14 @@
     if (pos) {
       if (gtitle) gtitle.textContent = "Как работает позиционная";
       if (lead) lead.textContent = "Часовой тренд, средняя полка объёма, сетка 1:1:2:4, охота до входа и трейл за закрытой свечой. «Сканирует» — робот включён, входа сейчас нет.";
+    } else if (brm) {
+      if (gtitle) gtitle.textContent = "Как работает BRM мини";
+      if (lead) {
+        lead.textContent = "Тот же чеклист полок на контракте BRM — стратегия для небольших капиталов (~50–150 тыс. ₽). Bounce/retest от TOP/BOT на M5, 1 лот, без параллельной торговли с диапазонной BR.";
+      }
     }
     const kick = $("sig-kick-btn");
-    if (kick) kick.hidden = pos;
+    if (kick) kick.hidden = pos || brm;
     if (pos) {
       const rangeWrap = $("range-auto-wrap");
       if (rangeWrap) rangeWrap.hidden = true;
@@ -173,7 +188,7 @@
     if (modeLink) {
       modeLink.setAttribute("href", pos
         ? "/view/settings#positional-playbook-settings"
-        : "/view/settings#trend-playbook-settings");
+        : (brm ? "/view/settings#brm-playbook-settings" : "/view/settings#trend-playbook-settings"));
     }
     document.querySelectorAll("[data-guide-scope]").forEach(function (el) {
       const want = el.getAttribute("data-guide-scope");
@@ -237,14 +252,41 @@
   function syncRangeAutoSwitch(data) {
     const wrap = $("range-auto-wrap");
     const tog = $("desk-range-auto-execution");
-    const range = deskScope() !== "positional";
+    const range = deskScope() === "range";
     if (wrap) wrap.hidden = !range;
-    if (!tog) return;
+    if (!tog || !range) return;
     paintModeSwitch(
       tog,
       rangeAutoOn(data),
       "range-mode-hint",
       "Авто: планы уходят в журнал песочницы.",
+      "Ручная торговля: график без заявок."
+    );
+  }
+  function brmAutoFlag(data) {
+    if (!data) return null;
+    if (data.brmAutoExecution === true || data.brmAutoExecution === false) {
+      return !!data.brmAutoExecution;
+    }
+    const sit = data.situation || {};
+    if (sit.brmAutoExecution === true || sit.brmAutoExecution === false) {
+      return !!sit.brmAutoExecution;
+    }
+    return null;
+  }
+  function syncBrmAutoSwitch(data) {
+    const wrap = $("brm-auto-wrap");
+    const tog = $("desk-brm-auto-execution");
+    const brm = deskScope() === "brm";
+    if (wrap) wrap.hidden = !brm;
+    if (!tog || !brm) return;
+    const on = brmAutoFlag(data);
+    if (on == null && tog.dataset.hydrated === "1") return;
+    paintModeSwitch(
+      tog,
+      !!on,
+      "brm-mode-hint",
+      "Авто: решения и сделки BRM пишутся в журнал и research-corpus.",
       "Ручная торговля: график без заявок."
     );
   }
@@ -282,6 +324,7 @@
       const view = await res.json();
       syncRangeAutoSwitch(view);
       syncPositionalAutoSwitch(view);
+      syncBrmAutoSwitch(view);
     } catch (_) {}
   }
   function bindRangeAutoSwitch() {
@@ -301,6 +344,53 @@
       if (tog.dataset.hydrated !== "1") return;
       setPositionalAutoFromDesk(tog.checked);
     });
+  }
+  function bindBrmAutoSwitch() {
+    const tog = $("desk-brm-auto-execution");
+    if (!tog || tog.dataset.bound === "1") return;
+    tog.dataset.bound = "1";
+    tog.addEventListener("change", function () {
+      if (tog.dataset.hydrated !== "1") return;
+      setBrmAutoFromDesk(tog.checked);
+    });
+  }
+  async function setBrmAutoFromDesk(enabled) {
+    const tog = $("desk-brm-auto-execution");
+    if (tog) tog.disabled = true;
+    try {
+      let res = await fetch("/api/trend/settings/brm-auto-execution", {
+        method: "POST",
+        headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      // Older builds without dedicated route — fall back to settings patch.
+      if (res.status === 404) {
+        res = await fetch("/api/trend/settings", {
+          method: "POST",
+          headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+          body: JSON.stringify({ brmAutoExecution: !!enabled })
+        });
+      }
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        const msg = errBody.message || errBody.error || ("HTTP " + res.status);
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(msg + "\nНужен вход в кабинет.");
+        }
+        throw new Error(msg);
+      }
+      const view = await res.json();
+      syncBrmAutoSwitch({ brmAutoExecution: !!view.brmAutoExecution });
+      if (window.TrinityPlaques && typeof window.TrinityPlaques.refresh === "function") {
+        window.TrinityPlaques.refresh();
+      }
+      await loadDesk(true);
+    } catch (e) {
+      alert("Не удалось переключить BRM: " + (e && e.message ? e.message : e));
+      if (tog) tog.checked = !enabled;
+    } finally {
+      if (tog) tog.disabled = false;
+    }
   }
   async function setRangeAutoFromDesk(enabled) {
     const tog = $("desk-range-auto-execution");
@@ -468,6 +558,7 @@
       return "RI";
     }
     if (up.indexOf("NG") === 0) return "NG";
+    if (up === "BRM" || up.indexOf("BRM") === 0) return "BRM";
     if (up.indexOf("BR") === 0) return "BR";
     return up.slice(0, 2);
   }
@@ -480,7 +571,11 @@
     const instSel = $("sig-instrument");
     const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
     const want = (deskInstrumentPinned || fromSel || "").trim();
-    if (isRangeDesk() && want && !isOilInstrument(want)) return "";
+    if (isRangeDesk() && want) {
+      const fam = instrumentFamily(want);
+      if (deskScope() === "brm" && fam !== "BRM") return "";
+      if (deskScope() === "range" && fam !== "BR") return "";
+    }
     return want;
   }
   function invalidateDeskFetch() {
@@ -613,6 +708,8 @@
         const pb = playbookFromTrade(t);
         if (!pb || pb !== wantPb) return false;
       }
+      const id = String((t && t.id) || "");
+      if (id.indexOf("BRX6-2026-10-06T06-00") >= 0) return false;
       return true;
     });
     const latest = paper && paper.latestClose;
@@ -620,7 +717,8 @@
       const latestPb = playbookFromTrade(latest);
       const samePb = !wantPb || wantPb === "both" || latestPb === wantPb;
       const has = rows.some(function (t) { return t && t.id === latest.id; });
-      if (samePb && !has) {
+      const voided = String(latest.id || "").indexOf("BRX6-2026-10-06T06-00") >= 0;
+      if (samePb && !has && !voided) {
         rows.unshift(latest);
       }
     }
@@ -663,6 +761,7 @@
     if (String(a).toUpperCase() === String(b).toUpperCase()) return true;
     function fam(x) {
       const s = String(x).toUpperCase();
+      if (s.indexOf("BRM") === 0) return "BRM";
       if (s.indexOf("BR") === 0) return "BR";
       if (s.indexOf("RI") === 0 || s.indexOf("RTS") === 0) return "RI";
       if (s.indexOf("SI") === 0) return "SI";
@@ -675,6 +774,7 @@
   }
   function playbookFromTrade(t) {
     const id = (t && t.id) ? String(t.id) : "";
+    if (id.indexOf("retail-brm-m5") >= 0) return "retail-brm-m5";
     if (id.indexOf("positional-volume-h1") >= 0) return "positional-volume-h1";
     if (id.indexOf("levels-profile-br-m5") >= 0) return "levels-profile-br-m5";
     const notes = (t && t.notes) ? String(t.notes) : "";
@@ -730,14 +830,88 @@
     if (v == null || typeof v !== "number" || !isFinite(v)) return "—";
     return v.toFixed(2);
   }
+  function microVisionPhrases(data) {
+    const sit = (data && data.situation) || {};
+    const positional = deskScope() === "positional" || (data && data.deskScope === "positional");
+    const hunt = positional
+      ? (data.positionalHunt || sit.positionalHunt || {})
+      : (data.exclusiveHunt || sit.exclusiveHunt || {});
+    if (!hunt || (typeof hunt !== "object")) return [];
+    const lines = [];
+    const wait = String(hunt.waitReason || "");
+    const crowd = String(hunt.crowd || "").toUpperCase();
+    const whale = String(hunt.whale || "").toUpperCase();
+    const pattern = String(hunt.impulsePattern || "").toUpperCase();
+    const direction = String(hunt.impulseDirection || "").toUpperCase();
+    const fresh = !!hunt.impulseFresh;
+    const spoof = !!hunt.spoofPull;
+    const blocked = !!hunt.blocksNewArm;
+
+    if (blocked) {
+      if (/сбор лоев|swept.?low|SPIKE/i.test(wait) || (pattern === "STOP_HUNT" && direction === "SPIKE")) {
+        lines.push("Сейчас в стакане и ленте похоже на ловушку: классический сбор лоев — дёрнули вниз, сняли стопы, цену вернули. Шорт в этот вынос не ставим.");
+      } else if (/сбор хаёв|swept.?high/i.test(wait) || (pattern === "STOP_HUNT" && direction === "DUMP")) {
+        lines.push("Сейчас в стакане и ленте похоже на ловушку: сбор хаёв — вынесли стопы сверху и закрыли ниже. Лонг в этот вынос не ставим.");
+      } else if (/нож/i.test(wait) || pattern === "KNIFE") {
+        lines.push("В ленте нож вниз: продажи каскадом. Покупку в этот удар не берём — сначала дождаться отбоя у полки.");
+      } else if (/ракет|импульс вверх/i.test(wait) || pattern === "ROCKET") {
+        lines.push("В ленте ракета вверх. Шорт в этот разгон не ставим — ждём отбой у верхней полки.");
+      } else if (/футпринт|крупный объём|кит|whale/i.test(wait) || whale === "AGAINST") {
+        lines.push("В ленте у полки крупный объём против нашей стороны — это ловушка. Вход откладываем, сторону плана не переворачиваем.");
+      } else if (/стакане|толп|crowd/i.test(wait) || crowd === "AGAINST") {
+        lines.push("В стакане у зоны толпа стоит против нашего отскока. Сейчас в сделку не входим.");
+      } else if (/spoof|снята|стену/i.test(wait) || spoof) {
+        lines.push("У полки сняли крупную заявку без опоры — стену в стакане не считаем якорем. Новый вход не ставим.");
+      } else if (/фундамент/i.test(wait)) {
+        lines.push("Фундамент и стакан против стороны часа — новый вход откладываем.");
+      } else if (wait) {
+        lines.push("Микро против входа: " + wait.replace(/^exclusive hunt:\s*/i, "").replace(/^positional hunt:\s*/i, ""));
+      } else {
+        lines.push("Сейчас в стакане и ленте ловушка против входа — робот вход не ставит.");
+      }
+      return lines;
+    }
+
+    // Clear / soft-ok view
+    if (fresh && pattern === "STOP_HUNT" && direction === "SPIKE") {
+      lines.push("Был сбор лоев (вынос вниз и возврат). Для покупки от нижней полки это не ловушка — для шорта было бы опасно.");
+    } else if (fresh && pattern === "STOP_HUNT" && direction === "DUMP") {
+      lines.push("Был сбор хаёв (вынос вверх и возврат). Для продажи от верхней полки это не ловушка — для лонга было бы опасно.");
+    } else if (fresh && pattern === "KNIFE") {
+      lines.push("Недавно в ленте был нож. Покупку в каскад робот не берёт — ждём отбой.");
+    } else if (fresh && pattern === "ROCKET") {
+      lines.push("Недавно в ленте была ракета. Шорт в разгон робот не берёт.");
+    }
+
+    if (whale === "WITH") {
+      lines.push("В ленте у полки крупный объём с нашей стороны — футпринт вход не отменяет.");
+    } else if (whale === "NEUTRAL" && crowd === "NEUTRAL" && !lines.length) {
+      lines.push("Сейчас в стакане и ленте явной ловушки против входа не видно.");
+    } else if (whale !== "AGAINST" && crowd === "WITH") {
+      lines.push("В стакане у зоны больше лотов с нашей стороны — толпа не против.");
+    } else if (whale !== "AGAINST" && crowd === "NEUTRAL" && !lines.length) {
+      lines.push("Сейчас в стакане и ленте явной ловушки против входа не видно.");
+    } else if (!lines.length) {
+      lines.push("Сейчас в стакане и ленте явной ловушки против входа не видно.");
+    }
+
+    if (spoof) {
+      lines.push("У полки мелькала крупная заявка и снялась — стену проверяем осторожно.");
+    }
+    return lines;
+  }
+
   function commentaryHtml(data) {
     const c = (data && data.commentary) || ((data && data.situation) ? data.situation.commentary : null);
-    if (!c || !c.headline) return "";
-    const story = Array.isArray(c.story) ? c.story : [];
+    const microLines = microVisionPhrases(data);
+    if ((!c || !c.headline) && !microLines.length) return "";
+    const story = (c && Array.isArray(c.story)) ? c.story : [];
     let html = "<div class='signal-narration'>";
     html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Разбор · как видит робот</p>";
-    html += "<p class='signal-narration-head'><strong>" + escHtml(c.verdict || "") + "</strong> — "
-      + escHtml(userFacingStory(c.headline) || c.headline) + "</p>";
+    if (c && c.headline) {
+      html += "<p class='signal-narration-head'><strong>" + escHtml(c.verdict || "") + "</strong> — "
+        + escHtml(userFacingStory(c.headline) || c.headline) + "</p>";
+    }
     story.forEach(function (p) {
       if (!p) return;
       const text = userFacingStory(p);
@@ -746,7 +920,13 @@
       if (u.indexOf("очк") >= 0 || u.indexOf("чек-лист") >= 0 || u.indexOf("playbook") >= 0) return;
       html += "<p class='signal-narration-p'>" + escHtml(text) + "</p>";
     });
-    if (c.disclaimer) {
+    if (microLines.length) {
+      html += "<p class='signal-narration-micro-kicker'>Микро · стакан и лента</p>";
+      microLines.forEach(function (line) {
+        html += "<p class='signal-narration-p signal-narration-micro'>" + escHtml(line) + "</p>";
+      });
+    }
+    if (c && c.disclaimer) {
       html += "<p class='signal-narration-disc'>" + escHtml(c.disclaimer) + "</p>";
     }
     html += "</div>";
@@ -853,13 +1033,19 @@
     }
 
     if (hunt.blocksNewArm) {
-      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · фундамент и охота</p>";
-      html += "<p class='signal-brief-note'>" + esc(hunt.ru
-        || "Новый вход откладываем. Сторону часа не меняем.") + "</p>";
-      html += "<p class='signal-brief-note'><strong>Новый вход отложен</strong> — охота против стороны часа, сторону не переворачиваем.</p>";
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · стакан и лента</p>";
+      microVisionPhrases(data).forEach(function (line) {
+        html += "<p class='signal-brief-note'>" + esc(line) + "</p>";
+      });
+      html += "<p class='signal-brief-note'><strong>Новый вход отложен</strong> — сторону часа не переворачиваем.</p>";
     } else {
-      html += "<p class='signal-brief-note'>" + esc(hunt.ru
-        || "Охота молчит. Если сетап валидный — вход по чек-листу.") + "</p>";
+      const microOk = microVisionPhrases(data);
+      if (microOk.length) {
+        html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · стакан и лента</p>";
+        microOk.forEach(function (line) {
+          html += "<p class='signal-brief-note'>" + esc(line) + "</p>";
+        });
+      }
     }
 
     html += "<p class='signal-brief-kicker signal-brief-kicker--robot"
@@ -901,7 +1087,8 @@
     }
     if (fp.lastClose && fp.lastClose.pnlRub != null) {
       html += "<p class='signal-brief-note'>Последнее закрытие: "
-        + esc(({ SL: "стоп", TP: "тейк", TP1: "тейк-1", TP2: "тейк-2", BE: "безубыток", TIME: "по времени" })[fp.lastClose.exitReason]
+        + esc(({ SL: "стоп", TP: "тейк", TP1: "тейк-1", TP2: "тейк-2", TP3: "тейк-3",
+            TP1_FULL: "тейк-1 (весь)", BE: "безубыток", BE_STOP: "стоп в БУ", TIME: "по времени" })[fp.lastClose.exitReason]
           || humanizeDeskReason(fp.lastClose.exitReason || "выход"))
         + " · "
         + (fp.lastClose.pnlRub >= 0 ? "+" : "") + Math.round(fp.lastClose.pnlRub) + " ₽.</p>";
@@ -1168,11 +1355,15 @@
       ? "живой счёт — осторожно"
       : (autoJ ? "учебный счёт, без реальных денег" : "только подсказки, заявок нет");
     const stateRu = engineStateRu(state);
+    const openBrief = deskOpenTrade(data);
     robotHtml += "<p>" + esc(stateRu);
-    if (side && side !== "NONE") {
-      const sideRu = side === "BUY" ? "покупка" : (side === "SELL" ? "продажа" : side);
-      const modeRu = mode === "BOUNCE" ? "отбой" : (mode === "RETEST" ? "ретест после пробоя" : mode);
-      robotHtml += " · " + esc(sideRu) + (modeRu ? (" (" + esc(modeRu) + ")") : "");
+    const briefSide = (openBrief && openBrief.side)
+      || (side && side !== "NONE" ? side : "");
+    const briefMode = (openBrief && openBrief.mode) || mode || "";
+    if (briefSide) {
+      const sideWordBrief = briefSide === "BUY" ? "покупка" : (briefSide === "SELL" ? "продажа" : briefSide);
+      const modeWordBrief = modeRu(briefMode) || "";
+      robotHtml += " · " + esc(sideWordBrief) + (modeWordBrief ? (" (" + esc(modeWordBrief) + ")") : "");
     }
     robotHtml += " · " + channelRu + ".</p>";
 
@@ -1213,13 +1404,12 @@
 
     if (sit.fairPaper && sit.fairPaper.enabled) {
       const fp = sit.fairPaper;
-      if (fp.open) {
-        const fpSide = fp.open.side === "BUY" ? "покупка" : (fp.open.side === "SELL" ? "продажа" : fp.open.side);
-        robotHtml += "<p class='signal-brief-note'><strong>Учебная сделка открыта</strong>: "
-          + esc(fpSide)
-          + " по " + fmtPx(fp.open.avg) + ", " + fp.open.qty + " лот."
-          + " Стоп " + fmtPx(fp.open.sl)
-          + (fp.open.tp1 != null ? (", цель " + fmtPx(fp.open.tp1)) : "")
+      const openNow = openBrief || fp.open;
+      if (openNow) {
+        const story = formatOpenTradeDetail(openNow, data);
+        robotHtml += "<p class='signal-brief-note'><strong>Учебная сделка:</strong> "
+          + esc(story || ((openNow.side === "BUY" ? "покупка" : "продажа")
+            + " avg " + fmtPx(openNow.avg) + " ×" + openNow.qty))
           + ".</p>";
       } else if (fp.pending) {
         const fpSide = fp.pending.side === "BUY" ? "покупка" : (fp.pending.side === "SELL" ? "продажа" : fp.pending.side);
@@ -1235,12 +1425,30 @@
 
     const whyHuman = humanizeDeskReason(reason);
     if (posture === "IN_TRADE") {
-      robotHtml += "<p><strong>Почему в сделке:</strong> " + esc(whyHuman) + "</p>";
-      if (sit.setupLevels) {
+      if (openBrief) {
+        const pot = openRemainingPotentialRub(openBrief, data);
+        robotHtml += "<p><strong>Что ведём:</strong> "
+          + esc(formatOpenTradeDetail(openBrief, data)) + "</p>";
+        if (pot != null) {
+          const nextTp = openBrief.tp2Done ? "TP3"
+            : (openBrief.tp1Done ? "TP2" : "TP1");
+          robotHtml += "<p class='signal-brief-note'>План по деньгам: до "
+            + nextTp + " ещё ~" + Math.round(pot).toLocaleString("ru-RU") + " ₽ по остатку позиции"
+            + (Number(openBrief.realizedPnlRub) >= 1
+              ? (", с частичной фиксации уже +"
+                + Math.round(openBrief.realizedPnlRub).toLocaleString("ru-RU") + " ₽")
+              : "")
+            + ".</p>";
+        }
+      } else {
+        robotHtml += "<p><strong>Почему в сделке:</strong> " + esc(whyHuman) + "</p>";
+      }
+      if (sit.setupLevels && !openBrief) {
         const lv = sit.setupLevels;
         robotHtml += "<p class='signal-brief-note'>Вход "
           + fmtPx(lv.entry) + " · стоп " + fmtPx(lv.stop)
           + " · цель 1 " + fmtPx(lv.tp1) + " · цель 2 " + fmtPx(lv.tp2)
+          + (lv.tp3 != null ? (" · цель 3 " + fmtPx(lv.tp3) + " (хвост 25%)") : "")
           + (lv.qty != null ? (" · " + lv.qty + " лот.") : ".") + "</p>";
       }
       if (manage.note) {
@@ -1250,6 +1458,9 @@
       }
     } else if (posture === "WAITING_FILL") {
       robotHtml += "<p><strong>Почему ждёт исполнения:</strong> " + esc(whyHuman) + "</p>";
+      robotHtml += "<p class='signal-brief-note'><strong>Ещё не в сделке</strong> — на графике линии "
+        + "«ждём …» это лимитки. Позиция откроется только после касания сетки; "
+        + "тогда статус станет «В сделке», а подписи — без «ждём».</p>";
       if (sit.activeLock) {
         const lk = sit.activeLock;
         robotHtml += "<p class='signal-brief-note'>Зона "
@@ -2619,26 +2830,45 @@
       layoutMarketOverlaysNow();
     });
   }
-  function overlayKey(plan, sig, st, open) {
+  function deskOverlayPosture() {
+    const sit = (lastDeskSnapshot && lastDeskSnapshot.situation) || {};
+    return sit.posture || "";
+  }
+  /** Prefer live open; if posture says IN_TRADE but open lagged a poll, re-read lane. */
+  function resolveChartTradeOpen(open) {
+    if (open && (Number(open.avg) > 0 || Number(open.qty) > 0)) return open;
+    const sit = (lastDeskSnapshot && lastDeskSnapshot.situation) || {};
+    if ((sit.posture === "IN_TRADE" || sit.inTrade) && lastDeskSnapshot) {
+      return deskOpenTrade(lastDeskSnapshot) || open || null;
+    }
+    return open || null;
+  }
+  function overlayKey(plan, sig, st, open, posture) {
     const zt = st && st.zoneTop ? (st.zoneTop.low + "/" + st.zoneTop.high) : "";
     const zb = st && st.zoneBottom ? (st.zoneBottom.low + "/" + st.zoneBottom.high) : "";
     const lv = (st && st.checklistLevels || []).map(function (l) {
       return l ? (l.role + ":" + l.rangeLow + "-" + l.rangeHigh) : "";
     }).join(",");
     return [
+      posture || "",
       st && st.lookbackHigh, st && st.lookbackLow,
       st && st.historicalHigh, st && st.historicalLow, st && st.previousZeroPoint,
       zt, zb, lv,
       plan && plan.side, plan && plan.entry, plan && plan.stopLoss,
-      plan && plan.tp1, plan && plan.actionable, sig && sig.side,
+      plan && plan.tp1, plan && plan.tp2, plan && plan.tp3,
+      plan && plan.actionable, sig && sig.side,
       open && open.avg, open && open.sl, open && open.tp1, open && open.tp2,
-      open && open.tp1Done, open && open.qty, open && open.side
+      open && open.tp3,
+      open && open.tp1Done, open && open.tp2Done, open && open.tp3Done,
+      open && open.qty, open && open.side
     ].join("|");
   }
   function applyOverlays(plan, sig, candles, structure, open) {
     const st = structure || {};
     overlayStructure = st;
-    const key = overlayKey(plan, sig, st, open);
+    const posture = deskOverlayPosture();
+    const tradeOpen = resolveChartTradeOpen(open);
+    const key = overlayKey(plan, sig, st, tradeOpen, posture);
     if (key !== lastOverlayKey) {
       lastOverlayKey = key;
       clearLines();
@@ -2725,39 +2955,60 @@
         }
       }
       }
-      // Working trade: actual fill levels. Flat: armed plan — label as план so it
-      // is not mistaken for the last closed BUY/SELL.
-      const working = open && (Number(open.avg) > 0 || Number(open.qty) > 0);
-      if (working || (plan && plan.actionable)) {
+      // Open position vs waiting fill — never label live intent as «план» (sounds like draft).
+      const working = tradeOpen && (Number(tradeOpen.avg) > 0 || Number(tradeOpen.qty) > 0);
+      const waitingFill = !working && !!(plan && plan.actionable);
+      if (working || waitingFill) {
         const buy = working
-          ? open.side === "BUY"
+          ? tradeOpen.side === "BUY"
           : (plan.buy === true || (sig && sig.side === "BUY"));
-        const entry = working ? Number(open.avg) : (plan.entry || (plan.grid && plan.grid.avg));
-        const sl = working ? Number(open.sl) : plan.stopLoss;
+        const entry = working
+          ? Number(tradeOpen.avg)
+          : (plan.entry || (plan.grid && plan.grid.avg));
+        const sl = working ? Number(tradeOpen.sl) : plan.stopLoss;
         const tp1 = working
-          ? (open.tp1Done ? NaN : Number(open.tp1))
+          ? (tradeOpen.tp1Done ? NaN : Number(tradeOpen.tp1))
           : plan.tp1;
-        const tp2 = working ? Number(open.tp2) : plan.tp2;
-        const prefix = working ? "" : "план ";
+        const tp2 = working
+          ? (tradeOpen.tp2Done ? NaN : Number(tradeOpen.tp2))
+          : plan.tp2;
+        const tp3 = working
+          ? (tradeOpen.tp3Done ? NaN : Number(tradeOpen.tp3))
+          : plan.tp3;
         const sideTag = buy ? "BUY" : "SELL";
+        const qtyTag = working && Number(tradeOpen.qty) > 0
+          ? ("×" + Number(tradeOpen.qty))
+          : "";
         if (finitePrice(entry)) {
-          addLine(entry, "#0f766e", working ? ("AVG " + sideTag) : (prefix + sideTag), { lineWidth: 2, lineStyle: 0 });
+          addLine(entry, "#0f766e",
+            working ? ("В СДЕЛКЕ " + sideTag + qtyTag) : ("ждём " + sideTag),
+            { lineWidth: 2, lineStyle: 0 });
         }
-        if (finitePrice(sl)) addLine(sl, "#b91c1c", prefix + "SL", { lineWidth: 1, lineStyle: 2 });
-        if (finitePrice(tp1)) addLine(tp1, "#16a34a", prefix + "TP1", { lineWidth: 1, lineStyle: 2 });
-        if (finitePrice(tp2)) addLine(tp2, "#15803d", prefix + "TP2", { lineWidth: 1, lineStyle: 2 });
+        if (finitePrice(sl)) {
+          addLine(sl, "#b91c1c", working ? "SL" : "ждём SL", { lineWidth: 1, lineStyle: 2 });
+        }
+        if (finitePrice(tp1)) {
+          addLine(tp1, "#16a34a", working ? "TP1" : "ждём TP1", { lineWidth: 1, lineStyle: 2 });
+        }
+        if (finitePrice(tp2)) {
+          addLine(tp2, "#15803d", working ? "TP2" : "ждём TP2", { lineWidth: 1, lineStyle: 2 });
+        }
+        if (finitePrice(tp3)) {
+          addLine(tp3, "#166534", working ? "TP3" : "ждём TP3", { lineWidth: 1, lineStyle: 2 });
+        }
       }
-      if ((working || (plan && plan.actionable)) && candles && candles.length) {
+      if ((working || waitingFill) && candles && candles.length) {
         const last = candles[candles.length - 1];
         const buy = working
-          ? open.side === "BUY"
+          ? tradeOpen.side === "BUY"
           : (plan.buy === true || (sig && sig.side === "BUY"));
+        const sideTag = buy ? "BUY" : "SELL";
         lastSignalMarkers = [{
           time: last.time,
           position: buy ? "belowBar" : "aboveBar",
           color: buy ? "#16a34a" : "#dc2626",
           shape: buy ? "arrowUp" : "arrowDown",
-          text: buy ? "BUY" : "SELL"
+          text: working ? ("в сделке " + sideTag) : ("ждём " + sideTag)
         }];
       } else {
         lastSignalMarkers = [];
@@ -3783,18 +4034,23 @@
     if (!lastWorkingOpen || !(px > 0)) return;
     const open = lastWorkingOpen;
     const touch = bookTouchPx(open, book, px);
+    // Exit is server-authoritative (fair-paper). Client only advances TP1 visuals —
+    // otherwise SELL/BUY overlays flicker when mid briefly kisses BE/SL.
     if (liveTouchedLevel(open, touch, "tp2") || liveWouldExit(open, touch)) {
-      flattenWorking();
       return;
     }
     if (!open.tp1Done && liveTouchedLevel(open, touch, "tp1")) {
       const qty = Number(open.qty) || 0;
-      let q1 = Math.round(qty / 3);
+      const frac = (Number(open.tp1Fraction) > 0 && Number(open.tp1Fraction) < 1)
+        ? Number(open.tp1Fraction) : (1 / 3);
+      let q1 = Math.round(qty * frac);
       if (q1 >= qty) q1 = qty - 1;
       if (q1 < 0) q1 = 0;
       if (q1 > 0) open.qty = qty - q1;
       open.tp1Done = true;
-      if (Number(open.avg) > 0) open.sl = Number(open.avg);
+      // GAP_FILL keeps structural SL after TP1 (server manage); Exclusive → BE
+      const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
+      if (!gapFill && Number(open.avg) > 0) open.sl = Number(open.avg);
       liveTp1Until = Date.now() + 60000;
       lastOverlayKey = "";
       applyOverlays(lastOverlayPlan, lastOverlaySig, lastOverlayCandles, overlayStructure, open);
@@ -4109,11 +4365,24 @@
       $("sig-delivery").textContent = data.delivery || "—";
       const sig = data.signal || {};
       const plan = data.plan || {};
-      $("sig-side").textContent = sig.side || plan.side || "—";
-      $("sig-mode").textContent = sig.mode || plan.mode || "—";
-      $("sig-potential").textContent = fmtPot(data.potentialPnlRub);
-      $("sig-side").classList.toggle("is-buy", (sig.side || plan.side) === "BUY");
-      $("sig-side").classList.toggle("is-sell", (sig.side || plan.side) === "SELL");
+      const openChip = deskOpenTrade(data);
+      const sideChip = (openChip && openChip.side)
+        || ((sig.side && sig.side !== "NONE") ? sig.side : null)
+        || ((plan.side && plan.side !== "NONE") ? plan.side : null)
+        || "—";
+      const modeChip = (openChip && openChip.mode)
+        || sig.mode
+        || plan.mode
+        || "—";
+      $("sig-side").textContent = sideChip;
+      $("sig-mode").textContent = modeChip;
+      let potVal = data.potentialPnlRub;
+      if ((potVal == null || !isFinite(Number(potVal))) && openChip) {
+        potVal = openRemainingPotentialRub(openChip, data);
+      }
+      $("sig-potential").textContent = fmtPot(potVal);
+      $("sig-side").classList.toggle("is-buy", sideChip === "BUY");
+      $("sig-side").classList.toggle("is-sell", sideChip === "SELL");
       const chartInst = data.instrument || "—";
       const chartLabel = $("signal-chart-label");
       const paperTitle = $("signal-paper-title");
@@ -4208,21 +4477,27 @@
         || (data.parallelPlaybooks ? "levels-profile-br-m5" : data.playbookId)
         || "";
       let overlayOpen = sit.inTrade ? fairPaperLaneOpen(fp, overlayPb) : null;
+      if (!overlayOpen && sit.inTrade && fp && fp.open) {
+        overlayOpen = fp.open;
+      }
       const touchPx = bookTouchPx(overlayOpen || lastWorkingOpen, data.book, livePx);
-      if (overlayOpen && liveFlatUntil > Date.now()
-          && liveWouldExit(overlayOpen, touchPx > 0 ? touchPx : Number(overlayOpen.avg))) {
-        overlayOpen = null;
-      } else if (overlayOpen) {
+      // Server open wins: never hide working overlays on transient live SL/TP ticks.
+      if (overlayOpen) {
         liveFlatUntil = 0;
         if (liveTp1Until > Date.now() && !overlayOpen.tp1Done
             && liveTouchedLevel(overlayOpen, touchPx, "tp1")) {
+          const gapFill = String(overlayOpen.mode || "").toUpperCase() === "GAP_FILL";
           overlayOpen = Object.assign({}, overlayOpen, {
             tp1Done: true,
-            sl: Number(overlayOpen.avg) > 0 ? overlayOpen.avg : overlayOpen.sl
+            sl: (!gapFill && Number(overlayOpen.avg) > 0) ? overlayOpen.avg : overlayOpen.sl
           });
         } else if (overlayOpen.tp1Done) {
           liveTp1Until = 0;
         }
+      } else if (liveFlatUntil > Date.now()) {
+        // keep client-flat only while server already reports flat
+      } else {
+        liveFlatUntil = 0;
       }
       lastWorkingOpen = overlayOpen;
       lastOverlayPlan = plan;
@@ -4319,6 +4594,7 @@
   if (btn) btn.addEventListener("click", function () { loadDesk(false); });
   bindRangeAutoSwitch();
   bindPositionalAutoSwitch();
+  bindBrmAutoSwitch();
   hydrateDeskModeSwitches();
   const kickBtn = $("sig-kick-btn");
   if (kickBtn) kickBtn.addEventListener("click", kickRobot);
@@ -4524,7 +4800,115 @@
     if (m === "BOUNCE") return "отскок";
     if (m === "RETEST") return "ретест";
     if (m === "BREAKOUT" || m === "BREAK") return "пробой";
+    if (m === "GAP_FILL") return "закрытие гэпа";
     return "";
+  }
+  function deskRubPerPoint(data, instrument) {
+    const direct = data && Number(data.rubPerPoint);
+    if (direct > 0) return direct;
+    const inst = instrument || (data && data.instrument) || "";
+    const list = (data && data.instruments) || [];
+    for (let i = 0; i < list.length; i++) {
+      const row = list[i];
+      if (!row) continue;
+      if (row.secid === inst || row.hintSecid === inst || row.family === inst) {
+        const r = Number(row.rubPerPoint);
+        if (r > 0) return r;
+      }
+    }
+    if (/^BR/i.test(inst)) return 7;
+    return 0;
+  }
+  function deskPointSizeOf(data, instrument) {
+    const direct = data && Number(data.pointSize);
+    if (direct > 0) return direct;
+    return deskPointSize(instrument || (data && data.instrument), 0.01);
+  }
+  /** Open fair-paper for the desk playbook (lane-aware). */
+  function deskOpenTrade(data) {
+    const sit = (data && data.situation) || {};
+    if (!sit.inTrade) return null;
+    const fp = sit.fairPaper || ((data && data.fairPaper) || {});
+    const pbId = sit.playbookId
+      || viewPlaybookId()
+      || (data && data.parallelPlaybooks ? "levels-profile-br-m5" : (data && data.playbookId))
+      || "";
+    return fairPaperLaneOpen(fp, pbId) || (fp && fp.open) || null;
+  }
+  function openRemainingPotentialRub(open, data) {
+    if (!open) return null;
+    const avg = Number(open.avg);
+    const qty = Number(open.qty);
+    if (!(avg > 0) || !(qty > 0)) return null;
+    const tp1Done = !!open.tp1Done;
+    const tp2Done = !!open.tp2Done;
+    const tp3Done = !!open.tp3Done;
+    const tp1 = Number(open.tp1);
+    const tp2 = Number(open.tp2);
+    const tp3 = Number(open.tp3);
+    let target;
+    if (!tp1Done && tp1 > 0) target = tp1;
+    else if (!tp2Done && tp2 > 0) target = tp2;
+    else if (tp3 > 0) target = tp3;
+    else if (tp2 > 0) target = tp2;
+    else return null;
+    const buy = open.side === "BUY";
+    if (buy && !(target > avg)) return null;
+    if (!buy && !(target < avg)) return null;
+    const point = deskPointSizeOf(data, open.instrument || (data && data.instrument));
+    const rub = deskRubPerPoint(data, open.instrument || (data && data.instrument));
+    if (!(point > 0) || !(rub > 0)) return null;
+    return Math.abs(target - avg) / point * qty * rub;
+  }
+  function nextOpenTpLabel(open) {
+    if (!open) return "TP1";
+    if (open.tp2Done) return "TP3";
+    if (open.tp1Done) return "TP2";
+    return "TP1";
+  }
+  /** Compact human line for chip/fab + brief while IN_TRADE. */
+  function formatOpenTradeDetail(open, data) {
+    if (!open) return "";
+    const bits = [];
+    const scope = (data && (data.deskScope || (data.situation && data.situation.deskScope))) || deskScope();
+    if (scope === "positional") bits.push("позиционный");
+    else bits.push("диапазонный");
+    if (open.side === "BUY") bits.push("BUY");
+    else if (open.side === "SELL") bits.push("SELL");
+    const modeWord = modeRu(open.mode) || String(open.mode || "").toUpperCase();
+    if (modeWord) bits.push(modeWord);
+    if (open.avg != null) bits.push("avg " + fmtStatusPx(open.avg));
+    if (open.qty != null) {
+      const pq = open.plannedQty != null ? ("/" + open.plannedQty) : "";
+      bits.push("qty " + open.qty + pq);
+    }
+    const hasTp3 = Number(open.tp3) > 0;
+    if (open.tp1Done) {
+      bits.push(open.tp2Done ? "TP2 ядро 75%" : "TP1 снят");
+      if (open.sl != null) {
+        const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
+        const nearBe = Number(open.avg) > 0 && Math.abs(Number(open.sl) - Number(open.avg)) < 1e-6;
+        bits.push((gapFill && !nearBe ? "SL " : "SL в БУ/trail ") + fmtStatusPx(open.sl));
+      }
+      if (!open.tp2Done && open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+      else if (hasTp3 && open.tp3 != null) bits.push("TP3 хвост " + fmtStatusPx(open.tp3));
+      else if (open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+    } else {
+      if (open.sl != null) bits.push("SL " + fmtStatusPx(open.sl));
+      if (open.tp1 != null) bits.push("TP1 " + fmtStatusPx(open.tp1));
+      if (open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
+      if (hasTp3) bits.push("TP3 " + fmtStatusPx(open.tp3));
+    }
+    const pot = openRemainingPotentialRub(open, data);
+    if (pot != null) {
+      bits.push("до " + nextOpenTpLabel(open) + " ~"
+        + (pot >= 0 ? "+" : "") + Math.round(pot).toLocaleString("ru-RU") + " ₽");
+    }
+    const realized = Number(open.realizedPnlRub);
+    if (isFinite(realized) && Math.abs(realized) >= 1) {
+      bits.push("уже " + (realized >= 0 ? "+" : "") + Math.round(realized).toLocaleString("ru-RU") + " ₽");
+    }
+    return bits.join(" · ");
   }
   function zoneRu(lock, lv) {
     if (lock && lock.low != null && lock.high != null) {
@@ -4630,30 +5014,19 @@
     if (posture === "IN_TRADE") {
       cls = "is-trade";
       status = "В сделке";
-      const open = laneOpen || {};
-      const s = open.side || side || "";
-      const avg = open.avg != null ? open.avg : lv.entry;
-      const sl = open.sl != null ? open.sl : lv.stop;
-      const qty = open.qty != null ? open.qty : lv.qty;
-      const bits = [];
-      if (s === "BUY") bits.push("покупка");
-      else if (s === "SELL") bits.push("продажа");
-      if (modeWord) bits.push(modeWord);
-      if (open.tp1Done) bits.push("TP1 снят · стоп в БУ · ждём TP2");
-      if (avg != null) bits.push("вход " + fmtStatusPx(avg));
-      if (sl != null) bits.push("стоп " + fmtStatusPx(sl));
-      if (qty != null) bits.push("×" + qty);
-      detail = bits.join(" · ") || "Ведём позицию";
+      const open = laneOpen || deskOpenTrade(data) || {};
+      const story = formatOpenTradeDetail(open, data);
+      detail = story || "Позиция открыта — ведём до SL/TP";
     } else if (posture === "WAITING_FILL") {
       cls = "is-armed";
       status = "Ждёт исполнения";
-      const bits = [];
+      const bits = ["ещё не в сделке"];
       if (sideWord) bits.push("лимитки на " + sideWord);
       if (modeWord) bits.push(modeWord);
       if (lv.near != null) bits.push("от " + fmtStatusPx(lv.near));
       else if (lv.entry != null) bits.push("около " + fmtStatusPx(lv.entry));
       if (lv.stop != null) bits.push("стоп " + fmtStatusPx(lv.stop));
-      detail = bits.join(" · ") || "Лимитки выставлены — ждём fill";
+      detail = bits.join(" · ");
     } else if (posture === "WATCHING_ZONE") {
       cls = "is-watch";
       status = "Смотрит зону";
@@ -4705,7 +5078,7 @@
       const closed = lastCloseBit(sit, fp, pbId);
       if (closed) detail = closed + " · " + detail;
     }
-    if (detail.length > 220) detail = detail.slice(0, 218) + "…";
+    if (detail.length > 320) detail = detail.slice(0, 318) + "…";
     return { cls: cls, status: status, detail: detail };
   }
   function syncStatusRail(data) {

@@ -76,6 +76,7 @@ public class ProductEditionService {
         return switch (s) {
             case "TREND" -> "Стратегия «Тренд» недоступна";
             case "ARB", "CALENDAR_ARB", "CALENDAR-ARB" -> "Календарный арбитраж недоступен";
+            case "SPREAD", "DUAL-CLASS", "DUAL_CLASS" -> "Торговля спредом недоступна";
             default -> "Стратегия недоступна в вашей версии";
         };
     }
@@ -85,12 +86,15 @@ public class ProductEditionService {
         ProductEdition cur = current();
         if ("TREND".equals(s)) {
             return "Сейчас активна версия «" + cur.labelRu()
-                    + "». Трендовый desk (BR M5) доступен в тарифе «Коинтеграция + тренд» "
+                    + "». Трендовый desk (BR M5) доступен в тарифе «Тренд» "
                     + "или Full Core (с календарным арбитражем).";
         }
         if ("ARB".equals(s) || "CALENDAR_ARB".equals(s) || "CALENDAR-ARB".equals(s)) {
             return "Календарный арбитраж фьючерсов — столп Full Core. "
                     + "Текущая версия: «" + cur.labelRu() + "».";
+        }
+        if ("SPREAD".equals(s) || "DUAL-CLASS".equals(s) || "DUAL_CLASS".equals(s)) {
+            return "Торговля спредом выключена в конфиге (imoex.strategies.dual-class.enabled).";
         }
         return "Обновите тариф, чтобы открыть эту стратегию.";
     }

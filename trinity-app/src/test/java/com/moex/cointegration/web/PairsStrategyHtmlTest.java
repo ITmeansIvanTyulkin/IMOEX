@@ -25,11 +25,14 @@ class PairsStrategyHtmlTest {
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
                 java.util.Optional.empty(),
-                true, false, false
+                java.util.Optional.empty(),
+                true, false, false, true
         );
 
         String html = renderer.renderStrategy();
-        assertTrue(html.contains(">Пульт пар<"), html);
+        assertFalse(html.contains("data-strategy=\"pairs\""), html);
+        assertFalse(html.contains(">Коинтеграция<"), html);
+        assertFalse(html.contains(">Пульт пар<"), html);
         assertTrue(html.contains("Парная стратегия сейчас"), html);
         assertTrue(html.contains("Фаворит отрасли"), html);
         assertTrue(html.contains("закрытия реестра"), html);

@@ -87,17 +87,21 @@
     "/view/settings": "Настройки",
     "/view/recommendations": "Рекомендации",
     "/view/signals": "Сигналы",
-    "/view/final": "Пульт пар",
+    "/view/final": "Дашборд",
     "/view/paper": "Statement",
     "/view/statement": "Statement",
     "/view/trend-signal": "Диапазонная торговля",
     "/view/trend-positional": "Позиционная торговля",
-    "/view/trend-charts": "Терминал графиков",
+    "/view/trend-brm": "BRM мини",
+    "/view/investments": "Инвестиции",
+    "/view/investments-strategy": "Инвестиции · описание",
     "/view/trend-strategy": "Описание тренда",
     "/view/walk-forward": "Walk-forward",
-    "/view/strategy": "Описание стратегии",
+    "/view/strategy": "Дашборд",
     "/view/calendar-arb": "Календарный арбитраж",
     "/view/calendar-arb-strategy": "Описание арбитража",
+    "/view/spread": "Торговля спредом",
+    "/view/spread-strategy": "Описание спреда",
     "/view/full-core": "Full Core",
     "/view/guide": "Как пользоваться системой"
   };
@@ -1871,7 +1875,10 @@
     });
     (robots || []).forEach(function (r) {
       if (!r || r.posture !== "IN_TRADE") return;
-      const label = r.key === "oil" ? "Диапазонная" : (r.key === "positional" ? "Позиционная" : r.title);
+      const label = r.key === "oil" ? "Диапазонная"
+        : (r.key === "positional" ? "Позиционная"
+          : (r.key === "brm" ? "BRM мини"
+            : (r.key === "investments" ? "Инвестиции" : r.title)));
       rows.push({
         key: "r:" + r.key,
         text: label + " · " + (r.instrument || "—") + " · в сделке"
@@ -1897,9 +1904,10 @@
         const robots = (data && data.robots) || [];
         robots.forEach(function (r) {
           if (!r || !r.key) return;
-          if (r.key === "pairs") applyDashRobotCard("dash-robot-pairs", r);
           if (r.key === "oil") applyDashRobotCard("dash-robot-range", r);
           if (r.key === "positional") applyDashRobotCard("dash-robot-pos", r);
+          if (r.key === "brm") applyDashRobotCard("dash-robot-brm", r);
+          if (r.key === "investments") applyDashRobotCard("dash-robot-invest", r);
         });
         return robots;
       })
@@ -1916,6 +1924,8 @@
       ];
       if ($("dash-robot-arb")) {
         fetches.push(fetch("/api/calendar-arb/status", { headers: { Accept: "application/json" } }));
+      } else {
+        fetches.push(Promise.resolve(null));
       }
       const results = await Promise.all(fetches);
       const robots = results[0] || [];
@@ -2263,7 +2273,9 @@
   }
 
   async function loadTrendDeliverySettings() {
-    if (!$("trend-auto-execution") && !$("settings-positional-auto-execution")) return;
+    if (!$("trend-auto-execution")
+        && !$("settings-positional-auto-execution")
+        && !$("settings-brm-auto-execution")) return;
     try {
       const res = await fetch("/api/trend/settings", { headers: withAuthHeaders() });
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -2274,6 +2286,8 @@
       if (status) status.textContent = msg;
       const pos = $("positional-delivery-status");
       if (pos) pos.textContent = msg.replace("trend", "positional");
+      const brm = $("brm-delivery-status");
+      if (brm) brm.textContent = msg.replace("trend", "BRM");
     }
   }
 
@@ -2294,19 +2308,67 @@
     const title = $("trend-delivery-title");
     const hint = $("trend-delivery-hint");
     const status = $("trend-delivery-status");
-    if (title) title.textContent = auto ? "Авто · журнал" : "Наблюдение";
+    const brmOn = !!view.brmAutoExecution;
+    if (title) {
+      title.textContent = auto
+        ? "Авто · журнал"
+        : (brmOn ? "Корпус · без сделок" : "Наблюдение");
+    }
     if (hint) {
       hint.textContent = auto
         ? "Планы уходят в журнал песочницы. Живые заявки на срочном — только отдельным флагом."
-        : "Смотрим график без заявок. Включите авто, чтобы робот вёл журнал.";
+        : (brmOn
+          ? "Пока торгует BRM: диапазонная пишет ENTER/SKIP в exclusive-m5 без сделок и аллокации."
+          : "Смотрим график без заявок. Включите авто, чтобы робот вёл журнал.");
     }
     if (status) {
-      status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
+      status.textContent = auto
+        ? "Режим: авто"
+        : (brmOn ? "Режим: корпус решений (shadow)" : "Режим: наблюдение");
     }
     const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
     if (card) card.classList.toggle("is-auto", auto);
     }
     applyPositionalDeliveryView(view);
+    applyBrmDeliveryView(view);
+  }
+
+  function applyBrmDeliveryView(view) {
+    const toggle = $("settings-brm-auto-execution");
+    if (!toggle || !view) return;
+    const auto = !!view.brmAutoExecution;
+    toggle.checked = auto;
+    toggle.setAttribute("aria-checked", auto ? "true" : "false");
+    toggle.dataset.hydrated = "1";
+    if (!toggle.closest(".robot-mode-card.is-off")) toggle.disabled = false;
+    const wrap = toggle.closest(".mode-switch");
+    if (wrap) {
+      wrap.classList.toggle("is-auto", auto);
+      wrap.classList.toggle("is-signal", !auto);
+    }
+    const title = $("brm-delivery-title");
+    const hint = $("brm-delivery-hint");
+    const status = $("brm-delivery-status");
+    const exclusiveOn = !!view.autoExecution;
+    if (title) {
+      title.textContent = auto
+        ? "Авто · журнал"
+        : (exclusiveOn ? "Корпус · без сделок" : "Наблюдение");
+    }
+    if (hint) {
+      hint.textContent = auto
+        ? "Мини-нефть пишет решения и сделки в журнал и research-corpus."
+        : (exclusiveOn
+          ? "Пока торгует диапазонная: BRM пишет ENTER/SKIP в retail-brm-m5 без сделок и аллокации."
+          : "График есть, входов нет. Для счетов 50–150 тыс. обычно включают этот тумблер.");
+    }
+    if (status) {
+      status.textContent = auto
+        ? "Режим: авто"
+        : (exclusiveOn ? "Режим: корпус решений (shadow)" : "Режим: наблюдение");
+    }
+    const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
+    if (card) card.classList.toggle("is-auto", auto);
   }
 
   function applyPositionalDeliveryView(view) {
@@ -2336,6 +2398,62 @@
     }
     const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
     if (card) card.classList.toggle("is-auto", auto);
+  }
+
+  async function loadInvestDeliverySettings() {
+    if (!$("settings-invest-auto-execution")) return;
+    try {
+      const res = await fetch("/api/investments/settings", { headers: withAuthHeaders() });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyInvestDeliveryView(await res.json());
+    } catch (err) {
+      const status = $("invest-delivery-status");
+      if (status) status.textContent = "Не удалось загрузить режим инвестиций: " + (err.message || err);
+    }
+  }
+
+  function applyInvestDeliveryView(view) {
+    const toggle = $("settings-invest-auto-execution");
+    if (!toggle || !view) return;
+    const auto = !!view.autoExecution;
+    toggle.checked = auto;
+    toggle.setAttribute("aria-checked", auto ? "true" : "false");
+    toggle.dataset.hydrated = "1";
+    toggle.disabled = false;
+    const wrap = toggle.closest(".mode-switch");
+    if (wrap) {
+      wrap.classList.toggle("is-auto", auto);
+      wrap.classList.toggle("is-signal", !auto);
+    }
+    const title = $("invest-delivery-title");
+    const hint = $("invest-delivery-hint");
+    const status = $("invest-delivery-status");
+    if (title) title.textContent = auto ? "Авто · paper на пульте" : "Наблюдение";
+    if (hint) {
+      hint.textContent = auto
+        ? "Fair-paper лестницы по чек-листу на /view/investments. Live equity — отдельный флаг."
+        : "Скан и графики на пульте без заявок. Включите Авто для paper-исполнения.";
+    }
+    if (status) status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
+    const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
+    if (card) card.classList.toggle("is-auto", auto);
+  }
+
+  async function setInvestAutoExecution(enabled) {
+    const toggle = $("settings-invest-auto-execution");
+    try {
+      const res = await fetch("/api/investments/settings/auto-execution", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, withAuthHeaders()),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyInvestDeliveryView(await res.json());
+      appendLog(enabled ? "Инвестиции: авто-отбор здесь." : "Инвестиции: наблюдение.", "ok");
+    } catch (err) {
+      appendLog("Не удалось переключить инвестиции: " + (err.message || err), "err");
+      if (toggle) toggle.checked = !enabled;
+    }
   }
 
   async function loadArbDeliverySettings() {
@@ -2426,6 +2544,87 @@
     }
   }
 
+  async function loadSpreadDeliverySettings() {
+    if (!$("settings-spread-auto-execution") && !$("desk-spread-auto-execution")) return;
+    try {
+      const res = await fetch("/api/dual-class/settings", { headers: withAuthHeaders() });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applySpreadDeliveryView(await res.json());
+    } catch (err) {
+      const status = $("spread-delivery-status");
+      if (status) status.textContent = "Не удалось загрузить режим спреда: " + (err.message || err);
+    }
+  }
+
+  function spreadAutoToggles() {
+    return ["settings-spread-auto-execution", "desk-spread-auto-execution"].map($).filter(Boolean);
+  }
+
+  function applySpreadDeliveryView(view) {
+    if (!view) return;
+    const auto = !!view.autoExecution;
+    spreadAutoToggles().forEach(function (toggle) {
+      toggle.checked = auto;
+      toggle.setAttribute("aria-checked", auto ? "true" : "false");
+      toggle.dataset.hydrated = "1";
+      if (!toggle.closest(".robot-mode-card.is-off")) toggle.disabled = false;
+      const wrap = toggle.closest(".mode-switch");
+      if (wrap) {
+        wrap.classList.toggle("is-auto", auto);
+        wrap.classList.toggle("is-signal", !auto);
+      }
+    });
+    const deskWrap = $("spread-auto-wrap");
+    if (deskWrap && $("desk-spread-auto-execution")) deskWrap.hidden = false;
+    const title = $("spread-delivery-title");
+    const hint = $("spread-delivery-hint");
+    const status = $("spread-delivery-status");
+    if (title) title.textContent = auto ? "Авто · без журнала" : "Наблюдение";
+    if (hint) {
+      hint.textContent = auto
+        ? "Тумблер авто включён. Журнал сделок ещё не подключён — ног робот не открывает."
+        : "Last и таблица видны. Сделок нет. Включите авто на этом пульте или на доске спреда.";
+    }
+    if (status) status.textContent = auto ? "Режим: авто · без журнала" : "Режим: наблюдение";
+    const cardToggle = $("settings-spread-auto-execution");
+    const card = cardToggle && cardToggle.closest(".robot-mode-card");
+    if (card) card.classList.toggle("is-auto", auto);
+    const deskChip = $("spread-delivery");
+    if (deskChip && !$("spread-delivery-title")) {
+      deskChip.textContent = auto ? "Авто · без журнала" : "Наблюдение";
+    }
+    const modeHint = $("spread-mode-hint");
+    if (modeHint) {
+      modeHint.textContent = auto
+        ? "Авто: журнал ещё не подключён."
+        : "Наблюдение: график и таблица без сделок.";
+    }
+  }
+
+  async function setSpreadAutoExecution(enabled) {
+    const toggles = spreadAutoToggles();
+    if (!toggles.length) return;
+    toggles.forEach(function (toggle) { toggle.disabled = true; });
+    try {
+      const res = await fetch("/api/dual-class/settings/auto-execution", {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      applySpreadDeliveryView(await res.json());
+    } catch (err) {
+      toggles.forEach(function (toggle) { toggle.checked = !enabled; });
+      const status = $("spread-delivery-status");
+      if (status) status.textContent = "Не удалось переключить: " + (err.message || err);
+    } finally {
+      toggles.forEach(function (toggle) { toggle.disabled = false; });
+    }
+  }
+
   async function setTrendAutoExecution(enabled) {
     const toggle = $("trend-auto-execution");
     if (!toggle) return;
@@ -2441,7 +2640,7 @@
         throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
       }
       applyTrendDeliveryView(await res.json());
-      appendLog(enabled ? "Диапазонная: авто." : "Диапазонная: наблюдение.", "ok");
+      appendLog(enabled ? "Диапазонная: авто (BRM выкл)." : "Диапазонная: наблюдение.", "ok");
     } catch (err) {
       appendLog("Не удалось переключить trend: " + (err.message || err), "err");
       await loadTrendDeliverySettings();
@@ -2472,6 +2671,86 @@
     } finally {
       toggle.disabled = false;
     }
+  }
+
+  async function setBrmAutoExecution(enabled) {
+    const toggle = $("settings-brm-auto-execution");
+    if (!toggle) return;
+    toggle.disabled = true;
+    try {
+      let res = await fetch("/api/trend/settings/brm-auto-execution", {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      if (res.status === 404) {
+        res = await fetch("/api/trend/settings", {
+          method: "POST",
+          headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+          body: JSON.stringify({ brmAutoExecution: !!enabled })
+        });
+      }
+      if (!res.ok) {
+        const errBody = await res.json().catch(function () { return {}; });
+        throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
+      }
+      // Full view: Exclusive parks when BRM arms (mutex).
+      applyTrendDeliveryView(await res.json());
+      appendLog(enabled ? "BRM мини: авто (диапазонная выкл)." : "BRM мини: наблюдение.", "ok");
+    } catch (err) {
+      appendLog("Не удалось переключить BRM: " + (err.message || err), "err");
+      await loadTrendDeliverySettings();
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  async function maybeShowRetailCapitalGuide() {
+    const KEY = "imoex.retail-capital-guide.v1";
+    try {
+      if (sessionStorage.getItem(KEY) === "1") return;
+      const res = await fetch("/api/ops/retail-capital-guide", {
+        headers: withAuthHeaders({ Accept: "application/json" })
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.showModal) return;
+      const host = $("strategy-lock-host") || $("trinity-upsell-host");
+      if (!host) return;
+      const body = String(data.body || "").replace(/\n/g, "<br>");
+      host.innerHTML =
+        '<div class="strategy-lock-modal" role="dialog" aria-modal="true">' +
+        '<button type="button" class="upsell-close" aria-label="Закрыть">&times;</button>' +
+        "<h2>" + escapeHtml(data.title || "Капитал") + "</h2>" +
+        "<p>" + body + "</p>" +
+        '<div class="upsell-actions">' +
+        '<button type="button" class="btn btn-primary" id="retail-cap-apply">' +
+        escapeHtml(data.ctaPrimary || "Понятно") + "</button>" +
+        '<button type="button" class="btn btn-ghost" id="retail-cap-dismiss">' +
+        escapeHtml(data.ctaSecondary || "Закрыть") + "</button>" +
+        "</div></div>" +
+        '<div class="strategy-lock-backdrop"></div>';
+      const close = async function (apply) {
+        try {
+          await fetch("/api/ops/retail-capital-guide", {
+            method: "POST",
+            headers: withAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+            body: JSON.stringify({ apply: !!apply })
+          });
+        } catch (_) {}
+        sessionStorage.setItem(KEY, "1");
+        host.innerHTML = "";
+        if (apply) loadTrendDeliverySettings();
+      };
+      host.querySelector(".upsell-close").addEventListener("click", function () { close(false); });
+      const applyBtn = host.querySelector("#retail-cap-apply");
+      if (applyBtn) applyBtn.addEventListener("click", function () { close(true); });
+      const dismissBtn = host.querySelector("#retail-cap-dismiss");
+      if (dismissBtn) dismissBtn.addEventListener("click", function () { close(false); });
+      const bd = host.querySelector(".strategy-lock-backdrop");
+      if (bd) bd.addEventListener("click", function () { close(false); });
+      if (data.justApplied || data.applied) loadTrendDeliverySettings();
+    } catch (_) {}
   }
 
   function applyPairsDeliveryView(view) {
@@ -2534,9 +2813,9 @@
         throw new Error(errBody.message || errBody.error || ("HTTP " + res.status));
       }
       applyPairsDeliveryView(await res.json());
-      appendLog(enabled ? "Коинтеграция: авто." : "Коинтеграция: наблюдение.", "ok");
+      appendLog(enabled ? "Pairs: авто." : "Pairs: наблюдение.", "ok");
     } catch (err) {
-      appendLog("Не удалось переключить коинтеграцию: " + (err.message || err), "err");
+      appendLog("Не удалось переключить pairs: " + (err.message || err), "err");
       await loadPairsDeliverySettings();
     } finally {
       toggle.disabled = false;
@@ -2816,6 +3095,9 @@
   function hasArbAccess() {
     return document.body.getAttribute("data-has-arb") === "1";
   }
+  function hasSpreadAccess() {
+    return document.body.getAttribute("data-has-spread") === "1";
+  }
 
   function showStrategyLockModal(strategy) {
     const host = $("strategy-lock-host");
@@ -2849,24 +3131,24 @@
 
   function resolveActiveStrategy() {
     const page = (document.body.getAttribute("data-nav-strategy") || "").trim();
-    if (page === "pairs" || page === "trend" || page === "arb") return page;
+    if (page === "trend" || page === "arb" || page === "invest") return page;
     try {
       const stored = localStorage.getItem(STRATEGY_KEY);
-      if (stored === "pairs" || stored === "trend" || stored === "arb") return stored;
+      if (stored === "trend" || stored === "arb" || stored === "invest") return stored;
     } catch (_) {}
-    return "pairs";
+    return "trend";
   }
 
   function applyStrategyNav(strategy) {
-    let s = strategy || "pairs";
+    let s = strategy || "trend";
+    if (s === "pairs" || s === "spread") s = "trend";
     if (s === "trend" && !hasTrendAccess()) {
       showStrategyLockModal("TREND");
-      s = "pairs";
+      s = "arb";
     }
     if (s === "arb" && !hasArbAccess()) {
       showStrategyLockModal("ARB");
-      s = resolveActiveStrategy() === "arb" ? "pairs" : resolveActiveStrategy();
-      if (s === "arb") s = "pairs";
+      s = "trend";
     }
     try { localStorage.setItem(STRATEGY_KEY, s); } catch (_) {}
     document.querySelectorAll(".strategy-switch-btn").forEach(function (btn) {
@@ -2884,7 +3166,7 @@
   function bindStrategyNav() {
     document.querySelectorAll(".strategy-switch-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        const s = btn.getAttribute("data-strategy") || "pairs";
+        const s = btn.getAttribute("data-strategy") || "trend";
         if (btn.getAttribute("data-locked") === "true") {
           showStrategyLockModal(s === "arb" ? "ARB" : "TREND");
           return;
@@ -2894,11 +3176,8 @@
           location.href = "/view/trend-signal";
         } else if (s === "arb") {
           location.href = "/view/calendar-arb";
-        } else if (s === "pairs" && (
-          location.pathname.indexOf("/view/trend") === 0
-          || location.pathname.indexOf("/view/calendar-arb") === 0
-        )) {
-          location.href = "/view/final";
+        } else if (s === "invest") {
+          location.href = "/view/investments";
         }
       });
     });
@@ -3175,7 +3454,9 @@
     if ($("broker-save-settings")) {
       $("broker-save-settings").addEventListener("click", saveBrokerSettings);
     }
-    if ($("trend-auto-execution") || $("settings-positional-auto-execution")) {
+    if ($("trend-auto-execution")
+        || $("settings-positional-auto-execution")
+        || $("settings-brm-auto-execution")) {
       loadTrendDeliverySettings();
     }
     if ($("trend-auto-execution")) {
@@ -3190,6 +3471,20 @@
         setPositionalAutoExecution($("settings-positional-auto-execution").checked);
       });
     }
+    if ($("settings-brm-auto-execution")) {
+      $("settings-brm-auto-execution").addEventListener("change", function () {
+        if ($("settings-brm-auto-execution").dataset.hydrated !== "1") return;
+        setBrmAutoExecution($("settings-brm-auto-execution").checked);
+      });
+    }
+    if ($("settings-invest-auto-execution")) {
+      loadInvestDeliverySettings();
+      $("settings-invest-auto-execution").addEventListener("change", function () {
+        if ($("settings-invest-auto-execution").dataset.hydrated !== "1") return;
+        setInvestAutoExecution($("settings-invest-auto-execution").checked);
+      });
+    }
+    maybeShowRetailCapitalGuide();
     if ($("settings-pairs-auto-execution")) {
       loadPairsDeliverySettings();
       $("settings-pairs-auto-execution").addEventListener("change", function () {
@@ -3206,6 +3501,18 @@
         toggle.addEventListener("change", function () {
           if (toggle.dataset.hydrated !== "1") return;
           setArbAutoExecution(toggle.checked);
+        });
+      });
+    }
+    if ($("settings-spread-auto-execution") || $("desk-spread-auto-execution")) {
+      if ($("spread-auto-wrap")) $("spread-auto-wrap").hidden = true;
+      loadSpreadDeliverySettings();
+      spreadAutoToggles().forEach(function (toggle) {
+        if (toggle.dataset.bound === "1") return;
+        toggle.dataset.bound = "1";
+        toggle.addEventListener("change", function () {
+          if (toggle.dataset.hydrated !== "1") return;
+          setSpreadAutoExecution(toggle.checked);
         });
       });
     }
@@ -3250,11 +3557,11 @@
   /* —— Interactive onboarding tour (repeatable from dashboard) —— */
   const TOUR_KEY = "trinity.tour.v1";
   const TOUR_STEPS = [
-    { path: "/view", title: "Дашборд", body: "Обзор: режим рынка, KPI, «что сделать сейчас». Отсюда же можно снова запустить обучение." },
-    { path: "/view/final", title: "Пульт пар", body: "Рабочий стол коинтеграции: графики, фаворит отрасли, вход после фундамента." },
-    { path: "/view/statement", title: "Statement", body: "Paper track-record по стратегиям. Сделки trend тегируются playbookId." },
+    { path: "/view", title: "Дашборд", body: "Обзор: режим рынка и роботы спреда, тренда и календаря." },
+    { path: "/view/statement", title: "Statement", body: "Paper track-record по тренду и календарю. Сделки trend тегируются playbookId." },
     { path: "/view/trend-signal", title: "Диапазонная торговля", body: "Exclusive BR M5: полки TOP/BOT, bounce/retest. Робот #2 при этом не выключается — у него свой раздел." },
     { path: "/view/trend-positional", title: "Позиционная торговля", body: "H1: тренд HH/HL, промежуточный HVN, сетка 1:1:2:4. «Сканирует» = робот включён, входа по чеклисту нет." },
+    { path: "/view/trend-brm", title: "BRM мини", body: "Третий плейбук тренда: тот же чеклист полок, контракт BRM, 1 лот на 50–250к." },
     { path: "/view/guide", title: "Справка", body: "Полная инструкция: почему TRINITY так устроена, капитал, два playbook, ежедневный цикл." }
   ];
 
