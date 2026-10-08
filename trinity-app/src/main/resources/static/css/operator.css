@@ -4011,6 +4011,106 @@ body[data-upsell="off"] .full-core-badge {
 .signal-chart-wrap .meta {
   margin-top: 0.35rem;
 }
+.decision-frame {
+  margin-top: 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(196, 163, 90, 0.35);
+  background: linear-gradient(180deg, rgba(196, 163, 90, 0.10), rgba(30, 42, 50, 0.03));
+  overflow: hidden;
+}
+.decision-frame-summary {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 0.45rem 0.65rem;
+  align-items: start;
+  width: 100%;
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.decision-frame-summary:hover {
+  background: rgba(196, 163, 90, 0.08);
+}
+.decision-frame-kicker {
+  grid-column: 1 / -1;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--gold, #c4a35a);
+}
+.decision-frame-status {
+  display: inline-block;
+  min-width: 5.5rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(30, 42, 50, 0.08);
+  color: var(--ink);
+}
+.decision-frame-status[data-status="ENTER"] {
+  background: rgba(22, 163, 74, 0.14);
+  color: #15803d;
+}
+.decision-frame-status[data-status="WAIT"] {
+  background: rgba(196, 163, 90, 0.18);
+  color: #8a6d2f;
+}
+.decision-frame-status[data-status="SKIP"] {
+  background: rgba(100, 116, 139, 0.16);
+  color: #475569;
+}
+.decision-frame-text {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.decision-frame-hint {
+  font-size: 0.72rem;
+  color: var(--muted, #6a7580);
+  white-space: nowrap;
+  margin-top: 0.15rem;
+}
+.decision-frame-details {
+  padding: 0 1rem 0.85rem;
+  border-top: 1px solid rgba(30, 42, 50, 0.08);
+}
+.decision-frame-details-title {
+  margin: 0.65rem 0 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--muted, #6a7580);
+}
+.decision-frame-details-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.decision-frame-details-list li {
+  margin: 0 0 0.4rem;
+  padding: 0.25rem 0 0.25rem 0.7rem;
+  border-left: 2px solid rgba(196, 163, 90, 0.45);
+  line-height: 1.45;
+  font-size: 0.9rem;
+}
+.decision-frame-source {
+  display: inline-block;
+  margin-right: 0.45rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #6a7580);
+  font-weight: 700;
+}
 .signal-brief {
   margin-top: 0.85rem;
   padding: 0.85rem 1rem;

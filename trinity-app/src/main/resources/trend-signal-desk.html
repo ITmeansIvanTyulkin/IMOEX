@@ -180,6 +180,19 @@
         <span class="lg-hi">HI/LO</span> ·
         <span class="lg-zone">TOP/BOT</span> · ENTRY/SL/TP
       </p>
+      <div class="decision-frame" id="decision-frame" hidden>
+        <button type="button" class="decision-frame-summary" id="decision-frame-summary"
+                aria-expanded="false" aria-controls="decision-frame-details">
+          <span class="decision-frame-kicker">Кадр решения</span>
+          <span class="decision-frame-status" id="decision-frame-status">—</span>
+          <span class="decision-frame-text" id="decision-frame-text">Загрузка…</span>
+          <span class="decision-frame-hint" id="decision-frame-hint">подробнее</span>
+        </button>
+        <div class="decision-frame-details" id="decision-frame-details" hidden>
+          <p class="decision-frame-details-title">Факты кадра</p>
+          <ul class="decision-frame-details-list" id="decision-frame-details-list"></ul>
+        </div>
+      </div>
       <div class="signal-brief" id="signal-desk-brief" aria-live="polite">
         <p class="signal-brief-title">
           Сейчас на рынке
@@ -726,4 +739,4 @@
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/trend-signal-desk.js?v=20261007-waitfill"></script>
+<script src="/js/trend-signal-desk.js?v=20261008-df2"></script>

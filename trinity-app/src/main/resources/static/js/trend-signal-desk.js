@@ -90,6 +90,9 @@
   let lastDeskSnapshot = null;
   let liveFlatUntil = 0;
   let liveTp1Until = 0;
+  let decisionFrameOpen = false;
+  let decisionFrameBound = false;
+  let lastDecisionFrameId = "";
 
   function $(id) { return document.getElementById(id); }
   function deskScope() {
@@ -195,6 +198,71 @@
       el.hidden = !!(want && want !== "both" && want !== deskScope());
     });
   }
+  function decisionFrameStatusRu(status) {
+    if (status === "ENTER") return "входит";
+    if (status === "WAIT") return "ждёт";
+    if (status === "SKIP") return "пропускает";
+    return "—";
+  }
+
+  function bindDecisionFrameUi() {
+    if (decisionFrameBound) return;
+    const btn = $("decision-frame-summary");
+    if (!btn) return;
+    decisionFrameBound = true;
+    btn.addEventListener("click", function () {
+      decisionFrameOpen = !decisionFrameOpen;
+      const details = $("decision-frame-details");
+      const hint = $("decision-frame-hint");
+      btn.setAttribute("aria-expanded", decisionFrameOpen ? "true" : "false");
+      if (details) details.hidden = !decisionFrameOpen;
+      if (hint) hint.textContent = decisionFrameOpen ? "свернуть" : "подробнее";
+    });
+  }
+
+  function paintDecisionFrame(data) {
+    bindDecisionFrameUi();
+    const root = $("decision-frame");
+    const textEl = $("decision-frame-text");
+    const statusEl = $("decision-frame-status");
+    const listEl = $("decision-frame-details-list");
+    const details = $("decision-frame-details");
+    const btn = $("decision-frame-summary");
+    const hint = $("decision-frame-hint");
+    if (!root || !textEl || !statusEl) return;
+    const frame = data && data.decisionFrame;
+    if (!frame || !frame.summary) {
+      root.hidden = true;
+      return;
+    }
+    root.hidden = false;
+    const robot = frame.robot || {};
+    const statusRu = decisionFrameStatusRu(robot.status);
+    statusEl.textContent = statusRu;
+    statusEl.dataset.status = robot.status || "";
+    textEl.textContent = frame.summary;
+    root.dataset.trigger = frame.trigger || "";
+    root.dataset.frameId = frame.frameId || "";
+    if (btn) btn.setAttribute("aria-expanded", decisionFrameOpen ? "true" : "false");
+    if (hint) hint.textContent = decisionFrameOpen ? "свернуть" : "подробнее";
+    if (details) details.hidden = !decisionFrameOpen;
+    // Live refresh of open plaque when the frame changes.
+    if (listEl && (decisionFrameOpen || frame.frameId !== lastDecisionFrameId)) {
+      const rows = Array.isArray(frame.details) ? frame.details : [];
+      let html = "";
+      rows.forEach(function (d) {
+        if (!d || !d.text) return;
+        const src = d.source ? String(d.source) : "";
+        html += "<li data-source=\"" + escHtml(src) + "\">"
+          + "<span class=\"decision-frame-source\">" + escHtml(src) + "</span>"
+          + escHtml(d.text)
+          + "</li>";
+      });
+      listEl.innerHTML = html || "<li>Фактов в кадре пока нет.</li>";
+    }
+    lastDecisionFrameId = frame.frameId || "";
+  }
+
   function paintRobotChip(data) {
     const chip = $("sig-robot-chip");
     const el = $("sig-robot-status");
@@ -4345,6 +4413,7 @@
       }
       fillDeskSelects(data);
       paintRobotChip(data);
+      paintDecisionFrame(data);
       if (deskScope() === "positional") {
         syncPositionalAutoSwitch(data);
       } else {
