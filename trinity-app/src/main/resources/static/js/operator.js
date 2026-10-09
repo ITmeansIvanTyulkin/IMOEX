@@ -1835,7 +1835,14 @@
     if (!el || !robot) return;
     setText(el.querySelector(".dash-robot-status"), robot.status || "—");
     const scopeEl = el.querySelector(".dash-robot-scope");
-    if (scopeEl && robot.title) setText(scopeEl, robot.title);
+    if (scopeEl) {
+      const inst = robot.instrument ? String(robot.instrument).trim() : "";
+      const title = robot.title ? String(robot.title).trim() : "";
+      const scope = title && inst && title.indexOf(inst) < 0
+        ? (title + " · " + inst)
+        : (title || inst || "");
+      if (scope) setText(scopeEl, scope);
+    }
     setText(el.querySelector(".dash-robot-detail"), humanizeDashDetail(robot.detail || ""));
     if (robot.href) el.setAttribute("href", robot.href);
     el.classList.remove("is-trade", "is-armed", "is-watch", "is-flat", "is-scan", "is-session-off");

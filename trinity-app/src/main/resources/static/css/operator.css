@@ -3662,6 +3662,12 @@ body[data-upsell="off"] .full-core-badge {
   font-size: 0.82rem;
   color: var(--muted, #6a7580);
 }
+.signal-df-journal-inst {
+  font-weight: 700;
+  font-family: var(--mono, "IBM Plex Mono", monospace);
+  margin-right: 0.2rem;
+  color: var(--ink, #1e2a32);
+}
 .signal-df-journal-item {
   border-top: 1px solid rgba(30, 42, 50, 0.08);
 }

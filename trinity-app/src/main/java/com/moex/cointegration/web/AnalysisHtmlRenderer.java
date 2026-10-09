@@ -216,7 +216,7 @@ public class AnalysisHtmlRenderer {
                 <div id="strategy-lock-host" class="strategy-lock-host" aria-live="assertive"></div>
                 <p class="footnote">TRINITY — research / decision-support. Не индивидуальная инвестиционная рекомендация. Statement PnL — research-метрика (qty×цена, не брокерский отчёт). Проприетарное ПО · регистрация в Роспатенте · см. LICENSE.</p>
               </main>
-              <script src="/js/operator.js?v=20261005-inv1"></script>
+              <script src="/js/operator.js?v=20261009-ticker1"></script>
               <script src="/js/trinity-status-plaques.js?v=20261006-plaques5"></script>
             </body>
             </html>

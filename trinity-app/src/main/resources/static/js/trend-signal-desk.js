@@ -216,6 +216,8 @@
   let dfJournalKind = "";
   let dfJournalCache = null;
   let dfJournalBound = false;
+  /** Keep expanded journal rows across desk polls / ticks. */
+  const dfJournalOpenIds = Object.create(null);
 
   function dfJournalExportQuery(payload) {
     const q = [];
@@ -282,9 +284,14 @@
         if (!item) return;
         const details = item.querySelector(".signal-df-journal-details");
         if (!details) return;
+        const id = item.getAttribute("data-df-id") || "";
         const open = details.hidden;
         details.hidden = !open;
         btn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (id) {
+          if (open) dfJournalOpenIds[id] = true;
+          else delete dfJournalOpenIds[id];
+        }
       });
     }
     const exportBtn = $("signal-df-journal-export");
@@ -294,6 +301,30 @@
         exportDecisionFrameJournal();
       });
     }
+  }
+
+  function dfJournalListSig(filtered, kind) {
+    return String(kind || "") + "#" + filtered.map(function (e) {
+      return [
+        e && e.id,
+        e && e.kind,
+        e && e.robotStatus,
+        e && e.barTime,
+        e && e.summary
+      ].join(":");
+    }).join("|");
+  }
+
+  /** Humanize English rationale tail inside an already-built frame summary. */
+  function humanizeFrameSummary(text) {
+    const s = String(text || "");
+    if (!s) return "—";
+    const m = s.match(/^(.*?Робот\s+(?:пропускает|входит|ждёт)[:：]\s*)(.+)$/i);
+    if (m) {
+      const ru = humanizeDeskReason(m[2]);
+      return m[1] + (ru && ru !== m[2] ? ru : m[2]);
+    }
+    return humanizeDeskReason(s) || s;
   }
 
   function paintDecisionFrameJournal(payload) {
@@ -312,6 +343,7 @@
     if (!entries.length) {
       panel.hidden = true;
       listEl.innerHTML = "";
+      listEl.dataset.sig = "";
       if (meta) meta.textContent = "";
       return;
     }
@@ -335,24 +367,38 @@
     const detailsHtml = (window.TrinityDecisionFrame && TrinityDecisionFrame.detailsHtml)
       || function () { return "<li>—</li>"; };
     if (!filtered.length) {
+      listEl.dataset.sig = dfJournalListSig([], dfJournalKind);
       listEl.innerHTML = "<li class=\"signal-df-journal-empty\">Нет кадров с этим фильтром.</li>";
       return;
     }
+    const sig = dfJournalListSig(filtered, dfJournalKind);
+    // Same frames → keep DOM so an open plaque survives desk ticks/polls.
+    if (listEl.dataset.sig === sig && listEl.querySelector(".signal-df-journal-item")) {
+      return;
+    }
+    listEl.dataset.sig = sig;
     listEl.innerHTML = filtered.map(function (e) {
       const frame = e.frame || {};
       const robot = frame.robot || {};
       const status = e.robotStatus || robot.status || "";
+      const id = String(e.id || frame.frameId || "");
+      const open = !!(id && dfJournalOpenIds[id]);
       const t = shortTime(e.barTime || e.recordedAt || frame.barTime);
-      return "<li class=\"signal-df-journal-item\">"
+      const inst = e.instrument || frame.instrument || "";
+      const summary = humanizeFrameSummary(e.summary || frame.summary || "—");
+      return "<li class=\"signal-df-journal-item\" data-df-id=\"" + escHtml(id) + "\">"
         + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
-        + " aria-expanded=\"false\">"
+        + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
         + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(status) + "\">"
         + escHtml(statusRu(status)) + "</span>"
-        + "<span class=\"signal-df-journal-summary\">" + escHtml(e.summary || frame.summary || "—")
+        + "<span class=\"signal-df-journal-summary\">"
+        + (inst ? ("<span class=\"signal-df-journal-inst\">" + escHtml(inst) + "</span> ") : "")
+        + escHtml(summary)
         + "</span>"
         + "<span class=\"signal-df-journal-time\">" + escHtml(t) + "</span>"
         + "</button>"
-        + "<div class=\"signal-df-journal-details decision-frame-details\" hidden>"
+        + "<div class=\"signal-df-journal-details decision-frame-details\""
+        + (open ? "" : " hidden") + ">"
         + "<ul class=\"decision-frame-details-list\">" + detailsHtml(frame) + "</ul>"
         + "</div>"
         + "</li>";
@@ -378,8 +424,17 @@
       return;
     }
     const copy = buildRobotFabCopy(data);
-    const status = (copy && copy.status) ? copy.status : "Сканирует";
-    const detail = (copy && copy.detail) ? copy.detail : "";
+    let status = (copy && copy.status) ? copy.status : "Сканирует";
+    let detail = (copy && copy.detail) ? copy.detail : "";
+    const instRaw = (data && (data.robotInstrument || data.instrument)) || "";
+    const inst = instRaw ? formatSecidWithMonth(instRaw) : "";
+    if (inst && (posture === "WAITING_FILL" || posture === "IN_TRADE"
+        || posture === "WATCHING_ZONE")) {
+      status = status + " · " + inst;
+      if (detail && detail.indexOf(instRaw) < 0 && detail.indexOf(inst) < 0) {
+        detail = inst + " · " + detail;
+      }
+    }
     el.textContent = status;
     const sub = $("sig-robot-detail");
     if (sub) {
@@ -702,6 +757,7 @@
     try {
       const key = isRangeDesk() ? INST_STORE + ".range" : INST_STORE;
       if (v) localStorage.setItem(key, String(v).trim());
+      else localStorage.removeItem(key);
     } catch (_) {}
   }
   function readStoredPlaybook() {
@@ -734,9 +790,17 @@
   function wantedDeskInstrument() {
     const instSel = $("sig-instrument");
     const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
-    const want = (deskInstrumentPinned || fromSel || "").trim();
-    if (isRangeDesk() && want) {
-      const fam = instrumentFamily(want);
+    let want = (deskInstrumentPinned || fromSel || "").trim();
+    if (!want) return "";
+    const fam = instrumentFamily(want);
+    // Positional is BR oil only — drop BRM/SI/RI/… pins that used to spin «грузим desk…».
+    if (deskScope() === "positional" && fam && fam !== "BR") {
+      deskInstrumentPinned = "";
+      try { writeStoredInstrument(""); } catch (_) {}
+      if (instSel) instSel.value = "";
+      return "";
+    }
+    if (isRangeDesk()) {
       if (deskScope() === "brm" && fam !== "BRM") return "";
       if (deskScope() === "range" && fam !== "BR") return "";
     }
@@ -780,6 +844,12 @@
     const fromLayout = deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.instrument;
     let pick = deskInstrumentPinned || fromLayout || readStoredInstrument();
     if (isRangeDesk() && pick && !isOilInstrument(pick)) pick = "";
+    // Positional desk is BR oil only — never restore a non-BR pin from layout/storage.
+    if (deskScope() === "positional" && pick && instrumentFamily(pick) !== "BR") {
+      pick = "";
+      deskInstrumentPinned = "";
+      writeStoredInstrument("");
+    }
     if (pick && matchInstrumentOption(instSel, pick)) {
       deskInstrumentPinned = instSel.value;
     }
@@ -822,6 +892,25 @@
     const m = String(iso).match(/T(\d{2}:\d{2})/);
     return m ? m[1] : iso;
   }
+  /** Full when-clause: «в HH:mm» / «вчера в HH:mm» / «dd.MM в HH:mm». */
+  function shortCloseWhen(iso) {
+    if (!iso) return "";
+    const hm = shortTime(iso);
+    if (!hm || hm === "—") return "";
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})T/);
+    if (!m) return "в " + hm;
+    try {
+      const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const diff = Math.round((today.getTime() - day.getTime()) / 86400000);
+      if (diff === 0) return "в " + hm;
+      if (diff === 1) return "вчера в " + hm;
+      return m[3] + "." + m[2] + " в " + hm;
+    } catch (_) {
+      return "в " + hm;
+    }
+  }
   function clockMeta(sit) {
     if (!sit) return "";
     const rb = sit.robotBar ? shortTime(sit.robotBar) : "";
@@ -837,11 +926,11 @@
     const lane = fp && fp.lanes && pbId ? fp.lanes[pbId] : null;
     const lc = (lane && lane.lastClose) || (sit && sit.lastClose) || null;
     if (!lc || !lc.exitReason) return "";
-    const t = shortTime(lc.closedAt);
+    const when = shortCloseWhen(lc.closedAt);
     const pnl = typeof lc.pnlRub === "number" ? (" " + fmtPnl(lc.pnlRub)) : "";
     return "Последняя: " + lc.exitReason
       + (lc.slKind === "SWEEP" ? " sweep" : "")
-      + pnl + (t && t !== "—" ? (" в " + t) : "");
+      + pnl + (when ? (" " + when) : "");
   }
   function renderPaper(paper, desk) {
     const st = (paper && paper.statement) || {};
@@ -874,6 +963,7 @@
       }
       const id = String((t && t.id) || "");
       if (id.indexOf("BRX6-2026-10-06T06-00") >= 0) return false;
+      if (id.indexOf("BRX6-2026-10-09T16-45") >= 0) return false;
       return true;
     });
     const latest = paper && paper.latestClose;
@@ -881,7 +971,8 @@
       const latestPb = playbookFromTrade(latest);
       const samePb = !wantPb || wantPb === "both" || latestPb === wantPb;
       const has = rows.some(function (t) { return t && t.id === latest.id; });
-      const voided = String(latest.id || "").indexOf("BRX6-2026-10-06T06-00") >= 0;
+      const voided = String(latest.id || "").indexOf("BRX6-2026-10-06T06-00") >= 0
+          || String(latest.id || "").indexOf("BRX6-2026-10-09T16-45") >= 0;
       if (samePb && !has && !voided) {
         rows.unshift(latest);
       }
@@ -1853,6 +1944,44 @@
     const s = deMark(raw || "");
     if (!s) return "";
     const u = s.toUpperCase();
+    // Positional H1 gap-fill arm skips (English rationale from PositionalH1GapStrategy).
+    if (u.indexOf("GAP STRATEGY") >= 0) {
+      if (u.indexOf("2 H1") >= 0 || u.indexOf("≥2") >= 0 || u.indexOf(">=2") >= 0) {
+        return "Гэп: нужно ≥2 часовых бара после 07:00 в сторону вчерашнего закрытия "
+          + "(последний бар должен закрыться с заполнением гэпа).";
+      }
+      if (u.indexOf("VOLUME AGAINST") >= 0 || u.indexOf("CONFIRM-WINDOW") >= 0) {
+        return "Гэп: в окне подтверждения объём шёл против заполнения — вход не берём.";
+      }
+      if (u.indexOf("HARD MICRO") >= 0 || u.indexOf("NEED MICRO") >= 0) {
+        return "Гэп: до 10:00 нужен жёсткий микро-confirm (DOM + лента) — пока не подтверждаем.";
+      }
+      if (u.indexOf("AFTER 10:00") >= 0 || u.indexOf("MAIN SESSION") >= 0) {
+        return "Гэп: после 10:00 руки на заполнение гэпа уже не ставим.";
+      }
+      if (u.indexOf("BREAKAWAY") >= 0 || u.indexOf("OUTSIDE PRIOR") >= 0) {
+        return "Гэп: открытие вне вчерашнего диапазона — breakaway, на заполнение не торгуем.";
+      }
+      if (u.indexOf("LARGE GAP") >= 0 || u.indexOf("VS ATR") >= 0) {
+        return "Гэп слишком большой относительно ATR — на заполнение не берём.";
+      }
+      if (u.indexOf("ICEBERG") >= 0 || u.indexOf("SPOOF") >= 0) {
+        return "Гэп: в стакане айсберг/споф против заполнения — пропуск.";
+      }
+      if (u.indexOf("DOM CROWD") >= 0) {
+        return "Гэп: толпа в стакане против заполнения — пропуск.";
+      }
+      if (u.indexOf("TAPE") >= 0 || u.indexOf("FOOTPRINT") >= 0) {
+        return "Гэп: лента/footprint против заполнения — пропуск.";
+      }
+      if (u.indexOf("BOUNCE SLEEPS") >= 0 || u.indexOf("NO ARM") >= 0) {
+        return "Гэп ещё открыт — обычный отскок от полки спит, пока гэп не закроют.";
+      }
+      if (u.indexOf("NO CHASE") >= 0 || u.indexOf("REMAINING") >= 0) {
+        return "Гэп: до вчерашнего закрытия осталось мало пунктов — не догоняем.";
+      }
+      return "Фильтр заполнения ночного гэпа — вход сейчас не берём.";
+    }
     if (u.indexOf("GAP-FILL") >= 0 || u.indexOf("GAP FILL") >= 0 || u.indexOf("НОЧН") >= 0 && u.indexOf("ГЭП") >= 0) {
       if (u.indexOf("AGAINST") >= 0 || u.indexOf("NO BUY") >= 0 || u.indexOf("NO SELL") >= 0
           || u.indexOf("ПРОТИВ ЗАПОЛН") >= 0) {
@@ -4519,9 +4648,14 @@
       if (gen !== deskFetchGen) return;
       const stillWant = wantedDeskInstrument() || wantInst;
       if (deskScope() === "positional"
-          && stillWant && data.instrument && !sameInstrumentFamily(stillWant, data.instrument)) {
-        deskReloadQueued = true;
-        return;
+          && stillWant && data.instrument
+          && !sameInstrumentFamily(stillWant, data.instrument)) {
+        // Positional desk is BR oil — any stale pin (BRM, SI, RI, …) must adopt the
+        // server instrument. Reloading forever left the UI stuck on «грузим desk…».
+        deskInstrumentPinned = data.instrument;
+        writeStoredInstrument(data.instrument);
+        const instSel = $("sig-instrument");
+        if (instSel) matchInstrumentOption(instSel, data.instrument);
       }
       if (meta) {
         meta.textContent = (data.playbookName || data.playbookId || "playbook")
@@ -4580,7 +4714,7 @@
       const chartLabel = $("signal-chart-label");
       const paperTitle = $("signal-paper-title");
       if (paperTitle) {
-        paperTitle.textContent = "Сделки сегодня · " + formatSecidWithMonth(chartInst);
+        paperTitle.textContent = "Сделки сегодня · " + formatSecidWithMonth(chartInst)
           + (data.robotInstrument && data.robotInstrument !== chartInst
             ? (" · робот: " + data.robotInstrument) : "");
       }
@@ -5746,6 +5880,11 @@
     }
     if (isRangeDesk() && deskInstrumentPinned && !isOilInstrument(deskInstrumentPinned)) {
       deskInstrumentPinned = null;
+    }
+    if (deskScope() === "positional" && deskInstrumentPinned
+        && instrumentFamily(deskInstrumentPinned) !== "BR") {
+      deskInstrumentPinned = "";
+      writeStoredInstrument("");
     }
     applyUrlInstrumentOnce();
     bindTape();

@@ -7,6 +7,7 @@ import com.moex.cointegration.config.ImoexProperties;
 import com.moex.cointegration.model.MarketRegimeSnapshot;
 import com.moex.cointegration.model.PaperJournal;
 import com.moex.cointegration.model.PaperTradeEntry;
+import com.moex.trinity.marketdata.PlainHttp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -14,12 +15,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -42,6 +37,7 @@ public class DeskSnapshotPublisher {
     private static final Logger log = LoggerFactory.getLogger(DeskSnapshotPublisher.class);
     private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {};
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+    private static final int UPSTREAM_TIMEOUT_MS = 20_000;
 
     private final ImoexProperties properties;
     private final DeskCloudSessionStore cloudSessions;
@@ -50,10 +46,6 @@ public class DeskSnapshotPublisher {
     private final ObjectProvider<TrendPaperJournalService> trendPaper;
     private final ObjectProvider<CalendarArbPaperJournalService> arbPaper;
     private final ObjectProvider<MarketRegimeService> regimeService;
-    private final HttpClient http = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
 
     private final AtomicReference<String> lastOkAt = new AtomicReference<>();
     private final AtomicReference<String> lastError = new AtomicReference<>();
@@ -120,18 +112,21 @@ public class DeskSnapshotPublisher {
         String anon = sb.anonKey() == null ? "" : sb.anonKey().trim();
         byte[] body = mapper.writeValueAsBytes(List.of(row));
 
-        HttpRequest req = HttpRequest.newBuilder(
-                        URI.create(base + "/rest/v1/desk_snapshots?on_conflict=user_id"))
-                .timeout(Duration.ofSeconds(20))
-                .header("apikey", anon)
-                .header("Authorization", "Bearer " + session.accessToken())
-                .header("Content-Type", "application/json")
-                .header("Prefer", "resolution=merge-duplicates,return=minimal")
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
-        HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (res.statusCode() < 200 || res.statusCode() >= 300) {
-            String msg = "Supabase HTTP " + res.statusCode() + ": " + abbreviate(res.body());
+        PlainHttp.Reply res = PlainHttp.exchange(
+                "POST",
+                base + "/rest/v1/desk_snapshots?on_conflict=user_id",
+                UPSTREAM_TIMEOUT_MS,
+                "TRINITY-desk/1.0",
+                "application/json",
+                body,
+                Map.of(
+                        "apikey", anon,
+                        "Authorization", "Bearer " + session.accessToken(),
+                        "Prefer", "resolution=merge-duplicates,return=minimal"
+                )
+        );
+        if (res.status() < 200 || res.status() >= 300) {
+            String msg = "Supabase HTTP " + res.status() + ": " + abbreviate(res.body());
             lastError.set(msg);
             throw new IllegalStateException(msg);
         }
@@ -290,21 +285,24 @@ public class DeskSnapshotPublisher {
         String base = sb.url().endsWith("/") ? sb.url().substring(0, sb.url().length() - 1) : sb.url();
         String anon = sb.anonKey() == null ? "" : sb.anonKey().trim();
         byte[] payload = mapper.writeValueAsBytes(Map.of("refresh_token", s.refreshToken()));
-        HttpRequest req = HttpRequest.newBuilder(
-                        URI.create(base + "/auth/v1/token?grant_type=refresh_token"))
-                .timeout(Duration.ofSeconds(20))
-                .header("apikey", anon)
-                .header("Authorization", "Bearer " + anon)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
-                .build();
-        HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        PlainHttp.Reply res = PlainHttp.exchange(
+                "POST",
+                base + "/auth/v1/token?grant_type=refresh_token",
+                UPSTREAM_TIMEOUT_MS,
+                "TRINITY-desk/1.0",
+                "application/json",
+                payload,
+                Map.of(
+                        "apikey", anon,
+                        "Authorization", "Bearer " + anon
+                )
+        );
         Map<String, Object> body = mapper.readValue(res.body() == null ? "{}" : res.body(), MAP);
-        if (res.statusCode() < 200 || res.statusCode() >= 300
+        if (res.status() < 200 || res.status() >= 300
                 || !(body.get("access_token") instanceof String access)
                 || access.isBlank()) {
             throw new IllegalStateException(
-                    "Не удалось обновить сессию кабинета: HTTP " + res.statusCode()
+                    "Не удалось обновить сессию кабинета: HTTP " + res.status()
             );
         }
         String refresh = body.get("refresh_token") instanceof String r && !r.isBlank()
