@@ -535,24 +535,83 @@
     rail.setAnomalyMarkers(Object.keys(byTime).map(function (k) { return byTime[k]; }));
   }
 
+  function sparklineSvg(closes, up) {
+    const pts = (closes || []).filter(function (v) { return Number.isFinite(Number(v)); })
+      .map(Number);
+    if (pts.length < 2) {
+      return "<svg class='signal-sync-spark-svg' viewBox='0 0 120 36' preserveAspectRatio='none' aria-hidden='true'></svg>";
+    }
+    let min = pts[0];
+    let max = pts[0];
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i] < min) min = pts[i];
+      if (pts[i] > max) max = pts[i];
+    }
+    const span = max - min || 1;
+    const w = 120;
+    const h = 36;
+    const pad = 2;
+    const n = pts.length;
+    const path = pts.map(function (v, i) {
+      const x = pad + (i / (n - 1)) * (w - pad * 2);
+      const y = pad + (1 - (v - min) / span) * (h - pad * 2);
+      return (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
+    }).join(" ");
+    const stroke = up ? "#0f766e" : (up === false ? "#b45309" : "#64748b");
+    return "<svg class='signal-sync-spark-svg' viewBox='0 0 " + w + " " + h
+      + "' preserveAspectRatio='none' aria-hidden='true'>"
+      + "<path d='" + path + "' fill='none' stroke='" + stroke
+      + "' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+  }
+
+  function paintSyncSparks(ctx) {
+    const host = $("signal-sync-sparks");
+    if (!host) return;
+    const sparks = (ctx && ctx.peerSparks) || [];
+    if (!sparks.length) {
+      host.innerHTML = "<p class='signal-sync-spark-empty'>Нет ряда peers</p>";
+      return;
+    }
+    host.innerHTML = sparks.map(function (s) {
+      const peer = (s && s.peer) || "—";
+      const day = s && s.dayPts != null && Number.isFinite(Number(s.dayPts))
+        ? Number(s.dayPts) : null;
+      const up = day == null ? null : day > 0;
+      const dayLbl = day == null ? "—" : ((day > 0 ? "+" : "") + day + " пт");
+      const dayCls = day == null ? "" : (day > 0 ? " is-up" : (day < 0 ? " is-down" : ""));
+      return "<article class='signal-sync-spark" + dayCls + "'>"
+        + "<header class='signal-sync-spark-head'>"
+        + "<span class='signal-sync-spark-peer'>" + escHtml(peer) + "</span>"
+        + "<span class='signal-sync-spark-day'>" + escHtml(dayLbl) + "</span>"
+        + "</header>"
+        + sparklineSvg(s && s.closes, up)
+        + "<p class='signal-sync-spark-secid'>" + escHtml((s && s.secid) || "") + "</p>"
+        + "</article>";
+    }).join("");
+  }
+
   function paintSyncPanel(ctx) {
     bindSyncPanel();
     syncContextCache = ctx || null;
     const panel = $("signal-sync-panel");
     const toggle = $("signal-sync-toggle");
+    const body = $("signal-sync-body");
     const list = $("signal-sync-list");
     const meta = $("signal-sync-meta");
     if (!panel || !list) return;
     const events = (ctx && ctx.events) || [];
     const peers = (ctx && ctx.peers) || [];
-    panel.hidden = !ctx || !events.length;
+    const sparks = (ctx && ctx.peerSparks) || [];
+    // Show panel when there are events or peer sparks (open still reveals sparklines).
+    panel.hidden = !ctx || (!events.length && !sparks.length);
     refreshSyncAnomalyMarkers();
     if (panel.hidden) return;
     if (toggle) {
       toggle.setAttribute("aria-pressed", syncPanelOpen ? "true" : "false");
       toggle.classList.toggle("is-active", syncPanelOpen);
     }
-    list.hidden = !syncPanelOpen;
+    panel.classList.toggle("is-open", syncPanelOpen);
+    if (body) body.hidden = !syncPanelOpen;
     const shown = syncAnomOnly
       ? events.filter(function (e) { return e && e.anomaly; })
       : events;
@@ -564,8 +623,11 @@
     }
     if (!syncPanelOpen) {
       list.innerHTML = "";
+      const sparksEl = $("signal-sync-sparks");
+      if (sparksEl) sparksEl.innerHTML = "";
       return;
     }
+    paintSyncSparks(ctx);
     if (!shown.length) {
       list.innerHTML = "<li class='signal-sync-empty'>Нет расхождений"
         + (syncAnomOnly ? " (снимите «только аномалии»)" : "") + "</li>";

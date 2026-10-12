@@ -117,7 +117,7 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 | [DF-1](https://app.clickup.com/t/869fegd8p) | BE: слои 1+2+4 | must-have |
 | [DF-2](https://app.clickup.com/t/869fegda5) | FE: краткая сводка + плашка details live | must-have |
 | [DF-3](https://app.clickup.com/t/869fegdb2) | Журнал кадров why/wait/skip | must-have |
-| [DF-4](https://app.clickup.com/t/869fegdc9) | Lead/lag BR–BRM–RI одной строкой | must-have (после 1+4) |
+| [DF-4](https://app.clickup.com/t/869fegdc9) | Lead/lag BR–Si–RI одной строкой | must-have (после 1+4) |
 | [DF-5](https://app.clickup.com/t/869fegdd1) | Sync-панели + лента расхождений | после релиза |
 | [DF-6](https://app.clickup.com/t/869fegddy) | Allocator в языке Decision Frame | после |
 | [FE UI](https://app.clickup.com/t/869fegdf9) | Frontend-зеркало UI | parallel с DF-2 |
@@ -194,5 +194,5 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 Начни с DF-0. Не распыляйся на DF-5/6 и не трогай observe-тюнинг.
 
 Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`.  
-**Готово:** DF-0…DF-5 (лента расхождений + toggle; полные sync-панели — опционально).  
-**Дальше:** [DF-6](https://app.clickup.com/t/869fegddy) Allocator · при необходимости добить multi-chart sync из DF-5.
+**Готово:** DF-0…DF-5 (лента + toggle + sparkline peers BR/Si/RI).  
+**Дальше:** [DF-6](https://app.clickup.com/t/869fegddy) Allocator.

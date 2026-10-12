@@ -41,6 +41,8 @@ class TrendSignalDeskJsAuthQuietTest {
                 "positional §1 candidates must paint in brief (incl. DF short path)");
         assertTrue(src.contains("Выбор инструмента"), "instrument rotation kicker missing");
         assertTrue(src.contains("function paintSyncPanel"), "DF-5 sync ribbon missing");
+        assertTrue(src.contains("function paintSyncSparks"), "DF-5 peer sparklines missing");
+        assertTrue(src.contains("peerSparks"), "DF-5 peerSparks payload wiring missing");
         assertTrue(src.contains("seekChartToBarIso"), "DF-5 click-to-chart missing");
         assertTrue(src.contains("highlightAt"), "DF-5 anomaly pin/vline missing");
         assertTrue(src.contains("refreshSyncAnomalyMarkers"), "DF-5 anom-only batch markers missing");
@@ -71,7 +73,7 @@ class TrendSignalDeskJsAuthQuietTest {
                 "saveDeskSelection must not echo positionalAutoExecution");
         assertFalse(saveBody.contains("liveExecution:"),
                 "saveDeskSelection must not echo liveExecution");
-        assertTrue(src.contains("Перед входом · фундамент и охота"), "hunt brief heading missing");
+        assertTrue(src.contains("Перед входом · стакан и лента"), "hunt brief heading missing");
         assertTrue(src.contains("function wantedDeskInstrument"), "desk must request pinned instrument");
         assertTrue(src.contains("invalidateDeskFetch"), "stale oil payload must be dropped on instrument change");
         assertTrue(src.contains("deskReloadQueued"), "instrument change must queue desk reload");
@@ -80,7 +82,8 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("function isRangeDesk"), "range desk helper missing");
         assertTrue(src.contains("INST_STORE + \".range\""),
                 "range must not share positional instrument pin");
-        assertTrue(src.contains("isRangeDesk() && want && !isOilInstrument(want)"),
+        assertTrue(src.contains("deskScope() === \"range\" && fam !== \"BR\"")
+                        || src.contains("isRangeDesk() && want && !isOilInstrument(want)"),
                 "range wanted instrument must ignore Si/Ri pin");
         assertTrue(src.contains("function formatSecidWithMonth"), "chart must show FORTS month next to SECID");
         assertTrue(src.contains("FORTS_MONTH_RU"), "FORTS month map missing");

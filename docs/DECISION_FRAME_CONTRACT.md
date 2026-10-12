@@ -217,10 +217,10 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] desk: `body.leadLag` / `situation.leadLag`
 - [x] Unit: `LeadLagCompareTest`, assembler summary/details split
 
-## DoD DF-5 (вертикальный срез на `dev`)
+## DoD DF-5 (закрыто на `dev`)
 
-- [x] `SyncDivergenceCompare` + desk `syncContext` (preset oil: BR/BRM/RI)
+- [x] `SyncDivergenceCompare` + desk `syncContext` (preset oil: BR/Si/RI; BRM не peer)
 - [x] UI: toggle «Контекст» без reload (localStorage) · фильтр «только аномалии»
 - [x] Клик по событию → seek графика к `at`
 - [x] Топ-аномалии в `details[].source=sync` → журнал кадров
-- [ ] Полные sync-панели 50–60% + sparkline peers (следующий шаг, не блокер DoD кликабельности)
+- [x] Sync-панель ~50–60%: sparkline peers (`peerSparks`) + лента событий
