@@ -1,13 +1,13 @@
 # Decision Frame — контракт кадра (DF-0)
 
-> Статус: **DF-0 + DF-1 + DF-2 + DF-3 на `dev`** — контракт, слои 1+2+4, desk API, UI live, журнал кадров (JSONL).  
-> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) · [DF-1](https://app.clickup.com/t/869fegd8p) · [DF-2](https://app.clickup.com/t/869fegda5) · [DF-3](https://app.clickup.com/t/869fegdb2).  
+> Статус: **DF-0…DF-4 на `dev`** — контракт, слои 1–4, desk API, UI live, журнал кадров (JSONL).  
+> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) · [DF-1](https://app.clickup.com/t/869fegd8p) · [DF-2](https://app.clickup.com/t/869fegda5) · [DF-3](https://app.clickup.com/t/869fegdb2) · [DF-4](https://app.clickup.com/t/869fegdc9).  
 > Эпик: [Decision Frame USP](https://app.clickup.com/t/869fegd2j).  
 > Handoff: `docs/DECISION_FRAME_AGENT_PROMPT.md`. Тексты свечи: `docs/IMPULSE_CANDLE_TOOLTIP_PROMPT.md`.  
-> Код: `DecisionFrame.java`, `DecisionFrameAssembler.java`, `SessionNormCompare.java`, `DecisionFrameJournalService.java`; деск → `body.decisionFrame` + `situation.sessionNorm` + `body.decisionFrames`.  
-> Тесты: `DecisionFrameAssemblerTest`, `SessionNormCompareTest`; журнал: `DecisionFrameJournalServiceTest`.
+> Код: `DecisionFrameAssembler`, `SessionNormCompare`, `LeadLagCompare`, journal; деск → `decisionFrame` + `sessionNorm` + `leadLag` + `decisionFrames`.  
+> Тесты: `DecisionFrameAssemblerTest`, `SessionNormCompareTest`, `LeadLagCompareTest`.
 
-Exclusive / BR (+ positional H1): слои **1 (картина)**, **2 (норма сессии)**, **4 (решение)**. Слой 3 (lead/lag) — когда есть данные; иначе сводка про RI/BRM не пишет.
+Exclusive / BR: слои **1–4**. Positional: 1+2+4 (lead/lag по BR–BRM–RI на range/BRM lane).
 
 Новое поле деска: `decisionFrame`. Существующие `summary` (строка) и `situation.why` не трогаем — это текущий деск, не кадр.
 
@@ -108,7 +108,7 @@ Lead/lag, когда появится, **не** запрещает вход са
 | `cluster` | 1 | кластер у полки |
 | `footprint` | 1 | footprint деска |
 | `sessionNorm` | 2 | фаза дня + дневной ход + объём/ход бара vs медиана того же clock-hour (`SessionNormCompare`); soft-hint после клиринга |
-| `leadLag` | 3 | BR–BRM–RI одной строкой — **DF-4** (уже есть черновик на desk, не DoD) |
+| `leadLag` | 3 | BR–BRM–RI: короткая строка в summary + цифры/смысл в details (`LeadLagCompare`); **не veto** |
 | `robot` | 4 | план playbook: статус, сторона, mode, пункты чеклиста |
 
 `layer`: `1` \| `2` \| `3` \| `4`.  
@@ -208,3 +208,11 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Фильтры API + desk fragment
 - [x] UI список + detail-пакет (+ API export; кнопка UI убрана по запросу)
 - [x] За сессию paper можно отфильтровать «ждёт» и «вошёл» с полными фактами
+
+## DoD DF-4 (закрыто на `dev`)
+
+- [x] `LeadLagCompare`: день BR/BRM/RI + час (опережает/отстаёт/против)
+- [x] Короткая строка в summary; полный факт с цифрами в details
+- [x] Явно «контекст, не запрет входа» — без veto-языка
+- [x] desk: `body.leadLag` / `situation.leadLag`
+- [x] Unit: `LeadLagCompareTest`, assembler summary/details split
