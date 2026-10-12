@@ -1,5 +1,5 @@
 <section class="signal-desk" id="trend-signal-desk" data-desk-scope="range">
-  <link rel="stylesheet" href="/css/operator.css?v=20261012-df5sync">
+  <link rel="stylesheet" href="/css/operator.css?v=20261012-df5red">
   <div class="signal-desk-head">
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
@@ -768,8 +768,33 @@
   </div>
 </div>
 
+<div class="signal-sync-brief-gate" id="signal-sync-brief" hidden aria-hidden="true">
+  <div class="signal-sync-brief-backdrop" data-sync-brief-close tabindex="-1" aria-hidden="true"></div>
+  <div class="signal-sync-brief-modal" role="dialog" aria-modal="true"
+       aria-labelledby="signal-sync-brief-title" tabindex="-1">
+    <header class="signal-sync-brief-head">
+      <div>
+        <p class="signal-sync-brief-kicker">Контекст · расхождение</p>
+        <h3 id="signal-sync-brief-title">—</h3>
+        <p class="signal-sync-brief-lead" id="signal-sync-brief-lead"></p>
+      </div>
+      <button type="button" class="signal-sync-brief-close" data-sync-brief-close
+              aria-label="Закрыть">×</button>
+    </header>
+    <div class="signal-sync-brief-actions">
+      <button type="button" class="btn btn-primary btn-xs" id="signal-sync-brief-expand">
+        Разбор агрессии
+      </button>
+      <button type="button" class="btn btn-ghost btn-xs" id="signal-sync-brief-fp" hidden>
+        Включить footprint
+      </button>
+    </div>
+    <div class="signal-sync-brief-body" id="signal-sync-brief-body" hidden></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
-<script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/trinity-decision-frame.js?v=20261012-df5sync"></script>
-<script src="/js/trend-signal-desk.js?v=20261012-df5sync"></script>
+<script src="/js/trinity-chart-kit.js?v=20261012-df5red"></script>
+<script src="/js/trinity-decision-frame.js?v=20261012-df5pin"></script>
+<script src="/js/trend-signal-desk.js?v=20261012-df5red"></script>

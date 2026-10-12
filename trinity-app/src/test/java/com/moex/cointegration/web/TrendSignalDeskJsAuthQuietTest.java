@@ -42,6 +42,11 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("Выбор инструмента"), "instrument rotation kicker missing");
         assertTrue(src.contains("function paintSyncPanel"), "DF-5 sync ribbon missing");
         assertTrue(src.contains("seekChartToBarIso"), "DF-5 click-to-chart missing");
+        assertTrue(src.contains("highlightAt"), "DF-5 anomaly pin/vline missing");
+        assertTrue(src.contains("refreshSyncAnomalyMarkers"), "DF-5 anom-only batch markers missing");
+        assertTrue(src.contains("openSyncBrief"), "DF-5 anomaly brief modal missing");
+        assertTrue(src.contains("Разбор агрессии") || src.contains("signal-sync-brief-expand"),
+                "DF-5 aggression brief CTA missing");
         assertTrue(src.contains("После 16:00 новый вход не ставим"), "late-arm copy must be Russian");
         assertTrue(src.contains("desk-positional-auto-execution"), "positional desk switcher missing");
         assertTrue(src.contains("/api/trend/settings/positional-auto-execution"), "positional auto API missing");

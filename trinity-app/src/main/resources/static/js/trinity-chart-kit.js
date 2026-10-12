@@ -4394,6 +4394,17 @@
         const letter = (text || "•").slice(0, 1).toUpperCase();
         return { cls: "is-entry", color: color || "#2563eb", html: '<span class="signal-timeline-letter">' + letter + "</span>" };
       }
+      if (k === "SYNC_ANOMALY" || k === "SYNC" || k === "ANOMALY") {
+        const SKULL = '<svg class="signal-timeline-ico signal-timeline-skull" viewBox="0 0 16 16" aria-hidden="true">'
+          + '<circle cx="8" cy="8" r="7.35" fill="#dc2626"/>'
+          + '<path fill="#fff" d="M8 3.15c-2.55 0-4.35 1.65-4.35 3.75 0 1.28.58 2.28 1.48 2.95v1.35c0 .42.34.76.76.76h.62v.55c0 .3.24.54.54.54h1.9c.3 0 .54-.24.54-.54v-.55h.62c.42 0 .76-.34.76-.76V9.85c.9-.67 1.48-1.67 1.48-2.95 0-2.1-1.8-3.75-4.35-3.75zm-1.55 3.2a.95.95 0 110 1.9.95.95 0 010-1.9zm3.1 0a.95.95 0 110 1.9.95.95 0 010-1.9zM7.15 11.1h1.7v.85H7.15z"/>'
+          + "</svg>";
+        return {
+          cls: "is-sync-anomaly",
+          color: color || "#dc2626",
+          html: SKULL
+        };
+      }
       return {
         cls: "is-misc",
         color: color || "#6366f1",
@@ -4401,9 +4412,18 @@
       };
     }
 
+    /** Clicked anomaly: vline + skull until cleared / replaced. */
+    let pin = null;
+    /** Batch skulls from «только аномалии» (last N minutes). */
+    let anomalyBatch = [];
+
     function setHover(x, color, show) {
       if (!line) return;
       if (!show || x == null || !isFinite(x)) {
+        if (pin) {
+          showPinLine();
+          return;
+        }
         line.hidden = true;
         return;
       }
@@ -4412,17 +4432,66 @@
       line.style.borderColor = color || "rgba(99, 102, 241, 0.85)";
     }
 
+    function showPinLine() {
+      if (!line || !pin) {
+        if (line && !pin) line.hidden = true;
+        return;
+      }
+      const unix = toUnix(pin.time);
+      if (unix == null) {
+        line.hidden = true;
+        return;
+      }
+      let x = null;
+      try { x = chart.timeScale().timeToCoordinate(unix); } catch (_) {}
+      if (x == null || !isFinite(x)) {
+        line.hidden = true;
+        return;
+      }
+      line.hidden = false;
+      line.style.left = Math.round(x) + "px";
+      line.style.borderColor = pin.color || "rgba(220, 38, 38, 0.95)";
+      line.classList.add("is-pinned");
+    }
+
+    function mergeSyncDraw(base) {
+      const draw = base.slice();
+      const seen = {};
+      function addSync(m) {
+        if (!m || m.time == null) return;
+        const u = toUnix(m.time);
+        if (u == null) return;
+        const key = String(u);
+        if (seen[key]) return;
+        seen[key] = true;
+        draw.push({
+          time: m.time,
+          kind: m.kind || "SYNC_ANOMALY",
+          color: m.color || "#dc2626",
+          text: m.text || "!",
+          title: m.title || "Аномалия",
+          detail: m.detail || ""
+        });
+      }
+      anomalyBatch.forEach(addSync);
+      if (pin) addSync(pin);
+      return draw;
+    }
+
     function layout() {
       rail.innerHTML = "";
+      if (line) line.classList.remove("is-pinned");
       setHover(null, null, false);
-      if (!items.length) {
+      const draw = mergeSyncDraw(items);
+      if (!draw.length) {
         rail.hidden = true;
+        showPinLine();
         return;
       }
       rail.hidden = false;
       const w = host.clientWidth || 0;
       const ts = chart.timeScale();
-      items.forEach(function (m) {
+      draw.forEach(function (m) {
         if (!m) return;
         const unix = toUnix(m.time);
         if (unix == null) return;
@@ -4439,17 +4508,47 @@
         chip.title = detail ? (title + "\n" + detail) : title;
         const dot = document.createElement("span");
         dot.className = "signal-timeline-dot";
-        dot.style.background = vis.color;
+        if (vis.cls === "is-sync-anomaly") {
+          dot.style.background = "#dc2626";
+          dot.style.padding = "0";
+        } else {
+          dot.style.background = vis.color;
+        }
         dot.innerHTML = vis.html;
         chip.appendChild(dot);
         chip.addEventListener("mouseenter", function () { setHover(chipX, vis.color, true); });
         chip.addEventListener("mouseleave", function () { setHover(null, null, false); });
         rail.appendChild(chip);
       });
+      showPinLine();
     }
 
     function setMarkers(list) {
       items = Array.isArray(list) ? list.slice() : [];
+      layout();
+    }
+
+    function setAnomalyMarkers(list) {
+      anomalyBatch = Array.isArray(list) ? list.slice() : [];
+      layout();
+    }
+
+    function highlightAt(time, meta) {
+      meta = meta || {};
+      if (time == null) {
+        pin = null;
+        if (line) line.classList.remove("is-pinned");
+        layout();
+        return;
+      }
+      pin = {
+        time: time,
+        kind: meta.kind || "SYNC_ANOMALY",
+        color: meta.color || "#dc2626",
+        text: meta.text || "!",
+        title: meta.title || "Аномалия",
+        detail: meta.detail || ""
+      };
       layout();
     }
 
@@ -4459,8 +4558,15 @@
 
     return {
       setMarkers: setMarkers,
+      setAnomalyMarkers: setAnomalyMarkers,
       layout: layout,
-      clear: function () { setMarkers([]); }
+      highlightAt: highlightAt,
+      clearHighlight: function () { highlightAt(null); },
+      clear: function () {
+        pin = null;
+        anomalyBatch = [];
+        setMarkers([]);
+      }
     };
   }
 

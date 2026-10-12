@@ -240,6 +240,7 @@
         syncAnomOnly = !!anom.checked;
         try { localStorage.setItem("trinity.df.syncAnom", syncAnomOnly ? "1" : "0"); } catch (_) {}
         paintSyncPanel(syncContextCache);
+        refreshSyncAnomalyMarkers();
       });
     }
     list.addEventListener("click", function (ev) {
@@ -247,31 +248,291 @@
         ? ev.target.closest("[data-sync-at]")
         : null;
       if (!btn) return;
-      seekChartToBarIso(btn.getAttribute("data-sync-at"));
+      const meta = {
+        text: btn.getAttribute("data-sync-text") || "",
+        peer: btn.getAttribute("data-sync-peer") || "",
+        kind: btn.getAttribute("data-sync-kind") || "",
+        anomaly: btn.getAttribute("data-sync-anomaly") === "1"
+      };
+      seekChartToBarIso(btn.getAttribute("data-sync-at"), meta);
+      openSyncBrief(btn.getAttribute("data-sync-at"), meta);
     });
   }
 
-  function seekChartToBarIso(iso) {
+  let syncBriefBound = false;
+  let syncBriefExpanded = false;
+  let syncBriefMeta = null;
+
+  function deskAutoOn() {
+    const data = lastDeskSnapshot || {};
+    const scope = deskScope();
+    if (scope === "positional") return !!positionalAutoFlag(data);
+    if (scope === "brm") return !!brmAutoFlag(data);
+    return !!rangeAutoOn(data);
+  }
+
+  function syncBriefTitle(kind, peer, text) {
+    const k = String(kind || "").toUpperCase();
+    if (k === "RI_LAGS" || k.indexOf("RI_LAG") >= 0) {
+      return "RI отстаёт от нефти";
+    }
+    if (k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST" || k === "RI_AGAINST_BR") {
+      return "RI не с нефтью";
+    }
+    if (k === "OIL_FX_SPLIT" || k === "OIL_SPLIT") return "Нефть и Si разошлись";
+    if (k === "VOL_ANOMALY") return "Объём часа необычный";
+    if (k === "RANGE_ANOMALY") return "Ход бара необычный";
+    if (k === "SI_LEADS" || k === "BRM_LEADS") return "Si сильнее нефти";
+    if (k === "ALIGNED") return "Рынок согласован";
+    if (peer) return "Расхождение · " + peer;
+    return (text || "Расхождение").slice(0, 64);
+  }
+
+  function syncBriefLead(kind) {
+    const k = String(kind || "").toUpperCase();
+    if (k === "RI_LAGS") {
+      return "Нефть уже ушла, индекс почти стоит. Это фон к решению, не команда «входи» или «выходи».";
+    }
+    if (k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST") {
+      return "Широкий рынок спорит с нефтью. Ход по BR может быть локальным — смотрим осторожнее.";
+    }
+    if (k === "OIL_FX_SPLIT" || k === "OIL_SPLIT") {
+      return "Нефть и доллар (Si) смотрят в разные стороны — кросс-актив без единой картины.";
+    }
+    if (k === "VOL_ANOMALY" || k === "RANGE_ANOMALY") {
+      return "Сейчас час выглядит иначе, чем обычно в это же время. Имеет смысл проверить, кто давит в стакане и ленте.";
+    }
+    if (k === "ALIGNED") {
+      return "Нефть и широкий рынок сегодня в одну сторону — контекст спокойнее, но вход всё равно по чеклисту.";
+    }
+    return "Короткий контекст к кадру решения. Разбор — по кнопке ниже.";
+  }
+
+  function syncBriefWhatHappened(kind, text) {
+    const k = String(kind || "").toUpperCase();
+    if (k === "RI_LAGS") {
+      return "За последний час нефть (BR) сделала заметный ход, а RI (индекс RTS) почти не сдвинулся. "
+        + "Рынок «в целом» ещё не подтвердил нефтяной импульс.";
+    }
+    if (k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST") {
+      return "Нефть и RI идут в разные стороны (день или час). Давление по BR не поддержано широким рынком.";
+    }
+    if (k === "OIL_FX_SPLIT" || k === "OIL_SPLIT") {
+      return "BR и Si за день разошлись по знаку хода. Нефтяной импульс и валютный фон не совпадают.";
+    }
+    if (k === "VOL_ANOMALY") {
+      return text || "Объём текущего часа сильно отличается от медианы таких же часов раньше.";
+    }
+    if (k === "RANGE_ANOMALY") {
+      return text || "Размах бара необычен для этого часа — волатильность не как обычно.";
+    }
+    if (k === "SI_LEADS" || k === "BRM_LEADS") {
+      return "За час Si сильнее BR — валютный ход опережает нефть. Это фон, не сигнал входа.";
+    }
+    if (k === "ALIGNED") {
+      return text || "Нефть, мини и RI сегодня в одну сторону.";
+    }
+    return text || "На срезе видно расхождение между инструментами или нормой часа.";
+  }
+
+  function syncBriefWhatYouDo(kind, anomaly) {
+    const k = String(kind || "").toUpperCase();
+    let core = "Не ловите середину хода «потому что аномалия». Смотрите кадр решения и полку: "
+      + "есть ли сетап по чеклисту. При желании включите footprint на отмеченной свече — кто купил/продал.";
+    if (k === "RI_LAGS" || k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST") {
+      core = "Не догоняйте нефть только потому, что она уже ушла. Дождитесь либо подтяжки RI, "
+        + "либо своего сетапа на полке (касание + подтверждение). Footprint на свече — чтобы увидеть, "
+        + "была ли агрессия или тонкий ход.";
+    } else if (k === "VOL_ANOMALY" || k === "RANGE_ANOMALY") {
+      core = "Сверьте со стаканом и footprint: аномальна ли лента у полки, или просто «тихий/шумный» час. "
+        + "Вход только если чеклист собран.";
+    } else if (!anomaly) {
+      core = "Это спокойный фон. Действуйте по кадру и чеклисту как обычно.";
+    }
+    return core;
+  }
+
+  function syncBriefAutoBlock(kind, autoOn, live) {
+    if (!autoOn) {
+      return "Автоторговля выключена: робот только показывает решение. Вход/пропуск — ваше. "
+        + "Аномалия не выставляет и не отменяет заявки сама.";
+    }
+    const liveBit = live
+      ? "Сейчас контур боевой — будьте особенно внимательны."
+      : "Сейчас песочница (бумага): робот сам может выставить/вести сетку по чеклисту.";
+    return liveBit + " Аномалия — не стоп-кран и не «жми market». "
+      + "Робот по-прежнему ждёт правила playbook (полка, микро, сессия). "
+      + "Вы можете подождать, сбросить залипание или выключить авто, если контекст вас не устраивает.";
+  }
+
+  function syncBriefRobotWait(posture, why) {
+    const p = String(posture || "SCANNING").toUpperCase();
+    if (p === "WAITING_FILL") {
+      return "Робот ждёт исполнения: лимитки/сетка уже в работе. Аномалия не отменяет заявки — "
+        + "ждём касание цены. Следите за кадром и статусом «ждёт».";
+    }
+    if (p === "WATCHING_ZONE") {
+      return "Робот смотрит зону: сторона и полка есть, ждёт подход цены и подтверждение (бар/кластер/микро). "
+        + "Пока RI отстаёт или спорит — чаще остаётся в ожидании, а не в середине хода.";
+    }
+    if (p === "IN_TRADE") {
+      return "Робот уже в сделке: ведёт стоп/тейк по правилам. Аномалия — фон, не новая команда входа.";
+    }
+    if (p === "NOT_IN_TRADE") {
+      return "Робот не в сделке / пропускает: чеклист или сессия не дают вход. Аномалия объясняет фон пропуска.";
+    }
+    const whyBit = why ? (" Сейчас в кадре: «" + String(why).slice(0, 120) + "».") : "";
+    return "Робот сканирует / ждёт сетап." + whyBit
+      + " Пока нет касания полки и микро-подтверждения — новых входов нет.";
+  }
+
+  function buildSyncBriefHtml(meta) {
+    const data = lastDeskSnapshot || {};
+    const sit = data.situation || {};
+    const kind = (meta && meta.kind) || "";
+    const text = (meta && meta.text) || "";
+    const anomaly = !!(meta && meta.anomaly);
+    const autoOn = deskAutoOn();
+    const live = !!(sit.liveExecution || data.liveExecution);
+    const posture = sit.posture || data.posture || "SCANNING";
+    const why = sit.why || data.summary || "";
+    return ""
+      + "<section class='signal-sync-brief-sec'><h4>Что случилось</h4><p>"
+      + escHtml(syncBriefWhatHappened(kind, text)) + "</p></section>"
+      + "<section class='signal-sync-brief-sec'><h4>Что делать вам</h4><p>"
+      + escHtml(syncBriefWhatYouDo(kind, anomaly)) + "</p></section>"
+      + "<section class='signal-sync-brief-sec'><h4>Если автоторговля</h4><p>"
+      + escHtml(syncBriefAutoBlock(kind, autoOn, live)) + "</p></section>"
+      + "<section class='signal-sync-brief-sec'><h4>Что ждёт робот</h4><p>"
+      + escHtml(syncBriefRobotWait(posture, why)) + "</p></section>";
+  }
+
+  function bindSyncBrief() {
+    if (syncBriefBound) return;
+    const gate = $("signal-sync-brief");
+    if (!gate) return;
+    syncBriefBound = true;
+    gate.querySelectorAll("[data-sync-brief-close]").forEach(function (el) {
+      el.addEventListener("click", closeSyncBrief);
+    });
+    const expand = $("signal-sync-brief-expand");
+    if (expand) {
+      expand.addEventListener("click", function () {
+        syncBriefExpanded = true;
+        const body = $("signal-sync-brief-body");
+        if (body) {
+          body.hidden = false;
+          body.innerHTML = buildSyncBriefHtml(syncBriefMeta || {});
+        }
+        expand.hidden = true;
+        const fpBtn = $("signal-sync-brief-fp");
+        if (fpBtn) fpBtn.hidden = false;
+      });
+    }
+    const fpBtn = $("signal-sync-brief-fp");
+    if (fpBtn) {
+      fpBtn.addEventListener("click", function () {
+        const tool = $("tool-footprint");
+        if (tool && !tool.classList.contains("is-active")) {
+          tool.click();
+        }
+        closeSyncBrief();
+      });
+    }
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && gate && !gate.hidden) closeSyncBrief();
+    });
+  }
+
+  function openSyncBrief(at, meta) {
+    bindSyncBrief();
+    const gate = $("signal-sync-brief");
+    if (!gate) return;
+    syncBriefMeta = meta || {};
+    syncBriefExpanded = false;
+    const title = $("signal-sync-brief-title");
+    const lead = $("signal-sync-brief-lead");
+    const body = $("signal-sync-brief-body");
+    const expand = $("signal-sync-brief-expand");
+    const fpBtn = $("signal-sync-brief-fp");
+    if (title) {
+      title.textContent = syncBriefTitle(
+        syncBriefMeta.kind, syncBriefMeta.peer, syncBriefMeta.text);
+    }
+    if (lead) lead.textContent = syncBriefLead(syncBriefMeta.kind);
+    if (body) {
+      body.hidden = true;
+      body.innerHTML = "";
+    }
+    if (expand) expand.hidden = false;
+    if (fpBtn) fpBtn.hidden = true;
+    gate.hidden = false;
+    gate.setAttribute("aria-hidden", "false");
+    const dialog = gate.querySelector(".signal-sync-brief-modal");
+    if (dialog && dialog.focus) {
+      try { dialog.focus(); } catch (_) {}
+    }
+  }
+
+  function closeSyncBrief() {
+    const gate = $("signal-sync-brief");
+    if (!gate) return;
+    gate.hidden = true;
+    gate.setAttribute("aria-hidden", "true");
+    syncBriefExpanded = false;
+  }
+
+  function seekChartToBarIso(iso, meta) {
     if (!chart || !iso) return;
     const sec = toChartTime(iso);
     if (sec == null) return;
     const times = barTimesSorted();
-    if (!times.length) return;
-    const target = nearestBarTime(sec);
-    let idx = 0;
-    for (let i = 0; i < times.length; i++) {
-      if (times[i] === target) {
-        idx = i;
-        break;
-      }
-    }
-    const half = 18;
-    try {
-      chart.timeScale().setVisibleLogicalRange({
-        from: Math.max(0, idx - half),
-        to: Math.min(times.length - 1, idx + half)
+    const target = times.length ? nearestBarTime(sec) : sec;
+    // No zoom — small chart pane; only skull + dashed vline.
+    const rail = ensureDeskTimelineRail();
+    if (rail && typeof rail.highlightAt === "function") {
+      const peer = (meta && meta.peer) || "";
+      const text = (meta && meta.text) || "";
+      rail.highlightAt(target, {
+        kind: "SYNC_ANOMALY",
+        color: "#dc2626",
+        text: "!",
+        title: peer ? ("Аномалия · " + peer) : "Аномалия",
+        detail: text || iso
       });
-    } catch (_) {}
+    }
+  }
+
+  /** «Только аномалии»: skulls for anomaly events in the last 20 minutes. */
+  function refreshSyncAnomalyMarkers() {
+    const rail = ensureDeskTimelineRail();
+    if (!rail || typeof rail.setAnomalyMarkers !== "function") return;
+    if (!syncAnomOnly) {
+      rail.setAnomalyMarkers([]);
+      return;
+    }
+    const events = (syncContextCache && syncContextCache.events) || [];
+    const times = barTimesSorted();
+    const nowSec = times.length ? times[times.length - 1] : Math.floor(Date.now() / 1000);
+    const cutoff = nowSec - 20 * 60;
+    const byTime = {};
+    events.forEach(function (e) {
+      if (!e || !e.anomaly) return;
+      const sec = toChartTime(e.at);
+      if (sec == null || sec < cutoff) return;
+      const t = times.length ? nearestBarTime(sec) : sec;
+      const key = String(t);
+      if (byTime[key]) return;
+      byTime[key] = {
+        time: t,
+        kind: "SYNC_ANOMALY",
+        color: "#dc2626",
+        text: "!",
+        title: e.peer ? ("Аномалия · " + e.peer) : "Аномалия",
+        detail: e.text || ""
+      };
+    });
+    rail.setAnomalyMarkers(Object.keys(byTime).map(function (k) { return byTime[k]; }));
   }
 
   function paintSyncPanel(ctx) {
@@ -285,6 +546,7 @@
     const events = (ctx && ctx.events) || [];
     const peers = (ctx && ctx.peers) || [];
     panel.hidden = !ctx || !events.length;
+    refreshSyncAnomalyMarkers();
     if (panel.hidden) return;
     if (toggle) {
       toggle.setAttribute("aria-pressed", syncPanelOpen ? "true" : "false");
@@ -315,7 +577,11 @@
       const cls = e.anomaly ? " is-anomaly" : "";
       return "<li class='signal-sync-item" + cls + "'>"
         + "<button type='button' class='signal-sync-btn' data-sync-at='"
-        + escHtml(at) + "' title='Перейти к моменту на графике'>"
+        + escHtml(at) + "' data-sync-text='" + escHtml(e.text || "")
+        + "' data-sync-peer='" + escHtml(e.peer || "")
+        + "' data-sync-kind='" + escHtml(e.kind || "")
+        + "' data-sync-anomaly='" + (e.anomaly ? "1" : "0")
+        + "' title='Маркер на графике + короткий разбор'>"
         + "<span class='signal-sync-time'>" + escHtml(t || "—") + "</span>"
         + "<span class='signal-sync-peer'>" + escHtml(e.peer || "") + "</span>"
         + "<span class='signal-sync-text'>" + escHtml(e.text || "") + "</span>"

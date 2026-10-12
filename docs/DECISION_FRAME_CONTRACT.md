@@ -211,7 +211,7 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 
 ## DoD DF-4 (закрыто на `dev`)
 
-- [x] `LeadLagCompare`: день BR/BRM/RI + час (опережает/отстаёт/против)
+- [x] `LeadLagCompare`: день BR/Si/RI + час (опережает/отстаёт/против; BRM не peer)
 - [x] Короткая строка в summary; полный факт с цифрами в details
 - [x] Явно «контекст, не запрет входа» — без veto-языка
 - [x] desk: `body.leadLag` / `situation.leadLag`
