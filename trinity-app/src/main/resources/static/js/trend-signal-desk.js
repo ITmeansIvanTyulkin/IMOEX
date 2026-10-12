@@ -213,6 +213,116 @@
     ui.render(data && data.decisionFrame);
   }
 
+  let syncPanelOpen = false;
+  let syncAnomOnly = false;
+  let syncPanelBound = false;
+  let syncContextCache = null;
+
+  function bindSyncPanel() {
+    if (syncPanelBound) return;
+    const toggle = $("signal-sync-toggle");
+    const anom = $("signal-sync-anom-only");
+    const list = $("signal-sync-list");
+    if (!toggle || !list) return;
+    syncPanelBound = true;
+    try {
+      syncPanelOpen = localStorage.getItem("trinity.df.syncOpen") === "1";
+      syncAnomOnly = localStorage.getItem("trinity.df.syncAnom") === "1";
+    } catch (_) {}
+    if (anom) anom.checked = syncAnomOnly;
+    toggle.addEventListener("click", function () {
+      syncPanelOpen = !syncPanelOpen;
+      try { localStorage.setItem("trinity.df.syncOpen", syncPanelOpen ? "1" : "0"); } catch (_) {}
+      paintSyncPanel(syncContextCache);
+    });
+    if (anom) {
+      anom.addEventListener("change", function () {
+        syncAnomOnly = !!anom.checked;
+        try { localStorage.setItem("trinity.df.syncAnom", syncAnomOnly ? "1" : "0"); } catch (_) {}
+        paintSyncPanel(syncContextCache);
+      });
+    }
+    list.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-sync-at]")
+        : null;
+      if (!btn) return;
+      seekChartToBarIso(btn.getAttribute("data-sync-at"));
+    });
+  }
+
+  function seekChartToBarIso(iso) {
+    if (!chart || !iso) return;
+    const sec = toChartTime(iso);
+    if (sec == null) return;
+    const times = barTimesSorted();
+    if (!times.length) return;
+    const target = nearestBarTime(sec);
+    let idx = 0;
+    for (let i = 0; i < times.length; i++) {
+      if (times[i] === target) {
+        idx = i;
+        break;
+      }
+    }
+    const half = 18;
+    try {
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, idx - half),
+        to: Math.min(times.length - 1, idx + half)
+      });
+    } catch (_) {}
+  }
+
+  function paintSyncPanel(ctx) {
+    bindSyncPanel();
+    syncContextCache = ctx || null;
+    const panel = $("signal-sync-panel");
+    const toggle = $("signal-sync-toggle");
+    const list = $("signal-sync-list");
+    const meta = $("signal-sync-meta");
+    if (!panel || !list) return;
+    const events = (ctx && ctx.events) || [];
+    const peers = (ctx && ctx.peers) || [];
+    panel.hidden = !ctx || !events.length;
+    if (panel.hidden) return;
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", syncPanelOpen ? "true" : "false");
+      toggle.classList.toggle("is-active", syncPanelOpen);
+    }
+    list.hidden = !syncPanelOpen;
+    const shown = syncAnomOnly
+      ? events.filter(function (e) { return e && e.anomaly; })
+      : events;
+    if (meta) {
+      const anomN = events.filter(function (e) { return e && e.anomaly; }).length;
+      meta.textContent = (peers.length ? peers.join(" · ") + " · " : "")
+        + shown.length + "/" + events.length
+        + (anomN ? (" · аномалий " + anomN) : "");
+    }
+    if (!syncPanelOpen) {
+      list.innerHTML = "";
+      return;
+    }
+    if (!shown.length) {
+      list.innerHTML = "<li class='signal-sync-empty'>Нет расхождений"
+        + (syncAnomOnly ? " (снимите «только аномалии»)" : "") + "</li>";
+      return;
+    }
+    list.innerHTML = shown.map(function (e) {
+      const at = e.at || "";
+      const t = shortTime(at);
+      const cls = e.anomaly ? " is-anomaly" : "";
+      return "<li class='signal-sync-item" + cls + "'>"
+        + "<button type='button' class='signal-sync-btn' data-sync-at='"
+        + escHtml(at) + "' title='Перейти к моменту на графике'>"
+        + "<span class='signal-sync-time'>" + escHtml(t || "—") + "</span>"
+        + "<span class='signal-sync-peer'>" + escHtml(e.peer || "") + "</span>"
+        + "<span class='signal-sync-text'>" + escHtml(e.text || "") + "</span>"
+        + "</button></li>";
+    }).join("");
+  }
+
   let dfJournalKind = "";
   let dfJournalCache = null;
   let dfJournalBound = false;
@@ -4656,6 +4766,7 @@
       fillDeskSelects(data);
       paintRobotChip(data);
       paintDecisionFrame(data);
+      paintSyncPanel(data.syncContext);
       paintDecisionFrameJournal(data.decisionFrames);
       if (deskScope() === "positional") {
         syncPositionalAutoSwitch(data);

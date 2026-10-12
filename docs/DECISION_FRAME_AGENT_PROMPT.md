@@ -194,6 +194,5 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 Начни с DF-0. Не распыляйся на DF-5/6 и не трогай observe-тюнинг.
 
 Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`.  
-**Готово:** DF-0…DF-4.  
-**Сделано на `dev`:** слои 1–4 (`SessionNormCompare`, `LeadLagCompare`), UI live, журнал JSONL.  
-**Дальше:** [DF-5](https://app.clickup.com/t/869fegdd1) sync-панели → [DF-6](https://app.clickup.com/t/869fegddy) Allocator.
+**Готово:** DF-0…DF-5 (лента расхождений + toggle; полные sync-панели — опционально).  
+**Дальше:** [DF-6](https://app.clickup.com/t/869fegddy) Allocator · при необходимости добить multi-chart sync из DF-5.

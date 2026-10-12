@@ -1,13 +1,12 @@
 # Decision Frame — контракт кадра (DF-0)
 
-> Статус: **DF-0…DF-4 на `dev`** — контракт, слои 1–4, desk API, UI live, журнал кадров (JSONL).  
-> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) · [DF-1](https://app.clickup.com/t/869fegd8p) · [DF-2](https://app.clickup.com/t/869fegda5) · [DF-3](https://app.clickup.com/t/869fegdb2) · [DF-4](https://app.clickup.com/t/869fegdc9).  
+> Статус: **DF-0…DF-5 на `dev`** — слои 1–4 + лента расхождений (toggle).  
+> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) … [DF-5](https://app.clickup.com/t/869fegdd1).  
 > Эпик: [Decision Frame USP](https://app.clickup.com/t/869fegd2j).  
-> Handoff: `docs/DECISION_FRAME_AGENT_PROMPT.md`. Тексты свечи: `docs/IMPULSE_CANDLE_TOOLTIP_PROMPT.md`.  
-> Код: `DecisionFrameAssembler`, `SessionNormCompare`, `LeadLagCompare`, journal; деск → `decisionFrame` + `sessionNorm` + `leadLag` + `decisionFrames`.  
-> Тесты: `DecisionFrameAssemblerTest`, `SessionNormCompareTest`, `LeadLagCompareTest`.
+> Код: `SessionNormCompare`, `LeadLagCompare`, `SyncDivergenceCompare`; деск → `decisionFrame` + `syncContext` + journal.  
+> Тесты: assembler / sessionNorm / leadLag / `SyncDivergenceCompareTest`.
 
-Exclusive / BR: слои **1–4**. Positional: 1+2+4 (lead/lag по BR–BRM–RI на range/BRM lane).
+Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/lag на range lane).
 
 Новое поле деска: `decisionFrame`. Существующие `summary` (строка) и `situation.why` не трогаем — это текущий деск, не кадр.
 
@@ -109,6 +108,7 @@ Lead/lag, когда появится, **не** запрещает вход са
 | `footprint` | 1 | footprint деска |
 | `sessionNorm` | 2 | фаза дня + дневной ход + объём/ход бара vs медиана того же clock-hour (`SessionNormCompare`); soft-hint после клиринга |
 | `leadLag` | 3 | BR–BRM–RI: короткая строка в summary + цифры/смысл в details (`LeadLagCompare`); **не veto** |
+| `sync` | 3 | DF-5: топ-аномалии из ленты расхождений → details кадра (журнал) |
 | `robot` | 4 | план playbook: статус, сторона, mode, пункты чеклиста |
 
 `layer`: `1` \| `2` \| `3` \| `4`.  
@@ -216,3 +216,11 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Явно «контекст, не запрет входа» — без veto-языка
 - [x] desk: `body.leadLag` / `situation.leadLag`
 - [x] Unit: `LeadLagCompareTest`, assembler summary/details split
+
+## DoD DF-5 (вертикальный срез на `dev`)
+
+- [x] `SyncDivergenceCompare` + desk `syncContext` (preset oil: BR/BRM/RI)
+- [x] UI: toggle «Контекст» без reload (localStorage) · фильтр «только аномалии»
+- [x] Клик по событию → seek графика к `at`
+- [x] Топ-аномалии в `details[].source=sync` → журнал кадров
+- [ ] Полные sync-панели 50–60% + sparkline peers (следующий шаг, не блокер DoD кликабельности)

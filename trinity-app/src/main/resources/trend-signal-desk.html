@@ -1,5 +1,5 @@
 <section class="signal-desk" id="trend-signal-desk" data-desk-scope="range">
-  <link rel="stylesheet" href="/css/operator.css?v=20261006-plaques5">
+  <link rel="stylesheet" href="/css/operator.css?v=20261012-df5sync">
   <div class="signal-desk-head">
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
@@ -210,6 +210,20 @@
           <p class="decision-frame-details-title">Факты кадра · не тултип свечи</p>
           <ul class="decision-frame-details-list" id="decision-frame-details-list"></ul>
         </div>
+      </div>
+      <div class="signal-sync-panel" id="signal-sync-panel" hidden>
+        <div class="signal-sync-head">
+          <button type="button" class="btn btn-ghost btn-xs" id="signal-sync-toggle"
+                  aria-pressed="false" title="Лента расхождений BR / BRM / RI (DF-5)">
+            Контекст
+          </button>
+          <label class="signal-sync-anom check-label">
+            <input type="checkbox" id="signal-sync-anom-only">
+            только аномалии
+          </label>
+          <span class="meta" id="signal-sync-meta">—</span>
+        </div>
+        <ul class="signal-sync-list" id="signal-sync-list" hidden></ul>
       </div>
       <div class="signal-brief" id="signal-desk-brief" aria-live="polite">
         <p class="signal-brief-title">
@@ -757,5 +771,5 @@
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/trinity-decision-frame.js?v=20261009-df3d"></script>
-<script src="/js/trend-signal-desk.js?v=20261012-cands1"></script>
+<script src="/js/trinity-decision-frame.js?v=20261012-df5sync"></script>
+<script src="/js/trend-signal-desk.js?v=20261012-df5sync"></script>

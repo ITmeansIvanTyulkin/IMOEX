@@ -17,6 +17,7 @@
     footprint: "footprint",
     sessionNorm: "норма сессии",
     leadLag: "связка",
+    sync: "расхождение",
     robot: "робот"
   };
 
