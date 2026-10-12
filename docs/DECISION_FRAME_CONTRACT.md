@@ -1,13 +1,13 @@
 # Decision Frame — контракт кадра (DF-0)
 
-> Статус: **DF-0 + DF-2 + DF-3 DoD на `dev`** — контракт, desk API, UI live, журнал кадров (JSONL).  
-> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) · [DF-2](https://app.clickup.com/t/869fegda5) · [DF-3](https://app.clickup.com/t/869fegdb2).  
+> Статус: **DF-0 + DF-1 + DF-2 + DF-3 на `dev`** — контракт, слои 1+2+4, desk API, UI live, журнал кадров (JSONL).  
+> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) · [DF-1](https://app.clickup.com/t/869fegd8p) · [DF-2](https://app.clickup.com/t/869fegda5) · [DF-3](https://app.clickup.com/t/869fegdb2).  
 > Эпик: [Decision Frame USP](https://app.clickup.com/t/869fegd2j).  
 > Handoff: `docs/DECISION_FRAME_AGENT_PROMPT.md`. Тексты свечи: `docs/IMPULSE_CANDLE_TOOLTIP_PROMPT.md`.  
-> Код: `IMOEX-core/.../DecisionFrame.java`, `DecisionFrameAssembler.java`, `DecisionFrameJournalService.java`; деск → `body.decisionFrame` + `body.decisionFrames`.  
-> Тест-эталон формы: `DecisionFrameAssemblerTest`; журнал: `DecisionFrameJournalServiceTest`.
+> Код: `DecisionFrame.java`, `DecisionFrameAssembler.java`, `SessionNormCompare.java`, `DecisionFrameJournalService.java`; деск → `body.decisionFrame` + `situation.sessionNorm` + `body.decisionFrames`.  
+> Тесты: `DecisionFrameAssemblerTest`, `SessionNormCompareTest`; журнал: `DecisionFrameJournalServiceTest`.
 
-Первый срез — Exclusive / BR, playbook `levels-profile-br-m5`, слои **1 (картина)** и **4 (решение)**. Слои 2 и 3 в кадре можно опустить. Пока их нет, сводка **не говорит** про норму часа и про RI/BRM.
+Exclusive / BR (+ positional H1): слои **1 (картина)**, **2 (норма сессии)**, **4 (решение)**. Слой 3 (lead/lag) — когда есть данные; иначе сводка про RI/BRM не пишет.
 
 Новое поле деска: `decisionFrame`. Существующие `summary` (строка) и `situation.why` не трогаем — это текущий деск, не кадр.
 
@@ -107,8 +107,8 @@ Lead/lag, когда появится, **не** запрещает вход са
 | `poc` | 1 | POC профиля |
 | `cluster` | 1 | кластер у полки |
 | `footprint` | 1 | footprint деска |
-| `sessionNorm` | 2 | норма часа/клиринга — **нет в первом срезе** |
-| `leadLag` | 3 | BR–BRM–RI одной строкой — **нет в первом срезе** |
+| `sessionNorm` | 2 | фаза дня + дневной ход + объём/ход бара vs медиана того же clock-hour (`SessionNormCompare`); soft-hint после клиринга |
+| `leadLag` | 3 | BR–BRM–RI одной строкой — **DF-4** (уже есть черновик на desk, не DoD) |
 | `robot` | 4 | план playbook: статус, сторона, mode, пункты чеклиста |
 
 `layer`: `1` \| `2` \| `3` \| `4`.  
@@ -194,9 +194,17 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Нет дубля essay под кадром на trend-desk
 - [x] Живой эталон BRX6 + юнит-тесты
 
+## DoD DF-1 (закрыто на `dev`)
+
+- [x] Слой 1 — картина из desk facts (delta/DOM/shelf/POC/cluster/footprint)
+- [x] Слой 2 — `SessionNormCompare`: фаза · дневной ход · объём/ход vs медиана того же часа · hint после клиринга
+- [x] Слой 4 — решение робота (чеклист / enter·wait·skip), без LLM
+- [x] `situation.sessionNorm` + `details[].source=sessionNorm` в сводке при наличии фактов
+- [x] Unit: `SessionNormCompareTest`, `DecisionFrameAssemblerTest`
+
 ## DoD DF-3 (закрыто на `dev`)
 
 - [x] Persist JSONL день / инструмент / playbook / kind
 - [x] Фильтры API + desk fragment
-- [x] UI список + detail-пакет + экспорт
+- [x] UI список + detail-пакет (+ API export; кнопка UI убрана по запросу)
 - [x] За сессию paper можно отфильтровать «ждёт» и «вошёл» с полными фактами

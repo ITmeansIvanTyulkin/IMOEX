@@ -194,6 +194,6 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 Начни с DF-0. Не распыляйся на DF-5/6 и не трогай observe-тюнинг.
 
 Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`.  
-**Готово:** DF-0 + **DF-2 DoD** (UI live, слои 1–4 по фактам, mount trend/arb/invest).  
-**Сделано на `dev`:** DF-0 + DF-2 + DF-3 (журнал JSONL + UI фильтры/экспорт).  
-**Дальше:** углубление DF-1 / DF-4.
+**Готово:** DF-0 + DF-1 + DF-2 + DF-3.  
+**Сделано на `dev`:** контракт, слои 1+2+4 (`SessionNormCompare`), UI live, журнал JSONL.  
+**Дальше:** [DF-4](https://app.clickup.com/t/869fegdc9) lead/lag DoD → затем DF-5 / DF-6.

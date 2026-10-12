@@ -219,44 +219,6 @@
   /** Keep expanded journal rows across desk polls / ticks. */
   const dfJournalOpenIds = Object.create(null);
 
-  function dfJournalExportQuery(payload) {
-    const q = [];
-    if (payload && payload.day) q.push("day=" + encodeURIComponent(payload.day));
-    const inst = wantedDeskInstrument()
-      || (payload && payload.entries && payload.entries[0] && payload.entries[0].instrument);
-    const pb = viewPlaybookId();
-    if (inst) q.push("instrument=" + encodeURIComponent(inst));
-    if (pb && pb !== "both") q.push("playbook=" + encodeURIComponent(pb));
-    if (dfJournalKind) q.push("kind=" + encodeURIComponent(dfJournalKind));
-    return q;
-  }
-
-  async function exportDecisionFrameJournal() {
-    const q = dfJournalExportQuery(dfJournalCache);
-    const url = "/api/trend/decision-frames/export" + (q.length ? ("?" + q.join("&")) : "");
-    try {
-      const res = await fetch(url, {
-        headers: deskAuthHeaders({ Accept: "application/json" }),
-        credentials: "same-origin"
-      });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const blob = await res.blob();
-      const day = (dfJournalCache && dfJournalCache.day) || "today";
-      const a = document.createElement("a");
-      const href = URL.createObjectURL(blob);
-      a.href = href;
-      a.download = "decision-frames-" + day + ".json";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function () { URL.revokeObjectURL(href); }, 2000);
-    } catch (err) {
-      console.warn("df journal export failed", err);
-      const meta = $("signal-df-journal-meta");
-      if (meta) meta.textContent = "Экспорт не удался — проверьте вход в кабинет";
-    }
-  }
-
   function bindDfJournalFilters() {
     if (dfJournalBound) return;
     const filters = $("signal-df-journal-filters");
@@ -292,13 +254,6 @@
           if (open) dfJournalOpenIds[id] = true;
           else delete dfJournalOpenIds[id];
         }
-      });
-    }
-    const exportBtn = $("signal-df-journal-export");
-    if (exportBtn) {
-      exportBtn.addEventListener("click", function (ev) {
-        ev.preventDefault();
-        exportDecisionFrameJournal();
       });
     }
   }
@@ -1257,35 +1212,7 @@
       + (srcRu ? (" · " + esc(srcRu)) : "") + "</li>";
     html += "</ul>";
 
-    const sel = data.instrumentSelect || {};
-    const cands = sel.candidates || [];
-    if (cands.length) {
-      const reasons = cands.map(function (c) { return humanizeDeskReason(c.reason || ""); });
-      const allFail = cands.every(function (c) { return !c.pass; });
-      const allSame = reasons.length > 1 && reasons.every(function (r) { return r && r === reasons[0]; });
-      if (allFail && allSame) {
-        html += "<p class='signal-brief-note'><strong>Выбор инструмента.</strong> "
-          + esc(reasons[0])
-          + " Смотрели все семьи: "
-          + cands.map(function (c) { return familyRu(c.family); }).join(", ")
-          + ".</p>";
-      } else {
-        html += "<p class='signal-brief-note'><strong>Выбор инструмента</strong> — в работу берём одну семью:</p>";
-        html += "<ul class='signal-brief-list'>";
-        cands.forEach(function (c) {
-          const why = c.pass ? "проходит" : humanizeDeskReason(c.reason || "нет сетапа");
-          html += "<li>" + esc(familyRu(c.family)) + (c.pass ? " — " : " — не берём: ")
-            + esc(why) + "</li>";
-        });
-        html += "</ul>";
-      }
-    }
-    if (data.robotInstrument && data.instrument
-        && String(data.robotInstrument).toUpperCase() !== String(data.instrument).toUpperCase()) {
-      html += "<p class='signal-brief-note'>На графике " + esc(data.instrument)
-        + ", робот #2 выбрал " + esc(data.robotInstrument)
-        + " — смените инструмент в селекте, чтобы смотреть его H1.</p>";
-    }
+    html += instrumentSelectBriefHtml(data, esc);
 
     if (hunt.blocksNewArm) {
       html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · стакан и лента</p>";
@@ -1377,17 +1304,19 @@
   }
   function buildOperatorBrief(data) {
     // Decision Frame is the why — do not duplicate market/robot essay underneath.
+    // Still surface §1 family rotation: it lived only in the long positional brief and vanished here.
     if (data && data.decisionFrame && data.decisionFrame.summary) {
       const esc = function (t) {
         return String(t == null ? "" : t)
           .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       };
-      let html = "<p class='signal-brief-kicker signal-brief-kicker--gold'>Дополнительно</p>";
+      let html = instrumentSelectBriefHtml(data, esc);
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Дополнительно</p>";
       html += "<p class='signal-brief-note'>Полный why — в <strong>кадре решения</strong> выше "
         + "(тултип свечи остаётся микро-why одного бара).</p>";
       const sit = data.situation || {};
       if (sit.structureNote) {
-        html += "<p class='signal-brief-note'>" + esc(sit.structureNote) + "</p>";
+        html += "<p class='signal-brief-note'>" + esc(humanizeDeskReason(sit.structureNote)) + "</p>";
       }
       const paper = data.paper || {};
       if (paper.todayCount != null || paper.todayPnlRub != null) {
@@ -1918,6 +1847,58 @@
     if (u === "MX") return "MIX (MX)";
     return code || "?";
   }
+
+  /** §1 rotation — always show in brief (DF short path used to hide this). */
+  function instrumentSelectBriefHtml(data, esc) {
+    if (!(deskScope() === "positional" || (data && data.deskScope === "positional"))) {
+      return "";
+    }
+    const escFn = esc || escHtml;
+    const sel = (data && data.instrumentSelect) || {};
+    const cands = sel.candidates || [];
+    let html = "";
+    if (!cands.length) {
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Выбор инструмента</p>";
+      html += "<p class='signal-brief-note'>Ротация по семьям ещё не в кэше — обновите desk "
+        + "или подождите следующий тик (BR · RI · NG · SI · GD · MX).</p>";
+      return html;
+    }
+    const reasons = cands.map(function (c) { return humanizeDeskReason(c.reason || ""); });
+    const allFail = cands.every(function (c) { return !c.pass; });
+    const allSame = reasons.length > 1 && reasons.every(function (r) { return r && r === reasons[0]; });
+    html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Выбор инструмента</p>";
+    if (allFail && allSame) {
+      html += "<p class='signal-brief-note'>"
+        + escFn(reasons[0] || "нет сетапа")
+        + " Смотрели все семьи: "
+        + cands.map(function (c) { return familyRu(c.family); }).join(", ")
+        + ".</p>";
+    } else {
+      html += "<p class='signal-brief-note'>В работу берём одну семью:</p>";
+      html += "<ul class='signal-brief-list'>";
+      cands.forEach(function (c) {
+        const why = c.pass ? "проходит" : humanizeDeskReason(c.reason || "нет сетапа");
+        html += "<li>" + escFn(familyRu(c.family)) + (c.pass ? " — " : " — не берём: ")
+          + escFn(why) + "</li>";
+      });
+      html += "</ul>";
+    }
+    if (data.robotInstrument) {
+      html += "<p class='signal-brief-note'>Победитель ротации: <strong>"
+        + escFn(data.robotInstrument) + "</strong>"
+        + (data.robotFamily ? (" · " + escFn(familyRu(data.robotFamily))) : "")
+        + ".</p>";
+    } else if (allFail) {
+      html += "<p class='signal-brief-note'>Победителя нет — робот #2 никого не берёт.</p>";
+    }
+    if (data.robotInstrument && data.instrument
+        && String(data.robotInstrument).toUpperCase() !== String(data.instrument).toUpperCase()) {
+      html += "<p class='signal-brief-note'>На графике " + escFn(data.instrument)
+        + ", робот выбрал " + escFn(data.robotInstrument)
+        + " — смените инструмент в селекте сверху, чтобы смотреть его H1.</p>";
+    }
+    return html;
+  }
   function h1SourceRu(src) {
     const s = String(src || "").trim();
     if (!s) return "";
@@ -2039,6 +2020,10 @@
       const d = s.match(/until\s+(\d{4}-\d{2}-\d{2})/i);
       return "После стопа по этой семье пауза"
         + (d ? (" до " + d[1]) : "") + " — не мстим рынку сразу тем же инструментом.";
+    }
+    if (u.indexOf("INSUFFICIENT H1") >= 0 || u.indexOf("NEED MORE BARS") >= 0) {
+      return "На выбранном инструменте мало часовых свечей для структуры — "
+        + "это про график в селекте, не про ротацию семей выше.";
     }
     if (u.indexOf("STRUCTURE") >= 0 && u.indexOf("MIN") >= 0) {
       return "Тренд на часе слабоват (лесенка хаёв/лоёв нечёткая) — в ротацию эту семью не берём.";
