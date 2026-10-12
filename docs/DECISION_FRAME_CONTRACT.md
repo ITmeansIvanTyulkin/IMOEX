@@ -233,4 +233,5 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Кадр на toggle Exclusive / BRM / positional и mini-book defaults
 - [x] Журнал: `kind=alloc`, фильтр «капитал» на деске
 - [x] Summary: «Капитал сюда (…), потому что …» + details (mutex / equity / до→после)
-- [ ] Опционально: пользовательские веса + влияние на риск; live rebalance по воле/спредам
+- [x] Пользовательские веса рукавов (`CapitalWeightService` + UI «Капитал») + risk-impact ₽
+- [x] Live-rebalance: nudge от `rangeRatio` / regime ADX / lead-lag (+ кадр ALLOC при сдвиге ≥3 п.п.)

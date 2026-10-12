@@ -4147,6 +4147,47 @@ body[data-upsell="off"] .full-core-badge {
 .signal-chart-wrap .meta {
   margin-top: 0.35rem;
 }
+.signal-capital-panel {
+  margin-top: 0.45rem;
+  padding: 0.4rem 0.65rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  background: rgba(15, 118, 110, 0.04);
+}
+.signal-capital-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.85rem;
+}
+.signal-capital-live { font-size: 0.78rem; gap: 0.3rem; }
+.signal-capital-body { margin-top: 0.45rem; }
+.signal-capital-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem 0.45rem;
+  font-size: 0.78rem;
+}
+.signal-capital-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: #475569;
+}
+.signal-capital-grid input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid rgba(100, 116, 139, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+.signal-capital-eff,
+.signal-capital-risk {
+  margin: 0.35rem 0 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
 .signal-sync-panel {
   margin-top: 0.55rem;
   padding: 0.45rem 0.65rem 0.55rem;

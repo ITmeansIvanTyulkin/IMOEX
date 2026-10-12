@@ -229,6 +229,30 @@
           <ul class="signal-sync-list" id="signal-sync-list"></ul>
         </div>
       </div>
+      <div class="signal-capital-panel" id="signal-capital-panel" hidden>
+        <div class="signal-capital-head">
+          <button type="button" class="btn btn-ghost btn-xs" id="signal-capital-toggle"
+                  aria-pressed="false" title="Веса рукавов капитала + live-rebalance (DF-6)">
+            Капитал
+          </button>
+          <label class="signal-capital-live check-label">
+            <input type="checkbox" id="signal-capital-live">
+            live-rebalance
+          </label>
+          <span class="meta" id="signal-capital-meta">—</span>
+        </div>
+        <div class="signal-capital-body" id="signal-capital-body" hidden>
+          <div class="signal-capital-grid" id="signal-capital-grid">
+            <label>pairs <input type="number" id="cap-w-pairs" min="0" max="100" step="1"></label>
+            <label>M5 <input type="number" id="cap-w-m5" min="0" max="100" step="1"></label>
+            <label>pos <input type="number" id="cap-w-pos" min="0" max="100" step="1"></label>
+            <label>arb <input type="number" id="cap-w-arb" min="0" max="100" step="1"></label>
+          </div>
+          <p class="signal-capital-eff meta" id="signal-capital-eff">—</p>
+          <p class="signal-capital-risk meta" id="signal-capital-risk">—</p>
+          <button type="button" class="btn btn-ghost btn-xs" id="signal-capital-save">Сохранить веса</button>
+        </div>
+      </div>
       <div class="signal-brief" id="signal-desk-brief" aria-live="polite">
         <p class="signal-brief-title">
           Сейчас на рынке

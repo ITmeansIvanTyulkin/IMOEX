@@ -1,5 +1,6 @@
 package com.moex.cointegration.controller;
 
+import com.moex.cointegration.service.CapitalWeightService;
 import com.moex.cointegration.service.DecisionFrameJournalService;
 import com.moex.cointegration.service.OperatorTradeToastService;
 import com.moex.cointegration.service.TrendDeskService;
@@ -51,6 +52,7 @@ public class TrendRobotController {
     private final TrendDeskService deskService;
     private final TrendPaperJournalService paperJournal;
     private final DecisionFrameJournalService decisionFrameJournal;
+    private final CapitalWeightService capitalWeights;
     private final com.moex.cointegration.ops.LiveExecutionGate liveGate;
     private final TrendSandboxStopService sandboxStop;
 
@@ -63,6 +65,7 @@ public class TrendRobotController {
             TrendDeskService deskService,
             TrendPaperJournalService paperJournal,
             DecisionFrameJournalService decisionFrameJournal,
+            CapitalWeightService capitalWeights,
             com.moex.cointegration.ops.LiveExecutionGate liveGate,
             @org.springframework.beans.factory.annotation.Autowired(required = false)
             TrendSandboxStopService sandboxStop
@@ -75,6 +78,7 @@ public class TrendRobotController {
         this.deskService = deskService;
         this.paperJournal = paperJournal;
         this.decisionFrameJournal = decisionFrameJournal;
+        this.capitalWeights = capitalWeights;
         this.liveGate = liveGate;
         this.sandboxStop = sandboxStop;
     }
@@ -131,6 +135,29 @@ public class TrendRobotController {
                 ? body.enabled()
                 : !trendSettings.brmAutoExecution();
         return trendSettings.setBrmAutoExecution(next);
+    }
+
+    /** DF-6: user sleeve weights + live rebalance status / risk impact. */
+    @GetMapping("/capital/weights")
+    public Map<String, Object> capitalWeights() {
+        return capitalWeights.view();
+    }
+
+    @PostMapping("/capital/weights")
+    public Map<String, Object> setCapitalWeights(@RequestBody(required = false) CapitalWeightsBody body) {
+        if (body == null) {
+            return capitalWeights.view();
+        }
+        return capitalWeights.setUserWeights(
+                body.pairs(), body.trendM5(), body.positional(), body.arb(), body.liveRebalance());
+    }
+
+    @PostMapping("/capital/live-rebalance")
+    public Map<String, Object> toggleCapitalLiveRebalance(@RequestBody(required = false) ToggleBody body) {
+        boolean next = body != null && body.enabled() != null
+                ? body.enabled()
+                : !capitalWeights.liveRebalanceEnabled();
+        return capitalWeights.setLiveRebalance(next);
     }
 
     @GetMapping("/status")
@@ -469,5 +496,15 @@ public class TrendRobotController {
     }
 
     public record ToggleBody(Boolean enabled) {
+    }
+
+    /** DF-6 user sleeve weights (shares 0..1, normalized server-side). */
+    public record CapitalWeightsBody(
+            Double pairs,
+            Double trendM5,
+            Double positional,
+            Double arb,
+            Boolean liveRebalance
+    ) {
     }
 }

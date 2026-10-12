@@ -218,6 +218,139 @@
   let syncPanelBound = false;
   let syncContextCache = null;
 
+  let capitalPanelOpen = false;
+  let capitalPanelBound = false;
+  let capitalWeightsCache = null;
+
+  function pctInput(id, share) {
+    const el = $(id);
+    if (!el) return;
+    const v = share == null || !Number.isFinite(Number(share)) ? 0 : Math.round(Number(share) * 100);
+    el.value = String(v);
+  }
+
+  function readPctShare(id) {
+    const el = $(id);
+    if (!el) return 0;
+    const n = Number(el.value);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    return n / 100;
+  }
+
+  function fmtRub(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    return Math.round(v).toLocaleString("ru-RU") + " ₽";
+  }
+
+  function bindCapitalPanel() {
+    if (capitalPanelBound) return;
+    const toggle = $("signal-capital-toggle");
+    const live = $("signal-capital-live");
+    const body = $("signal-capital-body");
+    const save = $("signal-capital-save");
+    if (!toggle || !body) return;
+    capitalPanelBound = true;
+    try {
+      capitalPanelOpen = localStorage.getItem("trinity.df.capitalOpen") === "1";
+    } catch (_) {}
+    toggle.addEventListener("click", function () {
+      capitalPanelOpen = !capitalPanelOpen;
+      try { localStorage.setItem("trinity.df.capitalOpen", capitalPanelOpen ? "1" : "0"); } catch (_) {}
+      paintCapitalPanel(capitalWeightsCache);
+    });
+    if (live) {
+      live.addEventListener("change", async function () {
+        if (!hasDeskWriteAuth || !hasDeskWriteAuth()) {
+          live.checked = !live.checked;
+          return;
+        }
+        try {
+          const res = await fetch("/api/trend/capital/live-rebalance", {
+            method: "POST",
+            headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+            body: JSON.stringify({ enabled: !!live.checked })
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          capitalWeightsCache = await res.json();
+          paintCapitalPanel(capitalWeightsCache);
+        } catch (e) {
+          live.checked = !live.checked;
+          alert("Live-rebalance: " + (e && e.message ? e.message : e));
+        }
+      });
+    }
+    if (save) {
+      save.addEventListener("click", async function () {
+        if (!hasDeskWriteAuth || !hasDeskWriteAuth()) {
+          alert("Нужна сессия кабинета, чтобы сохранить веса.");
+          return;
+        }
+        try {
+          const res = await fetch("/api/trend/capital/weights", {
+            method: "POST",
+            headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+            body: JSON.stringify({
+              pairs: readPctShare("cap-w-pairs"),
+              trendM5: readPctShare("cap-w-m5"),
+              positional: readPctShare("cap-w-pos"),
+              arb: readPctShare("cap-w-arb"),
+              liveRebalance: !!(live && live.checked)
+            })
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          capitalWeightsCache = await res.json();
+          paintCapitalPanel(capitalWeightsCache);
+        } catch (e) {
+          alert("Веса: " + (e && e.message ? e.message : e));
+        }
+      });
+    }
+  }
+
+  function paintCapitalPanel(cw) {
+    bindCapitalPanel();
+    capitalWeightsCache = cw || null;
+    const panel = $("signal-capital-panel");
+    const toggle = $("signal-capital-toggle");
+    const body = $("signal-capital-body");
+    const live = $("signal-capital-live");
+    const meta = $("signal-capital-meta");
+    const eff = $("signal-capital-eff");
+    const risk = $("signal-capital-risk");
+    if (!panel) return;
+    panel.hidden = !cw;
+    if (!cw) return;
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", capitalPanelOpen ? "true" : "false");
+      toggle.classList.toggle("is-active", capitalPanelOpen);
+    }
+    if (body) body.hidden = !capitalPanelOpen;
+    if (live) live.checked = !!cw.liveRebalance;
+    const uw = cw.userWeights || {};
+    pctInput("cap-w-pairs", uw.pairs);
+    pctInput("cap-w-m5", uw.trendM5);
+    pctInput("cap-w-pos", uw.positional);
+    pctInput("cap-w-arb", uw.arb);
+    if (meta) {
+      meta.textContent = (cw.focusSlot || "—")
+        + (cw.multiFocusOk ? "" : " · multi с ≥300к")
+        + (cw.liveRebalance ? " · live" : "");
+    }
+    if (eff) {
+      eff.textContent = "Эффективно: " + (cw.effectiveSummary || "—")
+        + (cw.userSummary && cw.userSummary !== cw.effectiveSummary
+          ? (" (база " + cw.userSummary + ")") : "");
+    }
+    if (risk) {
+      const ri = cw.riskImpact || {};
+      risk.textContent = "Лимиты: pairs " + fmtRub(ri.pairsGrossCap)
+        + " · M5 " + fmtRub(ri.trendM5GrossCap)
+        + " · pos " + fmtRub(ri.positionalGrossCap)
+        + " · arb " + fmtRub(ri.arbGrossCap);
+    }
+  }
+
   function bindSyncPanel() {
     if (syncPanelBound) return;
     const toggle = $("signal-sync-toggle");
@@ -5096,6 +5229,7 @@
       paintRobotChip(data);
       paintDecisionFrame(data);
       paintSyncPanel(data.syncContext);
+      paintCapitalPanel(data.capitalWeights);
       paintDecisionFrameJournal(data.decisionFrames);
       if (deskScope() === "positional") {
         syncPositionalAutoSwitch(data);

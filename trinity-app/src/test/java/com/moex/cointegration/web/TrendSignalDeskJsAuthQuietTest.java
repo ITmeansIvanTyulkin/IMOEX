@@ -43,6 +43,8 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("function paintSyncPanel"), "DF-5 sync ribbon missing");
         assertTrue(src.contains("function paintSyncSparks"), "DF-5 peer sparklines missing");
         assertTrue(src.contains("peerSparks"), "DF-5 peerSparks payload wiring missing");
+        assertTrue(src.contains("function paintCapitalPanel"), "DF-6 capital weights panel missing");
+        assertTrue(src.contains("/api/trend/capital/weights"), "DF-6 capital weights API missing");
         assertTrue(src.contains("seekChartToBarIso"), "DF-5 click-to-chart missing");
         assertTrue(src.contains("highlightAt"), "DF-5 anomaly pin/vline missing");
         assertTrue(src.contains("refreshSyncAnomalyMarkers"), "DF-5 anom-only batch markers missing");
