@@ -226,6 +226,7 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Клик по событию → seek графика к `at`
 - [x] Топ-аномалии в `details[].source=sync` → журнал кадров
 - [x] Sync-панель ~50–60%: sparkline peers (`peerSparks`) + лента событий
+- [x] Preset peers: `oil` (BR·Si·RI) / `index-oil` (RI·BR·Si) — UI + `?syncPreset=`
 
 ## DoD DF-6 (вертикальный срез на `dev`)
 
@@ -236,3 +237,4 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Пользовательские веса рукавов (`CapitalWeightService` + UI «Капитал») + risk-impact ₽
 - [x] Live-rebalance: nudge от `rangeRatio` / regime ADX / lead-lag (+ кадр ALLOC при сдвиге ≥3 п.п.)
 - [x] Дефолт капитала: `TREND_M5` (не legacy PAIRS); pairs-share только если оператор явно задал
+- [x] Live facts: calendar `edgeCoversCross` + |z| из last-good arb desk (когда прогрет)

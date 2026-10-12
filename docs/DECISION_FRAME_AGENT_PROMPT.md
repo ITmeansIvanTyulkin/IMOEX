@@ -194,5 +194,5 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 Начни с DF-0. Не распыляйся на DF-5/6 и не трогай observe-тюнинг.
 
 Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`.  
-**Готово:** DF-0…DF-6 (sync peers + allocator frames + user weights + live-rebalance).  
-**Опционально позже:** presets UI beyond oil; arb edge из calendar в live facts.
+**Готово:** DF-0…DF-6 + polish (preset oil/index-oil, arb edge в live-rebalance, TREND_M5 default).  
+**Эпик закрыт на `dev`.**

@@ -191,9 +191,10 @@ public class TrendRobotController {
     public Map<String, Object> desk(
             @RequestParam(name = "instrument", required = false) String instrument,
             @RequestParam(name = "playbook", required = false) String playbook,
-            @RequestParam(name = "study", defaultValue = "false") boolean study
+            @RequestParam(name = "study", defaultValue = "false") boolean study,
+            @RequestParam(name = "syncPreset", required = false) String syncPreset
     ) {
-        return deskService.desk(instrument, playbook, study);
+        return deskService.desk(instrument, playbook, study, syncPreset);
     }
 
     /**

@@ -217,6 +217,7 @@
   let syncAnomOnly = false;
   let syncPanelBound = false;
   let syncContextCache = null;
+  let syncPreset = "oil";
 
   let capitalPanelOpen = false;
   let capitalPanelBound = false;
@@ -355,14 +356,18 @@
     if (syncPanelBound) return;
     const toggle = $("signal-sync-toggle");
     const anom = $("signal-sync-anom-only");
+    const presetEl = $("signal-sync-preset");
     const list = $("signal-sync-list");
     if (!toggle || !list) return;
     syncPanelBound = true;
     try {
       syncPanelOpen = localStorage.getItem("trinity.df.syncOpen") === "1";
       syncAnomOnly = localStorage.getItem("trinity.df.syncAnom") === "1";
+      const sp = localStorage.getItem("trinity.df.syncPreset");
+      if (sp === "index-oil" || sp === "oil") syncPreset = sp;
     } catch (_) {}
     if (anom) anom.checked = syncAnomOnly;
+    if (presetEl) presetEl.value = syncPreset;
     toggle.addEventListener("click", function () {
       syncPanelOpen = !syncPanelOpen;
       try { localStorage.setItem("trinity.df.syncOpen", syncPanelOpen ? "1" : "0"); } catch (_) {}
@@ -374,6 +379,13 @@
         try { localStorage.setItem("trinity.df.syncAnom", syncAnomOnly ? "1" : "0"); } catch (_) {}
         paintSyncPanel(syncContextCache);
         refreshSyncAnomalyMarkers();
+      });
+    }
+    if (presetEl) {
+      presetEl.addEventListener("change", function () {
+        syncPreset = presetEl.value === "index-oil" ? "index-oil" : "oil";
+        try { localStorage.setItem("trinity.df.syncPreset", syncPreset); } catch (_) {}
+        loadDesk(false);
       });
     }
     list.addEventListener("click", function (ev) {
@@ -735,6 +747,11 @@
     const events = (ctx && ctx.events) || [];
     const peers = (ctx && ctx.peers) || [];
     const sparks = (ctx && ctx.peerSparks) || [];
+    const presetEl = $("signal-sync-preset");
+    if (ctx && ctx.preset && (ctx.preset === "oil" || ctx.preset === "index-oil")) {
+      syncPreset = ctx.preset;
+      if (presetEl && presetEl.value !== syncPreset) presetEl.value = syncPreset;
+    }
     // Show panel when there are events or peer sparks (open still reveals sparklines).
     panel.hidden = !ctx || (!events.length && !sparks.length);
     refreshSyncAnomalyMarkers();
@@ -5193,6 +5210,11 @@
       const q = [];
       if (wantInst) q.push("instrument=" + encodeURIComponent(wantInst));
       q.push("playbook=" + encodeURIComponent(viewPlaybookId()));
+      try {
+        const sp = localStorage.getItem("trinity.df.syncPreset");
+        if (sp === "index-oil" || sp === "oil") syncPreset = sp;
+      } catch (_) {}
+      if (syncPreset) q.push("syncPreset=" + encodeURIComponent(syncPreset));
       const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
       const timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (_) {} }, DESK_FETCH_MS) : null;
       const res = await fetch("/api/trend/desk?" + q.join("&"), {
