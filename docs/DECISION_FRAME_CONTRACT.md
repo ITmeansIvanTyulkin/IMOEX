@@ -237,4 +237,10 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Пользовательские веса рукавов (`CapitalWeightService` + UI «Капитал») + risk-impact ₽
 - [x] Live-rebalance: nudge от `rangeRatio` / regime ADX / lead-lag (+ кадр ALLOC при сдвиге ≥3 п.п.)
 - [x] Дефолт капитала: `TREND_M5` (не legacy PAIRS); pairs-share только если оператор явно задал
-- [x] Live facts: calendar `edgeCoversCross` + |z| из last-good arb desk (когда прогрет)
+- [x] Live facts: calendar `edgeCoversCross` + |z| (peek + async warm, если cache пуст)
+- [x] BALANCED &lt;300к → доминирующий рукав по конфигу (не всегда pairs; arb-aware)
+- [x] Миграция legacy `capital-sleeve-weights.json` pairs-only → YAML TREND_M5
+- [x] Live-nudge сидит нулевые рукава (в т.ч. M5); risk-impact = CapitalAllocator caps
+- [x] Sleeve equity: 0% weight → legacy fallback (armed robot не на 0₽)
+- [x] Lead/lag: flat (0) не считается «согласованы»
+- [x] capitalWeights tick изолирован от decisionFrame try
