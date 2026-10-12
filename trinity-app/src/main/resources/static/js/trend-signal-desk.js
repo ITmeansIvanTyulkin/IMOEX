@@ -179,12 +179,17 @@
     const lead = $("signal-guide-lead");
     const gtitle = $("signal-guide-title");
     if (pos) {
-      if (gtitle) gtitle.textContent = "Как работает позиционная";
-      if (lead) lead.textContent = "Часовой тренд, средняя полка объёма, сетка 1:1:2:4, охота до входа и трейл за закрытой свечой. «Сканирует» — робот включён, входа сейчас нет.";
+      if (gtitle) gtitle.textContent = "Как торгует позиционная";
+      if (lead) lead.textContent = "Простыми словами: ищем явный часовой тренд, входим сеткой в среднюю полку объёма (1:1:2:4), стоп в объёме, трейл за часом с нами. «Сканирует» — робот включён, входа сейчас нет.";
     } else if (brm) {
-      if (gtitle) gtitle.textContent = "Как работает BRM мини";
+      if (gtitle) gtitle.textContent = "Как торгует BRM мини";
       if (lead) {
-        lead.textContent = "Тот же чеклист полок на контракте BRM — стратегия для небольших капиталов (~50–150 тыс. ₽). Bounce/retest от TOP/BOT на M5, 1 лот, без параллельной торговли с диапазонной BR.";
+        lead.textContent = "Тот же сценарий полок, что у диапазонной нефти, на мини-контракте BRM (~50–150 тыс. ₽): TOP/BOT, bounce/retest, 1 лот, без параллельной торговли с полным BR.";
+      }
+    } else {
+      if (gtitle) gtitle.textContent = "Как торгует диапазонная";
+      if (lead) {
+        lead.textContent = "Простыми словами: дневные полки TOP/BOT на нефти BR (M5), отскок или ретест после пробоя, ветер часа и фильтры — потом лимиты, стоп за зоной, TP1/TP2.";
       }
     }
     const kick = $("sig-kick-btn");
