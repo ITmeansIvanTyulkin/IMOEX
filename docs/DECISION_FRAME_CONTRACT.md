@@ -1,12 +1,12 @@
 # Decision Frame — контракт кадра (DF-0)
 
-> Статус: **DF-0…DF-5 на `dev`** — слои 1–4 + лента расхождений (toggle).  
-> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) … [DF-5](https://app.clickup.com/t/869fegdd1).  
+> Статус: **DF-0…DF-6 на `dev`** — слои 1–4 + sync + allocator frames.  
+> Задачи: [DF-0](https://app.clickup.com/t/869fegd5k) … [DF-6](https://app.clickup.com/t/869fegddy).  
 > Эпик: [Decision Frame USP](https://app.clickup.com/t/869fegd2j).  
-> Код: `SessionNormCompare`, `LeadLagCompare`, `SyncDivergenceCompare`; деск → `decisionFrame` + `syncContext` + journal.  
-> Тесты: assembler / sessionNorm / leadLag / `SyncDivergenceCompareTest`.
+> Код: `SessionNormCompare`, `LeadLagCompare`, `SyncDivergenceCompare`, `AllocatorDecisionCompare`; деск → `decisionFrame` + `syncContext` + journal.  
+> Тесты: assembler / sessionNorm / leadLag / sync / `AllocatorDecisionCompareTest`.
 
-Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/lag на range lane).
+Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/lag на range lane). DF-6: кадры на переключение рукавов капитала.
 
 Новое поле деска: `decisionFrame`. Существующие `summary` (строка) и `situation.why` не трогаем — это текущий деск, не кадр.
 
@@ -62,6 +62,7 @@ Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/l
 | `SKIP` | входа нет: нет полки, сессия, чеклист не собран |
 | `ENTER` | лимитки в работе или переход в позицию |
 | `MODE` | смена режима: сессия открылась/закрылась, смена стороны/mode, смена lane |
+| `ALLOC` | DF-6: переключение рукава капитала (веса / Exclusive↔BRM / mini-book) |
 
 ---
 
@@ -107,9 +108,10 @@ Lead/lag, когда появится, **не** запрещает вход са
 | `cluster` | 1 | кластер у полки |
 | `footprint` | 1 | footprint деска |
 | `sessionNorm` | 2 | фаза дня + дневной ход + объём/ход бара vs медиана того же clock-hour (`SessionNormCompare`); soft-hint после клиринга |
-| `leadLag` | 3 | BR–BRM–RI: короткая строка в summary + цифры/смысл в details (`LeadLagCompare`); **не veto** |
+| `leadLag` | 3 | BR–Si–RI: короткая строка в summary + цифры/смысл в details (`LeadLagCompare`); **не veto** |
 | `sync` | 3 | DF-5: топ-аномалии из ленты расхождений → details кадра (журнал) |
 | `robot` | 4 | план playbook: статус, сторона, mode, пункты чеклиста |
+| `allocator` | 4 | DF-6: переключение рукавов капитала (Exclusive / BRM / positional) — «Капитал сюда, потому что…» |
 
 `layer`: `1` \| `2` \| `3` \| `4`.  
 `text`: один факт, одна строка. Без эссе и без пяти пересказов одного события.  
@@ -224,3 +226,11 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Клик по событию → seek графика к `at`
 - [x] Топ-аномалии в `details[].source=sync` → журнал кадров
 - [x] Sync-панель ~50–60%: sparkline peers (`peerSparks`) + лента событий
+
+## DoD DF-6 (вертикальный срез на `dev`)
+
+- [x] `AllocatorDecisionCompare` + `Source.allocator` / `Trigger.ALLOC`
+- [x] Кадр на toggle Exclusive / BRM / positional и mini-book defaults
+- [x] Журнал: `kind=alloc`, фильтр «капитал» на деске
+- [x] Summary: «Капитал сюда (…), потому что …» + details (mutex / equity / до→после)
+- [ ] Опционально: пользовательские веса + влияние на риск; live rebalance по воле/спредам

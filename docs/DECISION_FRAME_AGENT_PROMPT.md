@@ -194,5 +194,5 @@ Lead/lag (слой 3) — **контекст, не авто-veto входа** п
 Начни с DF-0. Не распыляйся на DF-5/6 и не трогай observe-тюнинг.
 
 Контракт + эталон: `docs/DECISION_FRAME_CONTRACT.md`. Живой кадр BRX6: `IMOEX-core/.../decision-frame/brx6-2026-10-08-live.json`.  
-**Готово:** DF-0…DF-5 (лента + toggle + sparkline peers BR/Si/RI).  
-**Дальше:** [DF-6](https://app.clickup.com/t/869fegddy) Allocator.
+**Готово:** DF-0…DF-6 (sync peers + allocator frames на переключение рукавов).  
+**Опционально позже:** user weights / risk impact; presets UI beyond oil.

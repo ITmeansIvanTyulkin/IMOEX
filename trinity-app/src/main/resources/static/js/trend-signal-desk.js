@@ -751,6 +751,7 @@
         + " · ждёт " + (kinds.wait || 0)
         + " · вошёл " + (kinds.enter || 0)
         + " · пропуск " + (kinds.skip || 0)
+        + " · капитал " + (kinds.alloc || 0)
         + (filtered.length === 0 && dfJournalKind
           ? " · нет кадров с этим фильтром"
           : "");
