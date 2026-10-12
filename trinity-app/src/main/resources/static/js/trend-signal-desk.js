@@ -334,7 +334,7 @@
     pctInput("cap-w-arb", uw.arb);
     if (meta) {
       meta.textContent = (cw.focusSlot || "—")
-        + (cw.multiFocusOk ? "" : " · multi с ≥300к")
+        + (cw.multiFocusOk ? "" : " · один рукав до 300к")
         + (cw.liveRebalance ? " · live" : "");
     }
     if (eff) {

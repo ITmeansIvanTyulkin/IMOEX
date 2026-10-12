@@ -235,3 +235,4 @@ UI: блок «Журнал кадров» на trend-desk — фильтры ж
 - [x] Summary: «Капитал сюда (…), потому что …» + details (mutex / equity / до→после)
 - [x] Пользовательские веса рукавов (`CapitalWeightService` + UI «Капитал») + risk-impact ₽
 - [x] Live-rebalance: nudge от `rangeRatio` / regime ADX / lead-lag (+ кадр ALLOC при сдвиге ≥3 п.п.)
+- [x] Дефолт капитала: `TREND_M5` (не legacy PAIRS); pairs-share только если оператор явно задал

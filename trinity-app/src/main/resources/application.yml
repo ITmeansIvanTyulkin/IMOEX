@@ -133,11 +133,11 @@ imoex:
     # No weekly book — desks don't run a W1 pairs sleeve; we don't invent one.
     daily-gross-share: 1.0
     intraday-gross-share: 0.0
-    # Focus-слоты: PAIRS | TREND_M5 | TREND_POSITIONAL | ARB | BALANCED
-    # For retail pairs product keep PAIRS (trend sleeves need ≥300к BALANCED).
-    focus-slot: PAIRS
-    pairs-strategy-share: 1.0
-    trend-m5-share: 0.0
+    # Focus-слоты: TREND_M5 | TREND_POSITIONAL | ARB | BALANCED | PAIRS (legacy pairs desk)
+    # Operator desk = Exclusive/BRM/positional — default TREND_M5, не коинтеграционные PAIRS.
+    focus-slot: TREND_M5
+    pairs-strategy-share: 0.0
+    trend-m5-share: 1.0
     trend-positional-share: 0.0
     arb-share: 0.0
   session:
