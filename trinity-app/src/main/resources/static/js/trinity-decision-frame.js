@@ -195,7 +195,14 @@
         statusEl.textContent = statusRu(robot.status);
         statusEl.dataset.status = robot.status || "";
       }
-      if (textEl) textEl.textContent = frame.summary;
+      if (textEl) {
+        textEl.textContent = String(frame.summary || "")
+          .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*·\s*/gi, "")
+          .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*/gi, "")
+          .replace(/\(\s*·\s*/g, "(")
+          .replace(/\s{2,}/g, " ")
+          .trim();
+      }
       root.dataset.trigger = frame.trigger || "";
       root.dataset.frameId = frame.frameId || "";
       paintMeta(frame);

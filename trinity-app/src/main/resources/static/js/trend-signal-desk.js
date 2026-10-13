@@ -297,7 +297,7 @@
             method: "POST",
             headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
             body: JSON.stringify({
-              pairs: readPctShare("cap-w-pairs"),
+              pairs: 0,
               trendM5: readPctShare("cap-w-m5"),
               positional: readPctShare("cap-w-pos"),
               arb: readPctShare("cap-w-arb"),
@@ -334,7 +334,6 @@
     if (body) body.hidden = !capitalPanelOpen;
     if (live) live.checked = !!cw.liveRebalance;
     const uw = cw.userWeights || {};
-    pctInput("cap-w-pairs", uw.pairs);
     pctInput("cap-w-m5", uw.trendM5);
     pctInput("cap-w-pos", uw.positional);
     pctInput("cap-w-arb", uw.arb);
@@ -350,8 +349,7 @@
     }
     if (risk) {
       const ri = cw.riskImpact || {};
-      risk.textContent = "Лимиты: pairs " + fmtRub(ri.pairsGrossCap)
-        + " · M5 " + fmtRub(ri.trendM5GrossCap)
+      risk.textContent = "Лимиты: M5 " + fmtRub(ri.trendM5GrossCap)
         + " · pos " + fmtRub(ri.positionalGrossCap)
         + " · arb " + fmtRub(ri.arbGrossCap);
     }
@@ -863,9 +861,21 @@
     }).join("|");
   }
 
+  /** Drop legacy «pairs N%» from capital summaries (product desk has no pairs sleeve). */
+  function scrubPairsFromSummary(text) {
+    let s = String(text || "");
+    if (!s) return s;
+    s = s.replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*·\s*/gi, "");
+    s = s.replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*/gi, "");
+    s = s.replace(/Риск-лимиты\s*₽:\s*pairs\s*[\d.,]+\s*·\s*/gi, "Риск-лимиты ₽: ");
+    s = s.replace(/\(\s*·\s*/g, "(");
+    s = s.replace(/\s{2,}/g, " ").trim();
+    return s;
+  }
+
   /** Humanize English rationale tail inside an already-built frame summary. */
   function humanizeFrameSummary(text) {
-    const s = String(text || "");
+    const s = scrubPairsFromSummary(String(text || ""));
     if (!s) return "—";
     const m = s.match(/^(.*?Робот\s+(?:пропускает|входит|ждёт)[:：]\s*)(.+)$/i);
     if (m) {
