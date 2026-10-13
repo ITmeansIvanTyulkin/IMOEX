@@ -850,7 +850,12 @@
   }
 
   function dfJournalListSig(filtered, kind) {
-    return String(kind || "") + "#" + filtered.map(function (e) {
+    const groups = compressJournalEntries(filtered);
+    return String(kind || "") + "#" + groups.map(function (g) {
+      if (g.group) {
+        return "G:" + g.id + ":" + g.count + ":" + (g.entries[0] && g.entries[0].summary);
+      }
+      const e = g.entry;
       return [
         e && e.id,
         e && e.kind,
@@ -877,12 +882,193 @@
   function humanizeFrameSummary(text) {
     const s = scrubPairsFromSummary(String(text || ""));
     if (!s) return "—";
-    const m = s.match(/^(.*?Робот\s+(?:пропускает|входит|ждёт)[:：]\s*)(.+)$/i);
+    const m = s.match(/^(.*?Робот\s+(?:пропускает|входит|ждёт|в позиции)[:：]\s*)(.+)$/i);
     if (m) {
       const ru = humanizeDeskReason(m[2]);
       return m[1] + (ru && ru !== m[2] ? ru : m[2]);
     }
     return humanizeDeskReason(s) || s;
+  }
+
+  /** Fingerprint for collapsing identical skip/wait spam. */
+  function journalCompressKey(e) {
+    if (!e) return "";
+    const frame = e.frame || {};
+    const robot = frame.robot || {};
+    const status = String(e.robotStatus || robot.status || "").toUpperCase();
+    const kind = String(e.kind || "").toLowerCase();
+    if (status !== "SKIP" && status !== "WAIT") return "";
+    if (kind === "enter" || kind === "alloc") return "";
+    let reason = "";
+    const details = Array.isArray(frame.details) ? frame.details : [];
+    for (let i = 0; i < details.length; i++) {
+      const d = details[i];
+      if (!d || !d.text) continue;
+      if (d.source === "sessionNorm" || d.source === "robot" || d.source === "leadLag") {
+        reason = scrubPairsFromSummary(d.text);
+        if (d.source === "sessionNorm" || d.source === "robot") break;
+      }
+    }
+    if (!reason) reason = scrubPairsFromSummary(e.summary || frame.summary || "");
+    reason = reason
+      .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, "")
+      .replace(/\d+[.,]\d+/g, "#")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase()
+      .slice(0, 120);
+    const inst = String(e.instrument || frame.instrument || "").toUpperCase();
+    return status + "|" + kind + "|" + inst + "|" + reason;
+  }
+
+  function journalGroupLabel(entries) {
+    const e = entries[0] || {};
+    const frame = e.frame || {};
+    const details = Array.isArray(frame.details) ? frame.details : [];
+    for (let i = 0; i < details.length; i++) {
+      const d = details[i];
+      if (d && d.source === "sessionNorm" && d.text) {
+        let t = scrubPairsFromSummary(d.text);
+        if (/окн[оа].*закрыт|правил[оа] сессии|сесси/i.test(t)) {
+          return "окно закрыто";
+        }
+        t = t.replace(/^Норма сессии:\s*/i, "").replace(/\.$/, "");
+        return t.length > 48 ? t.slice(0, 47) + "…" : t;
+      }
+    }
+    for (let j = 0; j < details.length; j++) {
+      const d2 = details[j];
+      if (d2 && d2.source === "leadLag" && d2.text) {
+        let t = scrubPairsFromSummary(d2.text).replace(/\.$/, "");
+        if (/lead|lag|связк|расхожд/i.test(t)) {
+          return t.length > 48 ? ("связка · " + t.slice(0, 40) + "…") : ("связка · " + t);
+        }
+        return t.length > 48 ? t.slice(0, 47) + "…" : t;
+      }
+    }
+    const robotTxt = (window.TrinityDecisionFrame && TrinityDecisionFrame.robotDetailText)
+      ? TrinityDecisionFrame.robotDetailText(frame)
+      : "";
+    let s = scrubPairsFromSummary(robotTxt || e.summary || frame.summary || "повтор");
+    s = s.replace(/^Робот\s+(?:пропускает|ждёт)[:：]\s*/i, "").replace(/\.$/, "");
+    if (/сесси/i.test(s)) return "окно закрыто";
+    if (/lead|lag|связк/i.test(s)) return "то же lead-lag";
+    return s.length > 52 ? s.slice(0, 51) + "…" : (s || "тот же итог");
+  }
+
+  function compressJournalEntries(entries) {
+    const out = [];
+    let i = 0;
+    while (i < entries.length) {
+      const e = entries[i];
+      const key = journalCompressKey(e);
+      if (!key) {
+        out.push({ group: false, entry: e });
+        i += 1;
+        continue;
+      }
+      let j = i + 1;
+      while (j < entries.length && journalCompressKey(entries[j]) === key) j += 1;
+      const slice = entries.slice(i, j);
+      if (slice.length < 3) {
+        slice.forEach(function (one) { out.push({ group: false, entry: one }); });
+      } else {
+        const firstId = String((slice[slice.length - 1] && (slice[slice.length - 1].id
+          || (slice[slice.length - 1].frame && slice[slice.length - 1].frame.frameId))) || i);
+        const lastId = String((slice[0] && (slice[0].id
+          || (slice[0].frame && slice[0].frame.frameId))) || j);
+        out.push({
+          group: true,
+          id: "g:" + firstId + ":" + lastId + ":" + slice.length,
+          key: key,
+          count: slice.length,
+          entries: slice,
+          label: journalGroupLabel(slice)
+        });
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  function journalTimeRange(entries) {
+    const times = entries.map(function (e) {
+      return shortTime(e.barTime || e.recordedAt || (e.frame && e.frame.barTime));
+    }).filter(Boolean);
+    if (!times.length) return "—";
+    const a = times[times.length - 1];
+    const b = times[0];
+    return a === b ? a : (a + "–" + b);
+  }
+
+  let briefDensityBound = false;
+
+  function briefDensity() {
+    const root = $("signal-desk-brief");
+    const fromDom = root && root.getAttribute("data-density");
+    if (fromDom === "full" || fromDom === "brief") return fromDom;
+    try {
+      const s = localStorage.getItem("trinity.df.briefDensity");
+      if (s === "full" || s === "brief") return s;
+    } catch (_) {}
+    return "brief";
+  }
+
+  function applyBriefDensity(next) {
+    const root = $("signal-desk-brief");
+    if (!root) return;
+    const d = next === "full" ? "full" : "brief";
+    root.setAttribute("data-density", d);
+    root.classList.toggle("is-density-brief", d === "brief");
+    root.classList.toggle("is-density-full", d === "full");
+    root.querySelectorAll("[data-brief-density]").forEach(function (el) {
+      el.classList.toggle("is-active", el.getAttribute("data-brief-density") === d);
+    });
+    const body = $("signal-desk-brief-body");
+    if (body) body.classList.toggle("is-collapsed-dense", d === "brief");
+    try { localStorage.setItem("trinity.df.briefDensity", d); } catch (_) {}
+  }
+
+  function bindBriefDensity() {
+    if (briefDensityBound) return;
+    const root = $("signal-desk-brief");
+    if (!root) return;
+    briefDensityBound = true;
+    applyBriefDensity(briefDensity());
+    root.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-brief-density]")
+        : null;
+      if (!btn) return;
+      applyBriefDensity(btn.getAttribute("data-brief-density") || "brief");
+    });
+  }
+
+  function paintBriefHero(data) {
+    const hero = $("signal-desk-brief-hero");
+    if (!hero) return;
+    const frame = data && data.decisionFrame;
+    if (!frame || !frame.summary) {
+      hero.hidden = true;
+      hero.innerHTML = "";
+      return;
+    }
+    const statusRu = (window.TrinityDecisionFrame && TrinityDecisionFrame.statusRu)
+      || function (s) { return s || "—"; };
+    const robot = frame.robot || {};
+    const status = robot.status || "";
+    const heroText = (window.TrinityDecisionFrame && TrinityDecisionFrame.robotDetailText)
+      ? TrinityDecisionFrame.robotDetailText(frame)
+      : humanizeFrameSummary(frame.summary);
+    const chips = (window.TrinityDecisionFrame && TrinityDecisionFrame.whyChips)
+      ? TrinityDecisionFrame.whyChips(frame, heroText)
+      : [];
+    let why = chips.map(function (c) { return c.text; }).filter(Boolean).slice(0, 2).join(" · ");
+    hero.innerHTML = "<span class=\"signal-brief-hero-status\" data-status=\""
+      + escHtml(status) + "\">" + escHtml(statusRu(status)) + "</span>"
+      + escHtml(heroText || "—")
+      + (why ? (" <span class=\"signal-brief-note\">· " + escHtml(why) + "</span>") : "");
+    hero.hidden = false;
   }
 
   function paintDecisionFrameJournal(payload) {
@@ -910,8 +1096,11 @@
       const day = (payload && payload.day) || "";
       title.textContent = "Журнал кадров" + (day ? (" · " + day) : "");
     }
+    const groups = compressJournalEntries(filtered);
+    const shownRows = groups.length;
     if (meta) {
-      meta.textContent = "Показано " + filtered.length
+      meta.textContent = "Строк " + shownRows
+        + " · кадров " + filtered.length
         + " / " + entries.length
         + " · ждёт " + (kinds.wait || 0)
         + " · вошёл " + (kinds.enter || 0)
@@ -936,7 +1125,41 @@
       return;
     }
     listEl.dataset.sig = sig;
-    listEl.innerHTML = filtered.map(function (e) {
+    listEl.innerHTML = groups.map(function (g) {
+      if (g.group) {
+        const latest = g.entries[0] || {};
+        const frame = latest.frame || {};
+        const robot = frame.robot || {};
+        const status = latest.robotStatus || robot.status || "";
+        const id = g.id;
+        const open = !!(id && dfJournalOpenIds[id]);
+        const range = journalTimeRange(g.entries);
+        const inst = latest.instrument || frame.instrument || "";
+        const times = g.entries.map(function (e) {
+          return shortTime(e.barTime || e.recordedAt || (e.frame && e.frame.barTime));
+        }).filter(Boolean).reverse().join(", ");
+        return "<li class=\"signal-df-journal-item is-group\" data-df-id=\"" + escHtml(id) + "\">"
+          + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
+          + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
+          + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(status) + "\">"
+          + escHtml(statusRu(status)) + "</span>"
+          + "<span class=\"signal-df-journal-summary\">"
+          + (inst ? ("<span class=\"signal-df-journal-inst\">" + escHtml(inst) + "</span> ") : "")
+          + escHtml(g.label)
+          + " <span class=\"signal-df-journal-group-range\">· " + escHtml(range) + "</span>"
+          + "<span class=\"signal-df-journal-group-count\">" + g.count + " кадров</span>"
+          + "</span>"
+          + "<span class=\"signal-df-journal-time\">" + escHtml(range) + "</span>"
+          + "</button>"
+          + "<div class=\"signal-df-journal-details decision-frame-details\""
+          + (open ? "" : " hidden") + ">"
+          + "<p class=\"signal-brief-note\">Одинаковый итог · "
+          + escHtml(String(g.count)) + " кадров: " + escHtml(times) + "</p>"
+          + "<ul class=\"decision-frame-details-list\">" + detailsHtml(frame) + "</ul>"
+          + "</div>"
+          + "</li>";
+      }
+      const e = g.entry;
       const frame = e.frame || {};
       const robot = frame.robot || {};
       const status = e.robotStatus || robot.status || "";
@@ -1914,7 +2137,10 @@
         return String(t == null ? "" : t)
           .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       };
-      let html = instrumentSelectBriefHtml(data, esc);
+      let html = "<div class='signal-brief-keep-brief'>"
+        + instrumentSelectBriefHtml(data, esc)
+        + "</div>";
+      html += "<div class='signal-brief-dense'>";
       html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Дополнительно</p>";
       html += "<p class='signal-brief-note'>Полный why — в <strong>кадре решения</strong> выше "
         + "(тултип свечи остаётся микро-why одного бара).</p>";
@@ -1932,6 +2158,7 @@
             : "")
           + ".</p>";
       }
+      html += "</div>";
       return html;
     }
     const bars = deskBars(data);
@@ -2397,7 +2624,11 @@
         + " · всего на statement <strong>" + total + "</strong>.</p>";
     }
 
-    return commentaryHtml(data) + marketHtml + robotHtml + newsHtml + paperHtml;
+    return "<div class=\"signal-brief-keep-brief\">"
+      + commentaryHtml(data) + marketHtml + robotHtml
+      + "</div><div class=\"signal-brief-dense\">"
+      + newsHtml + paperHtml
+      + "</div>";
   }
   function paintImpulseBanner(impulse) {
     const el = $("signal-impulse-banner");
@@ -5315,8 +5546,14 @@
             ? (" · робот: " + data.robotInstrument) : "");
       }
       renderPaper(data.paper, data);
+      bindBriefDensity();
+      paintBriefHero(data);
       const briefBody = $("signal-desk-brief-body");
-      if (briefBody) briefBody.innerHTML = buildOperatorBrief(data);
+      if (briefBody) {
+        briefBody.innerHTML = buildOperatorBrief(data);
+        briefBody.classList.toggle("is-collapsed-dense", briefDensity() === "brief");
+      }
+      applyBriefDensity(briefDensity());
       syncDomPressureFab(data);
 
       ensureChart(data.instrument, data.pointSize);

@@ -1,9 +1,10 @@
 /**
- * Decision Frame UI (DF-2): clickable summary + live details plaque.
+ * Decision Frame UI (DF-2): hero-итог + кратко/подробно + live details plaque.
  * Mount on any desk that serves `decisionFrame` JSON. Extension point for
  * investments / calendar-arb — same create({ root }).
  *
  * States: idle | updating | stale
+ * Density: brief (hero + 1–2 why chips) | full (full summary + facts)
  */
 (function (global) {
   "use strict";
@@ -31,11 +32,15 @@
     MODE: "смена режима"
   };
 
+  /** Punchy operator labels for the 2–3s hero read. */
   var STATUS_RU = {
-    ENTER: "входит",
+    ENTER: "в сделке",
     WAIT: "ждёт",
-    SKIP: "пропускает"
+    SKIP: "пропуск"
   };
+
+  var DENSITY_KEY = "trinity.df.density";
+  var WHY_PRIORITY = ["sessionNorm", "leadLag", "robot", "shelf", "cluster", "footprint"];
 
   function esc(t) {
     return String(t == null ? "" : t)
@@ -59,10 +64,93 @@
     return TRIGGER_RU[trigger] || String(trigger).toLowerCase();
   }
 
+  function scrubPairs(text) {
+    return String(text || "")
+      .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*·\s*/gi, "")
+      .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*/gi, "")
+      .replace(/\(\s*·\s*/g, "(")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  function robotDetailText(frame) {
+    var rows = frame && Array.isArray(frame.details) ? frame.details : [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] && rows[i].source === "robot" && rows[i].text) {
+        return scrubPairs(rows[i].text);
+      }
+    }
+    var summary = scrubPairs(frame && frame.summary);
+    var m = summary.match(/Робот\s+(?:пропускает|входит|ждёт|в позиции)[^.]*(?:\.|$)/i);
+    return m ? m[0].trim() : summary;
+  }
+
+  function shortenChip(text, maxLen) {
+    var s = scrubPairs(text).replace(/\s+/g, " ").trim();
+    if (!s) return "";
+    s = s.replace(/\.$/, "");
+    // Drop leading «Робот …:» — status chip already says the decision.
+    s = s.replace(/^Робот\s+(?:пропускает|входит|ждёт)[:：]\s*/i, "");
+    s = s.replace(/^Норма сессии:\s*/i, "");
+    s = s.replace(/^Связка:\s*/i, "");
+    maxLen = maxLen || 72;
+    if (s.length > maxLen) {
+      s = s.slice(0, maxLen - 1).replace(/\s+\S*$/, "") + "…";
+    }
+    return s;
+  }
+
+  /**
+   * 1–2 decision reasons for the hero (not microstructure noise).
+   * Prefer session / lead-lag / robot; skip delta/dom/poc as third-block clutter.
+   */
+  function whyChips(frame, heroText) {
+    var rows = frame && Array.isArray(frame.details) ? frame.details : [];
+    var heroNorm = shortenChip(heroText || "", 200).toLowerCase();
+    var out = [];
+    var seen = Object.create(null);
+
+    function push(d) {
+      if (!d || !d.text || out.length >= 2) return;
+      var src = String(d.source || "");
+      if (src === "delta" || src === "dom" || src === "poc") return;
+      var chip = shortenChip(d.text, 64);
+      if (!chip) return;
+      var key = chip.toLowerCase();
+      if (seen[key]) return;
+      if (heroNorm && (heroNorm.indexOf(key) >= 0 || key.indexOf(heroNorm.slice(0, 24)) >= 0)) {
+        return;
+      }
+      seen[key] = true;
+      out.push({ source: src, text: chip });
+    }
+
+    WHY_PRIORITY.forEach(function (want) {
+      if (out.length >= 2) return;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i] && rows[i].source === want) {
+          push(rows[i]);
+          break;
+        }
+      }
+    });
+    return out;
+  }
+
   function $(root, id) {
     if (!root) return null;
     if (root.id === id) return root;
     return root.querySelector("#" + id) || document.getElementById(id);
+  }
+
+  function readDensity(root) {
+    var fromDom = root && root.getAttribute("data-density");
+    if (fromDom === "full" || fromDom === "brief") return fromDom;
+    try {
+      var stored = localStorage.getItem(DENSITY_KEY);
+      if (stored === "full" || stored === "brief") return stored;
+    } catch (_) {}
+    return "brief";
   }
 
   /**
@@ -79,14 +167,18 @@
     var staleAfterMs = opts.staleAfterMs > 0 ? opts.staleAfterMs : 90000;
     var open = false;
     var bound = false;
+    var densityBound = false;
+    var density = readDensity(root);
     var state = "idle";
     var lastFrameId = "";
     var lastSummary = "";
     var lastPaintAt = 0;
     var flashTimer = null;
+    var lastFrame = null;
 
     var btn = $(root, "decision-frame-summary");
     var textEl = $(root, "decision-frame-text");
+    var whyEl = $(root, "decision-frame-why");
     var statusEl = $(root, "decision-frame-status");
     var hint = $(root, "decision-frame-hint");
     var details = $(root, "decision-frame-details");
@@ -94,11 +186,38 @@
     var metaEl = $(root, "decision-frame-meta");
     var stateEl = $(root, "decision-frame-state");
 
+    function applyDensityClass() {
+      root.setAttribute("data-density", density);
+      root.classList.toggle("is-density-brief", density === "brief");
+      root.classList.toggle("is-density-full", density === "full");
+      root.querySelectorAll("[data-df-density]").forEach(function (el) {
+        el.classList.toggle("is-active", el.getAttribute("data-df-density") === density);
+      });
+    }
+
+    function setDensity(next, optsLocal) {
+      optsLocal = optsLocal || {};
+      density = next === "full" ? "full" : "brief";
+      try { localStorage.setItem(DENSITY_KEY, density); } catch (_) {}
+      applyDensityClass();
+      if (optsLocal.fromUser) {
+        if (density === "full") setOpen(true);
+        else if (density === "brief" && open) {
+          // Keep open if operator already drilled in; only change copy density.
+        }
+      }
+      if (lastFrame) paintCopy(lastFrame);
+    }
+
     function setOpen(next) {
       open = !!next;
       if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
       if (details) details.hidden = !open;
-      if (hint) hint.textContent = open ? "свернуть" : "подробнее";
+      if (hint) {
+        hint.textContent = open
+          ? "свернуть"
+          : (density === "brief" ? "подробнее" : "факты");
+      }
       root.classList.toggle("is-open", open);
     }
 
@@ -115,6 +234,39 @@
       }
     }
 
+    function paintWhy(frame, heroText) {
+      if (!whyEl) return;
+      var chips = whyChips(frame, heroText);
+      if (!chips.length) {
+        whyEl.innerHTML = "";
+        whyEl.hidden = true;
+        return;
+      }
+      whyEl.innerHTML = chips.map(function (c) {
+        return "<span class=\"decision-frame-why-chip\" data-source=\""
+          + esc(c.source) + "\" title=\"" + esc(sourceRu(c.source)) + "\">"
+          + esc(c.text) + "</span>";
+      }).join("");
+      whyEl.hidden = density === "full";
+    }
+
+    function paintCopy(frame) {
+      var robot = frame.robot || {};
+      var fullSummary = scrubPairs(frame.summary || "");
+      var hero = robotDetailText(frame) || fullSummary || "—";
+      if (statusEl) {
+        statusEl.textContent = statusRu(robot.status);
+        statusEl.dataset.status = robot.status || "";
+      }
+      if (textEl) {
+        textEl.textContent = density === "brief" ? hero : (fullSummary || hero);
+      }
+      paintWhy(frame, hero);
+      if (hint && !open) {
+        hint.textContent = density === "brief" ? "подробнее" : "факты";
+      }
+    }
+
     function bind() {
       if (bound || !btn) return;
       bound = true;
@@ -124,6 +276,24 @@
           listEl.innerHTML = listEl.dataset.pendingHtml;
           delete listEl.dataset.pendingHtml;
         }
+      });
+      bindDensity();
+    }
+
+    function bindDensity() {
+      if (densityBound) return;
+      var bar = root.querySelector(".decision-frame-density");
+      if (!bar) return;
+      densityBound = true;
+      applyDensityClass();
+      bar.addEventListener("click", function (ev) {
+        var t = ev.target && ev.target.closest
+          ? ev.target.closest("[data-df-density]")
+          : null;
+        if (!t) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        setDensity(t.getAttribute("data-df-density") || "brief", { fromUser: true });
       });
     }
 
@@ -136,7 +306,7 @@
       else if (frame.asOf) bits.push(String(frame.asOf).replace("T", " "));
       if (frame.instrument) bits.push(String(frame.instrument));
       metaEl.textContent = bits.join(" · ");
-      metaEl.hidden = bits.length === 0;
+      metaEl.hidden = bits.length === 0 || density === "brief";
     }
 
     function flashUpdated() {
@@ -190,19 +360,8 @@
         return;
       }
       root.hidden = false;
-      var robot = frame.robot || {};
-      if (statusEl) {
-        statusEl.textContent = statusRu(robot.status);
-        statusEl.dataset.status = robot.status || "";
-      }
-      if (textEl) {
-        textEl.textContent = String(frame.summary || "")
-          .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*·\s*/gi, "")
-          .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*/gi, "")
-          .replace(/\(\s*·\s*/g, "(")
-          .replace(/\s{2,}/g, " ")
-          .trim();
-      }
+      lastFrame = frame;
+      paintCopy(frame);
       root.dataset.trigger = frame.trigger || "";
       root.dataset.frameId = frame.frameId || "";
       paintMeta(frame);
@@ -234,12 +393,15 @@
       }
     }
 
+    applyDensityClass();
     var staleTimer = setInterval(tickStale, 15000);
 
     return {
       markUpdating: markUpdating,
       markStale: markStale,
       render: render,
+      setDensity: setDensity,
+      density: function () { return density; },
       isOpen: function () { return open; },
       state: function () { return state; },
       destroy: function () {
@@ -257,7 +419,7 @@
       var src = d.source ? String(d.source) : "";
       html += "<li data-source=\"" + esc(src) + "\">"
         + "<span class=\"decision-frame-source\">" + esc(sourceRu(src)) + "</span>"
-        + esc(d.text)
+        + esc(scrubPairs(d.text))
         + "</li>";
     });
     return html || "<li>Фактов в кадре пока нет.</li>";
@@ -269,6 +431,8 @@
     statusRu: statusRu,
     triggerRu: triggerRu,
     detailsHtml: detailsHtml,
+    whyChips: whyChips,
+    robotDetailText: robotDetailText,
     SOURCE_RU: SOURCE_RU
   };
 })(typeof window !== "undefined" ? window : globalThis);
