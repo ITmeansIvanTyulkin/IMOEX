@@ -5445,6 +5445,64 @@
     }
     reapplyFactFocusAfterPaint();
   }
+  function inferStuckFromDesk(data) {
+    const sit = (data && data.situation) || {};
+    if (sit.stuck && typeof sit.stuck === "object") return sit.stuck;
+    const posture = String(sit.posture || "");
+    if (posture === "IN_TRADE") return { active: false };
+    const reason = String(sit.why || (data && data.summary) || "");
+    const waiting = /waiting retest|break\+hold|retest|ждёт ретест|ждет ретест/i.test(reason);
+    const far = /unlock|far from|далеко от/i.test(reason);
+    const cooldown = /COOLDOWN|cooldown|пауза после стопа/i.test(reason);
+    const lock = !!sit.activeLock && (posture === "WAITING_FILL" || posture === "WATCHING_ZONE");
+    const active = !!(waiting || far || cooldown || lock);
+    if (!active) return { active: false };
+    const bits = [];
+    if (waiting) bits.push("ждёт ретест после пробоя");
+    if (far) bits.push("цена далеко от зоны входа");
+    if (lock) bits.push("arm/сетка на замке");
+    if (cooldown) bits.push("пауза после стопа (cooldown)");
+    const why = bits.join(" · ") || "без прогресса к входу";
+    return {
+      active: true,
+      why: why,
+      hint: "Сейчас залипло: " + why + ". Сброс снимет arm/cooldown, полки дня (day-lock) оставит."
+    };
+  }
+
+  function paintStuckStatus(data) {
+    const btn = $("sig-kick-btn");
+    const statusEl = $("sig-kick-status");
+    if (!btn && !statusEl) return;
+    if (deskScope() !== "range") {
+      if (statusEl) {
+        statusEl.hidden = true;
+        statusEl.textContent = "";
+      }
+      if (btn) btn.classList.remove("is-stuck");
+      return;
+    }
+    const stuck = inferStuckFromDesk(data);
+    const active = !!(stuck && stuck.active);
+    if (btn) {
+      btn.classList.toggle("is-stuck", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+      btn.title = active
+        ? ((stuck.hint || ("Сейчас залипло: " + (stuck.why || "")))
+          + " Soft-сброс: arm/cooldown без сноса day-lock.")
+        : "Сейчас залипания нет. Soft: сброс arm / cooldown / one-setup без сноса day-lock TOP/BOT.";
+    }
+    if (statusEl) {
+      if (active) {
+        statusEl.hidden = false;
+        statusEl.textContent = stuck.hint || ("Сейчас залипло: " + (stuck.why || "без прогресса") + ".");
+      } else {
+        statusEl.hidden = true;
+        statusEl.textContent = "";
+      }
+    }
+  }
+
   async function kickRobot() {
     const btn = $("sig-kick-btn");
     if (btn) btn.disabled = true;
@@ -5462,11 +5520,22 @@
       const brief = $("signal-desk-brief-body");
       if (brief) {
         brief.innerHTML = "<p><strong>Сброс залипания:</strong> "
-          + (data.reason || "soft")
-          + " · kicksToday=" + (data.kickCountToday || "?")
-          + " · " + (data.deskSummary || data.engineState || "")
-          + " <span class='signal-brief-note'>(day-lock TOP/BOT сохранён)</span></p>"
+          + "сняли arm/cooldown"
+          + (data.clearedSetupLock ? " · был замок сетки" : "")
+          + (data.clearedCooldown ? " · был cooldown" : "")
+          + " · сбросов сегодня: " + (data.kickCountToday != null ? data.kickCountToday : "?")
+          + " <span class='signal-brief-note'>(полки дня TOP/BOT сохранены)</span></p>"
           + brief.innerHTML;
+      }
+      const statusEl = $("sig-kick-status");
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Сброс выполнен — робот снова сканирует. Полки дня на месте.";
+        setTimeout(function () {
+          if (statusEl.textContent.indexOf("Сброс выполнен") === 0) {
+            paintStuckStatus(lastDeskSnapshot);
+          }
+        }, 4000);
       }
     } catch (e) {
       alert("Сброс не удался: " + (e && e.message ? e.message : e));
@@ -5633,6 +5702,7 @@
         briefBody.classList.toggle("is-collapsed-dense", briefDensity() === "brief");
       }
       applyBriefDensity(briefDensity());
+      paintStuckStatus(data);
       syncDomPressureFab(data);
 
       ensureChart(data.instrument, data.pointSize);

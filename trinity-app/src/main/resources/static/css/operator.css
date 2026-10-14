@@ -4885,6 +4885,21 @@ body[data-upsell="off"] .full-core-badge {
 .signal-brief-note {
   color: var(--muted, #4a5560);
 }
+.signal-kick-status {
+  margin: 0.35rem 0 0.15rem;
+  padding: 0.4rem 0.55rem;
+  border-left: 3px solid rgba(180, 83, 9, 0.75);
+  background: rgba(251, 191, 36, 0.14);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #78350f;
+}
+#sig-kick-btn.is-stuck {
+  border-color: rgba(180, 83, 9, 0.55);
+  color: #92400e;
+  background: rgba(251, 191, 36, 0.18);
+}
 .signal-brief-kicker {
   margin: 0.75rem 0 0.25rem !important;
   font-size: 0.68rem;
