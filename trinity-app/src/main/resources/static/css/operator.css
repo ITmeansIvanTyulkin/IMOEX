@@ -4645,6 +4645,10 @@ body[data-upsell="off"] .full-core-badge {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+.decision-frame-why-chip.is-fact-active {
+  box-shadow: 0 0 0 2px rgba(196, 163, 90, 0.55);
 }
 .decision-frame-hint {
   font-size: 0.72rem;
@@ -4679,6 +4683,22 @@ body[data-upsell="off"] .full-core-badge {
   line-height: 1.45;
   font-size: 0.9rem;
 }
+.decision-frame-details-list li.decision-frame-fact {
+  cursor: pointer;
+  border-radius: 0 6px 6px 0;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.decision-frame-details-list li.decision-frame-fact:hover,
+.decision-frame-details-list li.decision-frame-fact:focus-visible {
+  background: rgba(196, 163, 90, 0.12);
+  border-left-color: #c4a35a;
+  outline: none;
+}
+.decision-frame-details-list li.decision-frame-fact.is-fact-active {
+  background: rgba(196, 163, 90, 0.22);
+  border-left-color: #a8842e;
+  box-shadow: inset 0 0 0 1px rgba(196, 163, 90, 0.35);
+}
 .decision-frame-source {
   display: inline-block;
   margin-right: 0.45rem;
@@ -4687,6 +4707,38 @@ body[data-upsell="off"] .full-core-badge {
   text-transform: uppercase;
   color: var(--muted, #6a7580);
   font-weight: 700;
+}
+.dom-row.is-df-focus {
+  box-shadow: inset 0 0 0 2px rgba(196, 163, 90, 0.85);
+  background: rgba(196, 163, 90, 0.18) !important;
+  z-index: 1;
+}
+#signal-dom-body.is-df-focus-host {
+  outline: 2px solid rgba(196, 163, 90, 0.45);
+  outline-offset: -2px;
+}
+.signal-zone-band.is-df-focus {
+  border-top-color: #c4a35a !important;
+  border-bottom-color: #c4a35a !important;
+  border-left-color: #a8842e !important;
+  background: rgba(196, 163, 90, 0.42) !important;
+  box-shadow: 0 0 0 2px rgba(196, 163, 90, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  z-index: 4;
+}
+.is-poc.is-df-focus,
+.signal-profile-row.is-df-focus {
+  outline: 2px solid #ca8a04;
+  outline-offset: 1px;
+}
+.decision-frame.is-df-focus,
+.signal-brief.is-df-focus,
+#signal-desk-brief.is-df-focus,
+#signal-capital-panel.is-df-focus {
+  box-shadow: 0 0 0 2px rgba(196, 163, 90, 0.65);
+}
+.arb-row.is-df-focus {
+  box-shadow: inset 0 0 0 2px rgba(196, 163, 90, 0.85);
+  background: rgba(196, 163, 90, 0.16) !important;
 }
 .signal-brief {
   margin-top: 0.85rem;

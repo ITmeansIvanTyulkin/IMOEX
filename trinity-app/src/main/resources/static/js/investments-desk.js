@@ -154,10 +154,34 @@
 
   let decisionFrameUi = null;
   let dfJournalUi = null;
+  let investFactTimer = null;
+
+  function focusInvestDecisionFact(detail) {
+    if (investFactTimer) {
+      clearTimeout(investFactTimer);
+      investFactTimer = null;
+    }
+    document.querySelectorAll("#investments-desk .is-df-focus, #decision-frame.is-df-focus")
+      .forEach(function (el) { el.classList.remove("is-df-focus"); });
+    if (!detail) return;
+    const df = document.getElementById("decision-frame");
+    if (df) df.classList.add("is-df-focus");
+    const list = document.getElementById("invest-checklist") || document.getElementById("invest-cards");
+    if (list) list.classList.add("is-df-focus");
+    investFactTimer = setTimeout(function () {
+      document.querySelectorAll(".is-df-focus").forEach(function (el) {
+        el.classList.remove("is-df-focus");
+      });
+    }, 12000);
+  }
+
   function paintDecisionFrame(data) {
     if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") return;
     if (!decisionFrameUi) {
-      decisionFrameUi = TrinityDecisionFrame.create({ root: "decision-frame" });
+      decisionFrameUi = TrinityDecisionFrame.create({
+        root: "decision-frame",
+        onFactFocus: focusInvestDecisionFact
+      });
     }
     if (!decisionFrameUi) return;
     decisionFrameUi.render(data && data.decisionFrame);
@@ -170,7 +194,8 @@
         list: "signal-df-journal-list",
         meta: "signal-df-journal-meta",
         title: "signal-df-journal-title",
-        filters: "signal-df-journal-filters"
+        filters: "signal-df-journal-filters",
+        onFactFocus: focusInvestDecisionFact
       });
     }
     if (dfJournalUi) dfJournalUi.paint(payload || null);

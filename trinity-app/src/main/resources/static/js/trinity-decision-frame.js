@@ -19,7 +19,8 @@
     sessionNorm: "норма сессии",
     leadLag: "связка",
     sync: "расхождение",
-    robot: "робот"
+    robot: "робот",
+    allocator: "капитал"
   };
 
   var TRIGGER_RU = {
@@ -193,9 +194,11 @@
       return null;
     }
     var staleAfterMs = opts.staleAfterMs > 0 ? opts.staleAfterMs : 90000;
+    var onFactFocus = typeof opts.onFactFocus === "function" ? opts.onFactFocus : null;
     var open = false;
     var bound = false;
     var densityBound = false;
+    var factBound = false;
     var density = readDensity(root);
     var state = "idle";
     var lastFrameId = "";
@@ -272,7 +275,8 @@
       }
       whyEl.innerHTML = chips.map(function (c) {
         return "<span class=\"decision-frame-why-chip\" data-source=\""
-          + esc(c.source) + "\" title=\"" + esc(sourceRu(c.source)) + "\">"
+          + esc(c.source) + "\" title=\"" + esc(sourceRu(c.source))
+          + " · показать на графике\" tabindex=\"0\" role=\"button\">"
           + esc(c.text) + "</span>";
       }).join("");
       whyEl.hidden = density === "full";
@@ -296,17 +300,49 @@
       }
     }
 
+    function flushPendingDetails() {
+      if (listEl && listEl.dataset.pendingHtml) {
+        listEl.innerHTML = listEl.dataset.pendingHtml;
+        delete listEl.dataset.pendingHtml;
+      }
+    }
+
+    function bindFactClicks() {
+      if (factBound || !onFactFocus) return;
+      factBound = true;
+      bindFactFocus({
+        host: root,
+        origin: "live",
+        getFrame: function () { return lastFrame; },
+        onFactFocus: onFactFocus,
+        onWhyChip: function (chip, thenFocus) {
+          setOpen(true);
+          flushPendingDetails();
+          var src = chip.getAttribute("data-source") || "";
+          var li = src && listEl
+            ? listEl.querySelector(".decision-frame-fact[data-source=\"" + src + "\"]")
+            : null;
+          if (li) {
+            markFactActive(root, li);
+            var detail = detailFromEl(li, lastFrame);
+            if (detail) onFactFocus(detail, { origin: "live", el: li, frame: lastFrame });
+            try { li.scrollIntoView({ block: "nearest" }); } catch (_) {}
+            return;
+          }
+          thenFocus();
+        }
+      });
+    }
+
     function bind() {
       if (bound || !btn) return;
       bound = true;
       btn.addEventListener("click", function () {
         setOpen(!open);
-        if (open && listEl && listEl.dataset.pendingHtml) {
-          listEl.innerHTML = listEl.dataset.pendingHtml;
-          delete listEl.dataset.pendingHtml;
-        }
+        if (open) flushPendingDetails();
       });
       bindDensity();
+      bindFactClicks();
     }
 
     function bindDensity() {
@@ -433,11 +469,27 @@
       density: function () { return density; },
       isOpen: function () { return open; },
       state: function () { return state; },
+      clearFactFocus: function () {
+        clearFactActive(root);
+        if (onFactFocus) onFactFocus(null, { origin: "clear", el: null, frame: null });
+      },
       destroy: function () {
         if (staleTimer) clearInterval(staleTimer);
         if (flashTimer) clearTimeout(flashTimer);
       }
     };
+  }
+
+  function factLiAttrs(d) {
+    var src = d && d.source ? String(d.source) : "";
+    var val = d && d.value != null && d.value !== "" ? String(d.value) : "";
+    var layer = d && d.layer != null ? String(d.layer) : "";
+    return " class=\"decision-frame-fact\""
+      + " data-source=\"" + esc(src) + "\""
+      + (val !== "" ? (" data-value=\"" + esc(val) + "\"") : "")
+      + (layer !== "" ? (" data-layer=\"" + esc(layer) + "\"") : "")
+      + " tabindex=\"0\" role=\"button\""
+      + " title=\"Показать на графике / в стакане\"";
   }
 
   function detailsHtml(frame) {
@@ -446,12 +498,153 @@
     rows.forEach(function (d) {
       if (!d || !d.text) return;
       var src = d.source ? String(d.source) : "";
-      html += "<li data-source=\"" + esc(src) + "\">"
+      html += "<li" + factLiAttrs(d) + ">"
         + "<span class=\"decision-frame-source\">" + esc(sourceRu(src)) + "</span>"
         + esc(scrubPairs(d.text))
         + "</li>";
     });
-    return html || "<li>Фактов в кадре пока нет.</li>";
+    return html || "<li class=\"decision-frame-fact-empty\">Фактов в кадре пока нет.</li>";
+  }
+
+  function clearFactActive(scope) {
+    var root = scope || document;
+    root.querySelectorAll(".decision-frame-fact.is-fact-active, .decision-frame-why-chip.is-fact-active")
+      .forEach(function (n) { n.classList.remove("is-fact-active"); });
+  }
+
+  function markFactActive(scope, el) {
+    clearFactActive(scope);
+    if (el) el.classList.add("is-fact-active");
+  }
+
+  /** Build focus payload from a fact / why-chip element + optional frame. */
+  function detailFromEl(el, frame) {
+    if (!el) return null;
+    var src = el.getAttribute("data-source") || "";
+    if (!src) return null;
+    var valueAttr = el.getAttribute("data-value");
+    var value = null;
+    if (valueAttr != null && valueAttr !== "") {
+      var n = Number(valueAttr);
+      value = isFinite(n) ? n : valueAttr;
+    }
+    var layerAttr = el.getAttribute("data-layer");
+    var layer = layerAttr != null && layerAttr !== "" ? Number(layerAttr) : 0;
+    var text = "";
+    var matched = null;
+    if (frame && Array.isArray(frame.details)) {
+      var i;
+      for (i = 0; i < frame.details.length; i++) {
+        var d = frame.details[i];
+        if (!d || String(d.source) !== src) continue;
+        if (value != null && d.value != null && Number(d.value) === Number(value)) {
+          matched = d;
+          break;
+        }
+        if (!matched) matched = d;
+      }
+    }
+    if (matched) {
+      text = scrubPairs(matched.text || "");
+      if (matched.value != null && value == null) value = matched.value;
+      if (matched.layer != null && !layer) layer = matched.layer;
+    } else {
+      var clone = el.cloneNode(true);
+      var srcEl = clone.querySelector(".decision-frame-source");
+      if (srcEl) srcEl.parentNode.removeChild(srcEl);
+      text = scrubPairs(clone.textContent || "");
+    }
+    var host = el.closest("[data-bar-time], [data-df-bar-time], .signal-df-journal-member, .signal-df-journal-item");
+    var barTime = (host && (host.getAttribute("data-bar-time") || host.getAttribute("data-df-bar-time")))
+      || (frame && (frame.barTime || frame.asOf))
+      || "";
+    var instrument = (host && host.getAttribute("data-instrument"))
+      || (frame && frame.instrument)
+      || "";
+    return {
+      source: src,
+      value: value,
+      layer: layer || 0,
+      text: text,
+      barTime: barTime || null,
+      instrument: instrument || null,
+      frame: frame || null
+    };
+  }
+
+  /**
+   * Click / keyboard on fact rows and why-chips → onFactFocus(detail|null, ctx).
+   * Esc clears selection and calls onFactFocus(null).
+   */
+  function bindFactFocus(opts) {
+    opts = opts || {};
+    var host = opts.host;
+    var onFactFocus = opts.onFactFocus;
+    if (!host || typeof onFactFocus !== "function") return;
+    if (host.dataset.dfFactBound === "1") return;
+    host.dataset.dfFactBound = "1";
+    var origin = opts.origin || "live";
+
+    function scopeRoot() {
+      return host.closest(".decision-frame, .signal-df-journal") || host;
+    }
+
+    function fire(el) {
+      var frame = typeof opts.getFrame === "function" ? opts.getFrame(el) : null;
+      var detail = detailFromEl(el, frame);
+      if (!detail) return;
+      markFactActive(scopeRoot(), el);
+      onFactFocus(detail, { origin: origin, el: el, frame: frame || detail.frame });
+    }
+
+    host.addEventListener("click", function (ev) {
+      if (ev.target.closest
+          && ev.target.closest("[data-df-toggle], [data-df-density], [data-df-kind], a, button.signal-df-journal-toggle")) {
+        return;
+      }
+      var el = ev.target && ev.target.closest
+        ? ev.target.closest(".decision-frame-fact[data-source], .decision-frame-why-chip[data-source]")
+        : null;
+      if (!el || !host.contains(el)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (el.classList.contains("decision-frame-why-chip") && typeof opts.onWhyChip === "function") {
+        opts.onWhyChip(el, function () { fire(el); });
+        return;
+      }
+      fire(el);
+    });
+
+    host.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      var el = ev.target && ev.target.closest
+        ? ev.target.closest(".decision-frame-fact[data-source]")
+        : null;
+      if (!el || !host.contains(el)) return;
+      ev.preventDefault();
+      fire(el);
+    });
+
+    if (typeof onFactFocus === "function") {
+      if (!global.__trinityDfFactClearFns) global.__trinityDfFactClearFns = [];
+      if (global.__trinityDfFactClearFns.indexOf(onFactFocus) < 0) {
+        global.__trinityDfFactClearFns.push(onFactFocus);
+      }
+    }
+    if (!global.__trinityDfFactEscBound) {
+      global.__trinityDfFactEscBound = true;
+      document.addEventListener("keydown", function (ev) {
+        if (ev.key !== "Escape") return;
+        var active = document.querySelector(
+          ".decision-frame-fact.is-fact-active, .decision-frame-why-chip.is-fact-active, .is-df-focus"
+        );
+        if (!active && !(global.__trinityDfFactClearFns || []).length) return;
+        clearFactActive(document);
+        (global.__trinityDfFactClearFns || []).forEach(function (fn) {
+          try { fn(null, { origin: "clear", el: null, frame: null }); } catch (_) {}
+        });
+      });
+    }
   }
 
   function shortHm(iso) {
@@ -647,10 +840,30 @@
     var cache = null;
     var bound = false;
     var openIds = Object.create(null);
+    var onFactFocus = typeof opts.onFactFocus === "function" ? opts.onFactFocus : null;
     var humanize = typeof opts.humanizeSummary === "function"
       ? opts.humanizeSummary
       : function (t) { return scrubPairs(t) || "—"; };
     var timeFn = typeof opts.shortTime === "function" ? opts.shortTime : shortHm;
+
+    function frameForJournalEl(el) {
+      if (!el || !cache || !Array.isArray(cache.entries)) return null;
+      var item = el.closest(".signal-df-journal-member, .signal-df-journal-item");
+      if (!item) return null;
+      var id = item.getAttribute("data-df-id") || "";
+      var fid = item.getAttribute("data-frame-id") || "";
+      var entries = cache.entries;
+      var i;
+      for (i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        if (!e) continue;
+        var fr = e.frame || {};
+        var eid = String(e.id || fr.frameId || "");
+        if (fid && (eid === fid || String(fr.frameId || "") === fid)) return fr;
+        if (id === eid || id === ("m:" + eid)) return fr;
+      }
+      return null;
+    }
 
     function bind() {
       if (bound) return;
@@ -694,6 +907,14 @@
           else delete openIds[id];
         }
       });
+      if (onFactFocus) {
+        bindFactFocus({
+          host: listEl,
+          origin: "journal",
+          getFrame: frameForJournalEl,
+          onFactFocus: onFactFocus
+        });
+      }
     }
 
     function memberHtml(e) {
@@ -701,9 +922,14 @@
       var badge = entryBadge(e);
       var id = "m:" + String(e.id || frame.frameId || Math.random());
       var open = !!openIds[id];
-      var t = timeFn(e.barTime || e.recordedAt || frame.barTime);
+      var barIso = e.barTime || e.recordedAt || frame.barTime || "";
+      var inst = e.instrument || frame.instrument || "";
+      var t = timeFn(barIso);
       var summary = humanize(e.summary || frame.summary || "—");
-      return "<li class=\"signal-df-journal-member\" data-df-id=\"" + esc(id) + "\">"
+      return "<li class=\"signal-df-journal-member\" data-df-id=\"" + esc(id) + "\""
+        + " data-frame-id=\"" + esc(String(e.id || frame.frameId || "")) + "\""
+        + " data-bar-time=\"" + esc(barIso) + "\""
+        + " data-instrument=\"" + esc(inst) + "\">"
         + "<button type=\"button\" class=\"signal-df-journal-toggle is-member\" data-df-toggle"
         + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
         + "<span class=\"signal-df-journal-time\">" + esc(t) + "</span>"
@@ -791,10 +1017,14 @@
         var b = entryBadge(e);
         var eid = String(e.id || fr.frameId || "");
         var eOpen = !!(eid && openIds[eid]);
-        var t = timeFn(e.barTime || e.recordedAt || fr.barTime);
+        var barIso2 = e.barTime || e.recordedAt || fr.barTime || "";
+        var t = timeFn(barIso2);
         var inst2 = e.instrument || fr.instrument || "";
         var summary = humanize(e.summary || fr.summary || "—");
-        return "<li class=\"signal-df-journal-item\" data-df-id=\"" + esc(eid) + "\">"
+        return "<li class=\"signal-df-journal-item\" data-df-id=\"" + esc(eid) + "\""
+          + " data-frame-id=\"" + esc(eid) + "\""
+          + " data-bar-time=\"" + esc(barIso2) + "\""
+          + " data-instrument=\"" + esc(inst2) + "\">"
           + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
           + " aria-expanded=\"" + (eOpen ? "true" : "false") + "\">"
           + "<span class=\"signal-df-journal-status\" data-status=\"" + esc(b.status) + "\">"
@@ -815,7 +1045,11 @@
     return {
       paint: paint,
       compressEntries: compressEntries,
-      displayKind: displayKind
+      displayKind: displayKind,
+      clearFactFocus: function () {
+        clearFactActive(panel);
+        if (onFactFocus) onFactFocus(null, { origin: "clear", el: null, frame: null });
+      }
     };
   }
 
@@ -828,6 +1062,8 @@
     effectiveStatus: effectiveStatus,
     triggerRu: triggerRu,
     detailsHtml: detailsHtml,
+    detailFromEl: detailFromEl,
+    clearFactActive: clearFactActive,
     whyChips: whyChips,
     robotDetailText: robotDetailText,
     SOURCE_RU: SOURCE_RU

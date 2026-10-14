@@ -430,10 +430,49 @@
 
   let decisionFrameUi = null;
   let dfJournalUi = null;
+  let arbFactFocusTimer = null;
+
+  function clearArbFactFocus() {
+    if (arbFactFocusTimer) {
+      clearTimeout(arbFactFocusTimer);
+      arbFactFocusTimer = null;
+    }
+    document.querySelectorAll("#calendar-arb-desk .is-df-focus, #arb-book-near-body .is-df-focus, #arb-book-next-body .is-df-focus")
+      .forEach(function (el) { el.classList.remove("is-df-focus"); });
+  }
+
+  function flashArbDomTop() {
+    ["arb-book-near-body", "arb-book-next-body"].forEach(function (id) {
+      const body = $(id);
+      if (!body) return;
+      const asks = Array.prototype.slice.call(body.querySelectorAll(".arb-row.arb-ask"));
+      const bids = Array.prototype.slice.call(body.querySelectorAll(".arb-row.arb-bid"));
+      asks.slice(-5).forEach(function (el) { el.classList.add("is-df-focus"); });
+      bids.slice(0, 5).forEach(function (el) { el.classList.add("is-df-focus"); });
+    });
+  }
+
+  function focusArbDecisionFact(detail) {
+    clearArbFactFocus();
+    if (!detail) return;
+    const source = String(detail.source || "");
+    if (source === "dom" || source === "delta" || source === "cluster") {
+      flashArbDomTop();
+    } else {
+      const df = $("decision-frame");
+      if (df) df.classList.add("is-df-focus");
+      flashArbDomTop();
+    }
+    arbFactFocusTimer = setTimeout(clearArbFactFocus, 12000);
+  }
+
   function paintDecisionFrame(data) {
     if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") return;
     if (!decisionFrameUi) {
-      decisionFrameUi = TrinityDecisionFrame.create({ root: "decision-frame" });
+      decisionFrameUi = TrinityDecisionFrame.create({
+        root: "decision-frame",
+        onFactFocus: focusArbDecisionFact
+      });
     }
     if (!decisionFrameUi) return;
     decisionFrameUi.render(data && data.decisionFrame);
@@ -446,7 +485,8 @@
         list: "signal-df-journal-list",
         meta: "signal-df-journal-meta",
         title: "signal-df-journal-title",
-        filters: "signal-df-journal-filters"
+        filters: "signal-df-journal-filters",
+        onFactFocus: focusArbDecisionFact
       });
     }
     if (dfJournalUi) dfJournalUi.paint(payload || null);
@@ -749,7 +789,8 @@
     const title = isLong
       ? (side === "bid" ? "SELL · нога LONG" : "BUY · нога LONG")
       : (isShort ? (side === "ask" ? "BUY · нога SHORT" : "SELL · нога SHORT") : "");
-    return "<div class=\"" + cls.join(" ") + "\"" + (title ? (" title=\"" + title + "\"") : "") + ">"
+    return "<div class=\"" + cls.join(" ") + "\" data-px=\"" + (isFinite(p) ? p : "") + "\""
+      + (title ? (" title=\"" + title + "\"") : "") + ">"
       + bidCell
       + "<span class=\"arb-px\">" + tag + pxLabel + "</span>"
       + askCell

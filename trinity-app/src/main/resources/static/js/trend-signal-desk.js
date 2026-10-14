@@ -100,7 +100,8 @@
     }
     decisionFrameUi = TrinityDecisionFrame.create({
       root: "decision-frame",
-      staleAfterMs: Math.max(DESK_MS * 3, 45000)
+      staleAfterMs: Math.max(DESK_MS * 3, 45000),
+      onFactFocus: focusDecisionFact
     });
     return decisionFrameUi;
   }
@@ -641,14 +642,331 @@
     if (rail && typeof rail.highlightAt === "function") {
       const peer = (meta && meta.peer) || "";
       const text = (meta && meta.text) || "";
+      const kind = (meta && meta.kind) || "SYNC_ANOMALY";
+      const isFact = kind === "DF_FACT" || kind === "FACT";
       rail.highlightAt(target, {
-        kind: "SYNC_ANOMALY",
-        color: "#dc2626",
-        text: "!",
-        title: peer ? ("Аномалия · " + peer) : "Аномалия",
+        kind: kind,
+        color: (meta && meta.color) || (isFact ? "#c4a35a" : "#dc2626"),
+        text: (meta && meta.mark) || (isFact ? "·" : "!"),
+        title: (meta && meta.title)
+          || (isFact ? "Факт кадра" : (peer ? ("Аномалия · " + peer) : "Аномалия")),
         detail: text || iso
       });
     }
+  }
+
+  /** Click DF / journal fact → chart zone / price line / DOM / sync pin. */
+  let factFocusState = null;
+  let factFocusLines = [];
+
+  function parseFactPriceRange(text) {
+    const m = String(text || "").match(
+      /(\d+(?:[.,]\d+)?)\s*[–—\-]\s*(\d+(?:[.,]\d+)?)/
+    );
+    if (!m) return null;
+    const a = Number(String(m[1]).replace(",", "."));
+    const b = Number(String(m[2]).replace(",", "."));
+    if (!isFinite(a) || !isFinite(b)) return null;
+    return { lo: Math.min(a, b), hi: Math.max(a, b) };
+  }
+
+  function parseFactPrice(text) {
+    const s = String(text || "");
+    const near = s.match(/(?:около|POC|полка|уровн\w*)\s+(\d+(?:[.,]\d+)?)/i);
+    if (near) {
+      const v = Number(String(near[1]).replace(",", "."));
+      if (isFinite(v) && v > 0) return v;
+    }
+    const nums = s.match(/\d+(?:[.,]\d+)?/g) || [];
+    for (let i = nums.length - 1; i >= 0; i--) {
+      const v = Number(String(nums[i]).replace(",", "."));
+      if (isFinite(v) && v >= 1) return v;
+    }
+    return null;
+  }
+
+  function clearFactFocusLines() {
+    if (!candleSeries) {
+      factFocusLines = [];
+      return;
+    }
+    factFocusLines.forEach(function (l) {
+      try { candleSeries.removePriceLine(l); } catch (_) {}
+    });
+    factFocusLines = [];
+  }
+
+  function addFactFocusLine(price, title, color) {
+    if (!candleSeries || !(price > 0)) return;
+    try {
+      const line = candleSeries.createPriceLine({
+        price: price,
+        color: color || "#c4a35a",
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: title || "факт"
+      });
+      factFocusLines.push(line);
+    } catch (_) {}
+  }
+
+  function clearFactFocusVisuals() {
+    if (factFocusState && factFocusState.timer) {
+      clearTimeout(factFocusState.timer);
+    }
+    factFocusState = null;
+    clearFactFocusLines();
+    document.querySelectorAll(".is-df-focus").forEach(function (el) {
+      el.classList.remove("is-df-focus");
+    });
+    const rail = ensureDeskTimelineRail();
+    if (rail && typeof rail.clearHighlight === "function") {
+      try { rail.clearHighlight(); } catch (_) {}
+    }
+  }
+
+  function flashDomTopLevels() {
+    const body = $("signal-dom-body");
+    if (!body) return;
+    body.querySelectorAll(".dom-row.is-df-focus").forEach(function (el) {
+      el.classList.remove("is-df-focus");
+    });
+    const asks = Array.prototype.slice.call(body.querySelectorAll(".dom-row.dom-ask"));
+    const bids = Array.prototype.slice.call(body.querySelectorAll(".dom-row.dom-bid"));
+    asks.slice(-5).forEach(function (el) { el.classList.add("is-df-focus"); });
+    bids.slice(0, 5).forEach(function (el) { el.classList.add("is-df-focus"); });
+    try { centerDomOnSpread(body); } catch (_) {}
+    const first = body.querySelector(".dom-row.is-df-focus");
+    if (first && first.scrollIntoView) {
+      try { first.scrollIntoView({ block: "nearest" }); } catch (_) {}
+    }
+    body.classList.add("is-df-focus-host");
+    setTimeout(function () { body.classList.remove("is-df-focus-host"); }, 1200);
+  }
+
+  function flashZoneBandsForFocus() {
+    const ov = $("signal-zone-overlay");
+    if (!ov || !factFocusState) return;
+    const lo = factFocusState.lo;
+    const hi = factFocusState.hi;
+    ov.querySelectorAll(".signal-zone-band").forEach(function (band) {
+      band.classList.remove("is-df-focus");
+      if (!(lo > 0) || !(hi > 0)) {
+        band.classList.add("is-df-focus");
+        return;
+      }
+      const label = (band.querySelector(".signal-zone-label") || {}).textContent || "";
+      const range = parseFactPriceRange(label);
+      if (range && Math.abs(range.lo - lo) < 0.05 && Math.abs(range.hi - hi) < 0.05) {
+        band.classList.add("is-df-focus");
+      } else if (!range) {
+        band.classList.add("is-df-focus");
+      }
+    });
+  }
+
+  function flashProfilePoc(px) {
+    if (!(px > 0)) return;
+    document.querySelectorAll(".signal-profile-row.is-poc, .charts-profile-row.is-poc, .is-poc")
+      .forEach(function (el) {
+        el.classList.add("is-df-focus");
+      });
+  }
+
+  function flashElBrief(el) {
+    if (!el) return;
+    el.classList.add("is-df-focus");
+    setTimeout(function () { el.classList.remove("is-df-focus"); }, 1600);
+  }
+
+  function openSyncPanelForFact() {
+    if (!syncPanelOpen) {
+      syncPanelOpen = true;
+      try { localStorage.setItem("trinity.df.syncOpen", "1"); } catch (_) {}
+      paintSyncPanel(syncContextCache);
+    }
+  }
+
+  function openCapitalPanelForFact() {
+    if (!capitalPanelOpen) {
+      capitalPanelOpen = true;
+      try { localStorage.setItem("trinity.df.capitalOpen", "1"); } catch (_) {}
+      paintCapitalPanel(capitalWeightsCache);
+    }
+  }
+
+  function repaintFactFocusLines() {
+    if (!factFocusState || !factFocusState.lines || !factFocusState.lines.length) return;
+    clearFactFocusLines();
+    factFocusState.lines.forEach(function (ln) {
+      addFactFocusLine(ln.price, ln.title, ln.color);
+    });
+    if (factFocusState.source === "shelf") flashZoneBandsForFocus();
+    if (factFocusState.source === "poc" && factFocusState.lines[0]) {
+      flashProfilePoc(factFocusState.lines[0].price);
+    }
+  }
+
+  function reapplyFactFocusAfterPaint() {
+    if (!factFocusState) return;
+    if (factFocusState.source === "dom") flashDomTopLevels();
+    else repaintFactFocusLines();
+  }
+
+  function focusDecisionFact(detail, ctx) {
+    ctx = ctx || {};
+    clearFactFocusVisuals();
+    if (!detail) {
+      if (window.TrinityDecisionFrame && TrinityDecisionFrame.clearFactActive) {
+        TrinityDecisionFrame.clearFactActive(document);
+      }
+      return;
+    }
+    const source = String(detail.source || "");
+    const frame = detail.frame || ctx.frame
+      || (lastDeskSnapshot && lastDeskSnapshot.decisionFrame) || {};
+    const text = String(detail.text || "");
+    const value = detail.value != null ? Number(detail.value) : NaN;
+    const barIso = detail.barTime || frame.barTime || frame.asOf || null;
+    const lines = [];
+
+    if (source === "shelf") {
+      const st = overlayStructure || {};
+      let z = null;
+      if (/нижн|bot|BOTTOM/i.test(text) && st.zoneBottom) z = st.zoneBottom;
+      else if (/верхн|top|TOP/i.test(text) && st.zoneTop) z = st.zoneTop;
+      else {
+        const range = parseFactPriceRange(text);
+        if (range && st.zoneTop && st.zoneBottom) {
+          const mid = (range.lo + range.hi) / 2;
+          const topMid = (Number(st.zoneTop.low) + Number(st.zoneTop.high)) / 2;
+          const botMid = (Number(st.zoneBottom.low) + Number(st.zoneBottom.high)) / 2;
+          z = Math.abs(mid - topMid) <= Math.abs(mid - botMid) ? st.zoneTop : st.zoneBottom;
+        } else if (range && st.zoneTop) z = st.zoneTop;
+        else z = st.zoneTop || st.zoneBottom;
+      }
+      if (z && finitePrice(z.low) && finitePrice(z.high)) {
+        lines.push({ price: Number(z.high), title: "полка↑", color: "#7c3aed" });
+        lines.push({ price: Number(z.low), title: "полка↓", color: "#7c3aed" });
+        factFocusState = { source: source, lines: lines, lo: Number(z.low), hi: Number(z.high), barIso: barIso };
+      } else {
+        const range = parseFactPriceRange(text);
+        if (range) {
+          lines.push({ price: range.hi, title: "полка↑", color: "#7c3aed" });
+          lines.push({ price: range.lo, title: "полка↓", color: "#7c3aed" });
+          factFocusState = { source: source, lines: lines, lo: range.lo, hi: range.hi, barIso: barIso };
+        }
+      }
+      if (factFocusState) {
+        repaintFactFocusLines();
+        flashZoneBandsForFocus();
+      }
+    } else if (source === "poc") {
+      const px = (isFinite(value) && value > 0) ? value : parseFactPrice(text);
+      if (px > 0) {
+        lines.push({ price: px, title: "POC", color: "#ca8a04" });
+        factFocusState = { source: source, lines: lines, barIso: barIso };
+        repaintFactFocusLines();
+        flashProfilePoc(px);
+      }
+    } else if (source === "dom") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      flashDomTopLevels();
+    } else if (source === "delta" || source === "cluster" || source === "footprint") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#c4a35a",
+          mark: "·",
+          title: sourceRuFact(source),
+          text: text
+        });
+      }
+      if (source === "cluster" || source === "shelf") {
+        flashZoneBandsForFocus();
+      }
+    } else if (source === "sync") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      openSyncPanelForFact();
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#dc2626",
+          mark: "!",
+          title: "Расхождение",
+          text: text
+        });
+      }
+    } else if (source === "leadLag") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      openSyncPanelForFact();
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#0f766e",
+          mark: "↔",
+          title: "Связка",
+          text: text
+        });
+      }
+    } else if (source === "sessionNorm") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      flashElBrief($("signal-brief") || $("signal-desk-brief") || $("decision-frame"));
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#64748b",
+          mark: "⏱",
+          title: "Норма сессии",
+          text: text
+        });
+      }
+    } else if (source === "robot") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      flashElBrief($("decision-frame"));
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#1e293b",
+          mark: "R",
+          title: "Робот",
+          text: text
+        });
+      }
+    } else if (source === "allocator") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      openCapitalPanelForFact();
+      flashElBrief($("signal-capital-panel") || $("decision-frame"));
+    } else {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#c4a35a",
+          mark: "·",
+          title: sourceRuFact(source),
+          text: text
+        });
+      }
+    }
+
+    if (factFocusState) {
+      factFocusState.timer = setTimeout(function () {
+        clearFactFocusVisuals();
+        if (window.TrinityDecisionFrame && TrinityDecisionFrame.clearFactActive) {
+          TrinityDecisionFrame.clearFactActive(document);
+        }
+      }, 14000);
+    }
+  }
+
+  function sourceRuFact(src) {
+    if (window.TrinityDecisionFrame && TrinityDecisionFrame.sourceRu) {
+      return TrinityDecisionFrame.sourceRu(src) || src;
+    }
+    return src || "факт";
   }
 
   /** «Только аномалии»: skulls for anomaly events in the last 20 minutes. */
@@ -818,7 +1136,8 @@
       title: "signal-df-journal-title",
       filters: "signal-df-journal-filters",
       humanizeSummary: humanizeFrameSummary,
-      shortTime: shortTime
+      shortTime: shortTime,
+      onFactFocus: focusDecisionFact
     });
     return dfJournalUi;
   }
@@ -3018,6 +3337,9 @@
       const role = el.dataset.zone || "";
       if (!seen[role]) el.parentNode.removeChild(el);
     });
+    if (factFocusState && factFocusState.source === "shelf") {
+      flashZoneBandsForFocus();
+    }
   }
   function ensureProfileOverlay() {
     const el = $("signal-chart");
@@ -3908,6 +4230,9 @@
     }
     fitPriceToVisibleCandles();
     layoutMarketOverlays();
+    if (factFocusState && factFocusState.lines && factFocusState.lines.length) {
+      repaintFactFocusLines();
+    }
   }
   function ensureVolumeChart() {
     const wrap = $("signal-volume-wrap");
@@ -5064,7 +5389,7 @@
       const buy = Number(t.buy) || 0;
       const sell = Number(t.sell) || 0;
       const isBest = bestAsk != null && Math.abs(p - bestAsk) < 1e-9;
-      html += "<div class=\"dom-row dom-ask" + (isBest ? " is-best" : "") + "\">"
+      html += "<div class=\"dom-row dom-ask" + (isBest ? " is-best" : "") + "\" data-px=\"" + p.toFixed(2) + "\">"
         + "<span class=\"dom-bid-px\"></span>"
         + "<span class=\"dom-bid-q\"></span>"
         + "<span class=\"dom-px\">" + p.toFixed(2) + "</span>"
@@ -5093,7 +5418,7 @@
       const buy = Number(t.buy) || 0;
       const sell = Number(t.sell) || 0;
       const isBest = bestBid != null && Math.abs(p - bestBid) < 1e-9;
-      html += "<div class=\"dom-row dom-bid" + (isBest ? " is-best" : "") + "\">"
+      html += "<div class=\"dom-row dom-bid" + (isBest ? " is-best" : "") + "\" data-px=\"" + p.toFixed(2) + "\">"
         + "<span class=\"dom-bid-px\">" + p.toFixed(2) + "</span>"
         + "<span class=\"dom-bid-q\"><i style=\"width:" + barW(q) + "%\"></i><em>" + q + "</em></span>"
         + "<span class=\"dom-px\">" + p.toFixed(2) + "</span>"
@@ -5118,6 +5443,7 @@
     } else {
       body.scrollTop = prevScroll;
     }
+    reapplyFactFocusAfterPaint();
   }
   async function kickRobot() {
     const btn = $("sig-kick-btn");
