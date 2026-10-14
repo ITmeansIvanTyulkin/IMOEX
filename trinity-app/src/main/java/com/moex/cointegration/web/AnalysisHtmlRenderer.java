@@ -147,7 +147,7 @@ public class AnalysisHtmlRenderer {
                       </div>
                       <p class="trinity-auth-eyebrow">Operator desk</p>
                       <h2 id="trinity-auth-title" class="trinity-auth-title">TRINITY</h2>
-                      <p class="trinity-auth-lead">Тренд и календарный арбитраж. Один пульт. Войдите аккаунтом кабинета.</p>
+                      <p class="trinity-auth-lead">Инвестиции, тренд и календарный арбитраж. Один пульт. Войдите аккаунтом кабинета.</p>
                     </div>
                     <form id="trinity-auth-form" class="trinity-auth-form" autocomplete="on">
                       <div class="field">
@@ -173,7 +173,7 @@ public class AnalysisHtmlRenderer {
                       <p class="trinity-welcome-kicker">Сессия открыта</p>
                       <h2 class="trinity-welcome-title">Добро пожаловать в TRINITY</h2>
                       <p class="trinity-welcome-copy">
-                        Тренд и календарный арбитраж — один операторский пульт.
+                        Инвестиции, тренд и календарный арбитраж — один операторский пульт.
                         Сейчас откроется дашборд.
                       </p>
                     </div>
