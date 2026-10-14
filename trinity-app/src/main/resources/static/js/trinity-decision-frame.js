@@ -55,8 +55,25 @@
     return SOURCE_RU[src] || String(src);
   }
 
-  function statusRu(status) {
-    return STATUS_RU[status] || "—";
+  /**
+   * Effective badge status. Old cores tagged WAITING_FILL as ENTER («в сделке»);
+   * if robot text is still about limits / armed grid — show «ждёт».
+   */
+  function effectiveStatus(frame) {
+    var robot = (frame && frame.robot) || {};
+    var status = String(robot.status || "").toUpperCase();
+    if (status !== "ENTER") return status || "";
+    var hero = robotDetailText(frame) || scrubPairs(frame && frame.summary) || "";
+    if (/лимитки|ждёт касани|сетка вооружен|WAITING_FILL|ждёт исполнения/i.test(hero)
+        && !/в позиции|вед[её]т сделку/i.test(hero)) {
+      return "WAIT";
+    }
+    return "ENTER";
+  }
+
+  function statusRu(status, frame) {
+    var s = frame ? effectiveStatus(frame) : String(status || "").toUpperCase();
+    return STATUS_RU[s] || STATUS_RU[String(status || "").toUpperCase()] || "—";
   }
 
   function triggerRu(trigger) {
@@ -254,9 +271,10 @@
       var robot = frame.robot || {};
       var fullSummary = scrubPairs(frame.summary || "");
       var hero = robotDetailText(frame) || fullSummary || "—";
+      var badgeStatus = effectiveStatus(frame) || robot.status || "";
       if (statusEl) {
-        statusEl.textContent = statusRu(robot.status);
-        statusEl.dataset.status = robot.status || "";
+        statusEl.textContent = statusRu(badgeStatus, frame);
+        statusEl.dataset.status = badgeStatus;
       }
       if (textEl) {
         textEl.textContent = density === "brief" ? hero : (fullSummary || hero);
@@ -429,6 +447,7 @@
     create: create,
     sourceRu: sourceRu,
     statusRu: statusRu,
+    effectiveStatus: effectiveStatus,
     triggerRu: triggerRu,
     detailsHtml: detailsHtml,
     whyChips: whyChips,
