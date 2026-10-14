@@ -4895,10 +4895,10 @@ body[data-upsell="off"] .full-core-badge {
   line-height: 1.4;
   color: #78350f;
 }
-#sig-kick-btn.is-stuck {
-  border-color: rgba(180, 83, 9, 0.55);
-  color: #92400e;
-  background: rgba(251, 191, 36, 0.18);
+.signal-kick-status.is-auto-done {
+  border-left-color: rgba(22, 163, 74, 0.7);
+  background: rgba(34, 197, 94, 0.12);
+  color: #14532d;
 }
 .signal-brief-kicker {
   margin: 0.75rem 0 0.25rem !important;

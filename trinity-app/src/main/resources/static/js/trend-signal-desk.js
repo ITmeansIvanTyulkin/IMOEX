@@ -193,8 +193,7 @@
         lead.textContent = "Простыми словами: дневные полки TOP/BOT на нефти BR (M5), отскок или ретест после пробоя, ветер часа и фильтры — потом лимиты, стоп за зоной, цели TP1 → TP2 → TP3 (хвост).";
       }
     }
-    const kick = $("sig-kick-btn");
-    if (kick) kick.hidden = pos || brm;
+    // Stuck reset is automatic in the engine (soft ~20 мин) — no manual kick button.
     if (pos) {
       const rangeWrap = $("range-auto-wrap");
       if (rangeWrap) rangeWrap.hidden = true;
@@ -511,7 +510,7 @@
       : "Сейчас песочница (бумага): робот сам может выставить/вести сетку по чеклисту.";
     return liveBit + " Аномалия — не стоп-кран и не «жми market». "
       + "Робот по-прежнему ждёт правила playbook (полка, микро, сессия). "
-      + "Вы можете подождать, сбросить залипание или выключить авто, если контекст вас не устраивает.";
+      + "Можно подождать автосброс залипания или выключить авто, если контекст вас не устраивает.";
   }
 
   function syncBriefRobotWait(posture, why) {
@@ -5445,103 +5444,45 @@
     }
     reapplyFactFocusAfterPaint();
   }
-  function inferStuckFromDesk(data) {
-    const sit = (data && data.situation) || {};
-    if (sit.stuck && typeof sit.stuck === "object") return sit.stuck;
-    const posture = String(sit.posture || "");
-    if (posture === "IN_TRADE") return { active: false };
-    const reason = String(sit.why || (data && data.summary) || "");
-    const waiting = /waiting retest|break\+hold|retest|ждёт ретест|ждет ретест/i.test(reason);
-    const far = /unlock|far from|далеко от/i.test(reason);
-    const cooldown = /COOLDOWN|cooldown|пауза после стопа/i.test(reason);
-    const lock = !!sit.activeLock && (posture === "WAITING_FILL" || posture === "WATCHING_ZONE");
-    const active = !!(waiting || far || cooldown || lock);
-    if (!active) return { active: false };
-    const bits = [];
-    if (waiting) bits.push("ждёт ретест после пробоя");
-    if (far) bits.push("цена далеко от зоны входа");
-    if (lock) bits.push("arm/сетка на замке");
-    if (cooldown) bits.push("пауза после стопа (cooldown)");
-    const why = bits.join(" · ") || "без прогресса к входу";
-    return {
-      active: true,
-      why: why,
-      hint: "Сейчас залипло: " + why + ". Сброс снимет arm/cooldown, полки дня (day-lock) оставит."
-    };
-  }
-
   function paintStuckStatus(data) {
-    const btn = $("sig-kick-btn");
     const statusEl = $("sig-kick-status");
-    if (!btn && !statusEl) return;
+    if (!statusEl) return;
     if (deskScope() !== "range") {
-      if (statusEl) {
-        statusEl.hidden = true;
-        statusEl.textContent = "";
-      }
-      if (btn) btn.classList.remove("is-stuck");
+      statusEl.hidden = true;
+      statusEl.textContent = "";
+      statusEl.classList.remove("is-stuck", "is-auto-done");
       return;
     }
-    const stuck = inferStuckFromDesk(data);
-    const active = !!(stuck && stuck.active);
-    if (btn) {
-      btn.classList.toggle("is-stuck", active);
-      btn.setAttribute("aria-pressed", active ? "true" : "false");
-      btn.title = active
-        ? ((stuck.hint || ("Сейчас залипло: " + (stuck.why || "")))
-          + " Soft-сброс: arm/cooldown без сноса day-lock.")
-        : "Сейчас залипания нет. Soft: сброс arm / cooldown / one-setup без сноса day-lock TOP/BOT.";
+    const stuck = (data && data.situation && data.situation.stuck) || null;
+    if (!stuck) {
+      statusEl.hidden = true;
+      statusEl.textContent = "";
+      statusEl.classList.remove("is-stuck", "is-auto-done");
+      return;
     }
-    if (statusEl) {
-      if (active) {
-        statusEl.hidden = false;
-        statusEl.textContent = stuck.hint || ("Сейчас залипло: " + (stuck.why || "без прогресса") + ".");
-      } else {
-        statusEl.hidden = true;
-        statusEl.textContent = "";
-      }
+    if (stuck.active) {
+      statusEl.hidden = false;
+      statusEl.classList.add("is-stuck");
+      statusEl.classList.remove("is-auto-done");
+      statusEl.textContent = stuck.hint
+        || ("Залипание: " + (stuck.why || "без прогресса")
+          + ". Автосброс soft через ~"
+          + ((Number(stuck.barsToAutoSoft) || 0) * 5) + " мин.");
+      return;
     }
-  }
-
-  async function kickRobot() {
-    const btn = $("sig-kick-btn");
-    if (btn) btn.disabled = true;
-    try {
-      const res = await fetch("/api/trend/kick?mode=soft&reason=desk-button", {
-        method: "POST",
-        headers: deskAuthHeaders()
-      });
-      const data = await res.json().catch(function () { return {}; });
-      if (!res.ok) {
-        const msg = data.message || data.error || ("HTTP " + res.status);
-        throw new Error(msg);
-      }
-      await loadDesk(true);
-      const brief = $("signal-desk-brief-body");
-      if (brief) {
-        brief.innerHTML = "<p><strong>Сброс залипания:</strong> "
-          + "сняли arm/cooldown"
-          + (data.clearedSetupLock ? " · был замок сетки" : "")
-          + (data.clearedCooldown ? " · был cooldown" : "")
-          + " · сбросов сегодня: " + (data.kickCountToday != null ? data.kickCountToday : "?")
-          + " <span class='signal-brief-note'>(полки дня TOP/BOT сохранены)</span></p>"
-          + brief.innerHTML;
-      }
-      const statusEl = $("sig-kick-status");
-      if (statusEl) {
-        statusEl.hidden = false;
-        statusEl.textContent = "Сброс выполнен — робот снова сканирует. Полки дня на месте.";
-        setTimeout(function () {
-          if (statusEl.textContent.indexOf("Сброс выполнен") === 0) {
-            paintStuckStatus(lastDeskSnapshot);
-          }
-        }, 4000);
-      }
-    } catch (e) {
-      alert("Сброс не удался: " + (e && e.message ? e.message : e));
-    } finally {
-      if (btn) btn.disabled = false;
+    if (stuck.lastAutoKick) {
+      statusEl.hidden = false;
+      statusEl.classList.remove("is-stuck");
+      statusEl.classList.add("is-auto-done");
+      statusEl.textContent = stuck.hint
+        || ("Автосброс залипания выполнен ("
+          + (stuck.lastAutoKick.reason || "auto")
+          + "). Робот снова сканирует.");
+      return;
     }
+    statusEl.hidden = true;
+    statusEl.textContent = "";
+    statusEl.classList.remove("is-stuck", "is-auto-done");
   }
   function deskInstrumentQuery() {
     let inst = wantedDeskInstrument() || lastDeskInstrument;
@@ -5907,8 +5848,6 @@
   bindPositionalAutoSwitch();
   bindBrmAutoSwitch();
   hydrateDeskModeSwitches();
-  const kickBtn = $("sig-kick-btn");
-  if (kickBtn) kickBtn.addEventListener("click", kickRobot);
   const fitBtn = $("signal-desk-fit");
   if (fitBtn) fitBtn.addEventListener("click", function () {
     unlockScale();
