@@ -56,23 +56,34 @@
   }
 
   /**
-   * Effective badge status. Old cores tagged WAITING_FILL as ENTER («в сделке»);
-   * if robot text is still about limits / armed grid — show «ждёт».
+   * Effective badge status — same truth as plaques / journal.
+   * Old cores tagged WAITING_FILL as ENTER («в сделке»); limits text → WAIT.
+   * @param {object} frame
+   * @param {string=} entryStatus optional journal robotStatus override
    */
-  function effectiveStatus(frame) {
+  function effectiveStatus(frame, entryStatus) {
     var robot = (frame && frame.robot) || {};
-    var status = String(robot.status || "").toUpperCase();
+    var status = String(robot.status || entryStatus || "").toUpperCase();
     if (status !== "ENTER") return status || "";
     var hero = robotDetailText(frame) || scrubPairs(frame && frame.summary) || "";
-    if (/лимитки|ждёт касани|сетка вооружен|WAITING_FILL|ждёт исполнения/i.test(hero)
+    if (/лимитки|ждёт касани|ждет касани|сетка вооружен|WAITING_FILL|ждёт исполнения|ждет исполнения/i.test(hero)
         && !/в позиции|вед[её]т сделку/i.test(hero)) {
       return "WAIT";
     }
     return "ENTER";
   }
 
-  function statusRu(status, frame) {
-    var s = frame ? effectiveStatus(frame) : String(status || "").toUpperCase();
+  /** Operator label aligned with right-rail plaques. */
+  function statusRu(status, frame, entryStatus) {
+    var s = frame
+      ? effectiveStatus(frame, entryStatus)
+      : String(status || entryStatus || "").toUpperCase();
+    if (s === "WAIT" && frame) {
+      var hero = robotDetailText(frame) || scrubPairs(frame.summary) || "";
+      if (/лимитки|сетка вооружен|ждёт касани|ждет касани|WAITING_FILL|ждёт исполнения|ждет исполнения/i.test(hero)) {
+        return "ждёт исполнения";
+      }
+    }
     return STATUS_RU[s] || STATUS_RU[String(status || "").toUpperCase()] || "—";
   }
 

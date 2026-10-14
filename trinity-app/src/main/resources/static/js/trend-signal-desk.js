@@ -890,13 +890,21 @@
     return humanizeDeskReason(s) || s;
   }
 
+  function journalDisplayKind(e) {
+    if (!e) return "wait";
+    if (String(e.kind || "").toLowerCase() === "alloc") return "alloc";
+    const badge = dfBadge(e);
+    if (badge.status === "ENTER") return "enter";
+    if (badge.status === "SKIP") return "skip";
+    return "wait";
+  }
+
   /** Fingerprint for collapsing identical skip/wait spam. */
   function journalCompressKey(e) {
     if (!e) return "";
     const frame = e.frame || {};
-    const robot = frame.robot || {};
-    const status = String(e.robotStatus || robot.status || "").toUpperCase();
-    const kind = String(e.kind || "").toLowerCase();
+    const status = String(dfBadge(e).status || "").toUpperCase();
+    const kind = journalDisplayKind(e);
     if (status !== "SKIP" && status !== "WAIT") return "";
     if (kind === "enter" || kind === "alloc") return "";
     let reason = "";
@@ -1044,6 +1052,27 @@
     });
   }
 
+  function dfFrameForStatus(e) {
+    const frame = (e && e.frame) ? Object.assign({}, e.frame) : (e || {});
+    if (e && e.summary && !frame.summary) frame.summary = e.summary;
+    if (e && e.robotStatus && frame.robot && !frame.robot.status) {
+      frame.robot = Object.assign({}, frame.robot, { status: e.robotStatus });
+    }
+    return frame;
+  }
+
+  function dfBadge(eOrFrame) {
+    const frame = dfFrameForStatus(eOrFrame);
+    const entryStatus = eOrFrame && eOrFrame.robotStatus;
+    const eff = (window.TrinityDecisionFrame && TrinityDecisionFrame.effectiveStatus)
+      ? TrinityDecisionFrame.effectiveStatus(frame, entryStatus)
+      : String((frame.robot && frame.robot.status) || entryStatus || "");
+    const label = (window.TrinityDecisionFrame && TrinityDecisionFrame.statusRu)
+      ? TrinityDecisionFrame.statusRu(eff, frame, entryStatus)
+      : (eff || "—");
+    return { status: eff, label: label };
+  }
+
   function paintBriefHero(data) {
     const hero = $("signal-desk-brief-hero");
     if (!hero) return;
@@ -1053,10 +1082,7 @@
       hero.innerHTML = "";
       return;
     }
-    const statusRu = (window.TrinityDecisionFrame && TrinityDecisionFrame.statusRu)
-      || function (s) { return s || "—"; };
-    const robot = frame.robot || {};
-    const status = robot.status || "";
+    const badge = dfBadge(frame);
     const heroText = (window.TrinityDecisionFrame && TrinityDecisionFrame.robotDetailText)
       ? TrinityDecisionFrame.robotDetailText(frame)
       : humanizeFrameSummary(frame.summary);
@@ -1065,7 +1091,7 @@
       : [];
     let why = chips.map(function (c) { return c.text; }).filter(Boolean).slice(0, 2).join(" · ");
     hero.innerHTML = "<span class=\"signal-brief-hero-status\" data-status=\""
-      + escHtml(status) + "\">" + escHtml(statusRu(status)) + "</span>"
+      + escHtml(badge.status) + "\">" + escHtml(badge.label) + "</span>"
       + escHtml(heroText || "—")
       + (why ? (" <span class=\"signal-brief-note\">· " + escHtml(why) + "</span>") : "");
     hero.hidden = false;
@@ -1080,9 +1106,13 @@
     const title = $("signal-df-journal-title");
     if (!panel || !listEl) return;
     const entries = (payload && Array.isArray(payload.entries)) ? payload.entries : [];
-    const kinds = (payload && payload.kinds) || {};
+    const kinds = { wait: 0, enter: 0, skip: 0, alloc: 0 };
+    entries.forEach(function (e) {
+      const k = journalDisplayKind(e);
+      kinds[k] = (kinds[k] || 0) + 1;
+    });
     const filtered = dfJournalKind
-      ? entries.filter(function (e) { return e && e.kind === dfJournalKind; })
+      ? entries.filter(function (e) { return journalDisplayKind(e) === dfJournalKind; })
       : entries;
     if (!entries.length) {
       panel.hidden = true;
@@ -1110,8 +1140,6 @@
           ? " · нет кадров с этим фильтром"
           : "");
     }
-    const statusRu = (window.TrinityDecisionFrame && TrinityDecisionFrame.statusRu)
-      || function (s) { return s || "—"; };
     const detailsHtml = (window.TrinityDecisionFrame && TrinityDecisionFrame.detailsHtml)
       || function () { return "<li>—</li>"; };
     if (!filtered.length) {
@@ -1129,8 +1157,7 @@
       if (g.group) {
         const latest = g.entries[0] || {};
         const frame = latest.frame || {};
-        const robot = frame.robot || {};
-        const status = latest.robotStatus || robot.status || "";
+        const badge = dfBadge(latest);
         const id = g.id;
         const open = !!(id && dfJournalOpenIds[id]);
         const range = journalTimeRange(g.entries);
@@ -1141,8 +1168,8 @@
         return "<li class=\"signal-df-journal-item is-group\" data-df-id=\"" + escHtml(id) + "\">"
           + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
           + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
-          + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(status) + "\">"
-          + escHtml(statusRu(status)) + "</span>"
+          + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(badge.status) + "\">"
+          + escHtml(badge.label) + "</span>"
           + "<span class=\"signal-df-journal-summary\">"
           + (inst ? ("<span class=\"signal-df-journal-inst\">" + escHtml(inst) + "</span> ") : "")
           + escHtml(g.label)
@@ -1161,8 +1188,7 @@
       }
       const e = g.entry;
       const frame = e.frame || {};
-      const robot = frame.robot || {};
-      const status = e.robotStatus || robot.status || "";
+      const badge = dfBadge(e);
       const id = String(e.id || frame.frameId || "");
       const open = !!(id && dfJournalOpenIds[id]);
       const t = shortTime(e.barTime || e.recordedAt || frame.barTime);
@@ -1171,8 +1197,8 @@
       return "<li class=\"signal-df-journal-item\" data-df-id=\"" + escHtml(id) + "\">"
         + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
         + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
-        + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(status) + "\">"
-        + escHtml(statusRu(status)) + "</span>"
+        + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(badge.status) + "\">"
+        + escHtml(badge.label) + "</span>"
         + "<span class=\"signal-df-journal-summary\">"
         + (inst ? ("<span class=\"signal-df-journal-inst\">" + escHtml(inst) + "</span> ") : "")
         + escHtml(summary)
