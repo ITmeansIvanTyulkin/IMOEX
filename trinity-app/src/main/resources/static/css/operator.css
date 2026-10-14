@@ -3619,6 +3619,16 @@ body[data-upsell="off"] .full-core-badge {
   border-radius: 10px;
   background: rgba(30, 42, 50, 0.03);
 }
+.signal-df-day-summary {
+  margin: 0.55rem 0 0.35rem;
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid rgba(196, 163, 90, 0.75);
+  background: rgba(196, 163, 90, 0.08);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #1e293b;
+}
 .signal-df-journal-head {
   display: flex;
   flex-wrap: wrap;

@@ -915,6 +915,114 @@
     }).join("|");
   }
 
+  function ruCount(n, one, few, many) {
+    var abs = Math.abs(Number(n) || 0);
+    var n10 = abs % 10;
+    var n100 = abs % 100;
+    var word;
+    if (n10 === 1 && n100 !== 11) word = one;
+    else if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) word = few;
+    else word = many;
+    return abs + " " + word;
+  }
+
+  function entryReasonLabel(e) {
+    if (!e) return "";
+    var frame = e.frame || {};
+    var details = Array.isArray(frame.details) ? frame.details : [];
+    var pick = "";
+    var i;
+    for (i = 0; i < details.length; i++) {
+      var d = details[i];
+      if (!d || !d.text) continue;
+      if (d.source === "sessionNorm" || d.source === "robot" || d.source === "leadLag") {
+        pick = scrubPairs(d.text);
+        if (d.source === "sessionNorm" || d.source === "robot") break;
+      }
+    }
+    if (!pick) pick = scrubPairs(e.summary || frame.summary || "");
+    pick = pick
+      .replace(/^Норма сессии:\s*/i, "")
+      .replace(/^Робот\s+(?:пропускает|ждёт|ждет|входит)[:：]\s*/i, "")
+      .replace(/^Связка:\s*/i, "")
+      .replace(/\.$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (/окн[оа].*закрыт|правил[оа] сессии/i.test(pick)) pick = "окно входов закрыто";
+    if (pick.length > 96) pick = pick.slice(0, 95).replace(/\s+\S*$/, "") + "…";
+    return pick;
+  }
+
+  /** FE fallback when core has no dayBrief yet. */
+  function buildDayBriefLine(payload, kindsIn) {
+    var entries = (payload && Array.isArray(payload.entries)) ? payload.entries : [];
+    var kinds = kindsIn || (payload && payload.kinds) || {};
+    var enter = Number(kinds.enter) || 0;
+    var skip = Number(kinds.skip) || 0;
+    var wait = Number(kinds.wait) || 0;
+    var alloc = Number(kinds.alloc) || 0;
+    if (!enter && !skip && !wait && !alloc && entries.length) {
+      entries.forEach(function (e) {
+        var k = displayKind(e);
+        if (k === "enter") enter += 1;
+        else if (k === "skip") skip += 1;
+        else if (k === "alloc") alloc += 1;
+        else wait += 1;
+      });
+    }
+    var day = (payload && payload.day) || "";
+    var todayYmd = "";
+    try {
+      todayYmd = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
+    } catch (_) {
+      var d0 = new Date();
+      todayYmd = d0.getFullYear() + "-"
+        + String(d0.getMonth() + 1).padStart(2, "0") + "-"
+        + String(d0.getDate()).padStart(2, "0");
+    }
+    var head = (!day || day === todayYmd) ? "Сегодня" : ("День " + day);
+    var bits = [];
+    if (enter > 0) bits.push(ruCount(enter, "вход", "входа", "входов"));
+    if (skip > 0) bits.push(ruCount(skip, "пропуск", "пропуска", "пропусков"));
+    if (wait > 0) bits.push(ruCount(wait, "ожидание", "ожидания", "ожиданий"));
+    if (alloc > 0) bits.push(ruCount(alloc, "сдвиг капитала", "сдвига капитала", "сдвигов капитала"));
+    if (!bits.length) return head + ": кадров решения ещё нет.";
+    var line = head + ": " + bits.join(", ") + ".";
+    var prefer = skip > 0 ? "skip" : (wait > 0 ? "wait" : "");
+    if (!prefer) return line;
+    var tallies = Object.create(null);
+    var labels = Object.create(null);
+    entries.forEach(function (e) {
+      if (displayKind(e) !== prefer) return;
+      var label = entryReasonLabel(e);
+      if (!label) return;
+      var key = label.toLowerCase()
+        .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, "")
+        .replace(/\d+[.,]\d+/g, "#")
+        .replace(/[+-]?\d{3,}/g, "#")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!key) return;
+      tallies[key] = (tallies[key] || 0) + 1;
+      if (!labels[key]) labels[key] = label;
+    });
+    var bestKey = "";
+    var bestN = 0;
+    Object.keys(tallies).forEach(function (k) {
+      if (tallies[k] > bestN) {
+        bestN = tallies[k];
+        bestKey = k;
+      }
+    });
+    if (!bestKey) return line;
+    if (prefer === "skip") {
+      line += " Основная причина пропусков — " + labels[bestKey] + ".";
+    } else {
+      line += " Чаще всего ждёт из‑за — " + labels[bestKey] + ".";
+    }
+    return line;
+  }
+
   /**
    * Shared DF journal for every strategy desk (trend / positional / BRM / invest / arb).
    * @param {{
@@ -923,6 +1031,7 @@
    *   meta?: string|HTMLElement,
    *   title?: string|HTMLElement,
    *   filters?: string|HTMLElement,
+   *   daySummary?: string|HTMLElement,
    *   humanizeSummary?: function(string): string,
    *   shortTime?: function(*): string
    * }} opts
@@ -939,6 +1048,7 @@
     var meta = el(opts.meta || "signal-df-journal-meta");
     var title = el(opts.title || "signal-df-journal-title");
     var filters = el(opts.filters || "signal-df-journal-filters");
+    var daySummaryEl = el(opts.daySummary || "signal-df-day-summary");
     if (!panel || !listEl) return null;
 
     var kind = "";
@@ -1047,15 +1157,33 @@
         + "</div></li>";
     }
 
+    function paintDaySummary(payload, kindsFallback) {
+      if (!daySummaryEl) return;
+      var brief = payload && payload.dayBrief;
+      var line = brief && brief.line ? String(brief.line) : "";
+      if (!line) line = buildDayBriefLine(payload, kindsFallback);
+      if (!line) {
+        daySummaryEl.hidden = true;
+        daySummaryEl.textContent = "";
+        return;
+      }
+      daySummaryEl.hidden = false;
+      daySummaryEl.textContent = line;
+    }
+
     function paint(payload) {
       bind();
       cache = payload || null;
       var entries = (payload && Array.isArray(payload.entries)) ? payload.entries : [];
-      var kinds = { wait: 0, enter: 0, skip: 0, alloc: 0 };
-      entries.forEach(function (e) {
-        var k = displayKind(e);
-        kinds[k] = (kinds[k] || 0) + 1;
-      });
+      var kinds = (payload && payload.kinds) ? Object.assign({
+        wait: 0, enter: 0, skip: 0, alloc: 0
+      }, payload.kinds) : { wait: 0, enter: 0, skip: 0, alloc: 0 };
+      if (!payload || !payload.kinds) {
+        entries.forEach(function (e) {
+          var k = displayKind(e);
+          kinds[k] = (kinds[k] || 0) + 1;
+        });
+      }
       var filtered = kind
         ? entries.filter(function (e) { return displayKind(e) === kind; })
         : entries;
@@ -1064,6 +1192,10 @@
         listEl.innerHTML = "";
         listEl.dataset.sig = "";
         if (meta) meta.textContent = "";
+        if (daySummaryEl) {
+          daySummaryEl.hidden = true;
+          daySummaryEl.textContent = "";
+        }
         return;
       }
       panel.hidden = false;
@@ -1071,6 +1203,7 @@
         var day = (payload && payload.day) || "";
         title.textContent = "Журнал кадров" + (day ? (" · " + day) : "");
       }
+      paintDaySummary(payload, kinds);
       var groups = compressEntries(filtered);
       if (meta) {
         meta.textContent = "Строк " + groups.length
@@ -1175,6 +1308,7 @@
     robotDetailText: robotDetailText,
     SOURCE_RU: SOURCE_RU,
     LAYER_RU: LAYER_RU,
-    SOURCE_LAYER: SOURCE_LAYER
+    SOURCE_LAYER: SOURCE_LAYER,
+    buildDayBriefLine: buildDayBriefLine
   };
 })(typeof window !== "undefined" ? window : globalThis);
