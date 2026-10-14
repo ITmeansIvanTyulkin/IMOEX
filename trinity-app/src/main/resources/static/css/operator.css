@@ -4676,12 +4676,51 @@ body[data-upsell="off"] .full-core-badge {
   margin: 0;
   padding: 0;
 }
-.decision-frame-details-list li {
+.decision-frame-details-list > li,
+.decision-frame-layer-list > li {
   margin: 0 0 0.4rem;
   padding: 0.25rem 0 0.25rem 0.7rem;
   border-left: 2px solid rgba(196, 163, 90, 0.45);
   line-height: 1.45;
   font-size: 0.9rem;
+}
+.decision-frame-details-list.is-hierarchical > li.decision-frame-layer {
+  margin: 0 0 0.75rem;
+  padding: 0;
+  border-left: none;
+  list-style: none;
+}
+.decision-frame-details-list.is-hierarchical > li.decision-frame-layer:last-child {
+  margin-bottom: 0.15rem;
+}
+.decision-frame-layer-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted, #6a7580);
+}
+.decision-frame-layer-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.2rem;
+  border-radius: 3px;
+  background: rgba(30, 42, 50, 0.08);
+  color: #475569;
+  font-size: 0.65rem;
+  letter-spacing: 0;
+}
+.decision-frame-layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 .decision-frame-details-list li.decision-frame-fact {
   cursor: pointer;

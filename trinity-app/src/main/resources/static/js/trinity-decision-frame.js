@@ -4,7 +4,7 @@
  * investments / calendar-arb — same create({ root }).
  *
  * States: idle | updating | stale
- * Density: brief (hero + 1–2 why chips) | full (full summary + facts)
+ * Density: brief (hero + 1–2 why chips) | full (summary + facts by DF layers 1–4)
  */
 (function (global) {
   "use strict";
@@ -22,6 +22,36 @@
     robot: "робот",
     allocator: "капитал"
   };
+
+  /** Contract layer when detail.layer missing. */
+  var SOURCE_LAYER = {
+    delta: 1,
+    dom: 1,
+    shelf: 1,
+    poc: 1,
+    cluster: 1,
+    footprint: 1,
+    sessionNorm: 2,
+    leadLag: 3,
+    sync: 3,
+    robot: 4,
+    allocator: 4
+  };
+
+  var LAYER_RU = {
+    1: "Картина",
+    2: "Норма сессии",
+    3: "Связка",
+    4: "Решение"
+  };
+
+  /** Stable order inside a layer (contract table). */
+  var SOURCE_ORDER = [
+    "delta", "dom", "shelf", "poc", "cluster", "footprint",
+    "sessionNorm",
+    "leadLag", "sync",
+    "robot", "allocator"
+  ];
 
   var TRIGGER_RU = {
     IMPULSE: "импульс",
@@ -226,6 +256,18 @@
       });
     }
 
+    function paintDetailsList(frame) {
+      if (!listEl || !frame) return;
+      var html = detailsHtml(frame, { hierarchical: density === "full" });
+      listEl.classList.toggle("is-hierarchical", density === "full");
+      if (open || !listEl.innerHTML) {
+        listEl.innerHTML = html;
+        delete listEl.dataset.pendingHtml;
+      } else {
+        listEl.dataset.pendingHtml = html;
+      }
+    }
+
     function setDensity(next, optsLocal) {
       optsLocal = optsLocal || {};
       density = next === "full" ? "full" : "brief";
@@ -237,7 +279,10 @@
           // Keep open if operator already drilled in; only change copy density.
         }
       }
-      if (lastFrame) paintCopy(lastFrame);
+      if (lastFrame) {
+        paintCopy(lastFrame);
+        paintDetailsList(lastFrame);
+      }
     }
 
     function setOpen(next) {
@@ -431,10 +476,11 @@
       root.dataset.frameId = frame.frameId || "";
       paintMeta(frame);
       setOpen(open);
-      var html = detailsHtml(frame);
       var changed = (frame.frameId || "") !== lastFrameId
         || String(frame.summary || "") !== lastSummary;
       if (listEl) {
+        var html = detailsHtml(frame, { hierarchical: density === "full" });
+        listEl.classList.toggle("is-hierarchical", density === "full");
         if (open || changed || !listEl.innerHTML) {
           listEl.innerHTML = html;
           delete listEl.dataset.pendingHtml;
@@ -480,10 +526,23 @@
     };
   }
 
+  function detailLayer(d) {
+    if (!d) return 0;
+    var n = Number(d.layer);
+    if (n >= 1 && n <= 4) return n;
+    var src = d.source ? String(d.source) : "";
+    return SOURCE_LAYER[src] || 1;
+  }
+
+  function sourceRank(src) {
+    var i = SOURCE_ORDER.indexOf(String(src || ""));
+    return i >= 0 ? i : 99;
+  }
+
   function factLiAttrs(d) {
     var src = d && d.source ? String(d.source) : "";
     var val = d && d.value != null && d.value !== "" ? String(d.value) : "";
-    var layer = d && d.layer != null ? String(d.layer) : "";
+    var layer = String(detailLayer(d) || "");
     return " class=\"decision-frame-fact\""
       + " data-source=\"" + esc(src) + "\""
       + (val !== "" ? (" data-value=\"" + esc(val) + "\"") : "")
@@ -492,16 +551,62 @@
       + " title=\"Показать на графике / в стакане\"";
   }
 
-  function detailsHtml(frame) {
+  function factLiHtml(d) {
+    if (!d || !d.text) return "";
+    var src = d.source ? String(d.source) : "";
+    return "<li" + factLiAttrs(d) + ">"
+      + "<span class=\"decision-frame-source\">" + esc(sourceRu(src)) + "</span>"
+      + esc(scrubPairs(d.text))
+      + "</li>";
+  }
+
+  /**
+   * @param {object} frame
+   * @param {{ hierarchical?: boolean }} [opts]
+   *   hierarchical (подробно): group by DF layers 1–4.
+   *   flat (кратко): single ordered list.
+   */
+  function detailsHtml(frame, opts) {
+    opts = opts || {};
     var rows = frame && Array.isArray(frame.details) ? frame.details : [];
+    var usable = rows.filter(function (d) { return d && d.text; });
+    if (!usable.length) {
+      return "<li class=\"decision-frame-fact-empty\">Фактов в кадре пока нет.</li>";
+    }
+    if (!opts.hierarchical) {
+      return usable
+        .slice()
+        .sort(function (a, b) {
+          var la = detailLayer(a);
+          var lb = detailLayer(b);
+          if (la !== lb) return la - lb;
+          return sourceRank(a.source) - sourceRank(b.source);
+        })
+        .map(factLiHtml)
+        .join("");
+    }
+    var byLayer = { 1: [], 2: [], 3: [], 4: [] };
+    usable.forEach(function (d) {
+      var L = detailLayer(d);
+      if (!byLayer[L]) byLayer[L] = [];
+      byLayer[L].push(d);
+    });
     var html = "";
-    rows.forEach(function (d) {
-      if (!d || !d.text) return;
-      var src = d.source ? String(d.source) : "";
-      html += "<li" + factLiAttrs(d) + ">"
-        + "<span class=\"decision-frame-source\">" + esc(sourceRu(src)) + "</span>"
-        + esc(scrubPairs(d.text))
-        + "</li>";
+    [1, 2, 3, 4].forEach(function (L) {
+      var group = byLayer[L];
+      if (!group || !group.length) return;
+      group.sort(function (a, b) {
+        return sourceRank(a.source) - sourceRank(b.source);
+      });
+      var title = LAYER_RU[L] || ("Слой " + L);
+      html += "<li class=\"decision-frame-layer\" data-layer=\"" + L + "\">"
+        + "<div class=\"decision-frame-layer-title\">"
+        + "<span class=\"decision-frame-layer-num\">" + L + "</span>"
+        + esc(title)
+        + "</div>"
+        + "<ul class=\"decision-frame-layer-list\">"
+        + group.map(factLiHtml).join("")
+        + "</ul></li>";
     });
     return html || "<li class=\"decision-frame-fact-empty\">Фактов в кадре пока нет.</li>";
   }
@@ -937,7 +1042,8 @@
         + "</button>"
         + "<div class=\"signal-df-journal-details decision-frame-details\""
         + (open ? "" : " hidden") + ">"
-        + "<ul class=\"decision-frame-details-list\">" + detailsHtml(frame) + "</ul>"
+        + "<ul class=\"decision-frame-details-list is-hierarchical\">"
+        + detailsHtml(frame, { hierarchical: true }) + "</ul>"
         + "</div></li>";
     }
 
@@ -1037,7 +1143,8 @@
           + "</button>"
           + "<div class=\"signal-df-journal-details decision-frame-details\""
           + (eOpen ? "" : " hidden") + ">"
-          + "<ul class=\"decision-frame-details-list\">" + detailsHtml(fr) + "</ul>"
+          + "<ul class=\"decision-frame-details-list is-hierarchical\">"
+          + detailsHtml(fr, { hierarchical: true }) + "</ul>"
           + "</div></li>";
       }).join("");
     }
@@ -1066,6 +1173,8 @@
     clearFactActive: clearFactActive,
     whyChips: whyChips,
     robotDetailText: robotDetailText,
-    SOURCE_RU: SOURCE_RU
+    SOURCE_RU: SOURCE_RU,
+    LAYER_RU: LAYER_RU,
+    SOURCE_LAYER: SOURCE_LAYER
   };
 })(typeof window !== "undefined" ? window : globalThis);
