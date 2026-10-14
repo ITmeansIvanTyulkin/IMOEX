@@ -666,6 +666,9 @@
     var instrument = (host && host.getAttribute("data-instrument"))
       || (frame && frame.instrument)
       || "";
+    var marketSnap = (frame && frame.marketSnap && typeof frame.marketSnap === "object")
+      ? frame.marketSnap
+      : null;
     return {
       source: src,
       value: value,
@@ -673,7 +676,8 @@
       text: text,
       barTime: barTime || null,
       instrument: instrument || null,
-      frame: frame || null
+      frame: frame || null,
+      marketSnap: marketSnap
     };
   }
 
@@ -1072,10 +1076,18 @@
       for (i = 0; i < entries.length; i++) {
         var e = entries[i];
         if (!e) continue;
-        var fr = e.frame || {};
+        var fr = e.frame ? Object.assign({}, e.frame) : {};
         var eid = String(e.id || fr.frameId || "");
-        if (fid && (eid === fid || String(fr.frameId || "") === fid)) return fr;
-        if (id === eid || id === ("m:" + eid)) return fr;
+        var hit = (fid && (eid === fid || String(fr.frameId || "") === fid))
+          || id === eid
+          || id === ("m:" + eid);
+        if (!hit) continue;
+        if (!fr.marketSnap && e.marketSnap) fr.marketSnap = e.marketSnap;
+        if (!fr.barTime && (e.barTime || e.recordedAt)) {
+          fr.barTime = e.barTime || e.recordedAt;
+        }
+        if (!fr.instrument && e.instrument) fr.instrument = e.instrument;
+        return fr;
       }
       return null;
     }

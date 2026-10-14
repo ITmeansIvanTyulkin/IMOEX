@@ -744,6 +744,68 @@
     setTimeout(function () { body.classList.remove("is-df-focus-host"); }, 1200);
   }
 
+  /** Highlight live DOM rows near snapshot prices; draw chart lines for snap best bid/ask. */
+  function flashDomFromSnap(domSnap) {
+    if (!domSnap || typeof domSnap !== "object") {
+      flashDomTopLevels();
+      return;
+    }
+    clearFactFocusLines();
+    const prices = [];
+    (domSnap.bids || []).forEach(function (lv) {
+      const p = Number(lv && lv.p);
+      if (p > 0) prices.push(p);
+    });
+    (domSnap.asks || []).forEach(function (lv) {
+      const p = Number(lv && lv.p);
+      if (p > 0) prices.push(p);
+    });
+    const bestBid = Number(domSnap.bestBid);
+    const bestAsk = Number(domSnap.bestAsk);
+    if (bestBid > 0) addFactFocusLine(bestBid, "DOM bid·кадр", "#15803d");
+    if (bestAsk > 0) addFactFocusLine(bestAsk, "DOM ask·кадр", "#b91c1c");
+    const body = $("signal-dom-body");
+    if (!body || !prices.length) {
+      if (!prices.length) flashDomTopLevels();
+      return;
+    }
+    body.querySelectorAll(".dom-row.is-df-focus").forEach(function (el) {
+      el.classList.remove("is-df-focus");
+    });
+    let hit = 0;
+    body.querySelectorAll(".dom-row[data-px]").forEach(function (row) {
+      const px = Number(row.getAttribute("data-px"));
+      if (!(px > 0)) return;
+      for (let i = 0; i < prices.length; i++) {
+        if (Math.abs(px - prices[i]) <= Math.max(px * 0.0003, 0.02)) {
+          row.classList.add("is-df-focus");
+          hit += 1;
+          break;
+        }
+      }
+    });
+    if (!hit) {
+      flashDomTopLevels();
+      return;
+    }
+    try { centerDomOnSpread(body); } catch (_) {}
+    const first = body.querySelector(".dom-row.is-df-focus");
+    if (first && first.scrollIntoView) {
+      try { first.scrollIntoView({ block: "nearest" }); } catch (_) {}
+    }
+    body.classList.add("is-df-focus-host");
+    setTimeout(function () { body.classList.remove("is-df-focus-host"); }, 1200);
+  }
+
+  function zoneFromSnap(snap, preferBot) {
+    if (!snap) return null;
+    const top = snap.zoneTop;
+    const bot = snap.zoneBottom;
+    if (preferBot && bot) return bot;
+    if (!preferBot && top) return top;
+    return top || bot || null;
+  }
+
   function flashZoneBandsForFocus() {
     const ov = $("signal-zone-overlay");
     if (!ov || !factFocusState) return;
@@ -809,8 +871,12 @@
 
   function reapplyFactFocusAfterPaint() {
     if (!factFocusState) return;
-    if (factFocusState.source === "dom") flashDomTopLevels();
-    else repaintFactFocusLines();
+    if (factFocusState.source === "dom") {
+      if (factFocusState.domSnap) flashDomFromSnap(factFocusState.domSnap);
+      else flashDomTopLevels();
+    } else {
+      repaintFactFocusLines();
+    }
   }
 
   function focusDecisionFact(detail, ctx) {
@@ -825,29 +891,55 @@
     const source = String(detail.source || "");
     const frame = detail.frame || ctx.frame
       || (lastDeskSnapshot && lastDeskSnapshot.decisionFrame) || {};
+    const snap = detail.marketSnap || frame.marketSnap
+      || (ctx.origin === "live" && lastDeskSnapshot && lastDeskSnapshot.decisionFrame
+        && lastDeskSnapshot.decisionFrame.marketSnap)
+      || null;
     const text = String(detail.text || "");
     const value = detail.value != null ? Number(detail.value) : NaN;
-    const barIso = detail.barTime || frame.barTime || frame.asOf || null;
+    const barIso = detail.barTime || (snap && snap.barTime) || frame.barTime || frame.asOf || null;
     const lines = [];
 
     if (source === "shelf") {
       const st = overlayStructure || {};
       let z = null;
-      if (/нижн|bot|BOTTOM/i.test(text) && st.zoneBottom) z = st.zoneBottom;
-      else if (/верхн|top|TOP/i.test(text) && st.zoneTop) z = st.zoneTop;
-      else {
-        const range = parseFactPriceRange(text);
-        if (range && st.zoneTop && st.zoneBottom) {
-          const mid = (range.lo + range.hi) / 2;
-          const topMid = (Number(st.zoneTop.low) + Number(st.zoneTop.high)) / 2;
-          const botMid = (Number(st.zoneBottom.low) + Number(st.zoneBottom.high)) / 2;
-          z = Math.abs(mid - topMid) <= Math.abs(mid - botMid) ? st.zoneTop : st.zoneBottom;
-        } else if (range && st.zoneTop) z = st.zoneTop;
-        else z = st.zoneTop || st.zoneBottom;
+      let zFromSnap = false;
+      const preferBot = /нижн|bot|BOTTOM/i.test(text);
+      const preferTop = /верхн|top|TOP/i.test(text);
+      if (snap) {
+        if (preferBot) z = zoneFromSnap(snap, true);
+        else if (preferTop) z = zoneFromSnap(snap, false);
+        else {
+          const range = parseFactPriceRange(text);
+          if (range && snap.zoneTop && snap.zoneBottom) {
+            const mid = (range.lo + range.hi) / 2;
+            const topMid = (Number(snap.zoneTop.low) + Number(snap.zoneTop.high)) / 2;
+            const botMid = (Number(snap.zoneBottom.low) + Number(snap.zoneBottom.high)) / 2;
+            z = Math.abs(mid - topMid) <= Math.abs(mid - botMid) ? snap.zoneTop : snap.zoneBottom;
+          } else {
+            z = zoneFromSnap(snap, preferBot);
+          }
+        }
+        if (z) zFromSnap = true;
       }
-      if (z && finitePrice(z.low) && finitePrice(z.high)) {
-        lines.push({ price: Number(z.high), title: "полка↑", color: "#7c3aed" });
-        lines.push({ price: Number(z.low), title: "полка↓", color: "#7c3aed" });
+      if (!z) {
+        if (preferBot && st.zoneBottom) z = st.zoneBottom;
+        else if (preferTop && st.zoneTop) z = st.zoneTop;
+        else {
+          const range = parseFactPriceRange(text);
+          if (range && st.zoneTop && st.zoneBottom) {
+            const mid = (range.lo + range.hi) / 2;
+            const topMid = (Number(st.zoneTop.low) + Number(st.zoneTop.high)) / 2;
+            const botMid = (Number(st.zoneBottom.low) + Number(st.zoneBottom.high)) / 2;
+            z = Math.abs(mid - topMid) <= Math.abs(mid - botMid) ? st.zoneTop : st.zoneBottom;
+          } else if (range && st.zoneTop) z = st.zoneTop;
+          else z = st.zoneTop || st.zoneBottom;
+        }
+      }
+      if (z && finitePrice(Number(z.low)) && finitePrice(Number(z.high))) {
+        const tag = zFromSnap ? "полка·кадр" : "полка";
+        lines.push({ price: Number(z.high), title: tag + "↑", color: "#7c3aed" });
+        lines.push({ price: Number(z.low), title: tag + "↓", color: "#7c3aed" });
         factFocusState = { source: source, lines: lines, lo: Number(z.low), hi: Number(z.high), barIso: barIso };
       } else {
         const range = parseFactPriceRange(text);
@@ -862,16 +954,29 @@
         flashZoneBandsForFocus();
       }
     } else if (source === "poc") {
-      const px = (isFinite(value) && value > 0) ? value : parseFactPrice(text);
+      const snapPoc = snap && snap.poc != null ? Number(snap.poc) : NaN;
+      const px = (snapPoc > 0) ? snapPoc
+        : ((isFinite(value) && value > 0) ? value : parseFactPrice(text));
       if (px > 0) {
-        lines.push({ price: px, title: "POC", color: "#ca8a04" });
+        lines.push({ price: px, title: (snapPoc > 0) ? "POC·кадр" : "POC", color: "#ca8a04" });
         factFocusState = { source: source, lines: lines, barIso: barIso };
         repaintFactFocusLines();
         flashProfilePoc(px);
       }
     } else if (source === "dom") {
-      factFocusState = { source: source, lines: [], barIso: barIso };
-      flashDomTopLevels();
+      const keep = [];
+      const domSnap = (snap && snap.dom && typeof snap.dom === "object") ? snap.dom : null;
+      if (domSnap) {
+        if (Number(domSnap.bestBid) > 0) {
+          keep.push({ price: Number(domSnap.bestBid), title: "DOM bid·кадр", color: "#15803d" });
+        }
+        if (Number(domSnap.bestAsk) > 0) {
+          keep.push({ price: Number(domSnap.bestAsk), title: "DOM ask·кадр", color: "#b91c1c" });
+        }
+      }
+      factFocusState = { source: source, lines: keep, barIso: barIso, domSnap: domSnap };
+      if (domSnap) flashDomFromSnap(domSnap);
+      else flashDomTopLevels();
     } else if (source === "delta" || source === "cluster" || source === "footprint") {
       factFocusState = { source: source, lines: [], barIso: barIso };
       if (barIso) {
