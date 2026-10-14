@@ -454,8 +454,375 @@
     return html || "<li>Фактов в кадре пока нет.</li>";
   }
 
+  function shortHm(iso) {
+    var s = String(iso || "");
+    var m = s.match(/T(\d{2}:\d{2})/);
+    return m ? m[1] : (s.length >= 5 ? s.slice(-5) : (s || "—"));
+  }
+
+  function frameForBadge(e) {
+    var frame = (e && e.frame) ? Object.assign({}, e.frame) : (e || {});
+    if (e && e.summary && !frame.summary) frame.summary = e.summary;
+    return frame;
+  }
+
+  function entryBadge(e) {
+    var frame = frameForBadge(e);
+    var entryStatus = e && e.robotStatus;
+    var st = effectiveStatus(frame, entryStatus);
+    return { status: st, label: statusRu(st, frame, entryStatus), frame: frame };
+  }
+
+  function displayKind(e) {
+    if (!e) return "wait";
+    if (String(e.kind || "").toLowerCase() === "alloc") return "alloc";
+    var st = entryBadge(e).status;
+    if (st === "ENTER") return "enter";
+    if (st === "SKIP") return "skip";
+    return "wait";
+  }
+
+  /** Collapse key: same status/kind/inst + reason without volatile numbers. */
+  function compressKey(e) {
+    if (!e) return "";
+    var frame = e.frame || {};
+    var status = String(entryBadge(e).status || "").toUpperCase();
+    var kind = displayKind(e);
+    if (status !== "SKIP" && status !== "WAIT") return "";
+    if (kind === "enter" || kind === "alloc") return "";
+    var reason = "";
+    var details = Array.isArray(frame.details) ? frame.details : [];
+    var i;
+    for (i = 0; i < details.length; i++) {
+      var d = details[i];
+      if (!d || !d.text) continue;
+      if (d.source === "sessionNorm" || d.source === "robot" || d.source === "leadLag") {
+        reason = scrubPairs(d.text);
+        if (d.source === "sessionNorm" || d.source === "robot") break;
+      }
+    }
+    if (!reason) reason = scrubPairs(e.summary || frame.summary || "");
+    reason = reason
+      .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, "")
+      .replace(/\d+[.,]\d+/g, "#")
+      .replace(/[+-]?\d{3,}/g, "#")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase()
+      .slice(0, 140);
+    var inst = String(e.instrument || frame.instrument || "").toUpperCase();
+    return status + "|" + kind + "|" + inst + "|" + reason;
+  }
+
+  function groupWhyBits(entries) {
+    var e = entries[0] || {};
+    var frame = e.frame || {};
+    var details = Array.isArray(frame.details) ? frame.details : [];
+    var bits = [];
+    var i;
+    for (i = 0; i < details.length; i++) {
+      var d = details[i];
+      if (!d || !d.text) continue;
+      if (d.source !== "sessionNorm" && d.source !== "leadLag" && d.source !== "robot") continue;
+      var t = scrubPairs(d.text)
+        .replace(/^Норма сессии:\s*/i, "")
+        .replace(/^Робот\s+(?:пропускает|ждёт|входит)[:：]\s*/i, "")
+        .replace(/\.$/, "");
+      if (/окн[оа].*закрыт|правил[оа] сессии/i.test(t)) t = "окно закрыто";
+      if (t.length > 42) t = t.slice(0, 41) + "…";
+      if (t && bits.indexOf(t) < 0) bits.push(t);
+      if (bits.length >= 3) break;
+    }
+    if (!bits.length) {
+      var s = scrubPairs(e.summary || frame.summary || "");
+      s = s.replace(/^Робот\s+(?:пропускает|ждёт)[:：]\s*/i, "").replace(/\.$/, "");
+      if (s) bits.push(s.length > 52 ? s.slice(0, 51) + "…" : s);
+    }
+    return bits.join(" · ") || "тот же итог";
+  }
+
+  function groupHeadline(entries, statusRuLabel) {
+    var n = entries.length;
+    var times = entries.map(function (e) {
+      return shortHm(e.barTime || e.recordedAt || (e.frame && e.frame.barTime));
+    }).filter(Boolean);
+    var a = times.length ? times[times.length - 1] : "—";
+    var b = times.length ? times[0] : "—";
+    var range = a === b ? a : (a + "–" + b);
+    var verb = statusRuLabel || "ждёт";
+    if (/исполнен/i.test(verb)) verb = "Ждёт";
+    else if (/пропуск/i.test(verb)) verb = "Пропуск";
+    else if (/сделк/i.test(verb)) verb = "В сделке";
+    else verb = verb.charAt(0).toUpperCase() + verb.slice(1);
+    return {
+      title: verb + " × " + n + " (" + range + ")",
+      why: groupWhyBits(entries),
+      range: range,
+      count: n
+    };
+  }
+
+  /**
+   * Group consecutive identical WAIT/SKIP frames. Threshold 2.
+   * Expand shows each member's facts (not only the latest).
+   */
+  function compressEntries(entries) {
+    var out = [];
+    var i = 0;
+    while (i < entries.length) {
+      var e = entries[i];
+      var key = compressKey(e);
+      if (!key) {
+        out.push({ group: false, entry: e });
+        i += 1;
+        continue;
+      }
+      var j = i + 1;
+      while (j < entries.length && compressKey(entries[j]) === key) j += 1;
+      var slice = entries.slice(i, j);
+      if (slice.length < 2) {
+        slice.forEach(function (one) { out.push({ group: false, entry: one }); });
+      } else {
+        var first = slice[slice.length - 1] || {};
+        var last = slice[0] || {};
+        var firstId = String(first.id || (first.frame && first.frame.frameId) || i);
+        var lastId = String(last.id || (last.frame && last.frame.frameId) || j);
+        var badge = entryBadge(slice[0]);
+        var head = groupHeadline(slice, badge.label);
+        out.push({
+          group: true,
+          id: "g:" + firstId + ":" + lastId + ":" + slice.length,
+          key: key,
+          count: slice.length,
+          entries: slice,
+          label: head.title,
+          why: head.why,
+          range: head.range,
+          badge: badge
+        });
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  function listSig(filtered, kind) {
+    var groups = compressEntries(filtered || []);
+    return String(kind || "") + "#" + groups.map(function (g) {
+      if (g.group) {
+        return "G:" + g.id + ":" + g.count + ":" + g.label + ":" + (g.why || "");
+      }
+      var e = g.entry;
+      return [e && e.id, e && e.kind, e && e.robotStatus, e && e.barTime, e && e.summary].join(":");
+    }).join("|");
+  }
+
+  /**
+   * Shared DF journal for every strategy desk (trend / positional / BRM / invest / arb).
+   * @param {{
+   *   panel?: string|HTMLElement,
+   *   list?: string|HTMLElement,
+   *   meta?: string|HTMLElement,
+   *   title?: string|HTMLElement,
+   *   filters?: string|HTMLElement,
+   *   humanizeSummary?: function(string): string,
+   *   shortTime?: function(*): string
+   * }} opts
+   */
+  function mountJournal(opts) {
+    opts = opts || {};
+    function el(ref) {
+      if (!ref) return null;
+      if (typeof ref === "string") return document.getElementById(ref);
+      return ref;
+    }
+    var panel = el(opts.panel || "signal-df-journal");
+    var listEl = el(opts.list || "signal-df-journal-list");
+    var meta = el(opts.meta || "signal-df-journal-meta");
+    var title = el(opts.title || "signal-df-journal-title");
+    var filters = el(opts.filters || "signal-df-journal-filters");
+    if (!panel || !listEl) return null;
+
+    var kind = "";
+    var cache = null;
+    var bound = false;
+    var openIds = Object.create(null);
+    var humanize = typeof opts.humanizeSummary === "function"
+      ? opts.humanizeSummary
+      : function (t) { return scrubPairs(t) || "—"; };
+    var timeFn = typeof opts.shortTime === "function" ? opts.shortTime : shortHm;
+
+    function bind() {
+      if (bound) return;
+      bound = true;
+      if (filters) {
+        filters.addEventListener("click", function (ev) {
+          var btn = ev.target && ev.target.closest
+            ? ev.target.closest("[data-df-kind]")
+            : null;
+          if (!btn) return;
+          kind = btn.getAttribute("data-df-kind") || "";
+          filters.querySelectorAll(".signal-df-kind").forEach(function (node) {
+            node.classList.toggle("is-active", node === btn);
+          });
+          paint(cache);
+        });
+      }
+      listEl.addEventListener("click", function (ev) {
+        var btn = ev.target && ev.target.closest
+          ? ev.target.closest("[data-df-toggle]")
+          : null;
+        if (!btn) return;
+        ev.stopPropagation();
+        var item = btn.closest(".signal-df-journal-item, .signal-df-journal-member");
+        if (!item) return;
+        var details = null;
+        for (var ci = 0; ci < item.children.length; ci++) {
+          if (item.children[ci].classList
+              && item.children[ci].classList.contains("signal-df-journal-details")) {
+            details = item.children[ci];
+            break;
+          }
+        }
+        if (!details) return;
+        var id = item.getAttribute("data-df-id") || "";
+        var open = details.hidden;
+        details.hidden = !open;
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (id) {
+          if (open) openIds[id] = true;
+          else delete openIds[id];
+        }
+      });
+    }
+
+    function memberHtml(e) {
+      var frame = e.frame || {};
+      var badge = entryBadge(e);
+      var id = "m:" + String(e.id || frame.frameId || Math.random());
+      var open = !!openIds[id];
+      var t = timeFn(e.barTime || e.recordedAt || frame.barTime);
+      var summary = humanize(e.summary || frame.summary || "—");
+      return "<li class=\"signal-df-journal-member\" data-df-id=\"" + esc(id) + "\">"
+        + "<button type=\"button\" class=\"signal-df-journal-toggle is-member\" data-df-toggle"
+        + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
+        + "<span class=\"signal-df-journal-time\">" + esc(t) + "</span>"
+        + "<span class=\"signal-df-journal-summary\">" + esc(summary) + "</span>"
+        + "</button>"
+        + "<div class=\"signal-df-journal-details decision-frame-details\""
+        + (open ? "" : " hidden") + ">"
+        + "<ul class=\"decision-frame-details-list\">" + detailsHtml(frame) + "</ul>"
+        + "</div></li>";
+    }
+
+    function paint(payload) {
+      bind();
+      cache = payload || null;
+      var entries = (payload && Array.isArray(payload.entries)) ? payload.entries : [];
+      var kinds = { wait: 0, enter: 0, skip: 0, alloc: 0 };
+      entries.forEach(function (e) {
+        var k = displayKind(e);
+        kinds[k] = (kinds[k] || 0) + 1;
+      });
+      var filtered = kind
+        ? entries.filter(function (e) { return displayKind(e) === kind; })
+        : entries;
+      if (!entries.length) {
+        panel.hidden = true;
+        listEl.innerHTML = "";
+        listEl.dataset.sig = "";
+        if (meta) meta.textContent = "";
+        return;
+      }
+      panel.hidden = false;
+      if (title) {
+        var day = (payload && payload.day) || "";
+        title.textContent = "Журнал кадров" + (day ? (" · " + day) : "");
+      }
+      var groups = compressEntries(filtered);
+      if (meta) {
+        meta.textContent = "Строк " + groups.length
+          + " · кадров " + filtered.length
+          + " / " + entries.length
+          + " · ждёт " + (kinds.wait || 0)
+          + " · вошёл " + (kinds.enter || 0)
+          + " · пропуск " + (kinds.skip || 0)
+          + " · капитал " + (kinds.alloc || 0)
+          + (filtered.length === 0 && kind ? " · нет кадров с этим фильтром" : "");
+      }
+      if (!filtered.length) {
+        listEl.dataset.sig = listSig([], kind);
+        listEl.innerHTML = "<li class=\"signal-df-journal-empty\">Нет кадров с этим фильтром.</li>";
+        return;
+      }
+      var sig = listSig(filtered, kind);
+      if (listEl.dataset.sig === sig && listEl.querySelector(".signal-df-journal-item")) {
+        return;
+      }
+      listEl.dataset.sig = sig;
+      listEl.innerHTML = groups.map(function (g) {
+        if (g.group) {
+          var latest = g.entries[0] || {};
+          var frame = latest.frame || {};
+          var badge = g.badge || entryBadge(latest);
+          var id = g.id;
+          var open = !!openIds[id];
+          var inst = latest.instrument || frame.instrument || "";
+          return "<li class=\"signal-df-journal-item is-group\" data-df-id=\"" + esc(id) + "\">"
+            + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
+            + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
+            + "<span class=\"signal-df-journal-status\" data-status=\"" + esc(badge.status) + "\">"
+            + esc(badge.label) + "</span>"
+            + "<span class=\"signal-df-journal-summary\">"
+            + (inst ? ("<span class=\"signal-df-journal-inst\">" + esc(inst) + "</span> ") : "")
+            + esc(g.label)
+            + (g.why ? (" <span class=\"signal-df-journal-group-why\">— " + esc(g.why) + "</span>") : "")
+            + "<span class=\"signal-df-journal-group-count\">" + g.count + "</span>"
+            + "</span>"
+            + "<span class=\"signal-df-journal-time\">" + esc(g.range || "") + "</span>"
+            + "</button>"
+            + "<div class=\"signal-df-journal-details\"" + (open ? "" : " hidden") + ">"
+            + "<ul class=\"signal-df-journal-members\">"
+            + g.entries.map(memberHtml).join("")
+            + "</ul></div></li>";
+        }
+        var e = g.entry;
+        var fr = e.frame || {};
+        var b = entryBadge(e);
+        var eid = String(e.id || fr.frameId || "");
+        var eOpen = !!(eid && openIds[eid]);
+        var t = timeFn(e.barTime || e.recordedAt || fr.barTime);
+        var inst2 = e.instrument || fr.instrument || "";
+        var summary = humanize(e.summary || fr.summary || "—");
+        return "<li class=\"signal-df-journal-item\" data-df-id=\"" + esc(eid) + "\">"
+          + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
+          + " aria-expanded=\"" + (eOpen ? "true" : "false") + "\">"
+          + "<span class=\"signal-df-journal-status\" data-status=\"" + esc(b.status) + "\">"
+          + esc(b.label) + "</span>"
+          + "<span class=\"signal-df-journal-summary\">"
+          + (inst2 ? ("<span class=\"signal-df-journal-inst\">" + esc(inst2) + "</span> ") : "")
+          + esc(summary)
+          + "</span>"
+          + "<span class=\"signal-df-journal-time\">" + esc(t) + "</span>"
+          + "</button>"
+          + "<div class=\"signal-df-journal-details decision-frame-details\""
+          + (eOpen ? "" : " hidden") + ">"
+          + "<ul class=\"decision-frame-details-list\">" + detailsHtml(fr) + "</ul>"
+          + "</div></li>";
+      }).join("");
+    }
+
+    return {
+      paint: paint,
+      compressEntries: compressEntries,
+      displayKind: displayKind
+    };
+  }
+
   global.TrinityDecisionFrame = {
     create: create,
+    mountJournal: mountJournal,
+    compressEntries: compressEntries,
     sourceRu: sourceRu,
     statusRu: statusRu,
     effectiveStatus: effectiveStatus,

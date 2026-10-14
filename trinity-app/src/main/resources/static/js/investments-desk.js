@@ -153,6 +153,7 @@
   }
 
   let decisionFrameUi = null;
+  let dfJournalUi = null;
   function paintDecisionFrame(data) {
     if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") return;
     if (!decisionFrameUi) {
@@ -161,6 +162,19 @@
     if (!decisionFrameUi) return;
     decisionFrameUi.render(data && data.decisionFrame);
   }
+  function paintDecisionFrameJournal(payload) {
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.mountJournal !== "function") return;
+    if (!dfJournalUi) {
+      dfJournalUi = TrinityDecisionFrame.mountJournal({
+        panel: "signal-df-journal",
+        list: "signal-df-journal-list",
+        meta: "signal-df-journal-meta",
+        title: "signal-df-journal-title",
+        filters: "signal-df-journal-filters"
+      });
+    }
+    if (dfJournalUi) dfJournalUi.paint(payload || null);
+  }
 
   async function refreshDesk() {
     const statusEl = $("invest-counts");
@@ -168,6 +182,7 @@
     const desk = await api("/api/investments/desk");
     window.__investDeskCache = desk;
     paintDecisionFrame(desk);
+    paintDecisionFrameJournal(desk.decisionFrames);
     const counts = desk.counts || {};
     const cEl = $("invest-counts");
     if (cEl) {

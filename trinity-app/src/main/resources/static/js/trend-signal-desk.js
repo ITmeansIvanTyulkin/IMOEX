@@ -804,66 +804,23 @@
     }).join("");
   }
 
-  let dfJournalKind = "";
-  let dfJournalCache = null;
-  let dfJournalBound = false;
-  /** Keep expanded journal rows across desk polls / ticks. */
-  const dfJournalOpenIds = Object.create(null);
-
-  function bindDfJournalFilters() {
-    if (dfJournalBound) return;
-    const filters = $("signal-df-journal-filters");
-    if (!filters) return;
-    dfJournalBound = true;
-    filters.addEventListener("click", function (ev) {
-      const btn = ev.target && ev.target.closest
-        ? ev.target.closest("[data-df-kind]")
-        : null;
-      if (!btn) return;
-      dfJournalKind = btn.getAttribute("data-df-kind") || "";
-      filters.querySelectorAll(".signal-df-kind").forEach(function (el) {
-        el.classList.toggle("is-active", el === btn);
-      });
-      paintDecisionFrameJournal(dfJournalCache);
-    });
-    const list = $("signal-df-journal-list");
-    if (list) {
-      list.addEventListener("click", function (ev) {
-        const btn = ev.target && ev.target.closest
-          ? ev.target.closest("[data-df-toggle]")
-          : null;
-        if (!btn) return;
-        const item = btn.closest(".signal-df-journal-item");
-        if (!item) return;
-        const details = item.querySelector(".signal-df-journal-details");
-        if (!details) return;
-        const id = item.getAttribute("data-df-id") || "";
-        const open = details.hidden;
-        details.hidden = !open;
-        btn.setAttribute("aria-expanded", open ? "true" : "false");
-        if (id) {
-          if (open) dfJournalOpenIds[id] = true;
-          else delete dfJournalOpenIds[id];
-        }
-      });
+  /** Shared DF journal (Exclusive / positional / BRM — same mount). */
+  let dfJournalUi = null;
+  function ensureDfJournalUi() {
+    if (dfJournalUi) return dfJournalUi;
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.mountJournal !== "function") {
+      return null;
     }
-  }
-
-  function dfJournalListSig(filtered, kind) {
-    const groups = compressJournalEntries(filtered);
-    return String(kind || "") + "#" + groups.map(function (g) {
-      if (g.group) {
-        return "G:" + g.id + ":" + g.count + ":" + (g.entries[0] && g.entries[0].summary);
-      }
-      const e = g.entry;
-      return [
-        e && e.id,
-        e && e.kind,
-        e && e.robotStatus,
-        e && e.barTime,
-        e && e.summary
-      ].join(":");
-    }).join("|");
+    dfJournalUi = TrinityDecisionFrame.mountJournal({
+      panel: "signal-df-journal",
+      list: "signal-df-journal-list",
+      meta: "signal-df-journal-meta",
+      title: "signal-df-journal-title",
+      filters: "signal-df-journal-filters",
+      humanizeSummary: humanizeFrameSummary,
+      shortTime: shortTime
+    });
+    return dfJournalUi;
   }
 
   /** Drop legacy «pairs N%» from capital summaries (product desk has no pairs sleeve). */
@@ -888,125 +845,6 @@
       return m[1] + (ru && ru !== m[2] ? ru : m[2]);
     }
     return humanizeDeskReason(s) || s;
-  }
-
-  function journalDisplayKind(e) {
-    if (!e) return "wait";
-    if (String(e.kind || "").toLowerCase() === "alloc") return "alloc";
-    const badge = dfBadge(e);
-    if (badge.status === "ENTER") return "enter";
-    if (badge.status === "SKIP") return "skip";
-    return "wait";
-  }
-
-  /** Fingerprint for collapsing identical skip/wait spam. */
-  function journalCompressKey(e) {
-    if (!e) return "";
-    const frame = e.frame || {};
-    const status = String(dfBadge(e).status || "").toUpperCase();
-    const kind = journalDisplayKind(e);
-    if (status !== "SKIP" && status !== "WAIT") return "";
-    if (kind === "enter" || kind === "alloc") return "";
-    let reason = "";
-    const details = Array.isArray(frame.details) ? frame.details : [];
-    for (let i = 0; i < details.length; i++) {
-      const d = details[i];
-      if (!d || !d.text) continue;
-      if (d.source === "sessionNorm" || d.source === "robot" || d.source === "leadLag") {
-        reason = scrubPairsFromSummary(d.text);
-        if (d.source === "sessionNorm" || d.source === "robot") break;
-      }
-    }
-    if (!reason) reason = scrubPairsFromSummary(e.summary || frame.summary || "");
-    reason = reason
-      .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, "")
-      .replace(/\d+[.,]\d+/g, "#")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase()
-      .slice(0, 120);
-    const inst = String(e.instrument || frame.instrument || "").toUpperCase();
-    return status + "|" + kind + "|" + inst + "|" + reason;
-  }
-
-  function journalGroupLabel(entries) {
-    const e = entries[0] || {};
-    const frame = e.frame || {};
-    const details = Array.isArray(frame.details) ? frame.details : [];
-    for (let i = 0; i < details.length; i++) {
-      const d = details[i];
-      if (d && d.source === "sessionNorm" && d.text) {
-        let t = scrubPairsFromSummary(d.text);
-        if (/окн[оа].*закрыт|правил[оа] сессии|сесси/i.test(t)) {
-          return "окно закрыто";
-        }
-        t = t.replace(/^Норма сессии:\s*/i, "").replace(/\.$/, "");
-        return t.length > 48 ? t.slice(0, 47) + "…" : t;
-      }
-    }
-    for (let j = 0; j < details.length; j++) {
-      const d2 = details[j];
-      if (d2 && d2.source === "leadLag" && d2.text) {
-        let t = scrubPairsFromSummary(d2.text).replace(/\.$/, "");
-        if (/lead|lag|связк|расхожд/i.test(t)) {
-          return t.length > 48 ? ("связка · " + t.slice(0, 40) + "…") : ("связка · " + t);
-        }
-        return t.length > 48 ? t.slice(0, 47) + "…" : t;
-      }
-    }
-    const robotTxt = (window.TrinityDecisionFrame && TrinityDecisionFrame.robotDetailText)
-      ? TrinityDecisionFrame.robotDetailText(frame)
-      : "";
-    let s = scrubPairsFromSummary(robotTxt || e.summary || frame.summary || "повтор");
-    s = s.replace(/^Робот\s+(?:пропускает|ждёт)[:：]\s*/i, "").replace(/\.$/, "");
-    if (/сесси/i.test(s)) return "окно закрыто";
-    if (/lead|lag|связк/i.test(s)) return "то же lead-lag";
-    return s.length > 52 ? s.slice(0, 51) + "…" : (s || "тот же итог");
-  }
-
-  function compressJournalEntries(entries) {
-    const out = [];
-    let i = 0;
-    while (i < entries.length) {
-      const e = entries[i];
-      const key = journalCompressKey(e);
-      if (!key) {
-        out.push({ group: false, entry: e });
-        i += 1;
-        continue;
-      }
-      let j = i + 1;
-      while (j < entries.length && journalCompressKey(entries[j]) === key) j += 1;
-      const slice = entries.slice(i, j);
-      if (slice.length < 3) {
-        slice.forEach(function (one) { out.push({ group: false, entry: one }); });
-      } else {
-        const firstId = String((slice[slice.length - 1] && (slice[slice.length - 1].id
-          || (slice[slice.length - 1].frame && slice[slice.length - 1].frame.frameId))) || i);
-        const lastId = String((slice[0] && (slice[0].id
-          || (slice[0].frame && slice[0].frame.frameId))) || j);
-        out.push({
-          group: true,
-          id: "g:" + firstId + ":" + lastId + ":" + slice.length,
-          key: key,
-          count: slice.length,
-          entries: slice,
-          label: journalGroupLabel(slice)
-        });
-      }
-      i = j;
-    }
-    return out;
-  }
-
-  function journalTimeRange(entries) {
-    const times = entries.map(function (e) {
-      return shortTime(e.barTime || e.recordedAt || (e.frame && e.frame.barTime));
-    }).filter(Boolean);
-    if (!times.length) return "—";
-    const a = times[times.length - 1];
-    const b = times[0];
-    return a === b ? a : (a + "–" + b);
   }
 
   let briefDensityBound = false;
@@ -1098,119 +936,8 @@
   }
 
   function paintDecisionFrameJournal(payload) {
-    bindDfJournalFilters();
-    dfJournalCache = payload || null;
-    const panel = $("signal-df-journal");
-    const listEl = $("signal-df-journal-list");
-    const meta = $("signal-df-journal-meta");
-    const title = $("signal-df-journal-title");
-    if (!panel || !listEl) return;
-    const entries = (payload && Array.isArray(payload.entries)) ? payload.entries : [];
-    const kinds = { wait: 0, enter: 0, skip: 0, alloc: 0 };
-    entries.forEach(function (e) {
-      const k = journalDisplayKind(e);
-      kinds[k] = (kinds[k] || 0) + 1;
-    });
-    const filtered = dfJournalKind
-      ? entries.filter(function (e) { return journalDisplayKind(e) === dfJournalKind; })
-      : entries;
-    if (!entries.length) {
-      panel.hidden = true;
-      listEl.innerHTML = "";
-      listEl.dataset.sig = "";
-      if (meta) meta.textContent = "";
-      return;
-    }
-    panel.hidden = false;
-    if (title) {
-      const day = (payload && payload.day) || "";
-      title.textContent = "Журнал кадров" + (day ? (" · " + day) : "");
-    }
-    const groups = compressJournalEntries(filtered);
-    const shownRows = groups.length;
-    if (meta) {
-      meta.textContent = "Строк " + shownRows
-        + " · кадров " + filtered.length
-        + " / " + entries.length
-        + " · ждёт " + (kinds.wait || 0)
-        + " · вошёл " + (kinds.enter || 0)
-        + " · пропуск " + (kinds.skip || 0)
-        + " · капитал " + (kinds.alloc || 0)
-        + (filtered.length === 0 && dfJournalKind
-          ? " · нет кадров с этим фильтром"
-          : "");
-    }
-    const detailsHtml = (window.TrinityDecisionFrame && TrinityDecisionFrame.detailsHtml)
-      || function () { return "<li>—</li>"; };
-    if (!filtered.length) {
-      listEl.dataset.sig = dfJournalListSig([], dfJournalKind);
-      listEl.innerHTML = "<li class=\"signal-df-journal-empty\">Нет кадров с этим фильтром.</li>";
-      return;
-    }
-    const sig = dfJournalListSig(filtered, dfJournalKind);
-    // Same frames → keep DOM so an open plaque survives desk ticks/polls.
-    if (listEl.dataset.sig === sig && listEl.querySelector(".signal-df-journal-item")) {
-      return;
-    }
-    listEl.dataset.sig = sig;
-    listEl.innerHTML = groups.map(function (g) {
-      if (g.group) {
-        const latest = g.entries[0] || {};
-        const frame = latest.frame || {};
-        const badge = dfBadge(latest);
-        const id = g.id;
-        const open = !!(id && dfJournalOpenIds[id]);
-        const range = journalTimeRange(g.entries);
-        const inst = latest.instrument || frame.instrument || "";
-        const times = g.entries.map(function (e) {
-          return shortTime(e.barTime || e.recordedAt || (e.frame && e.frame.barTime));
-        }).filter(Boolean).reverse().join(", ");
-        return "<li class=\"signal-df-journal-item is-group\" data-df-id=\"" + escHtml(id) + "\">"
-          + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
-          + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
-          + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(badge.status) + "\">"
-          + escHtml(badge.label) + "</span>"
-          + "<span class=\"signal-df-journal-summary\">"
-          + (inst ? ("<span class=\"signal-df-journal-inst\">" + escHtml(inst) + "</span> ") : "")
-          + escHtml(g.label)
-          + " <span class=\"signal-df-journal-group-range\">· " + escHtml(range) + "</span>"
-          + "<span class=\"signal-df-journal-group-count\">" + g.count + " кадров</span>"
-          + "</span>"
-          + "<span class=\"signal-df-journal-time\">" + escHtml(range) + "</span>"
-          + "</button>"
-          + "<div class=\"signal-df-journal-details decision-frame-details\""
-          + (open ? "" : " hidden") + ">"
-          + "<p class=\"signal-brief-note\">Одинаковый итог · "
-          + escHtml(String(g.count)) + " кадров: " + escHtml(times) + "</p>"
-          + "<ul class=\"decision-frame-details-list\">" + detailsHtml(frame) + "</ul>"
-          + "</div>"
-          + "</li>";
-      }
-      const e = g.entry;
-      const frame = e.frame || {};
-      const badge = dfBadge(e);
-      const id = String(e.id || frame.frameId || "");
-      const open = !!(id && dfJournalOpenIds[id]);
-      const t = shortTime(e.barTime || e.recordedAt || frame.barTime);
-      const inst = e.instrument || frame.instrument || "";
-      const summary = humanizeFrameSummary(e.summary || frame.summary || "—");
-      return "<li class=\"signal-df-journal-item\" data-df-id=\"" + escHtml(id) + "\">"
-        + "<button type=\"button\" class=\"signal-df-journal-toggle\" data-df-toggle"
-        + " aria-expanded=\"" + (open ? "true" : "false") + "\">"
-        + "<span class=\"signal-df-journal-status\" data-status=\"" + escHtml(badge.status) + "\">"
-        + escHtml(badge.label) + "</span>"
-        + "<span class=\"signal-df-journal-summary\">"
-        + (inst ? ("<span class=\"signal-df-journal-inst\">" + escHtml(inst) + "</span> ") : "")
-        + escHtml(summary)
-        + "</span>"
-        + "<span class=\"signal-df-journal-time\">" + escHtml(t) + "</span>"
-        + "</button>"
-        + "<div class=\"signal-df-journal-details decision-frame-details\""
-        + (open ? "" : " hidden") + ">"
-        + "<ul class=\"decision-frame-details-list\">" + detailsHtml(frame) + "</ul>"
-        + "</div>"
-        + "</li>";
-    }).join("");
+    const ui = ensureDfJournalUi();
+    if (ui) ui.paint(payload);
   }
 
   function paintRobotChip(data) {

@@ -429,6 +429,7 @@
   }
 
   let decisionFrameUi = null;
+  let dfJournalUi = null;
   function paintDecisionFrame(data) {
     if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") return;
     if (!decisionFrameUi) {
@@ -437,6 +438,19 @@
     if (!decisionFrameUi) return;
     decisionFrameUi.render(data && data.decisionFrame);
   }
+  function paintDecisionFrameJournal(payload) {
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.mountJournal !== "function") return;
+    if (!dfJournalUi) {
+      dfJournalUi = TrinityDecisionFrame.mountJournal({
+        panel: "signal-df-journal",
+        list: "signal-df-journal-list",
+        meta: "signal-df-journal-meta",
+        title: "signal-df-journal-title",
+        filters: "signal-df-journal-filters"
+      });
+    }
+    if (dfJournalUi) dfJournalUi.paint(payload || null);
+  }
 
   function render(data) {
     lastArbDesk = data || null;
@@ -444,6 +458,7 @@
     const desk = $("calendar-arb-desk");
     if (desk) desk.classList.toggle("is-warming", warming);
     paintDecisionFrame(data);
+    paintDecisionFrameJournal(data && data.decisionFrames);
 
     const sel = data.selected || {};
     const settings = data.settings || {};
