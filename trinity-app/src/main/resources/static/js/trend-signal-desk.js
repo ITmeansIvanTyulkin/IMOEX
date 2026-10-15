@@ -1751,13 +1751,7 @@
     let want = (deskInstrumentPinned || fromSel || "").trim();
     if (!want) return "";
     const fam = instrumentFamily(want);
-    // Positional is BR oil only — drop BRM/SI/RI/… pins that used to spin «грузим desk…».
-    if (deskScope() === "positional" && fam && fam !== "BR") {
-      deskInstrumentPinned = "";
-      try { writeStoredInstrument(""); } catch (_) {}
-      if (instSel) instSel.value = "";
-      return "";
-    }
+    // Range = BR only; BRM = BRM mini; positional = BR/RI/NG/SI/GD/MX (never wipe pin).
     if (isRangeDesk()) {
       if (deskScope() === "brm" && fam !== "BRM") return "";
       if (deskScope() === "range" && fam !== "BR") return "";
@@ -1802,12 +1796,6 @@
     const fromLayout = deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.instrument;
     let pick = deskInstrumentPinned || fromLayout || readStoredInstrument();
     if (isRangeDesk() && pick && !isOilInstrument(pick)) pick = "";
-    // Positional desk is BR oil only — never restore a non-BR pin from layout/storage.
-    if (deskScope() === "positional" && pick && instrumentFamily(pick) !== "BR") {
-      pick = "";
-      deskInstrumentPinned = "";
-      writeStoredInstrument("");
-    }
     if (pick && matchInstrumentOption(instSel, pick)) {
       deskInstrumentPinned = instSel.value;
     }
@@ -5629,12 +5617,11 @@
       if (deskScope() === "positional"
           && stillWant && data.instrument
           && !sameInstrumentFamily(stillWant, data.instrument)) {
-        // Positional desk is BR oil — any stale pin (BRM, SI, RI, …) must adopt the
-        // server instrument. Reloading forever left the UI stuck on «грузим desk…».
-        deskInstrumentPinned = data.instrument;
-        writeStoredInstrument(data.instrument);
+        // Keep operator pin (золото/Si/…) — do not snap select to server rotation.
         const instSel = $("sig-instrument");
-        if (instSel) matchInstrumentOption(instSel, data.instrument);
+        if (instSel) matchInstrumentOption(instSel, stillWant);
+        deskInstrumentPinned = stillWant;
+        writeStoredInstrument(stillWant);
       }
       if (meta) {
         meta.textContent = (data.playbookName || data.playbookId || "playbook")
@@ -6865,11 +6852,6 @@
     }
     if (isRangeDesk() && deskInstrumentPinned && !isOilInstrument(deskInstrumentPinned)) {
       deskInstrumentPinned = null;
-    }
-    if (deskScope() === "positional" && deskInstrumentPinned
-        && instrumentFamily(deskInstrumentPinned) !== "BR") {
-      deskInstrumentPinned = "";
-      writeStoredInstrument("");
     }
     applyUrlInstrumentOnce();
     bindTape();
