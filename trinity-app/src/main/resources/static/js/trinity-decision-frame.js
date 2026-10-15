@@ -13,9 +13,9 @@
     delta: "дельта",
     dom: "стакан",
     shelf: "полка",
-    poc: "POC",
+    poc: "контроль профиля",
     cluster: "кластер",
-    footprint: "footprint",
+    footprint: "лента",
     sessionNorm: "норма сессии",
     leadLag: "связка",
     sync: "расхождение",
@@ -56,7 +56,7 @@
   var TRIGGER_RU = {
     IMPULSE: "импульс",
     SHELF_TOUCH: "касание полки",
-    ARM: "arm",
+    ARM: "вооружение",
     WAIT: "ожидание",
     SKIP: "пропуск",
     ENTER: "вход",
@@ -124,12 +124,37 @@
   }
 
   function scrubPairs(text) {
-    return String(text || "")
+    return scrubOperatorText(String(text || "")
       .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*·\s*/gi, "")
       .replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*/gi, "")
       .replace(/\(\s*·\s*/g, "(")
       .replace(/\s{2,}/g, " ")
-      .trim();
+      .trim());
+  }
+
+  /** Display-time RU for half-English DF lines (live + old journal). */
+  function scrubOperatorText(text) {
+    var s = String(text || "");
+    if (!s) return s;
+    s = s.replace(/Дельта\s+footprint\b/gi, "Дельта профиля ленты");
+    s = s.replace(/\bPOC\s+профиля\b/gi, "Контрольная цена профиля");
+    s = s.replace(/аски толще бидов/gi, "предложение толще спроса");
+    s = s.replace(/биды толще асков/gi, "спрос толще предложения");
+    s = s.replace(/биды и аски в ближних 5 уровнях почти равны/gi,
+      "спрос и предложение на ближних 5 уровнях почти равны");
+    s = s.replace(/\(bid\s*(\d+)\s*\/\s*ask\s*(\d+)\)/gi, "(спрос $1 / предложение $2)");
+    s = s.replace(/positional:\s*need\s*[≥>=]+\s*3\s*volume ranges on trend window/gi,
+      "на окне тренда нужно не меньше трёх объёмных диапазонов");
+    s = s.replace(/positional:\s*need clear H1 HH\/HL or LH\/LL trend/gi,
+      "нужен ясный часовой тренд (серия повышающихся или понижающихся экстремумов)");
+    s = s.replace(/positional:\s*need H1 trend \+\s*[≥>=]+\s*3 volume ranges/gi,
+      "нужны часовой тренд и не меньше трёх объёмных диапазонов");
+    s = s.replace(/positional:\s*/gi, "");
+    s = s.replace(/gap strategy:\s*/gi, "стратегия гэпа: ");
+    s = s.replace(/\bneed\s*[≥>=]+\s*3 volume ranges on trend window/gi,
+      "на окне тренда нужно не меньше трёх объёмных диапазонов");
+    s = s.replace(/\bfootprint\b/gi, "лента");
+    return s.replace(/\s{2,}/g, " ").trim();
   }
 
   function robotDetailText(frame) {
