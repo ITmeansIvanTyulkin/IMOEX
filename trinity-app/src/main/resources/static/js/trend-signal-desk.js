@@ -510,7 +510,7 @@
       : "Сейчас песочница (бумага): робот сам может выставить/вести сетку по чеклисту.";
     return liveBit + " Аномалия — не стоп-кран и не «жми market». "
       + "Робот по-прежнему ждёт правила playbook (полка, микро, сессия). "
-      + "Можно подождать автосброс залипания или выключить авто, если контекст вас не устраивает.";
+      + "Если контекст не устраивает — выключите авто.";
   }
 
   function syncBriefRobotWait(posture, why) {
@@ -5549,46 +5549,6 @@
     }
     reapplyFactFocusAfterPaint();
   }
-  function paintStuckStatus(data) {
-    const statusEl = $("sig-kick-status");
-    if (!statusEl) return;
-    if (deskScope() !== "range") {
-      statusEl.hidden = true;
-      statusEl.textContent = "";
-      statusEl.classList.remove("is-stuck", "is-auto-done");
-      return;
-    }
-    const stuck = (data && data.situation && data.situation.stuck) || null;
-    if (!stuck) {
-      statusEl.hidden = true;
-      statusEl.textContent = "";
-      statusEl.classList.remove("is-stuck", "is-auto-done");
-      return;
-    }
-    if (stuck.active) {
-      statusEl.hidden = false;
-      statusEl.classList.add("is-stuck");
-      statusEl.classList.remove("is-auto-done");
-      statusEl.textContent = stuck.hint
-        || ("Залипание: " + (stuck.why || "без прогресса")
-          + ". Автосброс soft через ~"
-          + ((Number(stuck.barsToAutoSoft) || 0) * 5) + " мин.");
-      return;
-    }
-    if (stuck.lastAutoKick) {
-      statusEl.hidden = false;
-      statusEl.classList.remove("is-stuck");
-      statusEl.classList.add("is-auto-done");
-      statusEl.textContent = stuck.hint
-        || ("Автосброс залипания выполнен ("
-          + (stuck.lastAutoKick.reason || "auto")
-          + "). Робот снова сканирует.");
-      return;
-    }
-    statusEl.hidden = true;
-    statusEl.textContent = "";
-    statusEl.classList.remove("is-stuck", "is-auto-done");
-  }
   function deskInstrumentQuery() {
     let inst = wantedDeskInstrument() || lastDeskInstrument;
     if (isRangeDesk()) {
@@ -5748,7 +5708,6 @@
         briefBody.classList.toggle("is-collapsed-dense", briefDensity() === "brief");
       }
       applyBriefDensity(briefDensity());
-      paintStuckStatus(data);
       syncDomPressureFab(data);
 
       ensureChart(data.instrument, data.pointSize);
