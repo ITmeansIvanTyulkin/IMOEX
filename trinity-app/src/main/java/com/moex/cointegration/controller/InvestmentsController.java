@@ -176,8 +176,11 @@ public class InvestmentsController {
     }
 
     @GetMapping("/desk")
-    public Map<String, Object> desk() {
-        return desk.desk();
+    public Map<String, Object> desk(
+            @RequestParam(value = "ticker", required = false) String ticker,
+            @RequestParam(value = "refresh", required = false, defaultValue = "false") boolean refresh
+    ) {
+        return desk.desk(ticker, refresh);
     }
 
     /** Fast catalog for chart panes (no full universe evaluate). */

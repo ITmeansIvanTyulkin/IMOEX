@@ -4796,6 +4796,18 @@ body[data-upsell="off"] .full-core-badge {
   border: 1px solid rgba(30, 42, 50, 0.1);
   background: rgba(30, 42, 50, 0.03);
 }
+.invest-desk-brief {
+  margin: 0.55rem 0 0.35rem;
+}
+.invest-desk-brief .signal-brief-action {
+  margin: 0.45rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+.invest-desk-brief.is-df-focus {
+  outline: 2px solid rgba(196, 140, 60, 0.55);
+  outline-offset: 2px;
+}
 .signal-brief-title {
   display: flex;
   flex-wrap: wrap;

@@ -39,7 +39,7 @@ Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/l
 |------|--------|
 | `frameId` | `{instrument}\|{playbookId}\|{barTime}\|{trigger}\|{seq}` |
 | `asOf` / `barTime` | локальное время MSK, без суффикса зоны в строке (как бары деска) |
-| `lane` | `range` \| `brm` \| `positional`. На деске виден только свой lane |
+| `lane` | `range` \| `brm` \| `positional` \| `invest`. На деске виден только свой lane |
 | `trigger` | см. ниже |
 | `summary` | 2–4 предложения, читается за ~5 секунд |
 | `robot` | статус решения + внутренние id пунктов чеклиста |
@@ -77,8 +77,8 @@ Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/l
 | `SKIP` | пропускает | `NO_TRADE`, блок сессии, нет структуры |
 
 `side`: `BUY` \| `SELL` \| `NONE`.  
-`mode`: `BOUNCE` \| `RETEST` \| `NONE` — как у Exclusive, без переименования.  
-`checklistIds`: внутренние id из `ChecklistCompliance` (`S8_RETEST_BREAK_HOLD`, `S11_WAIT_LIMITS`, …). В текст оператора **не** попадают `§`, `/view/` и сырые id. В `details` с `source=robot` — фраза по-русски («ждёт возврата к лимиткам, без пробоя сетки на лету»).
+`mode`: Exclusive — `BOUNCE` \| `RETEST` \| `NONE`; investments — `PLACE_LIMITS` \| `WORKING_ORDERS` \| `IN_TRADE` \| `NONE`.  
+`checklistIds`: Exclusive — id из `ChecklistCompliance`; investments — id стадий pipeline (`regime`, `fund`, `zones`, …). В текст оператора **не** попадают `§`, `/view/` и сырые id. В `details` с `source=robot` — фраза по-русски.
 
 `qty` вида `1/3` — исполнено/план сетки, не ошибка объёма.
 
@@ -165,6 +165,16 @@ Lead/lag, когда появится, **не** запрещает вход са
 
 Компонент: `trinity-app/.../static/js/trinity-decision-frame.js` → `TrinityDecisionFrame.create({ root })`.  
 Mount: trend-desk (range/BRM/positional), calendar-arb, investments — плашка видна только если API отдал `decisionFrame`.
+
+### Investments (`lane=invest`)
+
+- `playbookId`: `investments`, `timeframe`: `D1`.
+- Assembler: `InvestmentsDecisionFrameAssembler` (сигнал + режим IMOEX + fair-paper pending/open).
+- Desk: `GET /api/investments/desk?ticker=&refresh=` → `decisionFrame` (фокус), `decisionFrames` (вся вселенная за день), `operatorBrief`.
+- Журнал: тот же `DecisionFrameJournalService` (`playbookId=investments`) — **один кадр на каждый тикер скана**, не только фокус плашки.
+- `marketSnap`: range1/range2, entryLimit, target, stop, verdict, score.
+- `robot.mode`: `PLACE_LIMITS` \| `WORKING_ORDERS` \| `IN_TRADE` \| `NONE` (не bounce/retest Exclusive).
+- Источники details: стадии чеклиста → `robot` / `cluster` / `shelf` / `poc`; сводка и why — по-русски.
 
 | Состояние | Когда |
 |-----------|--------|

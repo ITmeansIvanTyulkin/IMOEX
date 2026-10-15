@@ -79,21 +79,30 @@
     }
     const row = (rows || []).find(function (r) { return r.ticker === ticker; });
     if (row && row.stages) renderPipeline(row.stages);
+    refreshDesk({ ticker: ticker, refresh: false }).catch(console.warn);
   }
 
   function renderPositions(fair) {
     const el = $("invest-positions");
     if (!el) return;
+    const positions = (fair && fair.openPositions) || [];
     const ladders = (fair && fair.openLadders) || [];
-    if (!ladders.length) {
-      el.innerHTML = "<div class=\"charts-dock-empty\">нет открытых лестниц</div>";
+    const bits = [];
+    positions.forEach(function (o) {
+      bits.push("<div class=\"invest-cand-row is-pos\"><span>" + o.ticker + "</span>"
+        + "<span class=\"cat\">" + (o.side || "LONG") + "</span>"
+        + "<span>@ " + (o.entryAvg != null ? Number(o.entryAvg).toFixed(2) : "—") + "</span></div>");
+    });
+    ladders.forEach(function (o) {
+      bits.push("<div class=\"invest-cand-row\"><span>" + o.ticker + "</span>"
+        + "<span class=\"cat\">лестница</span>"
+        + "<span>" + (o.sleevePct != null ? (o.sleevePct * 100).toFixed(1) + "%" : "—") + "</span></div>");
+    });
+    if (!bits.length) {
+      el.innerHTML = "<div class=\"charts-dock-empty\">нет открытых лестниц / позиций</div>";
       return;
     }
-    el.innerHTML = ladders.map(function (o) {
-      return "<div class=\"invest-cand-row\"><span>" + o.ticker + "</span>"
-        + "<span class=\"cat\">C" + o.category + "</span>"
-        + "<span>" + (o.sleevePct != null ? (o.sleevePct * 100).toFixed(1) + "%" : "—") + "</span></div>";
-    }).join("");
+    el.innerHTML = bits.join("");
   }
 
   function renderMetrics(journal) {
@@ -105,6 +114,37 @@
       + " · E=" + (m.expectancy != null ? Number(m.expectancy).toFixed(2) : "—")
       + " · RR=" + (m.avgRewardRisk != null ? Number(m.avgRewardRisk).toFixed(2) : "—")
       + " · DD=" + (m.maxDrawdownPct != null ? Number(m.maxDrawdownPct).toFixed(1) : "—") + "%";
+  }
+
+  function paintBrief(desk) {
+    const body = $("invest-desk-brief-body");
+    const action = $("invest-desk-brief-action");
+    const brief = desk && desk.operatorBrief;
+    const frame = desk && desk.decisionFrame;
+    const counts = (desk && desk.counts) || {};
+    const regime = brief && brief.regime
+      ? brief.regime
+      : (desk && desk.regime && desk.regime.regime) || "—";
+    if (body) {
+      const ticker = (brief && brief.ticker) || (desk && desk.focusTicker) || "—";
+      const verdict = (brief && brief.verdict) || "—";
+      const uni = desk && desk.universeSize != null
+        ? desk.universeSize
+        : ((desk && desk.watchlist && desk.watchlist.length) || "—");
+      body.innerHTML = "Режим: <strong>" + regime + "</strong>"
+        + " · вселенная <strong>" + uni + "</strong>"
+        + " · фокус кадра <strong>" + ticker + "</strong> (" + verdict + ")"
+        + " · invest " + (counts.invest || 0)
+        + " / watch " + (counts.watch || 0)
+        + " / skip " + (counts.skip || 0)
+        + (desk && desk.delivery ? " · " + desk.delivery : "");
+    }
+    if (action) {
+      const what = (brief && brief.whatToDo)
+        || (frame && frame.summary)
+        || "Ждите скан или выберите тикер.";
+      action.innerHTML = "<strong>Что делать:</strong> " + what;
+    }
   }
 
   function paintAuto(on) {
@@ -122,7 +162,7 @@
     const hint = $("invest-mode-hint");
     if (hint) {
       hint.textContent = on
-        ? "Авто: paper-лестницы по чек-листу."
+        ? "Авто: paper — лестницы, fill по D1, выход по цели/стопу."
         : "Наблюдение: скан без заявок.";
     }
   }
@@ -155,18 +195,22 @@
   let decisionFrameUi = null;
   let dfJournalUi = null;
   let investFactTimer = null;
+  let focusTickerName = null;
 
   function focusInvestDecisionFact(detail) {
     if (investFactTimer) {
       clearTimeout(investFactTimer);
       investFactTimer = null;
     }
-    document.querySelectorAll("#investments-desk .is-df-focus, #decision-frame.is-df-focus")
+    document.querySelectorAll("#investments-desk .is-df-focus, #decision-frame.is-df-focus, #invest-desk-brief.is-df-focus")
       .forEach(function (el) { el.classList.remove("is-df-focus"); });
     if (!detail) return;
     const df = document.getElementById("decision-frame");
     if (df) df.classList.add("is-df-focus");
-    const list = document.getElementById("invest-checklist") || document.getElementById("invest-cards");
+    const brief = document.getElementById("invest-desk-brief");
+    if (brief) brief.classList.add("is-df-focus");
+    const list = document.getElementById("invest-ops-strip")
+      || document.getElementById("invest-candidates");
     if (list) list.classList.add("is-df-focus");
     investFactTimer = setTimeout(function () {
       document.querySelectorAll(".is-df-focus").forEach(function (el) {
@@ -201,11 +245,21 @@
     if (dfJournalUi) dfJournalUi.paint(payload || null);
   }
 
-  async function refreshDesk() {
+  async function refreshDesk(opts) {
+    opts = opts || {};
     const statusEl = $("invest-counts");
-    if (statusEl) statusEl.textContent = "скан чек-листа…";
-    const desk = await api("/api/investments/desk");
+    if (statusEl) statusEl.textContent = opts.refresh ? "скан чек-листа…" : "обновление кадра…";
+    const q = [];
+    const ticker = opts.ticker != null ? opts.ticker : focusTickerName;
+    if (ticker) {
+      focusTickerName = ticker;
+      q.push("ticker=" + encodeURIComponent(ticker));
+    }
+    if (opts.refresh) q.push("refresh=true");
+    const url = "/api/investments/desk" + (q.length ? "?" + q.join("&") : "");
+    const desk = await api(url);
     window.__investDeskCache = desk;
+    paintBrief(desk);
     paintDecisionFrame(desk);
     paintDecisionFrameJournal(desk.decisionFrames);
     const counts = desk.counts || {};
@@ -242,6 +296,10 @@
       });
       const on = autoFrom(view);
       paintAuto(on != null ? on : next);
+      if (on) {
+        try { await api("/api/investments/fair-paper/tick", { method: "POST" }); } catch (_) {}
+      }
+      refreshDesk({ refresh: false }).catch(console.warn);
     } catch (e) {
       console.warn(e);
       hydrateAuto().catch(console.warn);
@@ -320,15 +378,22 @@
       }
     }
     const btn = $("invest-desk-refresh");
-    if (btn) btn.addEventListener("click", function () { refreshDesk().catch(console.warn); });
+    if (btn) {
+      btn.addEventListener("click", function () {
+        refreshDesk({ refresh: true }).catch(console.warn);
+      });
+    }
     if (window.__investDeskCache) {
       const desk = window.__investDeskCache;
+      paintBrief(desk);
+      paintDecisionFrame(desk);
+      paintDecisionFrameJournal(desk.decisionFrames);
       renderCandidates(desk.candidates || []);
       if (desk.pipelineSample) renderPipeline(desk.pipelineSample);
       renderMetrics(desk.journal);
     }
     hydrateAuto().catch(console.warn);
-    refreshDesk().catch(console.warn);
+    refreshDesk({ refresh: false }).catch(console.warn);
   }
 
   if (document.readyState === "loading") {

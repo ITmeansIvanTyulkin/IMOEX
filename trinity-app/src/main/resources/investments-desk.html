@@ -1,5 +1,5 @@
 <section class="charts-terminal investments-workspace" id="investments-charts-terminal" data-nav-strategy="invest">
-  <link rel="stylesheet" href="/css/operator.css?v=20261014-dfautokick">
+  <link rel="stylesheet" href="/css/operator.css?v=20261015-investdf">
   <div class="charts-terminal-head">
     <div>
       <p class="meta"><a href="/view/investments-strategy">Описание стратегии</a>
@@ -29,6 +29,11 @@
   </div>
   <div class="invest-ops-strip" id="invest-ops-strip" aria-label="Pipeline">
     <span class="meta">Pipeline…</span>
+  </div>
+  <div class="signal-brief is-density-brief invest-desk-brief" id="invest-desk-brief" data-density="brief" aria-live="polite">
+    <p class="signal-brief-title">Сейчас</p>
+    <div class="signal-brief-body" id="invest-desk-brief-body">Загрузка среза…</div>
+    <p class="signal-brief-action" id="invest-desk-brief-action"><strong>Что делать:</strong> —</p>
   </div>
   <div class="decision-frame is-idle is-density-brief" id="decision-frame" data-state="idle"
        data-density="brief" hidden data-df-mount="investments">
@@ -727,6 +732,6 @@ body.invest-chart-fs { overflow: hidden; }
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/trinity-decision-frame.js?v=20261015-dfru"></script>
+<script src="/js/trinity-decision-frame.js?v=20261015-investdf"></script>
 <script src="/js/investments-charts-terminal.js?v=20261006-invest7"></script>
-<script src="/js/investments-desk.js?v=20261014-dffocus"></script>
+<script src="/js/investments-desk.js?v=20261015-investdf2"></script>
