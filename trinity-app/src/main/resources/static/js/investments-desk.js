@@ -116,12 +116,51 @@
       + " · DD=" + (m.maxDrawdownPct != null ? Number(m.maxDrawdownPct).toFixed(1) : "—") + "%";
   }
 
+  function escHtml(t) {
+    return String(t == null ? "" : t)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function paintBriefHero(desk) {
+    const hero = $("invest-desk-brief-hero");
+    if (!hero) return;
+    const frame = desk && desk.decisionFrame;
+    if (!frame || !frame.summary) {
+      hero.hidden = true;
+      hero.innerHTML = "";
+      return;
+    }
+    const status = (window.TrinityDecisionFrame && TrinityDecisionFrame.effectiveStatus)
+      ? TrinityDecisionFrame.effectiveStatus(frame)
+      : String((frame.robot && frame.robot.status) || "");
+    const label = (window.TrinityDecisionFrame && TrinityDecisionFrame.statusRu)
+      ? TrinityDecisionFrame.statusRu(status, frame)
+      : (status || "—");
+    const heroText = (window.TrinityDecisionFrame && TrinityDecisionFrame.robotDetailText)
+      ? TrinityDecisionFrame.robotDetailText(frame)
+      : (frame.summary || "—");
+    const chips = (window.TrinityDecisionFrame && TrinityDecisionFrame.whyChips)
+      ? TrinityDecisionFrame.whyChips(frame, heroText)
+      : [];
+    const why = chips.map(function (c) { return c.text; }).filter(Boolean).slice(0, 2).join(" · ");
+    hero.innerHTML = "<span class=\"signal-brief-hero-status\" data-status=\""
+      + escHtml(status) + "\">" + escHtml(label) + "</span>"
+      + escHtml(heroText || "—")
+      + (why ? (" <span class=\"signal-brief-note\">· " + escHtml(why) + "</span>") : "");
+    hero.hidden = false;
+  }
+
   function paintBrief(desk) {
+    paintBriefHero(desk);
     const body = $("invest-desk-brief-body");
     const action = $("invest-desk-brief-action");
     const brief = desk && desk.operatorBrief;
     const frame = desk && desk.decisionFrame;
     const counts = (desk && desk.counts) || {};
+    const live = desk && desk.liveBridge;
     const regime = brief && brief.regime
       ? brief.regime
       : (desk && desk.regime && desk.regime.regime) || "—";
@@ -131,40 +170,71 @@
       const uni = desk && desk.universeSize != null
         ? desk.universeSize
         : ((desk && desk.watchlist && desk.watchlist.length) || "—");
-      body.innerHTML = "Режим: <strong>" + regime + "</strong>"
-        + " · вселенная <strong>" + uni + "</strong>"
-        + " · фокус кадра <strong>" + ticker + "</strong> (" + verdict + ")"
+      const delivery = (desk && desk.delivery)
+        || (live && live.channel)
+        || "";
+      body.innerHTML = "Режим: <strong>" + escHtml(regime) + "</strong>"
+        + " · вселенная <strong>" + escHtml(uni) + "</strong>"
+        + " · фокус кадра <strong>" + escHtml(ticker) + "</strong> (" + escHtml(verdict) + ")"
         + " · invest " + (counts.invest || 0)
         + " / watch " + (counts.watch || 0)
         + " / skip " + (counts.skip || 0)
-        + (desk && desk.delivery ? " · " + desk.delivery : "");
+        + (delivery ? " · " + escHtml(delivery) : "")
+        + (live && live.brokerStatus
+          ? " · брокер: " + escHtml(live.brokerStatus)
+          : "");
     }
     if (action) {
       const what = (brief && brief.whatToDo)
         || (frame && frame.summary)
         || "Ждите скан или выберите тикер.";
-      action.innerHTML = "<strong>Что делать:</strong> " + what;
+      action.innerHTML = "<strong>Что делать:</strong> " + escHtml(what);
+    }
+  }
+
+  let modeState = { auto: false, live: false };
+
+  function paintMode(auto, live) {
+    modeState.auto = !!auto;
+    modeState.live = !!live;
+    const tog = $("invest-auto-execution");
+    if (tog) {
+      tog.checked = !!auto;
+      tog.setAttribute("aria-checked", auto ? "true" : "false");
+      tog.disabled = false;
+      tog.dataset.hydrated = "1";
+      const sw = tog.closest(".mode-switch");
+      if (sw) {
+        sw.classList.toggle("is-auto", !!auto);
+        sw.classList.toggle("is-signal", !auto);
+      }
+    }
+    const liveTog = $("invest-live-execution");
+    if (liveTog) {
+      liveTog.checked = !!live;
+      liveTog.setAttribute("aria-checked", live ? "true" : "false");
+      liveTog.disabled = false;
+      liveTog.dataset.hydrated = "1";
+      const sw = liveTog.closest(".mode-switch");
+      if (sw) {
+        sw.classList.toggle("is-auto", !!live);
+        sw.classList.toggle("is-signal", !live);
+      }
+    }
+    const hint = $("invest-mode-hint");
+    if (hint) {
+      if (!auto) {
+        hint.textContent = "Наблюдение: скан без заявок.";
+      } else if (live) {
+        hint.textContent = "Авто · Live: мост → T-Invest (или LIVE_GATED в журнал). Paper новых лестниц нет.";
+      } else {
+        hint.textContent = "Авто · Paper: лестницы, fill по D1, выход по цели/стопу.";
+      }
     }
   }
 
   function paintAuto(on) {
-    const tog = $("invest-auto-execution");
-    if (!tog) return;
-    tog.checked = !!on;
-    tog.setAttribute("aria-checked", on ? "true" : "false");
-    tog.disabled = false;
-    tog.dataset.hydrated = "1";
-    const sw = tog.closest(".mode-switch");
-    if (sw) {
-      sw.classList.toggle("is-auto", !!on);
-      sw.classList.toggle("is-signal", !on);
-    }
-    const hint = $("invest-mode-hint");
-    if (hint) {
-      hint.textContent = on
-        ? "Авто: paper — лестницы, fill по D1, выход по цели/стопу."
-        : "Наблюдение: скан без заявок.";
-    }
+    paintMode(on, modeState.live);
   }
 
   function autoFrom(obj) {
@@ -175,11 +245,20 @@
     return null;
   }
 
+  function liveFrom(obj) {
+    if (!obj) return null;
+    if (obj.liveExecution === true || obj.liveExecution === false) return !!obj.liveExecution;
+    const set = obj.settings;
+    if (set && (set.liveExecution === true || set.liveExecution === false)) return !!set.liveExecution;
+    return null;
+  }
+
   async function hydrateAuto() {
     try {
       const view = await api("/api/investments/settings");
       const on = autoFrom(view);
-      if (on != null) paintAuto(on);
+      const live = liveFrom(view);
+      paintMode(on != null ? on : false, live != null ? live : false);
     } catch (e) {
       console.warn(e);
       const tog = $("invest-auto-execution");
@@ -287,7 +366,7 @@
   }
 
   async function commitAuto(next) {
-    paintAuto(next);
+    paintMode(next, modeState.live);
     try {
       const view = await api("/api/investments/settings/auto-execution", {
         method: "POST",
@@ -295,7 +374,29 @@
         body: JSON.stringify({ enabled: !!next })
       });
       const on = autoFrom(view);
-      paintAuto(on != null ? on : next);
+      const live = liveFrom(view);
+      paintMode(on != null ? on : next, live != null ? live : modeState.live);
+      if (on) {
+        try { await api("/api/investments/fair-paper/tick", { method: "POST" }); } catch (_) {}
+      }
+      refreshDesk({ refresh: false }).catch(console.warn);
+    } catch (e) {
+      console.warn(e);
+      hydrateAuto().catch(console.warn);
+    }
+  }
+
+  async function commitLive(next) {
+    paintMode(modeState.auto, next);
+    try {
+      const view = await api("/api/investments/settings/live-execution", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !!next })
+      });
+      const on = autoFrom(view);
+      const live = liveFrom(view);
+      paintMode(on != null ? on : modeState.auto, live != null ? live : next);
       if (on) {
         try { await api("/api/investments/fair-paper/tick", { method: "POST" }); } catch (_) {}
       }
@@ -374,6 +475,22 @@
       } else {
         auto.addEventListener("change", function () {
           commitAuto(!!auto.checked);
+        });
+      }
+    }
+    const live = $("invest-live-execution");
+    if (live) {
+      live.disabled = false;
+      live.dataset.hydrated = "1";
+      const wrap = live.closest(".mode-switch");
+      if (wrap) {
+        wrap.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          commitLive(!live.checked);
+        });
+      } else {
+        live.addEventListener("change", function () {
+          commitLive(!!live.checked);
         });
       }
     }

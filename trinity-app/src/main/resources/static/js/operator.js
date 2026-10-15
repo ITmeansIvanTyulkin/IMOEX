@@ -2435,13 +2435,23 @@
     const title = $("invest-delivery-title");
     const hint = $("invest-delivery-hint");
     const status = $("invest-delivery-status");
-    if (title) title.textContent = auto ? "Авто · paper на пульте" : "Наблюдение";
+    if (title) {
+      title.textContent = auto
+        ? (view.liveExecution ? "Авто · Live (мост)" : "Авто · paper на пульте")
+        : "Наблюдение";
+    }
     if (hint) {
       hint.textContent = auto
-        ? "Fair-paper лестницы по чек-листу на /view/investments. Live equity — отдельный флаг."
+        ? (view.liveExecution
+          ? "Авто+live: лестницы в журнал и на T-Invest, если брокер armed. Paper новых входов нет."
+          : "Fair-paper лестницы по чек-листу на /view/investments. Live — тумблер на пульте.")
         : "Скан и графики на пульте без заявок. Включите Авто для paper-исполнения.";
     }
-    if (status) status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
+    if (status) {
+      status.textContent = auto
+        ? (view.liveExecution ? "Режим: авто · live" : "Режим: авто · paper")
+        : "Режим: наблюдение";
+    }
     const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
     if (card) card.classList.toggle("is-auto", auto);
   }

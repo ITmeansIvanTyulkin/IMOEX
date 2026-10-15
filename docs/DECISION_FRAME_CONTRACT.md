@@ -40,6 +40,13 @@ Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/l
 | `frameId` | `{instrument}\|{playbookId}\|{barTime}\|{trigger}\|{seq}` |
 | `asOf` / `barTime` | локальное время MSK, без суффикса зоны в строке (как бары деска) |
 | `lane` | `range` \| `brm` \| `positional` \| `invest`. На деске виден только свой lane |
+
+API журнала (единый уровень по стратегиям):
+
+| Стратегия | query / export |
+|-----------|----------------|
+| trend | `GET /api/trend/decision-frames` · `/export` |
+| investments | `GET /api/investments/decision-frames` · `/export` (`playbook` default `investments`) |
 | `trigger` | см. ниже |
 | `summary` | 2–4 предложения, читается за ~5 секунд |
 | `robot` | статус решения + внутренние id пунктов чеклиста |

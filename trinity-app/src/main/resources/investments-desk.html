@@ -15,6 +15,13 @@
           <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
           <span class="mode-switch-label">Авто</span>
         </label>
+        <label class="mode-switch is-signal invest-live-switch" id="invest-live-wrap"
+               title="Live: вместо paper — журнал + лимитки на T-Invest, если брокер armed.">
+          <span class="mode-switch-label">Paper</span>
+          <input type="checkbox" id="invest-live-execution" role="switch" aria-checked="false">
+          <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+          <span class="mode-switch-label">Live</span>
+        </label>
         <p class="strategy-mode-hint" id="invest-mode-hint">Загрузка режима…</p>
       </div>
       <button type="button" class="btn btn-ghost signal-guide-btn" id="invest-guide-open"
@@ -32,6 +39,7 @@
   </div>
   <div class="signal-brief is-density-brief invest-desk-brief" id="invest-desk-brief" data-density="brief" aria-live="polite">
     <p class="signal-brief-title">Сейчас</p>
+    <p class="signal-brief-hero" id="invest-desk-brief-hero" hidden></p>
     <div class="signal-brief-body" id="invest-desk-brief-body">Загрузка среза…</div>
     <p class="signal-brief-action" id="invest-desk-brief-action"><strong>Что делать:</strong> —</p>
   </div>
@@ -68,6 +76,8 @@
         <button type="button" class="signal-df-kind" data-df-kind="wait">ждёт</button>
         <button type="button" class="signal-df-kind" data-df-kind="enter">вошёл</button>
         <button type="button" class="signal-df-kind" data-df-kind="skip">пропуск</button>
+        <a class="signal-df-kind" id="invest-df-export" href="/api/investments/decision-frames/export"
+           title="JSON export кадров investments за сегодня">export</a>
       </div>
     </div>
     <p class="signal-df-day-summary" id="signal-df-day-summary" hidden></p>
@@ -706,7 +716,9 @@ body.invest-chart-fs { overflow: hidden; }
         <h4>Наблюдение и авто</h4>
         <ul class="signal-guide-list">
           <li><strong>Наблюдение</strong> — скан и графики без заявок. Список слева всё равно полный.</li>
-          <li><strong>Авто</strong> — те же решения, плюс paper-лестницы и журнал метрик.</li>
+          <li><strong>Авто · Paper</strong> — fair-paper лестницы (place → fill → exit) и statement.</li>
+          <li><strong>Авто · Live</strong> — paper не ставит новые; мост пишет журнал и шлёт
+            лимитки в T-Invest, если брокер armed (иначе канал <code>LIVE_GATED</code>).</li>
           <li>Тумблер тот же, что в
             <a href="/view/settings#investments-playbook-settings">Настройках · инвестиции</a>.</li>
           <li>Live-заявки брокера — отдельный флаг, по умолчанию выкл.</li>
@@ -732,6 +744,6 @@ body.invest-chart-fs { overflow: hidden; }
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/trinity-decision-frame.js?v=20261015-investdf"></script>
+<script src="/js/trinity-decision-frame.js?v=20261015-investlive"></script>
 <script src="/js/investments-charts-terminal.js?v=20261006-invest7"></script>
-<script src="/js/investments-desk.js?v=20261015-investdf2"></script>
+<script src="/js/investments-desk.js?v=20261015-investlive"></script>
