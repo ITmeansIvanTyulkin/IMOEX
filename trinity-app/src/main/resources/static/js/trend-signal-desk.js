@@ -3054,23 +3054,27 @@
       return "Нужен явный тренд на часе и минимум три полки объёма. Пока этого нет — сетапа нет.";
     }
     const exclusiveDesk = deskScope() !== "positional";
-    if (exclusiveDesk && (u.indexOf("TOP+BOT") >= 0 || u.indexOf("IN PLAY") >= 0)) {
-      if (u.indexOf("TREND_HI") >= 0 || (u.indexOf("FOCUS") >= 0 && u.indexOf("TOP") >= 0) || u.indexOf("TREND_HI") >= 0) {
+    if (exclusiveDesk && (u.indexOf("TOP+BOT") >= 0 || u.indexOf("IN PLAY") >= 0 || u.indexOf("MONITOR") >= 0)) {
+      // Do not match the word TOP inside "TOP+BOT" — role is after nearest/focus.
+      const nearestRole = (u.match(/(?:NEAREST|FOCUS)\s+(TREND_HI|TREND_LO|TOP|BOT)\b/) || [])[1] || "";
+      const nearTop = nearestRole === "TREND_HI" || nearestRole === "TOP";
+      const nearBot = nearestRole === "TREND_LO" || nearestRole === "BOT";
+      if (nearTop) {
         if (u.indexOf("MID-ZONE") >= 0 || u.indexOf("NO BOUNCE") >= 0) {
-          return "Робот смотрит обе полки дня. Сейчас цена у верхней — ждём закрытый отбой, не вход с касания.";
+          return "Мониторим обе полки дня (TOP и BOT). Сейчас цена у верхней — ждём закрытый отбой, не вход с касания.";
         }
         if (u.indexOf("PRICE BELOW TOP") >= 0 || u.indexOf("WAITING RETURN") >= 0) {
-          return "Робот смотрит обе полки. Цена под верхней зоной — продажа только если вернётся и отобьётся закрытой свечой.";
+          return "Мониторим обе полки. Ближе верхняя: цена под TOP — продажа только если вернётся и отобьётся закрытой свечой.";
         }
-        return "Робот смотрит обе полки дня, сейчас внимание на верхней.";
+        return "Мониторим обе полки дня (TOP и BOT). Ближе к цене сейчас верхняя.";
       }
-      if (u.indexOf("TREND_LO") >= 0 || u.indexOf("BOT") >= 0) {
+      if (nearBot) {
         if (u.indexOf("PRICE ABOVE BOT") >= 0 || u.indexOf("WAITING RETURN") >= 0) {
-          return "Робот смотрит обе полки. Цена над нижней зоной — покупка только если вернётся и отобьётся закрытой свечой.";
+          return "Мониторим обе полки. Ближе нижняя: цена над BOT — покупка только если вернётся и отобьётся закрытой свечой.";
         }
-        return "Робот смотрит обе полки дня, сейчас внимание на нижней.";
+        return "Мониторим обе полки дня (TOP и BOT). Ближе к цене сейчас нижняя.";
       }
-      return "Робот смотрит обе полки дня — верхнюю и нижнюю.";
+      return "Мониторим обе полки дня — верхнюю и нижнюю; вход только от ближайшей с подтверждением.";
     }
     if (exclusiveDesk && u.indexOf("HTF UP") >= 0 && (u.indexOf("ШОРТ") >= 0 || u.indexOf("ВЫНОСА ИЗ ЗОНЫ") >= 0)) {
       return "Час смотрит вверх — продавать от верха можно только после сильного отбоя: свеча закрылась обратно ниже зоны.";
