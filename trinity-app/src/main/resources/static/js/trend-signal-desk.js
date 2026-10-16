@@ -5360,7 +5360,7 @@
       if (q1 < 0) q1 = 0;
       if (q1 > 0) open.qty = qty - q1;
       open.tp1Done = true;
-      // GAP_FILL keeps structural SL after TP1 (server manage); Exclusive → BE
+      // GAP_FILL: leave SL to server (structural, then H1 candle-trail). Exclusive → BE here.
       const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
       if (!gapFill && Number(open.avg) > 0) open.sl = Number(open.avg);
       liveTp1Until = Date.now() + 60000;
@@ -6192,8 +6192,12 @@
       bits.push(open.tp2Done ? "TP2 ядро 75%" : "TP1 снят");
       if (open.sl != null) {
         const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
+        const trailed = !!open.candleTrail;
         const nearBe = Number(open.avg) > 0 && Math.abs(Number(open.sl) - Number(open.avg)) < 1e-6;
-        bits.push((gapFill && !nearBe ? "SL " : "SL в БУ/trail ") + fmtStatusPx(open.sl));
+        const slLabel = trailed
+          ? "SL trail "
+          : (gapFill && !nearBe ? "SL " : "SL в БУ/trail ");
+        bits.push(slLabel + fmtStatusPx(open.sl));
       }
       if (!open.tp2Done && open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
       else if (hasTp3 && open.tp3 != null) bits.push("TP3 хвост " + fmtStatusPx(open.tp3));
