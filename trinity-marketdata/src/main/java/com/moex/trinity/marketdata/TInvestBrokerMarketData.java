@@ -344,6 +344,63 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         return List.copyOf(withGo);
     }
 
+    /**
+     * Shortest unexpired futures ticker that matches {@code tickerTest}.
+     * Calendar spreads are longer than a single month, so the shortest hit is the pair itself.
+     */
+    public Optional<BrokerListedFuture> findUnexpiredTicker(java.util.function.Predicate<String> tickerTest) {
+        if (tickerTest == null) {
+            return Optional.empty();
+        }
+        Instant now = Instant.now();
+        List<Future> all;
+        try {
+            all = listedFutures();
+        } catch (Exception ex) {
+            log.warn("findUnexpiredTicker failed: {}", ex.toString());
+            return Optional.empty();
+        }
+        BrokerListedFuture best = null;
+        for (Future f : all) {
+            String ticker = f.getTicker();
+            if (ticker == null || !tickerTest.test(ticker)) {
+                continue;
+            }
+            Instant last = f.hasLastTradeDate()
+                    ? Instant.ofEpochSecond(f.getLastTradeDate().getSeconds(), f.getLastTradeDate().getNanos())
+                    : (f.hasExpirationDate()
+                    ? Instant.ofEpochSecond(f.getExpirationDate().getSeconds(), f.getExpirationDate().getNanos())
+                    : null);
+            if (last == null || !listedOnMskDate(last, now)) {
+                continue;
+            }
+            if (best != null && ticker.length() >= best.ticker().length()) {
+                continue;
+            }
+            Instant exp = f.hasExpirationDate()
+                    ? Instant.ofEpochSecond(f.getExpirationDate().getSeconds(), f.getExpirationDate().getNanos())
+                    : last;
+            best = new BrokerListedFuture(
+                    ticker,
+                    f.getFigi(),
+                    LocalDate.ofInstant(last, MSK),
+                    exp == null ? null : LocalDate.ofInstant(exp, MSK),
+                    quotationToDouble(f.getMinPriceIncrement()),
+                    quotationToDouble(f.getBasicAssetSize()),
+                    0,
+                    0
+            );
+        }
+        if (best == null) {
+            return Optional.empty();
+        }
+        CachedMargin go = futuresMargin(best.figi());
+        return Optional.of(new BrokerListedFuture(
+                best.ticker(), best.figi(), best.lastTradeDate(), best.expirationDate(),
+                best.minPriceIncrement(), best.basicAssetSize(),
+                go.initialMarginRub(), go.minPriceIncrementAmount()));
+    }
+
     /** Near + next month of the family (calendar spread legs). */
     public Optional<CalendarPair> resolveCalendarPair(String familyOrSecid) {
         List<BrokerListedFuture> months = listFamilyMonths(familyOrSecid);

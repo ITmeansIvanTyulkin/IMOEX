@@ -3,7 +3,7 @@
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
       <h2>Календарный арбитраж</h2>
-      <p class="meta" id="arb-desk-meta">Котировки брокера · два или три месяца · сделки только в режиме «Авто»</p>
+      <p class="meta" id="arb-desk-meta">Котировки брокера · копим DOM ног и CS · сделки только в режиме «Авто»</p>
     </div>
     <div class="signal-desk-actions">
       <button type="button" class="btn btn-ghost" id="arb-desk-refresh">Обновить</button>
@@ -93,8 +93,9 @@
   <div class="arb-cards" id="arb-cards"></div>
   <div class="signal-paper-panel" id="arb-paper-panel" hidden>
     <p class="signal-brief-title">Сделки сегодня</p>
+    <p class="meta" id="arb-paper-books"></p>
     <table class="signal-paper-table">
-      <thead><tr><th>Дата</th><th>Пара</th><th>Side</th><th>Вход</th><th>Выход</th><th>PnL</th></tr></thead>
+      <thead><tr><th>Дата</th><th>Книга</th><th>Пара</th><th>Side</th><th>Вход</th><th>Выход</th><th>PnL</th></tr></thead>
       <tbody id="arb-paper-body"></tbody>
     </table>
   </div>
@@ -185,7 +186,7 @@
       <div>
         <p class="signal-guide-kicker">TRINITY · Календарный арбитраж</p>
         <h3 id="arb-guide-title">Как торгует робот</h3>
-        <p class="signal-guide-lead">Простыми словами: не ставка на рост нефти или курса. Разница двух месяцев одного товара уехала — покупаем дешёвую ногу, продаём дорогую, ждём возврата.</p>
+        <p class="signal-guide-lead">Сейчас робот в режиме исследования: копим стакан ног и календарный спред (CS). Fade «к средней» на 2025–2026 дал минус — пороги z не крутим.</p>
       </div>
       <button type="button" class="signal-guide-close" id="arb-guide-close"
               data-arb-guide-close aria-label="Закрыть">×</button>
@@ -211,13 +212,13 @@
           Цена «нефти вообще» — одно, а <strong>разница между месяцами</strong> — другое.
         </p>
         <p>
-          Робот не угадывает, пойдёт ли товар вверх. Он смотрит календарный спред:
-          если разница резко уехала от привычной и кривая спокойная — покупает «дешёвую» ногу,
-          продаёт «дорогую», ждёт возврата и закрывает обе вместе.
+          Раньше ставка была на возврат разницы месяцев к средней. На полном прогоне 2025 и 2026
+          это не окупило круг. Сейчас авто копирует <strong>DOM ближнего, дальнего и CS</strong>
+          в архив — без стакана нельзя честно считать ролл и исполнение.
         </p>
         <p class="signal-guide-note">
-          Бабочка из трёх месяцев — та же идея: перекос «крыльев» относительно середины.
-          Одна нога без второй — уже ставка на товар; так робот не держит.
+          Кадр «Почему так» говорит, что делает робот, почему молчит и сколько строк DOM уже есть сегодня.
+          Одна нога без второй — ставка на товар; так робот не держит.
         </p>
       </article>
 
@@ -350,4 +351,4 @@
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
 <script src="/js/trinity-decision-frame.js?v=20261015-dfru"></script>
-<script src="/js/calendar-arb-desk.js?v=20261014-dffocus"></script>
+<script src="/js/calendar-arb-desk.js?v=20261019-domcs"></script>

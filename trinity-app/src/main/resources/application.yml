@@ -420,8 +420,13 @@ imoex:
       enabled: true
       auto-execution: true          # fair-paper fills on T-Invest H1 close
       live-execution: true          # две ноги FORTS market у T-Invest (нужен broker armed + без kill-switch)
-      families: BR,SI,RI,GD,NG
-      default-family: BR
+      dom-collect: true             # автоподписка near/next/CS → data/broker-tape/dom-*.jsonl
+      dom-collect-ms: 60000
+      dom-collect-initial-ms: 15000
+      families: NG,GD,SI,RI,BR
+      default-family: GD
+      fv-gate: true              # @CalendarFv — false возвращает сырой z-fade
+      fv-cost-k: 1.5             # |спред−медиана| должен покрыть круг × k, z в ту же сторону
       fly-enabled: true              # 1:-2:1 near/mid/far рядом с calendar
       ng-seasonality: true           # NG: не фадить зимнюю премию / летний дисконт
       dv01-hedge: true               # лоты по basicAssetSize брокера (обычно 1:1)

@@ -278,8 +278,8 @@
     const hint = $("arb-mode-hint");
     if (hint) {
       hint.textContent = shown
-        ? "Авто: робот сам открывает и закрывает по правилам."
-        : "Ручная торговля: график без сделок.";
+        ? "Авто: paper/live по правилам + копим DOM ног и CS в broker-tape."
+        : "Ручная торговля: график без сделок. DOM всё равно копится, если сервис включён.";
     }
   }
 
@@ -340,11 +340,21 @@
 
   function robotLine(data) {
     const fp = (data && data.fairPaper) || {};
-    if (fp.open) {
-      return "В сделке " + (fp.open.pair || "");
+    const brief = (data && data.operatorBrief) || {};
+    const mode = String(brief.mode || "");
+    if (fp.open || mode === "IN_TRADE") {
+      return "В сделке " + (fp.open && fp.open.pair ? fp.open.pair : "");
     }
     if (autoOn(data) === false) {
       return "Наблюдение";
+    }
+    if (mode === "ARM_CS") {
+      return "Готовит вход · CS";
+    }
+    if (mode === "COLLECT" || mode === "SKIP" || mode === "NONE") {
+      const d = ((data.selected || {}).domArchive) || {};
+      const cs = d.csLinesToday == null ? "" : (" · CS " + d.csLinesToday);
+      return "Копит DOM " + (d.nearLinesToday || 0) + "/" + (d.nextLinesToday || 0) + cs;
     }
     const act = fp.lastAction || "";
     const live = fp.liveArmed ? "живые заявки" : "журнал";
@@ -352,7 +362,7 @@
       return "Не торгует · " + skipActionRu(act);
     }
     if (act === "NONE" || act === "") {
-      return "Ждёт перекос · " + live;
+      return "Копит DOM · " + live;
     }
     return skipActionRu(act) || (act + " · " + live);
   }
@@ -525,10 +535,12 @@
     }
     if ($("arb-dom-arch")) {
       const d = sel.domArchive || {};
+      const cs = d.csTicker
+        ? (" · " + d.csTicker + " " + (d.csLinesToday || 0))
+        : (d.csLinesToday ? (" · CS " + d.csLinesToday) : "");
       $("arb-dom-arch").textContent = warming ? "…"
-        : (d.ok
-          ? ("сегодня " + (d.nearLinesToday || 0) + "/" + (d.nextLinesToday || 0))
-          : ("копится " + (d.nearLinesToday || 0) + "/" + (d.nextLinesToday || 0)));
+        : ((d.ok ? "сегодня " : "копится ")
+          + (d.nearLinesToday || 0) + "/" + (d.nextLinesToday || 0) + cs);
     }
     if ($("arb-book")) {
       const b = sel.book || {};
@@ -856,9 +868,20 @@
     });
   }
 
+  function bookLine(st) {
+    const books = (st && st.books) || [];
+    if (!books.length) return "";
+    return books.map(function (b) {
+      const pnl = b.realizedPnlRub == null ? 0 : Math.round(b.realizedPnlRub);
+      return (b.book || "") + " " + (b.closedCount || 0) + " · " + pnl + " ₽";
+    }).join("    ");
+  }
+
   function fillPaper(paper) {
     const st = paper.statement || {};
     $("arb-paper-today").textContent = st.todayPnlRub == null ? "—" : (Math.round(st.todayPnlRub) + " ₽");
+    const books = $("arb-paper-books");
+    if (books) books.textContent = bookLine(st);
     const rows = paper.todayTrades || [];
     const panel = $("arb-paper-panel");
     const body = $("arb-paper-body");
@@ -870,7 +893,8 @@
     body.innerHTML = rows.map(function (t) {
       const pnl = t.pnlRub == null ? 0 : t.pnlRub;
       const cls = pnl > 0 ? "is-buy" : (pnl < 0 ? "is-sell" : "");
-      return "<tr><td>" + (t.closedAt || "") + "</td><td>" + (t.pair || "") + "</td><td>" +
+      const book = (t.tag && String(t.tag).indexOf("LIVE") === 0) ? "LIVE" : "PAPER";
+      return "<tr><td>" + (t.closedAt || "") + "</td><td>" + book + "</td><td>" + (t.pair || "") + "</td><td>" +
         (t.side || "") + "</td><td>" + fmt(t.entryPrice, 3) + "</td><td>" + fmt(t.exitPrice, 3) +
         "</td><td class=\"" + cls + "\">" + (pnl > 0 ? "+" : "") + Math.round(pnl) + " ₽</td></tr>";
     }).join("");

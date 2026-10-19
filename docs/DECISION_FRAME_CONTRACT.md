@@ -39,7 +39,7 @@ Exclusive / BR: слои **1–4** + DF-5 ribbon. Positional: 1+2+4 (sync lead/l
 |------|--------|
 | `frameId` | `{instrument}\|{playbookId}\|{barTime}\|{trigger}\|{seq}` |
 | `asOf` / `barTime` | локальное время MSK, без суффикса зоны в строке (как бары деска) |
-| `lane` | `range` \| `brm` \| `positional` \| `invest`. На деске виден только свой lane |
+| `lane` | `range` \| `brm` \| `positional` \| `invest` \| `calendar`. На деске виден только свой lane |
 
 API журнала (единый уровень по стратегиям):
 
@@ -190,6 +190,15 @@ Mount: trend-desk (range/BRM/positional), calendar-arb, investments — плаш
 | `stale` | ошибка/таймаут desk или нет кадра / давно без обновления |
 
 Поведение: клик ↔ факты live; под chart; при наличии кадра блок «Сейчас на рынке» сжимается до короткого companion (без дубля why). Тултип свечи = микро-why.
+
+### Calendar arb (`lane=calendar`)
+
+- `playbookId`: `calendar-arb`, `timeframe`: `H1`.
+- Assembler: `CalendarArbDecisionFrameAssembler` (что делает / почему / DOM collect + FV/z + paper/live).
+- Desk: `GET /api/calendar-arb/desk` → `decisionFrame` (фокус), `decisionFrames` (семьи за день), `operatorBrief` (`summary`, `status`, `mode`, `why`, `doNext`, `dom`), `domCollect`.
+- Журнал: тот же `DecisionFrameJournalService`. Книги сделок в `paper.statement.books`: `SANDBOX_FAIR` и `LIVE`.
+- `robot.mode`: `ARM_CS` \| `IN_TRADE` \| `COLLECT` \| `SKIP` \| `NONE`.
+- Автосбор стакана: `CalendarArbDomCollectService` → `data/broker-tape/dom-*.jsonl` (near/next/CS), без ордеров.
 
 ## DF-3 — Журнал кадров
 
