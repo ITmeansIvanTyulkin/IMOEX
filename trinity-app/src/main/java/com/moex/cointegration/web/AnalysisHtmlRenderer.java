@@ -32,6 +32,7 @@ import org.springframework.stereotype.Component;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -2843,9 +2844,9 @@ public class AnalysisHtmlRenderer {
             trendSt = svc.statement();
             trendTrades = svc.allTradeDtos();
         }
+        // Top-level statement mirrors paper book (SANDBOX_FAIR) — not research/live pile.
         double trendRealized = num(trendSt.get("realizedPnlRub"));
         double trendToday = num(trendSt.get("todayPnlRub"));
-        int trendClosed = (int) num(trendSt.get("closedCount"));
 
         Map<String, Object> arbSt = Map.of();
         List<Map<String, Object>> arbTrades = List.of();
@@ -2855,8 +2856,6 @@ public class AnalysisHtmlRenderer {
             arbTrades = svc.allTradeDtos();
         }
         double arbRealized = num(arbSt.get("realizedPnlRub"));
-        double arbToday = num(arbSt.get("todayPnlRub"));
-        int arbClosed = (int) num(arbSt.get("closedCount"));
 
         Map<String, Object> investSt = Map.of();
         List<Map<String, Object>> investTrades = List.of();
@@ -2866,8 +2865,6 @@ public class AnalysisHtmlRenderer {
             investTrades = svc.allTradeDtos();
         }
         double investRealized = num(investSt.get("realizedPnlRub"));
-        double investToday = num(investSt.get("todayPnlRub"));
-        int investClosed = (int) num(investSt.get("closedCount"));
 
         double equity = capitalProperties.equityRub() != null ? capitalProperties.equityRub() : 0;
         double depositNet = (strategyPairsEnabled ? pairsRealized + pairsUnrealized : 0)
@@ -2883,8 +2880,8 @@ public class AnalysisHtmlRenderer {
                       <div>
                         <p class="settings-eyebrow">Statement</p>
                         <h2>Депозит и стратегии</h2>
-                        <p class="meta">Общий срез paper / research PnL по купленным стратегиям.
-                          На Trend desk над графиком — только сделки за сегодня.</p>
+                        <p class="meta">Бумажная и боевая книги раздельно. Net* — по бумажной книге.
+                          На Trend desk над графиком — сделки за сегодня.</p>
                       </div>
                       <button type="button" class="btn btn-primary" id="statement-export-pdf"
                               title="Сохранить шапку и statement в PDF-файл">Сохранить PDF</button>
@@ -2893,51 +2890,53 @@ public class AnalysisHtmlRenderer {
                 """);
 
         body.append("<section class=\"statement-section\" id=\"deposit\">");
-        body.append("<h3>Депозит (общий)</h3>");
+        body.append("<h3>Депозит (paper)</h3>");
         body.append("<div class=\"cards\">");
         body.append(card("Equity", String.format(Locale.ROOT, "%,.0f ₽", equity).replace(',', ' '), false));
         if (productEdition.hasTrend()) {
-            body.append(card("Trend realized", String.format("%.0f", trendRealized), trendRealized >= 0));
+            body.append(card("Trend paper", String.format("%.0f", trendRealized), trendRealized >= 0));
             body.append(card("Trend сегодня", String.format("%.0f", trendToday), trendToday >= 0));
         } else {
             body.append(card("Trend", "locked", false));
         }
         if (productEdition.hasArb()) {
-            body.append(card("Arb realized", String.format("%.0f", arbRealized), arbRealized >= 0));
+            body.append(card("Arb paper", String.format("%.0f", arbRealized), arbRealized >= 0));
         } else {
             body.append(card("Arb", "locked", false));
         }
         if (investmentsPaperJournal.isPresent()) {
-            body.append(card("Invest realized", String.format("%.0f", investRealized), investRealized >= 0));
+            body.append(card("Invest paper", String.format("%.0f", investRealized), investRealized >= 0));
         }
-        body.append(card("Net* (доступное)", String.format("%.0f", depositNet), depositNet >= 0));
+        body.append(card("Net* (paper)", String.format("%.0f", depositNet), depositNet >= 0));
         body.append("</div></section>");
 
         // Trend
         body.append("<section class=\"statement-section\" id=\"trend\">");
-        body.append("<h3>Тренд · BR</h3>");
+        body.append("<h3>Тренд · BR · Exclusive / Positional</h3>");
         if (!productEdition.hasTrend()) {
             body.append(statementLockedBlock("TREND"));
         } else {
-            body.append("<div class=\"cards\">");
-            body.append(card("Closed", String.valueOf(trendClosed), false));
-            body.append(card("Wins/Losses",
-                    (int) num(trendSt.get("wins")) + "/" + (int) num(trendSt.get("losses")), false));
-            body.append(card("Realized ₽*", String.format("%.0f", trendRealized), trendRealized >= 0));
-            body.append(card("Сегодня ₽*", String.format("%.0f", trendToday), trendToday >= 0));
-            body.append(card("Instrument", String.valueOf(trendSt.getOrDefault("instrument", "BR")), false));
-            Object note = trendSt.get("note");
-            body.append("</div>");
-            if (note != null && !String.valueOf(note).isBlank()) {
-                body.append("<p class=\"meta\">").append(escape(String.valueOf(note))).append("</p>");
+            body.append(renderPaperLiveBookPanels(trendSt));
+            body.append("<p class=\"meta\"><a href=\"/view/trend-signal\">Открыть desk →</a></p>");
+            List<Map<String, Object>> trendPaper = filterTradesByStatementBook(trendTrades, "paper");
+            List<Map<String, Object>> trendLive = filterTradesByStatementBook(trendTrades, "live");
+            List<Map<String, Object>> trendRuns = filterTradesByStatementBook(trendTrades, "research");
+            Map<String, Object> trendResearchBook = nestedBook(trendSt, "research");
+            if (!trendResearchBook.isEmpty() || !trendRuns.isEmpty()) {
+                body.append("<div class=\"statement-book statement-book--runs\">");
+                body.append("<h4 class=\"statement-book-title\">Бумажные прогоны</h4>");
+                body.append("<div class=\"cards cards--compact\">");
+                body.append(card("Closed", String.valueOf((int) num(trendResearchBook.get("closedCount"))), false));
+                body.append(card("W/L",
+                        (int) num(trendResearchBook.get("wins")) + "/" + (int) num(trendResearchBook.get("losses")),
+                        false));
+                double runPnl = num(trendResearchBook.get("realizedPnlRub"));
+                body.append(card("Realized ₽*", String.format(Locale.ROOT, "%.0f", runPnl), runPnl >= 0));
+                body.append("</div></div>");
             }
-            body.append("<p class=\"meta\"><a href=\"/view/trend-signal\">Открыть desk →</a> ")
-                    .append("(над графиком только сделки за сегодня)</p>");
-            if (trendTrades.isEmpty()) {
-                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — закрытых paper-сделок BR ещё нет.</p></div>");
-            } else {
-                body.append(renderTrendTradesByYear(trendTrades));
-            }
+            body.append(renderBookTradeBlock("Бумажная · desk", trendPaper, "закрытых бумажных сделок по BR ещё нет"));
+            body.append(renderBookTradeBlock("Боевая", trendLive, "боевых сделок пока нет"));
+            body.append(renderBookTradeBlock("Бумажные прогоны", trendRuns, "прогонов пока нет"));
         }
         body.append("</section>");
 
@@ -2947,50 +2946,139 @@ public class AnalysisHtmlRenderer {
         if (!productEdition.hasArb()) {
             body.append(statementLockedBlock("ARB"));
         } else {
-            body.append("<div class=\"cards\">");
-            body.append(card("Closed", String.valueOf(arbClosed), false));
-            body.append(card("Wins/Losses",
-                    (int) num(arbSt.get("wins")) + "/" + (int) num(arbSt.get("losses")), false));
-            body.append(card("Realized ₽*", String.format("%.0f", arbRealized), arbRealized >= 0));
-            body.append(card("Сегодня ₽*", String.format("%.0f", arbToday), arbToday >= 0));
-            body.append("</div>");
-            body.append("<p class=\"meta\"><a href=\"/view/calendar-arb\">Открыть доску →</a> · котировки T-Invest</p>");
+            body.append(renderPaperLiveBookPanels(arbSt));
+            body.append("<p class=\"meta\"><a href=\"/view/calendar-arb\">Открыть доску →</a></p>");
             if (arbTrades.isEmpty()) {
-                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — закрытых calendar-спредов ещё нет.</p></div>");
+                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — закрытых сделок ещё нет.</p></div>");
             } else {
                 body.append(renderTrendTradesByYear(arbTrades));
             }
         }
         body.append("</section>");
 
-        // Investments (Experiment equity only)
+        // Investments
         body.append("<section class=\"statement-section\" id=\"investments\">");
-        body.append("<h3>Инвестиции · Experiment</h3>");
+        body.append("<h3>Инвестиции · TQBR</h3>");
         if (investmentsPaperJournal.isEmpty()) {
             body.append("<div class=\"callout\"><p>Модуль investments выключен.</p></div>");
         } else {
-            body.append("<div class=\"cards\">");
-            body.append(card("Closed", String.valueOf(investClosed), false));
-            body.append(card("Wins/Losses",
-                    (int) num(investSt.get("wins")) + "/" + (int) num(investSt.get("losses")), false));
-            body.append(card("Realized ₽*", String.format("%.0f", investRealized), investRealized >= 0));
-            body.append(card("Сегодня ₽*", String.format("%.0f", investToday), investToday >= 0));
-            body.append("</div>");
-            Object investNote = investSt.get("note");
-            if (investNote != null && !String.valueOf(investNote).isBlank()) {
-                body.append("<p class=\"meta\">").append(escape(String.valueOf(investNote))).append("</p>");
+            body.append(renderPaperLiveBookPanels(investSt));
+            body.append("<p class=\"meta\"><a href=\"/view/investments\">Открыть пульт →</a></p>");
+            List<Map<String, Object>> invPaper = filterTradesByStatementBook(investTrades, "paper");
+            List<Map<String, Object>> invLive = filterTradesByStatementBook(investTrades, "live");
+            List<Map<String, Object>> invRuns = filterTradesByStatementBook(investTrades, "research");
+            // Исторические бумажные прогоны — основной видимый track Invest (не прятать).
+            Map<String, Object> invResearchBook = nestedBook(investSt, "research");
+            if (!invResearchBook.isEmpty() || !invRuns.isEmpty()) {
+                body.append("<div class=\"statement-book statement-book--runs\">");
+                body.append("<h4 class=\"statement-book-title\">Бумажные прогоны</h4>");
+                body.append("<div class=\"cards cards--compact\">");
+                body.append(card("Closed", String.valueOf((int) num(invResearchBook.get("closedCount"))), false));
+                body.append(card("W/L",
+                        (int) num(invResearchBook.get("wins")) + "/" + (int) num(invResearchBook.get("losses")),
+                        false));
+                double runPnl = num(invResearchBook.get("realizedPnlRub"));
+                body.append(card("Realized ₽*", String.format(Locale.ROOT, "%.0f", runPnl), runPnl >= 0));
+                body.append("</div></div>");
             }
-            body.append("<p class=\"meta\"><a href=\"/view/investments\">Открыть пульт →</a> · только Experiment (без baseline)</p>");
-            if (investTrades.isEmpty()) {
-                body.append("<div class=\"callout\"><p><strong>Statement пуст</strong> — импортируйте replay: ")
-                        .append("<code>POST /api/investments/statement/import-replay</code></p></div>");
-            } else {
-                body.append(renderTrendTradesByYear(investTrades));
-            }
+            body.append(renderBookTradeBlock("Бумажные прогоны", invRuns, "прогонов пока нет"));
+            body.append(renderBookTradeBlock("Бумажная · текущий desk", invPaper,
+                    "закрытых бумажных сделок desk ещё нет"));
+            body.append(renderBookTradeBlock("Боевая", invLive, "боевых сделок пока нет"));
         }
         body.append("</section>");
         body.append("</article>");
         return page("TRINITY — Statement", body.toString(), nav("statement"));
+    }
+
+    /** Two independent summary panels: paper vs live (from statement nested books). */
+    private String renderPaperLiveBookPanels(Map<String, Object> st) {
+        Map<String, Object> paper = nestedBook(st, "paper");
+        Map<String, Object> live = nestedBook(st, "live");
+        if (paper.isEmpty() && !st.isEmpty()) {
+            paper = st;
+        }
+        StringBuilder b = new StringBuilder();
+        b.append("<div class=\"statement-books\">");
+        b.append(renderOneBookPanel("Бумажная", "paper", paper));
+        b.append(renderOneBookPanel("Боевая", "live", live));
+        b.append("</div>");
+        return b.toString();
+    }
+
+    private String renderOneBookPanel(String title, String bookId, Map<String, Object> book) {
+        int closed = (int) num(book.get("closedCount"));
+        int wins = (int) num(book.get("wins"));
+        int losses = (int) num(book.get("losses"));
+        double realized = num(book.get("realizedPnlRub"));
+        double today = num(book.get("todayPnlRub"));
+        StringBuilder b = new StringBuilder();
+        b.append("<div class=\"statement-book statement-book--").append(escape(bookId)).append("\">");
+        b.append("<h4 class=\"statement-book-title\">").append(escape(title)).append("</h4>");
+        b.append("<div class=\"cards cards--compact\">");
+        b.append(card("Closed", String.valueOf(closed), false));
+        b.append(card("W/L", wins + "/" + losses, false));
+        b.append(card("Realized ₽*", String.format(Locale.ROOT, "%.0f", realized), realized >= 0));
+        b.append(card("Сегодня ₽*", String.format(Locale.ROOT, "%.0f", today), today >= 0));
+        b.append("</div></div>");
+        return b.toString();
+    }
+
+    private String renderBookTradeBlock(String label, List<Map<String, Object>> trades, String emptyHint) {
+        StringBuilder b = new StringBuilder();
+        b.append("<div class=\"statement-book-trades\">");
+        b.append("<h4 class=\"statement-book-trades-title\">Сделки · ").append(escape(label)).append("</h4>");
+        if (trades == null || trades.isEmpty()) {
+            b.append("<p class=\"meta\">").append(escape(emptyHint)).append("</p>");
+        } else {
+            b.append(renderTrendTradesByYear(trades));
+        }
+        b.append("</div>");
+        return b.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> nestedBook(Map<String, Object> st, String key) {
+        if (st == null) {
+            return Map.of();
+        }
+        Object o = st.get(key);
+        if (!(o instanceof Map<?, ?> raw)) {
+            return Map.of();
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : raw.entrySet()) {
+            m.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        return m;
+    }
+
+    /** Partition closed-trade DTOs by statement book (paper / live / research). */
+    static List<Map<String, Object>> filterTradesByStatementBook(
+            List<Map<String, Object>> trades, String book
+    ) {
+        if (trades == null || trades.isEmpty() || book == null) {
+            return List.of();
+        }
+        String want = book.trim().toLowerCase(Locale.ROOT);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> t : trades) {
+            String tag = t.get("tag") == null ? "" : String.valueOf(t.get("tag"));
+            String b;
+            if (TrendPaperJournalService.isLiveTag(tag)
+                    || InvestmentsPaperJournalService.isLiveTag(tag)) {
+                b = "live";
+            } else if (TrendPaperJournalService.isResearchTag(tag)
+                    || InvestmentsPaperJournalService.isResearchTag(tag)) {
+                b = "research";
+            } else {
+                b = "paper";
+            }
+            if (want.equals(b)) {
+                out.add(t);
+            }
+        }
+        return out;
     }
 
     private String renderTrendTradesByYear(List<Map<String, Object>> trendTrades) {

@@ -1880,18 +1880,26 @@
   }
   function renderPaper(paper, desk) {
     const st = (paper && paper.statement) || {};
+    const paperBook = st.paper || st;
+    const liveBook = st.live || {};
     const todayEl = $("sig-paper-today");
     const totalEl = $("sig-paper-total");
     if (todayEl) {
-      todayEl.textContent = fmtPnl(st.todayPnlRub);
-      todayEl.classList.toggle("is-buy", (st.todayPnlRub || 0) > 0);
-      todayEl.classList.toggle("is-sell", (st.todayPnlRub || 0) < 0);
+      todayEl.textContent = fmtPnl(paperBook.todayPnlRub);
+      todayEl.classList.toggle("is-buy", (paperBook.todayPnlRub || 0) > 0);
+      todayEl.classList.toggle("is-sell", (paperBook.todayPnlRub || 0) < 0);
     }
     if (totalEl) {
-      const w = (st.wins || 0) + "/" + (st.losses || 0);
-      totalEl.textContent = fmtPnl(st.realizedPnlRub) + " · " + w;
-      totalEl.classList.toggle("is-buy", (st.realizedPnlRub || 0) > 0);
-      totalEl.classList.toggle("is-sell", (st.realizedPnlRub || 0) < 0);
+      const w = (paperBook.wins || 0) + "/" + (paperBook.losses || 0);
+      const runsBook = st.research || {};
+      const runsN = Number(runsBook.closedCount || 0);
+      const liveN = Number(liveBook.closedCount || 0);
+      const bits = [fmtPnl(paperBook.realizedPnlRub) + " desk · " + w];
+      if (runsN > 0) bits.push(fmtPnl(runsBook.realizedPnlRub) + " прогоны");
+      if (liveN > 0) bits.push(fmtPnl(liveBook.realizedPnlRub) + " боевая");
+      totalEl.textContent = bits.join(" · ");
+      totalEl.classList.toggle("is-buy", (paperBook.realizedPnlRub || 0) > 0);
+      totalEl.classList.toggle("is-sell", (paperBook.realizedPnlRub || 0) < 0);
     }
     const panel = $("signal-paper-panel");
     const body = $("signal-paper-body");

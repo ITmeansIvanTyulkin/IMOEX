@@ -472,7 +472,7 @@ imoex:
       no-trade-before-close-minutes: 30
     investments:
       enabled: true
-      auto-execution: false   # OBSERVE vs SANDBOX_FAIR paper ladders
+      auto-execution: true    # fair-paper ladders → SANDBOX_FAIR (live off)
       live-execution: false   # LIVE_EQUITY gated separately
       paper-tick-ms: 30000
       # Daily entry scan + decision/corpus history (independent of auto/live)

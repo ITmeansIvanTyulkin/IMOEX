@@ -36,6 +36,7 @@ public class OpsController {
     private final ObjectProvider<StartupSmokeRunner> smokeRunner;
     private final com.moex.cointegration.ops.LiveExecutionGate liveExecutionGate;
     private final com.moex.cointegration.service.RetailCapitalGuideService retailCapitalGuide;
+    private final ObjectProvider<com.moex.cointegration.service.TrackRecordHealthService> trackRecordHealth;
 
     public OpsController(
             PaperAlertService alertService,
@@ -45,7 +46,8 @@ public class OpsController {
             StartupSmokeStatus smokeStatus,
             ObjectProvider<StartupSmokeRunner> smokeRunner,
             com.moex.cointegration.ops.LiveExecutionGate liveExecutionGate,
-            com.moex.cointegration.service.RetailCapitalGuideService retailCapitalGuide
+            com.moex.cointegration.service.RetailCapitalGuideService retailCapitalGuide,
+            ObjectProvider<com.moex.cointegration.service.TrackRecordHealthService> trackRecordHealth
     ) {
         this.alertService = alertService;
         this.tradeToasts = tradeToasts;
@@ -55,6 +57,7 @@ public class OpsController {
         this.smokeRunner = smokeRunner;
         this.liveExecutionGate = liveExecutionGate;
         this.retailCapitalGuide = retailCapitalGuide;
+        this.trackRecordHealth = trackRecordHealth;
     }
 
     /**
@@ -177,5 +180,21 @@ public class OpsController {
     @GetMapping("/live-gate")
     public Map<String, Object> liveGateStatus() {
         return liveExecutionGate.checklist();
+    }
+
+    /**
+     * GET /api/ops/track-record — continuity of Exclusive / positional / Invest paper books.
+     * Reports holes (auto off, no tick today, invest desk paper empty) without inventing trades.
+     */
+    @GetMapping("/track-record")
+    public Map<String, Object> trackRecord() {
+        com.moex.cointegration.service.TrackRecordHealthService svc = trackRecordHealth.getIfAvailable();
+        if (svc == null) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("ok", false);
+            m.put("error", "track_record_unavailable");
+            return m;
+        }
+        return svc.snapshot();
     }
 }

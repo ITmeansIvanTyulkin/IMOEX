@@ -1739,6 +1739,10 @@
     const status = String(robot.status || "");
     const tone = String(robot.tone || "scan");
     if (tone === "trade" || status === "В сделке") return "is-trade";
+    if (tone === "armed" || status.indexOf("Ждёт") === 0 || status.indexOf("Ждет") === 0) {
+      return "is-armed";
+    }
+    if (tone === "watch" || status === "Наблюдение") return "is-watch";
     if (robot.sessionTradable === false || status === "Сессия закрыта" || status === "Выкл") {
       return "is-session-off";
     }
@@ -3575,7 +3579,7 @@
   const TOUR_KEY = "trinity.tour.v1";
   const TOUR_STEPS = [
     { path: "/view", title: "Дашборд", body: "Обзор: режим рынка и роботы спреда, тренда и календаря." },
-    { path: "/view/statement", title: "Statement", body: "Paper track-record по тренду и календарю. Сделки trend тегируются playbookId." },
+    { path: "/view/statement", title: "Statement", body: "Две книги paper / live по Trend, Arb, Invest. Research (replay) отдельно, не в депозит." },
     { path: "/view/trend-signal", title: "Диапазонная торговля", body: "Exclusive BR M5: полки TOP/BOT, bounce/retest. Робот #2 при этом не выключается — у него свой раздел." },
     { path: "/view/trend-positional", title: "Позиционная торговля", body: "H1: тренд HH/HL, промежуточный HVN, сетка 1:1:2:4. «Сканирует» = робот включён, входа по чеклисту нет." },
     { path: "/view/trend-brm", title: "BRM мини", body: "Третий плейбук тренда: тот же чеклист полок, контракт BRM, 1 лот на 50–250к." },

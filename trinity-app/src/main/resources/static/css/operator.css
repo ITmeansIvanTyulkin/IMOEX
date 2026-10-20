@@ -292,6 +292,55 @@ nav.topnav a.active {
   font-size: 1.05rem;
 }
 
+.statement-books {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+  margin: 0 0 1rem;
+}
+@media (max-width: 720px) {
+  .statement-books {
+    grid-template-columns: 1fr;
+  }
+}
+.statement-book {
+  padding: 0.75rem 0.85rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface, transparent);
+}
+.statement-book--live {
+  border-style: dashed;
+}
+.statement-book-title {
+  margin: 0 0 0.55rem;
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+.statement-book .cards--compact {
+  gap: 0.5rem;
+}
+.statement-book-trades {
+  margin: 1rem 0 1.25rem;
+}
+.statement-book-trades-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+.statement-research {
+  margin: 0.75rem 0 1.25rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+.statement-research > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--muted, #6a7680);
+}
+
 .statement-pager {
   display: flex;
   flex-wrap: wrap;
