@@ -20,6 +20,8 @@
   let priceScaleLocked = false;
   let scaleRememberTimer = null;
   let userScaleGesture = false;
+  /** Only true after wheel/pinch/axis zoom — not click, pan, or programmatic restore. */
+  let userScaleIntent = false;
   let chartNav = null;
   const SCALE_STORE = "trinity.trend.desk.scale";
   const DEFAULT_BAR_SPACING = 8;
@@ -4427,8 +4429,11 @@
   }
   function sanitizeScaleRow(row) {
     if (!row || !(row.barSpacing > 0)) return null;
+    // Legacy rows without user:true were often poisoned by click/cluster/layout races.
+    // Restore only explicit user zooms so refresh does not re-enlarge the chart.
+    if (row.user !== true && row.userIntent !== true) return null;
     const logical = (row.logical && logicalSpan(row.logical) >= MIN_KEEP_LOGICAL) ? row.logical : null;
-    return { barSpacing: clampBarSpacing(row.barSpacing), logical: logical };
+    return { barSpacing: clampBarSpacing(row.barSpacing), logical: logical, user: true };
   }
   function snapshotTimeScale() {
     if (!chart) return null;
@@ -4448,11 +4453,20 @@
   function loadScaleLocal(instrument) {
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      return sanitizeScaleRow(all[scaleStoreKey(instrument)]);
+      const key = scaleStoreKey(instrument);
+      const raw = all[key];
+      const sane = sanitizeScaleRow(raw);
+      // Drop legacy poisoned rows (saved without explicit user zoom).
+      if (raw && !sane) {
+        delete all[key];
+        localStorage.setItem(SCALE_STORE, JSON.stringify(all));
+      }
+      return sane;
     } catch (_) {}
     return null;
   }
   function saveScaleLocal(instrument) {
+    if (!userScaleIntent) return;
     const snap = snapshotTimeScale();
     const raw = (lockedBarSpacing > 0)
       ? lockedBarSpacing
@@ -4468,7 +4482,14 @@
       const logical = lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL
         ? lockedLogical
         : ((snap && logicalSpan(snap.logical) >= MIN_KEEP_LOGICAL) ? snap.logical : null);
-      all[scaleStoreKey(instrument)] = { barSpacing: spacing, logical: logical };
+      all[scaleStoreKey(instrument)] = { barSpacing: spacing, logical: logical, user: true };
+      localStorage.setItem(SCALE_STORE, JSON.stringify(all));
+    } catch (_) {}
+  }
+  function clearScaleLocal(instrument) {
+    try {
+      const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
+      delete all[scaleStoreKey(instrument)];
       localStorage.setItem(SCALE_STORE, JSON.stringify(all));
     } catch (_) {}
   }
@@ -4478,17 +4499,19 @@
     lockedLogical = null;
     clearTimeout(scaleRememberTimer);
     userScaleGesture = false;
+    userScaleIntent = false;
     unlockPriceScale();
-    try {
-      const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      delete all[scaleStoreKey(lastDeskInstrument)];
-      localStorage.setItem(SCALE_STORE, JSON.stringify(all));
-    } catch (_) {}
+    clearScaleLocal(lastDeskInstrument);
+    if (deskLayoutDoc && deskLayoutDoc.desk) {
+      delete deskLayoutDoc.desk.scale;
+    }
+    scheduleSaveDeskLayout();
   }
   function adoptSavedScale(instrument) {
     const saved = loadScaleLocal(instrument);
     if (!saved) return false;
     scaleLocked = true;
+    userScaleIntent = true;
     lockedBarSpacing = saved.barSpacing;
     lockedLogical = saved.logical || null;
     return true;
@@ -4530,12 +4553,16 @@
       lockedLogical = snap.logical;
       userPinned = true;
     }
-    saveScaleLocal(lastDeskInstrument);
-    scheduleSaveDeskLayout();
+    // Persist only after real zoom/pinch — pan/click must not poison refresh.
+    if (userScaleIntent) {
+      saveScaleLocal(lastDeskInstrument);
+      scheduleSaveDeskLayout();
+    }
     syncGoLiveBtn();
   }
-  function scheduleRememberUserScale() {
+  function scheduleRememberUserScale(fromUserZoom) {
     if (applyingScale) return;
+    if (fromUserZoom) userScaleIntent = true;
     clearTimeout(scaleRememberTimer);
     scaleRememberTimer = setTimeout(rememberUserScale, 120);
   }
@@ -4587,27 +4614,35 @@
   function bindUserScaleCapture(el) {
     if (!el || el._trinityScaleBound) return;
     el._trinityScaleBound = true;
-    const markTime = function () {
-      scheduleRememberUserScale();
-    };
-    el.addEventListener("wheel", markTime, { passive: true, capture: true });
+    // Wheel / pinch = zoom intent. Plain click/drag pan must not write scale to storage.
+    el.addEventListener("wheel", function () {
+      scheduleRememberUserScale(true);
+    }, { passive: true, capture: true });
     el.addEventListener("mousedown", function (ev) {
       userScaleGesture = true;
       const rect = el.getBoundingClientRect();
       const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
       let priceW = 56;
+      let timeH = 28;
       try {
         if (chart && typeof chart.priceScale === "function") {
           priceW = chart.priceScale("right").width() || 56;
         }
       } catch (_) {}
-      if (x > rect.width - priceW - 4) freezePriceScale();
+      if (x > rect.width - priceW - 4) {
+        freezePriceScale();
+        userScaleIntent = true; // drag on price axis
+      } else if (y > rect.height - timeH - 2) {
+        userScaleIntent = true; // drag on time axis = scale
+      }
     });
     el.addEventListener("touchstart", function () { userScaleGesture = true; }, { passive: true });
     const endGesture = function () {
       if (!userScaleGesture) return;
       userScaleGesture = false;
-      markTime();
+      // Update live lock/pin state; persist only if zoom intent was set above / by wheel.
+      scheduleRememberUserScale(false);
       syncPriceLockBtn();
     };
     window.addEventListener("mouseup", endGesture);
@@ -4923,7 +4958,8 @@
         atRightEdge: atRightEdge,
         getPointSize: function () { return deskPointSize(lastDeskInstrument); },
         onTimeGesture: function () {
-          scheduleRememberUserScale();
+          // Pan / programmatic — pin live edge only; wheel handler marks user zoom.
+          scheduleRememberUserScale(false);
           layoutMarketOverlays();
         },
         onPriceLock: function (locked) {
@@ -5970,17 +6006,7 @@
       if (!chartFlow || typeof chartFlow.setShowClusters !== "function") return;
       chartFlow.setShowClusters(!chartFlow.getShowClusters());
       setToolPressed("tool-clusters", chartFlow.getShowClusters());
-      if (chartFlow.getShowClusters() && chart) {
-        try {
-          const sp = chart.timeScale().options().barSpacing;
-          const lr = chart.timeScale().getVisibleLogicalRange();
-          if (sp > 0) {
-            scaleLocked = true;
-            lockedBarSpacing = sp;
-            if (lr) lockedLogical = lr;
-          }
-        } catch (_) {}
-      }
+      // Cluster auto-zoom must not poison persisted time-scale (refresh would re-enlarge).
     });
   }
   const toolMacd = $("tool-macd");
@@ -6665,12 +6691,18 @@
       const st = desk.tools || null;
       if (chartTools && st) chartTools.setState(st);
       const sc = desk.scale;
-      if (!scaleLocked && lastCandleTime == null && sc && sc.barSpacing > 0
+      const saneScale = sanitizeScaleRow(sc);
+      if (sc && !saneScale && deskLayoutDoc && deskLayoutDoc.desk) {
+        // Strip legacy poison (click/cluster/layout) so refresh stops re-enlarging.
+        delete deskLayoutDoc.desk.scale;
+        scheduleSaveDeskLayout();
+      }
+      if (!scaleLocked && lastCandleTime == null && saneScale
           && (!sc.instrument || sc.instrument === lastDeskInstrument)) {
         scaleLocked = true;
-        const sane = sanitizeScaleRow(sc);
-        lockedBarSpacing = sane ? sane.barSpacing : DEFAULT_BAR_SPACING;
-        lockedLogical = sane ? sane.logical : null;
+        userScaleIntent = true;
+        lockedBarSpacing = saneScale.barSpacing;
+        lockedLogical = saneScale.logical || null;
         restoreTimeScale(followLive && !userPinned);
       }
       if (chartFlow && desk.flow && typeof chartFlow.setState === "function") {
@@ -6700,22 +6732,16 @@
         cur.desk.instrument = ($("sig-instrument") && $("sig-instrument").value) || null;
         cur.desk.playbookId = ($("sig-playbook") && $("sig-playbook").value) || null;
       }
-      if (scaleLocked && lockedBarSpacing > 0) {
+      if (userScaleIntent && scaleLocked && lockedBarSpacing > 0) {
         cur.desk.scale = {
           instrument: lastDeskInstrument || null,
           barSpacing: clampBarSpacing(lockedBarSpacing),
-          logical: (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) ? lockedLogical : null
+          logical: (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) ? lockedLogical : null,
+          user: true
         };
       } else {
-        const snap = snapshotTimeScale();
-        if (snap && snap.barSpacing > 0) {
-          const sane = sanitizeScaleRow(snap);
-          cur.desk.scale = {
-            instrument: lastDeskInstrument || null,
-            barSpacing: sane ? sane.barSpacing : DEFAULT_BAR_SPACING,
-            logical: sane ? sane.logical : null
-          };
-        }
+        // Drop accidental / legacy scale so the next refresh opens at default spacing.
+        delete cur.desk.scale;
       }
       deskLayoutDoc = await TrinityChartKit.saveLayouts(cur);
     } catch (e) {

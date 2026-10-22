@@ -63,6 +63,10 @@ class TrendSignalDeskJsAuthQuietTest {
         assertTrue(src.contains("MAX_BAR_SPACING = 160"), "barSpacing soft-cap must allow deep mouse zoom");
         assertTrue(src.contains("Never reset just because spacing is"), "heal must not undo wheel zoom");
         assertTrue(src.contains("vis > 0 && vis < 2.5"), "heal only one-candle fill");
+        assertTrue(src.contains("userScaleIntent"), "only explicit user zoom may persist time-scale");
+        assertTrue(src.contains("row.user !== true"), "legacy poisoned scale rows must not restore on refresh");
+        assertTrue(src.contains("delete cur.desk.scale") || src.contains("delete deskLayoutDoc.desk.scale"),
+                "non-user scale must be stripped from desk layout");
         assertTrue(src.contains("function jwtUnexpired"), "expired cabinet JWT must not block desk cookie writes");
         assertTrue(src.contains("footprintByTime = {}"), "instrument change must clear foreign footprint levels");
         assertTrue(src.contains("Always replace so instrument switches"),

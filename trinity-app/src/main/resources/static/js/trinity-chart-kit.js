@@ -3421,6 +3421,7 @@
     }
 
     function maybeZoomForClusters() {
+      // Session-only nudge for readable cluster cells — never a reason to persist zoom.
       const bars = getBars() || [];
       if (bars.length < 8) return false;
       const i1 = bars.length - 1;
