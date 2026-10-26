@@ -1,27 +1,23 @@
 # TRINITY — handoff-промпт для нового агента
 
 > Скопируй блок **«ПРОМПТ»** целиком в новый чат.  
-> Не путать с узкими промптами:  
-> - `docs/DECISION_FRAME_AGENT_PROMPT.md` — только продукт DF  
+> Узкие промпты (не заменяют этот):  
+> - `docs/DECISION_FRAME_AGENT_PROMPT.md` — продукт DF  
 > - `docs/OBSERVE_PATH_AGENT_PROMPT.md` — observe/тюнинг Exclusive  
 > - `docs/DECISION_FRAME_CONTRACT.md` — контракт кадра (DF-0…DF-6)  
-> Этот файл — **сквозной контекст длинного чата** (Exclusive desk + Invest parity + GAP_FILL trail + @Figures).
+> - `docs/CALENDAR_ARB_AGENT_PROMPT.md` — calendar arb  
+> Этот файл — **сквозной контекст** (Exclusive + soft lessons + gap/BOUNCE + desk UX + Invest parity).
 
-Репозитории: `IMOEX-core` (логика) + `IMOEX` (app/деск). Ветка: **`dev`**, оба up-to-date с `origin/dev` на момент handoff.
+Репозитории: `IMOEX-core` (логика) + `IMOEX` (app/деск). Ветка: **`dev`**.
 
-Ключевые SHA (уже запушены):
+### Состояние git на handoff (2026-10-26 ~15:20 MSK)
 
-| Repo | SHA | Суть |
-|------|-----|------|
-| core | `efd2bd1` | Exclusive: обе полки дня, фокус на nearest |
-| core | `d3e0b39` | Day TOP/BOT только сегодня; сброс фитильных полок без тел |
-| core | `d75a6b5` | Investments: DF, dual-sleeve long/short, fair-paper, journal |
-| core | `efbcf47` | Investments: live-мост T-Invest (не stub), `LIVE_GATED` |
-| core | `8f4d33e` | GAP_FILL: H1 candle-trail по ходу заполнения гэпа |
-| core | `c269bfe` | `@Figures` soft-skip + corpus A/B (флаг **OFF** по умолчанию) |
-| IMOEX | `ebea624` | FE Exclusive dual-shelf / nearest без ложного TOP из «TOP+BOT» |
-| IMOEX | `9bbbf32` | Invest desk: Live, DF API/export, brief как у trend |
-| IMOEX | `36bb188` | Деск: подпись SL trail для GAP_FILL |
+| Repo | Working tree | vs `origin/dev` | Ключевые локальные SHA (могут быть ещё не запушены) |
+|------|--------------|-----------------|------------------------------------------------------|
+| **IMOEX-core** | clean | **ahead 3** | `5e56490` BOUNCE≠against-fill gap · `1a90c0d` SUCCESS+CAUTION soft · `69ab115` auto-append WIN+LOSS lessons |
+| **IMOEX** | clean | **ahead 1** | `9734ec7` chart zoom: не травить scale без userScaleIntent |
+
+На handoff **незакоммиченных правок нет**. Если оператор просит «закоммить всё» — сначала `git status` обоих; если ahead без push — спрашивать отдельно про `git push` (не пушить без явной просьбы).
 
 ---
 
@@ -32,228 +28,218 @@
 Рабочая директория: /Users/ivan/MEGA/Work/TRINITY
 Два репо: IMOEX-core (Java playbooks/runtime) и IMOEX (Spring app + HTML/JS desks).
 Ветка: dev. Коммить/пуш только по явной просьбе; оба репо, если трогал оба.
-Язык ответов: русский, коротко, без воды. Операторский desk для знающего — не «витрина для новичков»; это осознанный выбор продукта.
+Язык ответов: русский, коротко, без воды. Desk для знающего оператора — не витрина для новичков.
+
+Предыдущий чат (эстафета): soft lessons / gap BOUNCE / desk zoom / диагностика «ждём SELL» vs IN_TRADE /
+разбор +628 BUY при soft-полках на графике. Transcript id (Cursor): 8bb53351-fe3b-4af6-898d-bfb5a3e8f1a7
+(agent-transcripts в .cursor/projects/... — цитировать как [title](uuid без .jsonl)).
 
 ════════════════════════════════════════════════════════
 0. ПРОДУКТОВАЯ ПОЗИЦИЯ (не ломать)
 ════════════════════════════════════════════════════════
 • Позиционирование: «операторский робот с памятью решений и железом правил», НЕ «ИИ анализирует рынок».
-• Платить будут за: закрытый контур (robot+исполнение+журнал+paper/live), доказуемый track record, экономию внимания, доверие к риску.
-• Track record = проверяемая цепочка «кадр → сделка → исход» за месяцы с цифрами. Код инфраструктуры уже есть — его нужно НАПОЛНЯТЬ месяцами авто/paper без дыр, не изобретать заново.
-• Paper и live — разные книги (SANDBOX_FAIR / LIVE_*). Statement hub и API уже показывают два ряда + research отдельно.
+• Платить будут за: закрытый контур (robot+исполнение+журнал+paper/live), доказуемый track record,
+  экономию внимания, доверие к риску.
+• Track record = цепочка «кадр → сделка → исход» месяцами. Код есть — наполнять paper/auto без дыр.
+• Paper и live — разные книги (SANDBOX_FAIR / LIVE_*). Statement hub: paper · live · research.
   Не чистить statement задним числом; не смешивать книги в metrics.
-• Arb (calendar) пока слабее Exclusive/Invest по UX кадров — не тащи arb «заодно», если задача не про него.
-• Не смешивать в разборе дня строки Exclusive (BOUNCE/RETEST M5) с positional / GAP_FILL H1.
+• Не смешивать в разборе дня Exclusive (BOUNCE/RETEST M5) с positional / GAP_FILL H1.
+• Arb (calendar) слабее по UX кадров — не тащить «заодно».
 
 ════════════════════════════════════════════════════════
 1. РЕПО / МОДУЛИ / ДЕСКИ
 ════════════════════════════════════════════════════════
 IMOEX-core:
-  trinity-trend/     — Exclusive, BRM, positional, FairPaperSimulator, DecisionFrame*, Figures*
-  trinity-investments/ — Investments* playbook/DF/gates
-  trinity-runtime/   — TrendFairPaperLiveService, TrendDeskService, InvestmentsDeskService,
-                       *PaperJournal*, *ExecutionBridge*, DecisionFrameJournalService
+  trinity-trend/     — Exclusive, BRM, positional, FairPaperSimulator, DecisionFrame*,
+                       ExclusiveSoftStackMemory, SoftLessonBookAppender, SessionGapFill,
+                       ExclusiveHuntExt, ExclusiveSide, DayZoneLock, LevelsProfileBrPlaybook
+  trinity-investments/ — Investments* + InvestmentsSoftLessonMemory
+  trinity-runtime/   — TrendFairPaperLiveService, TrendDeskService, *PaperJournal*,
+                       SoftLessonBookAppender hooks on close, ExecutionBridge*
 IMOEX:
-  trinity-app/.../trend-signal-desk.{html,js}     — Exclusive / BRM / positional
-  trinity-app/.../investments-desk.*             — Invest
+  trinity-app/.../trend-signal-desk.{html,js}  — Exclusive / BRM / positional
+  trinity-app/.../investments-desk.*
   trinity-app/.../static/js/trinity-decision-frame.js
-  docs/DECISION_FRAME_CONTRACT.md                — источник правды по кадру
-  research-corpus/positional-h1/                 — offline corpus для реплеев
-  data/*.jsonl / decision-frame/                 — НЕ в git; .megaignore режет налог версий MEGA
+  docs/DECISION_FRAME_CONTRACT.md
+  research-corpus/exclusive-m5/events-YYYY-MM-DD.jsonl
+  research-corpus/positional-h1/
+  data/ — НЕ в git; .megaignore режет налог версий MEGA
+    trend-paper-journal.json, trend-fair-paper-state.json (pending НЕ персистится — только open/lastClose),
+    trend-paper-voided-archive.json, positional-h1-lessons.json, investments-lessons.json,
+    trend-desk-poll-*.log, trend-jvm-watch-*.log
 
-Playbooks (не путать):
-  levels-profile-br-m5     — Exclusive range BR M5 (BOUNCE/RETEST)
-  retail-brm-m5            — BRM retail M5 (отдельный corpus lane)
-  positional-volume-h1     — positional H1 + GAP_FILL
-  investments              — TQBR ladder / checklist (lane=invest, D1)
+Playbooks (не путать id):
+  levels-profile-br-m5  — Exclusive range BR M5 (BOUNCE/RETEST)
+  retail-brm-m5         — BRM (отдельный corpus; часто corpus-shadow)
+  positional-volume-h1  — positional H1 + GAP_FILL
+  investments           — TQBR (lane=invest, D1)
 
-Mutex M5: когда один рукав parked — sibling всё равно пишет corpus-shadow
-(TrendFairPaperLiveService EXCLUSIVE_CORPUS_SHADOW_KEY / BRM_CORPUS_SHADOW_KEY) —
-без arms/fills/journal trading. Не ломать.
+Mutex M5: parked sleeve → sibling пишет corpus-shadow (без arms/fills/journal). Не ломать.
+
+Запуск: обычно `mvn -pl trinity-app -am spring-boot:run` из IMOEX, profile=dev, порт 8080.
+Auth desk API: Basic из application-local.yml / IMOEX_AUTH_*; scripts/trend_observe_auth.py → desk_request.
 
 ════════════════════════════════════════════════════════
-2. DECISION FRAME (DF) — ОБЩИЕ ПРАВИЛА
+2. DECISION FRAME (DF)
 ════════════════════════════════════════════════════════
-Контракт: IMOEX/docs/DECISION_FRAME_CONTRACT.md (DF-0…DF-6 уже на dev).
+Контракт: IMOEX/docs/DECISION_FRAME_CONTRACT.md (DF-0…DF-6).
 
-• Кадр = один объект «почему сейчас»: summary + robot{ENTER|WAIT|SKIP} + details[] + marketSnap.
-• lane: range | brm | positional | invest. На деске виден только свой lane.
+• Кадр = summary + robot{ENTER|WAIT|SKIP} + details[] + marketSnap; lane: range|brm|positional|invest.
 • Опрос деска без нового триггера кадр не плодит.
-• Тексты оператору — грамотный русский. В UI НЕ попадают §, /view/, сырые checklist id.
-• details[]: один факт = одна строка; числа только из value/полей деска, не выдумывать.
-• Lead/lag и sync — КОНТЕКСТ, не veto. Запрет входа только явным правилом playbook → source=robot.
-• Клик по факту журнала → подсветка полки/POC/стакана из marketSnap КАДРА, не live-картинки.
-• Журнал: data/decision-frame/YYYY-MM-DD.jsonl; группировка единая на всех strategic desks;
-  карточка «Сегодня: …»; фильтры ждёт/вошёл/пропуск/капитал.
-• ENTER + лимитки в чтении/фильтрах = WAIT («ждёт»), не «в сделке», пока нет позиции.
-• DF-6 капитал: дефолт TREND_M5; PAIRS только legacy/явно заданное; capital tick изолирован
-  от decisionFrame (ошибка allocator не должна затирать кадр).
-• API parity:
-    GET /api/trend/decision-frames[ /export ]
-    GET /api/investments/decision-frames[ /export ]  (playbook default investments)
-• Invest desk: decisionFrame (фокус) + decisionFrames (вселенная за день) + operatorBrief «что делать».
-
-При DF-правках: править assembler + journal + FE trinity-decision-frame.js согласованно;
-cache-bust query у desk JS при FE-изменениях.
+• UI: грамотный русский; без §, /view/, сырых checklist id.
+• ENTER + лимитки в фильтрах = WAIT («ждёт»), пока нет позиции (inTrade / lane open).
+• API: GET /api/trend/decision-frames[/export], GET /api/investments/decision-frames[/export].
+• DF/fair-paper sync: corpus PLAN_* пишется из fair-paper evaluate; не путать desk poll NO_TRADE
+  (hunt veto на опросе) с фактическим pending/open в TrendFairPaperLiveService.
 
 ════════════════════════════════════════════════════════
-3. EXCLUSIVE — DUAL-SHELF / DAY TOP·BOT / STUCK
+3. EXCLUSIVE — ПОЛКИ / SIDE / HUNT / SOFT vs HARD
 ════════════════════════════════════════════════════════
-Сделано и зафиксировано правилами:
+Day TOP/BOT (DayZoneLock):
+• Мониторим ОБЕ полки; фокус = nearest к цене. Rationale: «TOP+BOT monitor — nearest …».
+• Day lock = профиль ЗА СЕГОДНЯ. Soft/PRIOR не замораживаются как tradable lock
+  (LevelsProfileBrPlaybook.lockableShelf / isSoftSource — SOFT → null).
+• Desk может РИСОВАТЬ soft-зоны «TOP/BOT·ждём объём» (geometricSoftZone / DESK§5+SOFT) —
+  это ОРИЕНТИР, не вход. FE: isSoftZone → подпись «·ждём объём» / «ещё не полка».
+• Arm только с валидной полкой (TAPE/BARS/…+LIVE), validForEntry=true.
+  Пример 26.10 +628 BUY: вход по TREND_LO BARS§6+LIVE [113.96–114.15], не по soft на скрине после.
+  После филла часто «day BOT shelf cleared» → на графике снова soft «ждём объём» — это нормально.
 
-• Мониторим ОБЕ полки дня (TOP и BOT). Фокус = ближайшая к цене (nearest/overlap),
-  не «залипший BOT». Rationale вида «TOP+BOT monitor — nearest …».
-• FE: не матчить слово TOP внутри строки «TOP+BOT» — роль брать из NEAREST/FOCUS …
-  (trend-signal-desk.js). Подписи: «Мониторим обе полки… Ближе верхняя/нижняя…».
-• Day TOP/BOT = профиль ТОЛЬКО за сегодня (DayZoneLock). Фитильные полки без тел свечей
-  (ghost VAP со вчера) — сбрасывать.
-• Side laws (не ломать): BOT=BUY bounce, TOP=SELL bounce.
-  RETEST long только пока close ≥ TOP↑; short только пока close ≤ BOT↓.
-  Close внутри коробки = bounce. Gate: ExclusiveSide.
-  HTF / CL / макро / one-setup НЕ переворачивают сторону.
-• Checklist fidelity: при конфликте EXT vs чеклист побеждает чеклист.
-• Hunt (ExclusiveHuntExt): кит/толпа/спуф пишутся в UI; жёсткий hard skip — узкий
-  эксперимент OCT2026_NARROW_MICRO_VETO; не расширять без явного go оператора.
-• Stuck/залипание: автосброс soft ~20 мин, hard реже; «цена далеко» ≠ stuck;
-  UI статуса залипания с деска убран (тихий автосброс, без кнопки и шума).
-• Voided paper ids (не показывать в track): в т.ч. BRX6-2026-10-06T06-00 (GAP_FILL stub),
-  BRX6-2026-10-09T16-45 (SELL TOP vs HTF UP) — смотри VOID списки в TrendPaperJournal /
-  TrendFairPaperLiveService / FE filter.
+Side laws (ExclusiveSide — не ломать):
+• BOT = BUY bounce; TOP = SELL bounce.
+• RETEST long только close ≥ TOP↑; short только close ≤ BOT↓; close в коробке = bounce.
+• HTF / CL / макро / ONE_SETUP НЕ переворачивают сторону.
 
-════════════════════════════════════════════════════════
-4. POSITIONAL / GAP_FILL — ВЫХОДЫ И ТРЕЙЛ (критично)
-════════════════════════════════════════════════════════
-Файлы: FairPaperSimulator, PositionalH1GapStrategy, SessionGapFill,
-       PositionalVolumeH1Playbook, FE trend-signal-desk.js (подписи trail).
+ONE_SETUP lock (TrendRobotEngine):
+• При actionable ARMED evaluate ставит SetupLock → дальше withHoldRationale → state WORKING_ORDERS.
+• Unlock ≥ unlockDistancePoints (default 40) от mid или new day / smash-through against.
+• Fair-paper: pending в памяти; на диск pending НЕ пишется (LanePersisted = lastProcessed+open+lastClose).
+• Если hunt.blocksNewArm() на SKIP ARM — сейчас clearSetupLock НЕ всегда вызывается в той же ветке
+  (известный риск «фантомного ждём SELL»): engine WORKING_ORDERS + actionable plan, а lane.pending=null
+  и open=null. Desk posture WAITING_FILL может рисовать «ждём SELL» без реальных лимитов.
+  При фиксе: SKIP ARM → eng.clearSetupLock(); при fairPaperOn workingOrders считать по lanePending,
+  не по голому eng WORKING_ORDERS. НЕ чинить «заодно» без воспроизведения — сначала проверить live snapshot.
 
-Отличия от Exclusive после TP1:
-• Exclusive после TP1 → SL = exact BE → выход BE_STOP.
-• GAP_FILL после TP1 → structural/anchored SL ОСТАЁТСЯ (не exact BE).
-  Если structural нет — BE с буфером GAP_FILL_BE_BUFFER_POINTS = 8 пунктов
-  (чтобы шум H1 open не стопнул тик через avg).
+Fill rules (FairPaperSimulator):
+• Limit fill когда bar.low…high торгует уровень сетки.
+• §11/§16 smash-through against (BOUNCE/RETEST, tp1Fraction>0) → tryOpen возвращает null / unlock.
+• SELL smash: open < range.low OR (open < mid && close > high). Не путать «цена ниже entry avg»
+  с «уже в сделке» — нужен pending + касание сетки без smash.
 
-GAP_FILL candle-trail (сделано, 8f4d33e) — «не отдавать заполненный ход старому adverse SL»:
-• Константы: TRAIL_PAD=8 pts, ARM_FRAC=0.35 пути к priorClose, ARM_POINTS floor=15.
-• Arm: после TP1 ИЛИ когда MFE ≥ max(15pts, 35% |tp2−avg|).
-• Trail только за ЗАКРЫТОЙ H1 «с нами» (long: close≥open; short: close≤open),
-  pad за low/high, schedule pending → apply СО СЛЕДУЮЩЕГО бара
-  (свеча трейла своим фитилём нас не стопает). Only ratchet, never loosen.
-• stopReason: TRAIL если candleTrail, иначе SL.
-• FE: для GAP_FILL не форсить Exclusive-BE на клиенте — SL с сервера (structural → trail).
-
-Операторский нюанс (уже объясняли):
-«TP1 + свеча вниз ≠ гарантия без убытка». После TP1 откат РЕЖЕТСЯ трейлом,
-но пока trail ниже avg — хвост ещё может закрыться в минус (меньший, чем старый SL).
-«Без минуса» только когда stop уже ≥ avg (long).
-
-Прочие GAP_FILL гейты (не ослаблять без данных):
-• Book against planned side → no new arm (и bounce, и GAP_FILL).
-• До 10:00 часто нужен live DOM; medium/large gap — hard micro confirm.
-• Open GAP_FILL не с «раннего» stub 06:00 — см. void/history.
-
-Corpus/replay без ISS: research-corpus/positional-h1 + offline replays
-(PositionalH1PnlReplay, PositionalH1FiguresCorpusAbReplay). ISS таймауты = норма;
-для A/B предпочитать offline corpus.
+Hunt (ExclusiveHuntExt):
+• Soft size×0.5 (кит/спуф/импульс) vs hard blocksNewArm.
+• OCT2026_NARROW_MICRO_VETO — узкий эксперимент (ракета в ленте и т.п.); не расширять без go.
+• Пример 23.10: 15:10 ARMED_BOUNCE SELL → 15:15 rocket veto → позже soft кит → 15:25 FILL
+  SELL×2 @114.74 (сетка near/mid/far; far 114.85 мог не набрать) → BE_STOP +150.5 @15:35.
 
 ════════════════════════════════════════════════════════
-5. @Figures — ЭКСПЕРИМЕНТ (OFF по умолчанию)
+4. SESSION GAP / BOUNCE (критичные коммиты этой эстафеты)
 ════════════════════════════════════════════════════════
-Запрос оператора: regular MACD/RSI div как слой 1–2 DF для positional/GAP_FILL —
-контекст / мягкий skip, БЕЗ смены геометрического SL/TP. Tear-out тег @Figures.
+Проблема оператора: утренний гэп «against fill» / HTF gap-skip резал качественные дни и BOT BUY.
+Сделано (core):
+• `5e56490` — Exclusive BOUNCE от полки НЕ режется against-fill по утреннему гэпу
+  (BOUNCE проходит как RETEST full pass в SessionGapFill / TrendRobotEngine gap gate).
+• `24f92c3` (раньше) — BOUNCE не режет gap HTF-skip; process-уроки в soft memory.
+Не ослаблять GAP_FILL H1 гейты «заодно» с Exclusive M5 BOUNCE — разные миры.
 
-Код: Figures, FiguresFlags (-Dtrinity.figures=true / setEnabled),
-     RegularOscillatorDivergence, FiguresSoftSkip,
-     хуки в PositionalVolumeH1Playbook + DecisionFrameAssembler.
-Grep @Figures / Figures чтобы снести ветку целиком при провале.
-
-Поведение при enabled=true:
-• Soft-skip BUY при regular bearish MACD/RSI; SELL при regular bullish.
-• Геометрия сетки не меняется — только блок arm → NO_TRADE с reason.
-• В DF — строка контекста (@Figures: …), не veto-язык вне robot.
-
-A/B авг–окт 2026 (corpus offline):
-  baseline ΣR ≈ +55.23 → figures ≈ +55.48 (Δ +0.25 R), softSkips ≈ 9.
-  Вердикт: НЕЙТРАЛЬНО → код ОСТАВИТЬ под тегом, флаг DEFAULT OFF.
-Не включать в прод без нового явного A/B и go оператора.
-Не тащить @Figures в Exclusive/BRM «заодно».
+Positional GAP_FILL (напоминание, не откатывать):
+• После TP1 — НЕ exact BE; structural SL + candle-trail (FairPaperSimulator GAP_FILL_*).
+• Book against / micro confirm до 10:00 — держать.
 
 ════════════════════════════════════════════════════════
-6. INVESTMENTS — PARITY С TREND (сделано, держать уровень)
+5. SOFT LESSONS / ПАМЯТЬ СТРАТЕГИЙ (эстафета)
 ════════════════════════════════════════════════════════
-Цель оператора: Invest не «сырой третий продукт», а тот же уровень DF/paper/live, что trend.
+Цель: у каждой стратегии своя книга уроков; SUCCESS + CAUTION; auto на каждый close.
 
-Сделано:
-• InvestmentsDecisionFrameAssembler + desk decisionFrame/decisionFrames + RU why/brief.
-• Universe = InvestmentsUniverse.DEFAULT_TICKERS (~27); журнал по всем тикерам скана, не ROSN-only.
-• Dual-sleeve long/short (pickBetter) — шорт не только в BEAR; FormalPotential short ок.
-• Fair-paper: place → fill → ExitPolicy close; PaperState.side; статус связан с кадром.
-• Live: InvestmentsExecutionBridge зеркалит TrendExecutionBridge
-  (LIVE_GATED / LIVE_SUBMITTED / LIVE_PARTIAL) — не stub.
-• Settings vocabulary: OBSERVE | SANDBOX_FAIR | LIVE_GATED как у trend.
-• Auto без live = paper-лестницы; Auto+live = брокер или LIVE_GATED в журнал, если не armed.
-• API paper/statement/metrics parity с /api/trend/paper.
-• robot.mode invest: PLACE_LIMITS | WORKING_ORDERS | IN_TRADE | NONE
-  (НЕ bounce/retest Exclusive).
-• marketSnap invest: range1/range2, entryLimit, target, stop, verdict, score.
+Код:
+• SoftLessonBookAppender (+ Test) — общий append WIN+LOSS в strategy lesson archives.
+• ExclusiveSoftStackMemory — SUCCESS + тонкий LOSS + HTF flag; preferArm / process / LOSS.
+• LevelsProfileBrPlaybook / PositionalVolumeH1Playbook / InvestmentsSoftLessonMemory+Playbook.
+• Хуки close: TrendFairPaperLiveService + InvestmentsPaperJournalService → auto-append.
+• Коммиты: `1a90c0d` SUCCESS+CAUTION all strategies; `69ab115` каждый close → soft-книга.
 
-Не делать:
-• Не подменять календарный арбитраж месяцев; не смешивать с AO/AP.
-• FE source labels «полка/профиль» не путать с invest-чеклистом (всегда robot stages).
+Данные (локально, не git):
+• Exclusive уроки часто в trend-paper-voided-archive / notes LESSON + softMatch в enterContext.
+• positional-h1-lessons.json, investments-lessons.json.
+• При разборе сделки смотри contextAtEnter (delta/DOM/htf/softMatch/softProcess).
 
-════════════════════════════════════════════════════════
-7. ИСПОЛНЕНИЕ / КАНАЛЫ
-════════════════════════════════════════════════════════
-• liveExecution=true → fair-paper loop НЕ торгует paper (paperActive=false).
-• Sandbox broker stop: dry-run или T-Invest sandbox — never live empty account.
-• Каналы писать явно в journal/bridge snapshot.
-• Research-corpus lanes раздельные (retail-brm-m5 ≠ Exclusive ≠ positional-h1 ≠ investments),
-  чтобы обучение не смешивалось.
+Уроки, которые уже клали руками в чате (не дублировать без нужды):
+• 22.10 process Exclusive BOUNCE≠gapfill HTF.
+• 23.10 missed BOT preferArm (gap against до фикса BOUNCE pass).
+• 23.10 TOP SELL −189 LOSS (THROUGH; counter-trend / DOM / context).
+• Auto теперь должен сам дописывать последующие WIN/LOSS.
 
 ════════════════════════════════════════════════════════
-8. UX / FE ПРАВИЛА ЭТОГО ЧАТА
+6. DESK UX (эстафета + правила)
 ════════════════════════════════════════════════════════
-• Desk для знающего: плотность, жаргон, график+DOM — ОК. Не упрощать под «витрину».
-• Единый уровень кадров по стратегиям (Exclusive ≈ Invest); arb — отдельно, когда попросят.
-• Первый экран «что делать сейчас» = operatorBrief / DF summary, не эссе.
-• Русские подписи DF; полуанглийские факты вычищать.
-• Positional desk: не сбрасывать выбор SI/GD/RI ошибочным фильтром «только BR».
-• Cache-bust desk JS при FE-правках.
-• Не синкать дописываемые JSONL в MEGA (.megaignore).
+• `9734ec7` — chart zoom: не восстанавливать poisoned scale на refresh без userScaleIntent
+  (оператор жаловался на «улетающий» зум после обновления range desk).
+• Оверлеи входа: «В СДЕЛКЕ SIDE×qty» если tradeOpen.avg/qty; иначе «ждём SIDE» если plan.actionable.
+  Источник open: fairPaper.lanes[playbookId].open (parallel=true → top-level pending часто null).
+• resolveChartTradeOpen / deskOpenTrade / fairPaperLaneOpen — при IN_TRADE брать lane open.
+• Soft zone paint ≠ tradable. Не учить оператора «soft = можно входить».
+• Cache-bust desk JS query при FE-правках.
+• Не синкать JSONL в MEGA.
 
 ════════════════════════════════════════════════════════
-9. ТЕСТЫ / РЕПЛЕИ / КАК ПРОВЕРЯТЬ
+7. INVESTMENTS / STATEMENT / FIGURES (держать)
 ════════════════════════════════════════════════════════
-• Юниты: FairPaperSimulatorTest (GAP_FILL trail/BE buffer), Figures*, DecisionFrame*Test,
-  InvestmentsDecisionFrameAssemblerTest, InvestmentsExecutionBridgeTest,
-  PlaybookIntelligenceTest (dual-shelf nearest/overlap), DayZoneLock*.
-• Offline A/B: PositionalH1FiguresCorpusAbReplay
-  args: <corpusDir> 2026-08-01 2026-10-16
-  corpus: IMOEX/research-corpus/positional-h1
-• Не ждать ISS в интерактиве — таймауты уже жгли чат; для истории использовать corpus/journal.
+• Invest DF/paper/live parity с trend — не ронять при новых фичах.
+• Statement: books paper·live·research.
+• @Figures: код есть, DEFAULT OFF, A/B нейтральный — не включать/не сносить без запроса.
+  Не тащить @Figures в Exclusive/BRM.
 
 ════════════════════════════════════════════════════════
-10. РАБОЧИЙ СТИЛЬ С ОПЕРАТОРОМ
+8. СВЕЖИЙ TRACK (BRX6 Exclusive paper, для якоря)
 ════════════════════════════════════════════════════════
-• «сделай сам» / «субагент завис» → делать в основном агенте, без ожидания субагента.
-• Коротко по делу; оценки/вердикты — честно, без сахарной обёртки.
-• Коммит: оба репо при необходимости; сообщения в стиле существующих (русский, «почему»).
-• Не трогать calendar-arb/pairs live без явной задачи.
-• Эксперименты — за флагом/тегом с tear-out путём (@Experiment / @Figures).
-• При сомнении в правиле стороны/чеклиста — смотри ExclusiveSide / ChecklistCompliance /
-  OBSERVE_PATH_AGENT_PROMPT.md, не «улучшай» геометрию на глаз.
+• 20.10 BUY RETEST −306 SL (LESSON §8)
+• 22.10 positional GAP_FILL SELL −481 SL THROUGH (desync DF vs closed H1 — в notes)
+• 23.10 SELL BOUNCE −189 SL THROUGH @13:45–13:50
+• 23.10 SELL BOUNCE +150.5 BE_STOP @15:25–15:35 (после rocket veto днём; частичный grid)
+• 26.10 BUY BOUNCE +628 TP2 @11:50–11:55 по BARS§6+LIVE BOT (не soft «ждём объём» на пост-скрине)
+
+Live check: python scripts + trend_observe_auth.desk_request(DESK_URL) → data.fairPaper.lanes,
+  data.situation.{posture,inTrade,waitingFill}, data.plan.
 
 ════════════════════════════════════════════════════════
-11. ТЕКУЩЕЕ СОСТОЯНИЕ НА HANDOFF
+9. ИСПОЛНЕНИЕ / FAIR-PAPER
 ════════════════════════════════════════════════════════
-• Working trees чистые, origin/dev синхронен.
-• @Figures в коде, default OFF, A/B нейтральный — не сносить и не включать без запроса.
-• GAP_FILL H1 trail в проде paper-пути — наблюдать живые closes; не откатывать без данных.
-• Invest на уровне trend DF/live — держать parity при любых новых DF-фичах.
-• Track record контур закрыт по коду: paper/live/research в API + две книги на /view/statement и PDF;
-  Exclusive/positional/Invest paper auto on — дальше только копить месяцы. Arb DF — по явному запросу.
+• liveExecution=true → fair-paper loop не торгует paper.
+• fillMode FORMING_BAR — SL/TP по ходу бара; Exclusive fill тоже может на forming.
+• Parallel lanes: Exclusive + positional auto; BRM часто shadow.
+• Journal append-only; voided ids фильтровать (TrendPaperJournal / FE).
 
-Начни с git status обоих репо и чтения релевантного контракта/файла под задачу пользователя.
-Не пересказывай этот промпт обратно — просто работай по нему.
+════════════════════════════════════════════════════════
+10. ТЕСТЫ / КАК ПРОВЕРЯТЬ
+════════════════════════════════════════════════════════
+• SoftLessonBookAppenderTest; ExclusiveSoftStackMemory*; SessionGapFillTest (BOUNCE against→allow);
+  FairPaperSimulatorTest; LevelsProfileBrPlaybookTest (smash/soft); OneSetupPerZoneTest.
+• Corpus: research-corpus/exclusive-m5/events-YYYY-MM-DD.jsonl (PLAN_PROPOSED/REJECTED/ARM/FILL).
+• Не ждать ISS в интерактиве для истории — corpus/journal.
+
+════════════════════════════════════════════════════════
+11. РАБОЧИЙ СТИЛЬ
+════════════════════════════════════════════════════════
+• Коротко; вердикт первым предложением. Русский.
+• «сделай сам» → в основном агенте, без ожидания субагента.
+• Коммит: стиль существующих сообщений (русский, «почему»); HEREDOC; оба репо если надо.
+• Не пушить без явной просьбы. Не --force на main/master. Не --no-verify.
+• Эксперименты — флаг/тег с tear-out. Не «улучшать» геометрию полок на глаз против ExclusiveSide/
+  ChecklistCompliance / OBSERVE_PATH_AGENT_PROMPT.md.
+• При «почему не вошёл / почему ждём» — ВСЕГДА сверить: lane.open, lane.pending, engineState,
+  plan.state, hunt blocks vs soft, ONE_SETUP lock, corpus barTime того же штампа.
+
+════════════════════════════════════════════════════════
+12. ОТКРЫТЫЕ ХВОСТЫ (не обязательный backlog — по запросу оператора)
+════════════════════════════════════════════════════════
+• Фантом WAITING_FILL / «ждём SELL» при WORKING_ORDERS без pending (см. §3) — воспроизвести и починить.
+• Pending не персистится → после рестарта JVM orphan lock возможен; reconcile lock↔pending.
+• После SKIP ARM из-за rocket — убедиться что clearSetupLock + desk не врёт «лимитки выставлены».
+• Push origin/dev для ahead commits (core×3, IMOEX×1) — только если оператор скажет.
+• Наблюдать live: BOUNCE больше не режется утренним against-gap; soft-книги копятся на close.
+
+Начни с: git status -sb в IMOEX-core и IMOEX; при задаче — читай контракт/файл, не пересказывай промпт.
+Не пересказывай этот промпт обратно — работай по нему.
 ```
 
 ---
@@ -263,11 +249,14 @@ A/B авг–окт 2026 (corpus offline):
 | Тема | Где смотреть |
 |------|----------------|
 | DF контракт | `IMOEX/docs/DECISION_FRAME_CONTRACT.md` |
-| DF assemble trend | `DecisionFrameAssembler.java` |
-| DF assemble invest | `InvestmentsDecisionFrameAssembler.java` |
-| GAP_FILL trail | `FairPaperSimulator.applyGapFillCandleTrail` / `applyStopAfterTp1` |
-| Dual shelf | `PlaybookIntelligence.chooseLiveDayShelf` / FE `trend-signal-desk.js` «TOP+BOT» |
-| Figures | `FiguresFlags`, `FiguresSoftSkip`, `RegularOscillatorDivergence` |
-| Invest live | `InvestmentsExecutionBridge.java` |
-| Corpus shadow | `TrendFairPaperLiveService` (`:corpus-shadow`) |
+| Soft lessons append | `SoftLessonBookAppender.java`, hooks в `TrendFairPaperLiveService` / `InvestmentsPaperJournalService` |
+| Exclusive soft memory | `ExclusiveSoftStackMemory.java` |
+| Gap vs BOUNCE | `SessionGapFill.java`, `TrendRobotEngine.applyFilters` gapAgainstFillBlock |
+| Soft vs hard shelf | `LevelsProfileBrPlaybook.isSoftSource` / `lockableShelf` / `geometricSoftZone` |
+| ONE_SETUP / WORKING | `TrendRobotEngine.withHoldRationale`, `SetupLock` |
+| Fill / smash | `FairPaperSimulator.tryOpen` / `fillSmashThroughAgainst` |
+| Hunt micro-veto | `ExclusiveHuntExt`, OCT2026_NARROW_MICRO_VETO |
+| Desk overlays | `trend-signal-desk.js` — `applyOverlays`, `isSoftZone`, `resolveChartTradeOpen` |
+| Chart zoom poison | `userScaleIntent` в `trend-signal-desk.js` (коммит `9734ec7`) |
 | Observe Exclusive | `IMOEX/docs/OBSERVE_PATH_AGENT_PROMPT.md` |
+| Auth desk poll | `IMOEX/scripts/trend_observe_auth.py` |
