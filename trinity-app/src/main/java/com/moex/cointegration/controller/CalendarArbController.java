@@ -45,7 +45,7 @@ public class CalendarArbController {
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("enabled", true);
-        m.put("message", research.statusMessage());
+        m.put("message", CalendarArbResearchService.statusMessage(settings.liveExecution()));
         m.put("dataSource", research.market().providerId());
         m.putAll(settings.view());
         m.put("fairPaper", fairPaper.snapshot());

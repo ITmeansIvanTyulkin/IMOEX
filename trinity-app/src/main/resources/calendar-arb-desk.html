@@ -3,13 +3,16 @@
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
       <h2>Календарный арбитраж</h2>
-      <p class="meta" id="arb-desk-meta">Котировки брокера · два или три месяца · сделки только в режиме «Авто»</p>
+      <p class="meta" id="arb-desk-meta">Котировки брокера · копим DOM ног и CS · сделки только в режиме «Авто»</p>
     </div>
     <div class="signal-desk-actions">
       <button type="button" class="btn btn-ghost" id="arb-desk-refresh">Обновить</button>
       <a class="btn btn-ghost" href="/view/settings#calendar-arb-settings">Режим</a>
     </div>
   </div>
+  <p class="strategy-capital-note" id="arb-capital-note" role="note">
+    Стратегия работает при капитале от 2 млн. рублей
+  </p>
   <div class="signal-desk-strip" id="arb-desk-strip">
     <div class="signal-chip signal-chip-select">
       <span class="k">Семья</span>
@@ -45,6 +48,45 @@
     </label>
     <p class="strategy-mode-hint" id="arb-mode-hint">Ручная торговля: график без сделок.</p>
   </div>
+  <div class="decision-frame is-idle is-density-brief" id="decision-frame" data-state="idle"
+       data-density="brief" hidden data-df-mount="calendar-arb">
+    <div class="decision-frame-toolbar">
+      <span class="decision-frame-kicker">Почему так</span>
+      <span class="decision-frame-state" id="decision-frame-state" hidden></span>
+      <div class="decision-frame-density" role="group" aria-label="Детализация">
+        <button type="button" class="decision-frame-density-btn is-active" data-df-density="brief">кратко</button>
+        <button type="button" class="decision-frame-density-btn" data-df-density="full">подробно</button>
+      </div>
+    </div>
+    <button type="button" class="decision-frame-summary" id="decision-frame-summary"
+            aria-expanded="false" aria-controls="decision-frame-details">
+      <span class="decision-frame-status" id="decision-frame-status">—</span>
+      <span class="decision-frame-hero">
+        <span class="decision-frame-text" id="decision-frame-text">Загрузка…</span>
+        <span class="decision-frame-why" id="decision-frame-why" hidden></span>
+      </span>
+      <span class="decision-frame-hint" id="decision-frame-hint">подробнее</span>
+      <span class="decision-frame-meta" id="decision-frame-meta" hidden></span>
+    </button>
+    <div class="decision-frame-details" id="decision-frame-details" hidden>
+      <p class="decision-frame-details-title">Факты кадра</p>
+      <ul class="decision-frame-details-list" id="decision-frame-details-list"></ul>
+    </div>
+  </div>
+  <div class="signal-df-journal" id="signal-df-journal" hidden>
+    <div class="signal-df-journal-head">
+      <p class="signal-brief-title" id="signal-df-journal-title">Журнал кадров</p>
+      <div class="signal-df-journal-filters" id="signal-df-journal-filters" role="group" aria-label="Фильтр кадров">
+        <button type="button" class="signal-df-kind is-active" data-df-kind="">все</button>
+        <button type="button" class="signal-df-kind" data-df-kind="wait">ждёт</button>
+        <button type="button" class="signal-df-kind" data-df-kind="enter">вошёл</button>
+        <button type="button" class="signal-df-kind" data-df-kind="skip">пропуск</button>
+      </div>
+    </div>
+    <p class="signal-df-day-summary" id="signal-df-day-summary" hidden></p>
+    <p class="meta" id="signal-df-journal-meta">—</p>
+    <ul class="signal-df-journal-list" id="signal-df-journal-list"></ul>
+  </div>
   <p class="meta" id="arb-reason">—</p>
   <p class="meta" id="arb-fill-quality">Стакан ещё подгружается.</p>
   <p class="meta" id="arb-near-locked" hidden>Стакан скрещён — это флаг для исследования, не авто-ордер.</p>
@@ -54,8 +96,9 @@
   <div class="arb-cards" id="arb-cards"></div>
   <div class="signal-paper-panel" id="arb-paper-panel" hidden>
     <p class="signal-brief-title">Сделки сегодня</p>
+    <p class="meta" id="arb-paper-books"></p>
     <table class="signal-paper-table">
-      <thead><tr><th>Дата</th><th>Пара</th><th>Side</th><th>Вход</th><th>Выход</th><th>PnL</th></tr></thead>
+      <thead><tr><th>Дата</th><th>Книга</th><th>Пара</th><th>Side</th><th>Вход</th><th>Выход</th><th>PnL</th></tr></thead>
       <tbody id="arb-paper-body"></tbody>
     </table>
   </div>
@@ -146,7 +189,7 @@
       <div>
         <p class="signal-guide-kicker">TRINITY · Календарный арбитраж</p>
         <h3 id="arb-guide-title">Как торгует робот</h3>
-        <p class="signal-guide-lead">Не ставка на рост нефти или курса. Ставка на то, что разница цен двух месяцев одного товара вернётся к привычной.</p>
+        <p class="signal-guide-lead">Не ставка на рост нефти — ставка на разницу месяцев. Сейчас режим исследования: копим DOM ног и CS. Fade «к средней» на 2025–2026 не окупился — пороги z без go не крутим.</p>
       </div>
       <button type="button" class="signal-guide-close" id="arb-guide-close"
               data-arb-guide-close aria-label="Закрыть">×</button>
@@ -154,6 +197,7 @@
     <div class="signal-guide-body">
       <nav class="signal-guide-toc" aria-label="Разделы">
         <a href="#arb-guide-idea">Идея</a>
+        <a href="#arb-guide-day">День робота</a>
         <a href="#arb-guide-looks">На что смотрит</a>
         <a href="#arb-guide-entry">Когда входит</a>
         <a href="#arb-guide-legs">Как собирает</a>
@@ -164,36 +208,58 @@
       </nav>
 
       <article class="signal-guide-section" id="arb-guide-idea">
-        <h4>Идея в одном абзаце</h4>
+        <h4>Идея простыми словами</h4>
         <p>
-          На срочном рынке у одного товара всегда живут <strong>несколько месяцев поставки</strong>:
-          ближний и следующий, иногда ещё третий. Робот не угадывает, пойдёт ли цена вверх.
-          Он смотрит <strong>календарный спред</strong> — разницу между дальним и ближним месяцем.
-          Если эта разница резко уехала от своей обычной величины и рынок спокойный,
-          робот покупает «дешёвую» ногу и продаёт «дорогую», ждёт возврата к привычному
-          и закрывает обе ноги вместе.
+          У нефти, доллара, индекса, золота или газа на срочке всегда живут
+          <strong>несколько месяцев поставки</strong>: ближний и следующий, иногда третий.
+          Цена «нефти вообще» — одно, а <strong>щель между месяцами</strong> (календарный спред) — другое.
+          Прибыль (или убыток) идёт от схождения ног, не от того, что «баррель пошёл вверх».
+        </p>
+        <p>
+          Раньше ставка была на fade разницы к средней. На полном прогоне 2025–2026 круг
+          не окупил стакан и комиссии. Сейчас авто в режиме исследования копирует
+          <strong>DOM ближнего, дальнего и сам CS</strong> в архив — без стакана нельзя честно
+          считать ролл, проскальзывание и «окупит ли ход».
         </p>
         <p class="signal-guide-note">
-          Бабочка из трёх месяцев — та же идея: перекос «крыльев» относительно середины.
-          Это не прогноз нефти, доллара, индекса или золота.
+          Кадр «Почему так» говорит, что делает робот, почему молчит и сколько строк DOM уже есть.
+          Одна нога без второй — уже ставка на товар; так робот не держит.
+          Пороги z без research-go не крутим.
         </p>
+      </article>
+
+      <article class="signal-guide-section" id="arb-guide-day">
+        <h4>Как проходит день</h4>
+        <div class="signal-guide-flow" aria-hidden="true">
+          <span>час закрылся</span><i>→</i>
+          <span>CS + DOM ног</span><i>→</i>
+          <span>гейты / пауза</span><i>→</i>
+          <span>архив · редко вход</span>
+        </div>
+        <ol class="signal-guide-steps">
+          <li><strong>По закрытию часа.</strong> Считает разницу дальнего и ближнего месяца по живым котировкам брокера.</li>
+          <li><strong>Копит стаканы.</strong> Пишет в архив DOM ближнего, дальнего и сам CS —
+            без этого нельзя честно оценить ролл и «окупит ли ход».</li>
+          <li><strong>Гейты.</strong> Уехала ли разница от среднего? Не из середины? Не против тренда кривой?
+            Хватит ли лотов на обеих ногах? Не съест ли крест весь ход?</li>
+          <li><strong>Календарь.</strong> Дни до экспирации ближнего, окно поставки, запасы / ЦБ / дивиденды.</li>
+          <li><strong>Сейчас чаще пауза.</strong> Fade 2025–2026 не окупил круг — пороги z без research-go не крутим.
+            В работу — максимум <strong>один спред</strong>. Недели без сделок — норма.</li>
+        </ol>
       </article>
 
       <article class="signal-guide-section" id="arb-guide-looks">
         <h4>На что смотрит</h4>
         <ul class="signal-guide-list">
-          <li><strong>Часовой график</strong> разницы месяцев у брокера — не минутный скальп.</li>
-          <li><strong>Насколько разница уехала от среднего</strong> за последние недели.
-            Вход только когда уехало заметно, не из середины коридора.</li>
+          <li><strong>Часовой график</strong> разницы месяцев — не минутный скальп.</li>
+          <li><strong>Насколько разница уехала</strong> от среднего. Из середины не входим.</li>
           <li><strong>Наклон кривой</strong> — едет ли разница уверенно в одну сторону.
-            Если это тренд структуры, а не временный перекос — против него не встаём.</li>
-          <li><strong>Скорость возврата</strong> — если к среднему тащиться неделями, капитал зря заморожен.</li>
-          <li><strong>Оба стакана</strong> — хватит ли лотов на обеих ногах и не съест ли крест цен весь ход.</li>
-          <li><strong>Гарантийка</strong> двух ног, дни до окончания ближнего контракта, новости из календаря.</li>
+            Тренд структуры фадить опасно.</li>
+          <li><strong>Скорость возврата</strong> — если тащиться неделями, капитал зря заморожен.</li>
+          <li><strong>Оба стакана</strong>, гарантийка двух ног, дни до конца ближнего контракта.</li>
         </ul>
         <p>
           Нефть, доллар, индекс, золото и газ — <strong>разные шаблоны</strong>, не одна линейка на всех.
-          В работу берётся <strong>один спред</strong>, не пять сразу.
         </p>
       </article>
 
@@ -202,87 +268,95 @@
         <div class="signal-guide-cards">
           <div class="signal-guide-card">
             <p class="signal-guide-card-kicker">Разница слишком дешёвая</p>
-            <p>Покупаем спред: продаём ближний месяц, покупаем дальний. Ждём, пока разница подтянется к обычной.</p>
+            <p>Покупаем спред: продаём ближний месяц, покупаем дальний.
+              Ждём, пока разница подтянется к обычной.</p>
           </div>
           <div class="signal-guide-card">
             <p class="signal-guide-card-kicker">Разница слишком дорогая</p>
-            <p>Продаём спред: покупаем ближний, продаём дальний. Зеркально. Не «шорт нефти».</p>
+            <p>Продаём спред: покупаем ближний, продаём дальний. Зеркально.
+              Это не «шорт нефти».</p>
           </div>
         </div>
         <ul class="signal-guide-list">
-          <li>Нужен <strong>разворот к среднему</strong>, а не догон хвоста: если перекос ещё разгоняется — ждём.</li>
-          <li>Если уже уехали почти до стопа — поздно, не входим.</li>
+          <li>Нужен <strong>разворот к среднему</strong>, не догон хвоста.</li>
+          <li>Если уже уехали почти до стопа — поздно.</li>
           <li>Основная сессия срочного рынка, не открытие и не последние полчаса.</li>
-          <li>Выход — когда разница вернулась к среднему, упёрлась в стоп, вышло время без возврата,
-            или ближний месяц пора снимать перед экспирацией.</li>
+          <li>Выход — возврат к среднему, стоп, время без возврата, или ближний месяц пора снимать перед экспирацией.</li>
         </ul>
       </article>
 
       <article class="signal-guide-section" id="arb-guide-legs">
         <h4>Как собирает сделку</h4>
         <ol class="signal-guide-steps">
-          <li>Две ноги всегда вместе: ближний и дальний (бабочка — три). Одна нога без второй — это уже ставка на цену, её робот не держит.</li>
-          <li>Цена входа — по <strong>живому стакану</strong>, с запасом на проскальзывание, не по «красивой» середине графика.</li>
-          <li>Если второй ноги нет в стакане — сделку не оставляем висеть: закрываем то, что успели.</li>
+          <li>Две ноги всегда вместе (бабочка — три). Одну ногу висеть не оставляем.</li>
+          <li>Цена — по <strong>живому стакану</strong>, с запасом на проскальзывание, не по середине графика.</li>
+          <li>Нет второй ноги в стакане — то, что успели, закрываем.</li>
           <li>Размер ног подгоняется под стоимость пункта, чтобы спред не разъезжался от разного лота.</li>
         </ol>
       </article>
 
       <article class="signal-guide-section" id="arb-guide-pause">
-        <h4>Когда робот сознательно молчит</h4>
+        <h4>Когда сознательно молчит</h4>
         <ul class="signal-guide-list">
-          <li>Разница месяцев <strong>едет трендом</strong> — фадить такую кривую опасно.</li>
+          <li>Разница месяцев <strong>едет трендом</strong>.</li>
           <li>Ход к среднему <strong>не окупит стакан</strong> и две комиссии.</li>
-          <li>Тонкий стакан, мало сделок в ногах, слишком большая гарантийка.</li>
-          <li>Ближний месяц на исходе: не открываем новое, открытое снимаем.</li>
-          <li>Не шортим ближний месяц в окне поставки — там легко «выжать» шорт.</li>
-          <li>День отчёта по запасам, решения ЦБ, дивидендов, золота — из того же календаря, что у тренда.</li>
+          <li>Тонкий стакан, мало сделок, слишком большая гарантийка.</li>
+          <li>Ближний месяц на исходе: новое не открываем, открытое снимаем.</li>
+          <li>Не шортим ближний в окне поставки — там легко выжать шорт.</li>
+          <li>День запасов, ЦБ, дивидендов, золота — из календаря событий.</li>
         </ul>
-        <p>Дни и недели без сделок для этого робота — норма, не поломка. Он зарабатывает редко и только в спокойной кривой.</p>
+        <p>Плашка «не торгует» при включённом авто = правила не выполнены, не «доска сломалась».</p>
       </article>
 
       <article class="signal-guide-section" id="arb-guide-oil">
-        <h4>Нефть — отдельная пауза</h4>
+        <h4>Нефть — только «скучный» рынок</h4>
         <p>
-          На нефти стратегия работает только когда рынок «скучный». Если нефтезаводы зарабатывают
-          с барреля очень много, крупные спекулянты сильно перекошены или вышел крупный сюрприз
-          по запасам — разница месяцев часто <em>едет своим ходом</em>, а не возвращается.
-          Тогда нефть на паузе, остальные семьи робот всё ещё может смотреть.
+          На нефти стратегия работает, когда кривая не прёт своим ходом.
+          Если заводы зарабатывают с барреля очень много, крупные спекулянты сильно перекошены
+          или вышел крупный сюрприз по запасам — разница месяцев часто <em>едет</em>, а не возвращается.
+          Тогда нефть на паузе; остальные семьи робот всё ещё может смотреть.
         </p>
         <p class="signal-guide-note">
           Цифры прибыли заводов и отчёта спекулянтов — с публичных лент, не со стакана американской биржи.
+          У газа свой сезон (отопление / закачка) — в «чужой» сезон газ не трогаем.
         </p>
       </article>
 
       <article class="signal-guide-section" id="arb-guide-robot">
         <h4>Наблюдение и авто</h4>
         <ol class="signal-guide-steps">
-          <li><strong>Наблюдение</strong> — график, стаканы и паузы видны. Сделок робот не открывает.</li>
-          <li><strong>Авто</strong> — тот же тумблер, что в настройках. По закрытию часа робот пишет вход и выход в журнал.</li>
-          <li>Живые заявки на срочном рынке — отдельный контур и только если брокер к ним готов. Бабочка из трёх месяцев в живые заявки не ходит.</li>
+          <li><strong>Наблюдение</strong> — график, стаканы, паузы и кадр «Почему так» видны. Сделок нет.</li>
+          <li><strong>Авто</strong> — тот же тумблер, что в настройках. Сейчас в основном копирует DOM/CS
+            и пишет паузы; вход в журнал — только если гейты зелёные (после research это редкость).</li>
+          <li>Живые заявки на срочном — отдельный контур и только если брокер готов.
+            Бабочка из трёх месяцев в live не ходит.</li>
+          <li>Капитал ориентира — от ~2 млн ₽ (плашка на пульте): две ноги + гарантийка.</li>
         </ol>
-        <p>Если тумблер на наблюдении — решение входить за вами. Плашка «не торгует» при включённом авто значит: правила входа сейчас не выполнены.</p>
         <p class="signal-guide-note">
           Режим: <a href="/view/settings#calendar-arb-settings">Настройки · календарный арбитраж</a>.
+          Полное описание — <a href="/view/calendar-arb-strategy">стратегия арбитража</a>.
         </p>
       </article>
 
       <article class="signal-guide-section" id="arb-guide-risk">
         <h4>Риск</h4>
         <ul class="signal-guide-list">
-          <li>Календарный спред всё равно может уехать дальше среднего — стоп по отклонению и выход по времени.</li>
-          <li>Одна нога без второй — почти фьючерс на весь ход. Поэтому частичный набор быстро закрываем.</li>
+          <li>Спред всё равно может уехать дальше среднего — стоп и выход по времени.</li>
+          <li>Одна нога без второй — почти фьючерс на весь ход. Частичный набор быстро закрываем.</li>
           <li>Крест стакана и гарантийка могут съесть идею, даже если график «красивый».</li>
           <li>Это разбор и журнал для обучения, не обещание прибыли и не офер.</li>
         </ul>
         <p class="signal-guide-foot">
-          Памятка оператора по календарному спреду на срочном рынке. Журнал в песочнице брокера — не замена живой заявке.
+          Памятка оператора по календарному спреду на срочном рынке.
         </p>
       </article>
     </div>
   </div>
 </div>
+</div>
+</div>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
 <script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/calendar-arb-desk.js?v=20260925-tlmark2"></script>
+<script src="/js/trinity-decision-frame.js?v=20261015-dfru"></script>
+<script src="/js/calendar-arb-desk.js?v=20261019-domcs"></script>

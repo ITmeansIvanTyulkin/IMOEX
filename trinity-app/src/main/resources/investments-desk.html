@@ -1,5 +1,5 @@
 <section class="charts-terminal investments-workspace" id="investments-charts-terminal" data-nav-strategy="invest">
-  <link rel="stylesheet" href="/css/operator.css?v=20261006-plaques5">
+  <link rel="stylesheet" href="/css/operator.css?v=20261027-drawtv">
   <div class="charts-terminal-head">
     <div>
       <p class="meta"><a href="/view/investments-strategy">Описание стратегии</a>
@@ -15,6 +15,13 @@
           <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
           <span class="mode-switch-label">Авто</span>
         </label>
+        <label class="mode-switch is-signal invest-live-switch" id="invest-live-wrap"
+               title="Live: вместо paper — журнал + лимитки на T-Invest, если брокер armed.">
+          <span class="mode-switch-label">Paper</span>
+          <input type="checkbox" id="invest-live-execution" role="switch" aria-checked="false">
+          <span class="mode-switch-track" aria-hidden="true"><span class="mode-switch-knob"></span></span>
+          <span class="mode-switch-label">Live</span>
+        </label>
         <p class="strategy-mode-hint" id="invest-mode-hint">Загрузка режима…</p>
       </div>
       <button type="button" class="btn btn-ghost signal-guide-btn" id="invest-guide-open"
@@ -29,6 +36,53 @@
   </div>
   <div class="invest-ops-strip" id="invest-ops-strip" aria-label="Pipeline">
     <span class="meta">Pipeline…</span>
+  </div>
+  <div class="signal-brief is-density-brief invest-desk-brief" id="invest-desk-brief" data-density="brief" aria-live="polite">
+    <p class="signal-brief-title">Сейчас</p>
+    <p class="signal-brief-hero" id="invest-desk-brief-hero" hidden></p>
+    <div class="signal-brief-body" id="invest-desk-brief-body">Загрузка среза…</div>
+    <p class="signal-brief-action" id="invest-desk-brief-action"><strong>Что делать:</strong> —</p>
+  </div>
+  <div class="decision-frame is-idle is-density-brief" id="decision-frame" data-state="idle"
+       data-density="brief" hidden data-df-mount="investments">
+    <div class="decision-frame-toolbar">
+      <span class="decision-frame-kicker">Почему так</span>
+      <span class="decision-frame-state" id="decision-frame-state" hidden></span>
+      <div class="decision-frame-density" role="group" aria-label="Детализация">
+        <button type="button" class="decision-frame-density-btn is-active" data-df-density="brief">кратко</button>
+        <button type="button" class="decision-frame-density-btn" data-df-density="full">подробно</button>
+      </div>
+    </div>
+    <button type="button" class="decision-frame-summary" id="decision-frame-summary"
+            aria-expanded="false" aria-controls="decision-frame-details">
+      <span class="decision-frame-status" id="decision-frame-status">—</span>
+      <span class="decision-frame-hero">
+        <span class="decision-frame-text" id="decision-frame-text">Загрузка…</span>
+        <span class="decision-frame-why" id="decision-frame-why" hidden></span>
+      </span>
+      <span class="decision-frame-hint" id="decision-frame-hint">подробнее</span>
+      <span class="decision-frame-meta" id="decision-frame-meta" hidden></span>
+    </button>
+    <div class="decision-frame-details" id="decision-frame-details" hidden>
+      <p class="decision-frame-details-title">Факты кадра</p>
+      <ul class="decision-frame-details-list" id="decision-frame-details-list"></ul>
+    </div>
+  </div>
+  <div class="signal-df-journal" id="signal-df-journal" hidden>
+    <div class="signal-df-journal-head">
+      <p class="signal-brief-title" id="signal-df-journal-title">Журнал кадров</p>
+      <div class="signal-df-journal-filters" id="signal-df-journal-filters" role="group" aria-label="Фильтр кадров">
+        <button type="button" class="signal-df-kind is-active" data-df-kind="">все</button>
+        <button type="button" class="signal-df-kind" data-df-kind="wait">ждёт</button>
+        <button type="button" class="signal-df-kind" data-df-kind="enter">вошёл</button>
+        <button type="button" class="signal-df-kind" data-df-kind="skip">пропуск</button>
+        <a class="signal-df-kind" id="invest-df-export" href="/api/investments/decision-frames/export"
+           title="JSON export кадров investments за сегодня">export</a>
+      </div>
+    </div>
+    <p class="signal-df-day-summary" id="signal-df-day-summary" hidden></p>
+    <p class="meta" id="signal-df-journal-meta">—</p>
+    <ul class="signal-df-journal-list" id="signal-df-journal-list"></ul>
   </div>
   <div class="charts-tv-toolbar" id="charts-tv-toolbar" role="toolbar" aria-label="Инструменты активного графика">
     <div class="charts-tv-active" id="charts-active-chip" title="Клик по графику делает его активным">
@@ -215,18 +269,27 @@
   gap: 0.75rem;
   align-items: start;
 }
-/* True analysis fullscreen: viewport shell, dock + toolbar stay, ops panel hides */
-body.invest-chart-fs { overflow: hidden; }
+/* True analysis fullscreen: viewport shell; body lock must not kill inner scroll. */
+html.invest-chart-fs,
+body.invest-chart-fs {
+  overflow: hidden !important;
+  height: 100%;
+}
 .investments-workspace.is-chart-fs {
   position: fixed;
   inset: 0;
   z-index: 400;
   background: #f4f6f8;
   padding: 0.45rem 0.65rem 0.65rem;
-  overflow: hidden;
+  /* Was overflow:hidden — head+brief+toolbar > viewport clipped the chart with no scroll. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  min-height: 0;
 }
 .investments-workspace.is-chart-fs .charts-terminal-head { flex: 0 0 auto; }
 .investments-workspace.is-chart-fs .invest-ops-strip { flex: 0 0 auto; }
@@ -235,38 +298,44 @@ body.invest-chart-fs { overflow: hidden; }
   display: flex !important;
   margin-bottom: 0.45rem;
 }
-.investments-workspace.is-chart-fs .invest-ops-panel { display: none !important; }
+/* Hide bulky desk chrome so the chart gets the viewport; shell still scrolls if needed. */
+.investments-workspace.is-chart-fs .invest-ops-panel,
+.investments-workspace.is-chart-fs .invest-desk-brief,
+.investments-workspace.is-chart-fs #decision-frame,
+.investments-workspace.is-chart-fs #signal-df-journal {
+  display: none !important;
+}
 .investments-workspace.is-chart-fs .charts-workbench {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: min(70vh, 520px);
   align-items: stretch;
   grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
-  height: 100%;
 }
 .investments-workspace.is-chart-fs .charts-dock {
   display: block;
   max-height: none;
-  height: 100%;
+  height: auto;
+  max-height: calc(100vh - 7rem);
   overflow: auto;
 }
 .investments-workspace.is-chart-fs .charts-terminal-grid.is-fullscreen {
-  min-height: 0;
-  height: 100%;
+  min-height: min(70vh, 520px);
+  height: auto;
   display: grid;
   grid-template-columns: 1fr;
   grid-template-rows: minmax(0, 1fr);
 }
 .investments-workspace.is-chart-fs .charts-pane.is-fs-target {
-  height: 100%;
-  min-height: 0;
+  height: auto;
+  min-height: min(70vh, 520px);
   display: flex;
   flex-direction: column;
 }
 .investments-workspace.is-chart-fs .charts-pane.is-fs-target .charts-pane-head { flex: 0 0 auto; }
 .investments-workspace.is-chart-fs .charts-pane.is-fs-target .charts-pane-chart {
   flex: 1 1 auto;
-  height: auto !important;
-  min-height: 0;
+  height: calc(100vh - 11rem) !important;
+  min-height: 360px;
 }
 .invest-ops-strip {
   display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.65rem;
@@ -324,9 +393,11 @@ body.invest-chart-fs { overflow: hidden; }
 }
 .charts-watch-row.is-open { color: #1a2228; }
 .charts-watch-row.is-on { background: #e8eef2; }
-.charts-watch-row .v { font-size: 0.62rem; color: #94a3b8; margin-left: 0.25rem; }
+.charts-watch-row .v { font-size: 0.62rem; color: #94a3b8; margin-left: 0.35rem; font-weight: 550; }
 .charts-watch-row .v.is-invest { color: #15803d; }
 .charts-watch-row .v.is-watch { color: #b45309; }
+.charts-watch-row .v.is-skip { color: #94a3b8; }
+.charts-watch-row .v.is-pending { color: #cbd5e1; }
 .charts-watch-px.is-up { color: #15803d; }
 .charts-watch-px.is-down { color: #b91c1c; }
 .charts-dom, .charts-tape { max-height: 12rem; overflow: auto; font: 11px/1.3 ui-monospace, Menlo, monospace; }
@@ -547,7 +618,7 @@ body.invest-chart-fs { overflow: hidden; }
       <div>
         <p class="signal-guide-kicker">TRINITY · Инвестиции</p>
         <h3 id="invest-guide-title">Как торгует робот</h3>
-        <p class="signal-guide-lead">Среднесрок 1–3 месяца по акциям MOEX. Сначала широкий список наблюдения, потом чек-лист решает, кого брать.</p>
+        <p class="signal-guide-lead">Среднесрок 1–3 месяца по ликвидным акциям MOEX: слева — кого мониторим всегда, справа — кого чек-лист сегодня пустил в работу. Не скальп и не «зелёная свеча = buy».</p>
       </div>
       <button type="button" class="signal-guide-close" id="invest-guide-close"
               data-invest-guide-close aria-label="Закрыть">×</button>
@@ -555,97 +626,146 @@ body.invest-chart-fs { overflow: hidden; }
     <div class="signal-guide-body">
       <nav class="signal-guide-toc" aria-label="Разделы">
         <a href="#invest-guide-idea">Идея</a>
+        <a href="#invest-guide-day">День робота</a>
         <a href="#invest-guide-list">Список слева</a>
         <a href="#invest-guide-scan">Чек-лист</a>
         <a href="#invest-guide-entry">Когда входит</a>
+        <a href="#invest-guide-manage">В сделке</a>
         <a href="#invest-guide-auto">Наблюдение и авто</a>
         <a href="#invest-guide-risk">Риск</a>
       </nav>
 
       <article class="signal-guide-section" id="invest-guide-idea">
-        <h4>Идея в одном абзаце</h4>
+        <h4>Идея простыми словами</h4>
         <p>
-          Робот не гоняется за внутридневным импульсом. Он держит
-          <strong>список ликвидных акций</strong>, несколько раз за сессию прогоняет каждую
-          через чек-лист (фонд, категория, ликвидность, макро, события, тренд D1, зоны H4,
-          объём и кластеры) и ставит лестницу лимиток только если вердикт
-          <strong>invest</strong>.
+          Это не скальп и не «купил, потому что свеча зелёная». Робот держит
+          <strong>фиксированный список ликвидных акций MOEX</strong> и несколько раз за сессию
+          прогоняет каждую через длинный чек-лист: фундамент и категория, ликвидность,
+          макро/сектор, корпсобытия, дневной тренд, зоны на H4, объём, дельта и кластеры.
+        </p>
+        <p>
+          Лестницу лимиток ставит <strong>только</strong> при вердикте <strong>invest</strong>.
+          Бумага может годами жить слева и почти всегда быть skip —
+          список наблюдения шире, чем сделки. Так и задумано: сначала вселенная, потом отбор.
         </p>
         <p class="signal-guide-note">
-          Это не прогноз индекса. Бумага может быть в списке слева годами и при этом
-          почти всегда быть skip — список наблюдения шире, чем сделки.
+          Не прогноз индекса и не «победители дня». Soft-уроки прошлых closes могут урезать размер
+          или попросить подождать — сторону чек-листа не крутят.
         </p>
+      </article>
+
+      <article class="signal-guide-section" id="invest-guide-day">
+        <h4>Как проходит день</h4>
+        <div class="signal-guide-flow" aria-hidden="true">
+          <span>скан универсума</span><i>→</i>
+          <span>чек-лист по каждой</span><i>→</i>
+          <span>invest / watch / skip</span><i>→</i>
+          <span>лестница · manage</span>
+        </div>
+        <ol class="signal-guide-steps">
+          <li>Берёт всех из списка наблюдения (фиксированные имена MOEX).</li>
+          <li>По каждой проходит ступени pipeline — те же, что над графиками на пульте.</li>
+          <li>Красная ступень = этот вход сейчас закрыт (фонд, событие, нет зоны, тонкая лента…).</li>
+          <li>Только <strong>invest</strong> + Авто → fair-paper лестница
+            (часть в ближней зоне, часть на докупку), журнал и statement.</li>
+          <li>Уже открытые позиции ведёт по правилам выхода: цель, частичная фиксация + БУ,
+            путь цены по барам (не «только tip»).</li>
+          <li>Горизонт — <strong>недели и месяцы</strong> (обычно 1–3, до 6), не внутридневная охота.</li>
+        </ol>
       </article>
 
       <article class="signal-guide-section" id="invest-guide-list">
         <h4>Почему слева именно эти компании</h4>
         <p>
-          Сейчас в колонке «Робот» <strong id="invest-guide-universe-n">27</strong> тикеров.
-          Это <strong>фиксированный универсум наблюдения</strong>, а не результат сегодняшнего отбора.
-          Имена заданы заранее: ликвидный широкий рынок MOEX (нефть, металлы, банки, ритейл, IT).
-          Робот <em>мониторит всех</em> из этого списка на каждом скане.
+          В колонке «Робот» сейчас <strong id="invest-guide-universe-n">27</strong> тикеров.
+          Это <strong>фиксированный универсум наблюдения</strong>, не результат сегодняшнего отбора:
+          ликвидный широкий рынок (нефть, металлы, банки, ритейл, IT).
+          Робот <em>мониторит всех</em> на каждом скане.
         </p>
         <ul class="signal-guide-list">
-          <li>Попасть в колонку слева <strong>не значит</strong> «прошла отбор на покупку».</li>
-          <li>Отбор на действие — справа, в кандидатах: <strong>invest / watch / skip</strong>.</li>
-          <li>На графиках одновременно не больше шести панелей; клик по тикеру в списке открывает график.</li>
+          <li>Попасть слева <strong>не значит</strong> «прошла отбор на покупку».</li>
+          <li>Отбор на действие — справа: <strong>invest / watch / skip</strong>.</li>
+          <li>На графиках одновременно не больше шести панелей; клик по тикеру открывает график.</li>
         </ul>
-        <p>
-          <strong>Может ли быть больше или меньше?</strong> Да. Число не магическое: универсум можно
-          расширить или сузить (добавить/убрать бумаги в списке наблюдения). Сейчас нет живого
-          фильтра «биржа сама решает, кого смотреть» — пока 27 имён, пока так записано.
-          Если список поменяют, слева станет столько, сколько в универсуме.
-        </p>
         <p class="signal-guide-note">
-          Дневной скан не выкидывает тикер из колонки. Skip — это «сегодня не берём», а не «забыть бумагу».
+          Skip — «сегодня не берём», а не «забыть бумагу». Скан не выкидывает тикер из колонки.
         </p>
       </article>
 
       <article class="signal-guide-section" id="invest-guide-scan">
-        <h4>Что проверяет чек-лист</h4>
+        <h4>Что проверяет чек-лист — по ступеням</h4>
         <ol class="signal-guide-steps">
-          <li>Режим рынка IMOEX — можно ли лонг (или шорт в медвежьем рукаве).</li>
-          <li>Фундамент и категория 1–3; четвёртая — не берём.</li>
-          <li>Ликвидность, макро/сектор, корпоративные события.</li>
-          <li>D1 в нужную сторону, зона покупки на H4 / профиле.</li>
-          <li>Объём, кумулятивная дельта, кластеры Bid×Ask на M5 внутри зоны.</li>
+          <li><strong>Режим рынка IMOEX</strong> — можно ли лонг (или шорт в медвежьем рукаве).</li>
+          <li><strong>Фундамент и категория 1–3</strong>; четвёртая — в портфель не берём.</li>
+          <li><strong>Ликвидность</strong>, макро/сектор, корпсобытия (отчёт, дивиденд, оферта).</li>
+          <li><strong>D1</strong> в нужную сторону; зона на H4 / профиле объёма.</li>
+          <li><strong>Объём, кумулятивная дельта, кластеры Bid×Ask</strong> на M5 внутри зоны —
+            подтверждение, не сигнал «купить, потому что зелёное».</li>
+          <li><strong>Сайзинг</strong> по категории и soft-урокам; лестница лимиток.</li>
         </ol>
         <p class="signal-guide-note">
-          Pipeline над графиками — те же ступени по выбранному тикеру. Красная ступень = этот вход сейчас закрыт.
+          Pipeline над графиками = те же ступени по выбранному тикеру.
+          Красная ступень объясняет, почему вход закрыт.
         </p>
       </article>
 
       <article class="signal-guide-section" id="invest-guide-entry">
         <h4>Когда ставит заявки</h4>
+        <div class="signal-guide-cards">
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">invest</p>
+            <p>Чек-лист зелёный. При Авто — лестница: часть сразу в зоне,
+              часть на докупку «ниже по полке». Fill/exit → журнал, statement и soft-книга.</p>
+          </div>
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">watch / skip</p>
+            <p><strong>watch</strong> — интерес есть, входа нет (мало подтверждения, событие, тонкая лента).
+              <strong>skip</strong> — этот скан закрыл бумагу, из колонки слева не выкидывает.</p>
+          </div>
+        </div>
         <p>
-          Только вердикт <strong>invest</strong>. Тогда при включённом Авто робот ведёт
-          paper-лестницу лимиток (часть в ближней зоне, часть на докупку), пишет журнал и statement.
+          Категории: 1 — надёжный + жирный потенциал; 2 — надёжный, умеренный ход;
+          3 — слабее по фонду, но большой потенциал; 4 — не берём.
+          Сектор не раздуваем сверх доли портфеля — «все банки сразу» не прокатит.
         </p>
-        <p>
-          <strong>watch</strong> — интерес есть, входа нет (мало подтверждения, событие, слабая лента).
-          <strong>skip</strong> — чек-лист закрыл бумагу на этот скан.
-        </p>
+      </article>
+
+      <article class="signal-guide-section" id="invest-guide-manage">
+        <h4>Пока позиция жива</h4>
+        <ul class="signal-guide-list">
+          <li>Fair-paper смотрит путь цены по барам с момента входа: стоп, цель, частичная фиксация —
+            не только «кончик» последней свечи.</li>
+          <li>Типичный выход: полная цель или ≈50% + перевод остатка в безубыток.</li>
+          <li>Зомби-лестницы (висящие лимитки без живого плана) робот снимает.</li>
+          <li>Каждый close (плюс и минус) уходит в soft-книгу — следующий похожий вход сверится с прошлым.</li>
+        </ul>
       </article>
 
       <article class="signal-guide-section" id="invest-guide-auto">
         <h4>Наблюдение и авто</h4>
         <ul class="signal-guide-list">
           <li><strong>Наблюдение</strong> — скан и графики без заявок. Список слева всё равно полный.</li>
-          <li><strong>Авто</strong> — те же решения, плюс paper-лестницы и журнал.</li>
-          <li>Тумблер тот же, что в Настройках. Live-заявки брокера — отдельный флаг, по умолчанию выкл.</li>
+          <li><strong>Авто · Paper</strong> — fair-paper лестницы (place → fill → manage → exit) и statement.</li>
+          <li><strong>Авто · Live</strong> — paper не ставит новые; мост пишет журнал и шлёт
+            лимитки в T-Invest, если брокер armed (иначе <code>LIVE_GATED</code>).</li>
+          <li>Тумблер тот же, что в
+            <a href="/view/settings#investments-playbook-settings">Настройках · инвестиции</a>.</li>
+          <li>Live-заявки брокера — отдельный флаг, по умолчанию выкл.</li>
         </ul>
+        <p class="signal-guide-note">
+          Полное описание — <a href="/view/investments-strategy">стратегия инвестиций</a>.
+        </p>
       </article>
 
       <article class="signal-guide-section" id="invest-guide-risk">
         <h4>Риск</h4>
         <ul class="signal-guide-list">
-          <li>Горизонт 1–3 месяца, не внутридневная охота.</li>
-          <li>Риск на сделку в доле капитала sleeve; цель с запасом к стопу (RR не ниже двух).</li>
+          <li>Горизонт 1–3 месяца (до 6), не внутридневная охота.</li>
+          <li>Риск на сделку ≈ 0.5–1.5% капитала sleeve; цель с запасом к стопу (RR не ниже 2:1).</li>
+          <li>≈50% в ближней зоне / ≈50% на докупку.</li>
           <li>Категория 4 и перегретый сектор в портфель не идут.</li>
+          <li>Это research / decision-support: paper и песочница — не брокерский офер.</li>
         </ul>
-        <p class="signal-guide-note">
-          Research / decision-support, не индивидуальная рекомендация и не обещание доходности.
-        </p>
       </article>
     </div>
   </div>
@@ -653,6 +773,7 @@ body.invest-chart-fs { overflow: hidden; }
 
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
-<script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/investments-charts-terminal.js?v=20261006-invest7"></script>
-<script src="/js/investments-desk.js?v=20261006-invest9"></script>
+<script src="/js/trinity-chart-kit.js?v=20261027-drawtv"></script>
+<script src="/js/trinity-decision-frame.js?v=20261015-investlive"></script>
+<script src="/js/investments-charts-terminal.js?v=20261027-watchstat"></script>
+<script src="/js/investments-desk.js?v=20261028-guides"></script>

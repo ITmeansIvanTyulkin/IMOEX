@@ -1,5 +1,7 @@
 package com.moex.cointegration.controller;
 
+import com.moex.cointegration.service.CapitalWeightService;
+import com.moex.cointegration.service.DecisionFrameJournalService;
 import com.moex.cointegration.service.OperatorTradeToastService;
 import com.moex.cointegration.service.TrendDeskService;
 import com.moex.cointegration.service.TrendExecutionBridge;
@@ -17,6 +19,8 @@ import com.moex.trinity.trend.TrendRobotEngine;
 import com.moex.trinity.trend.TrendRobotPlan;
 import com.moex.trinity.trend.TrendSignal;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -47,6 +51,8 @@ public class TrendRobotController {
     private final OperatorTradeToastService tradeToasts;
     private final TrendDeskService deskService;
     private final TrendPaperJournalService paperJournal;
+    private final DecisionFrameJournalService decisionFrameJournal;
+    private final CapitalWeightService capitalWeights;
     private final com.moex.cointegration.ops.LiveExecutionGate liveGate;
     private final TrendSandboxStopService sandboxStop;
 
@@ -58,6 +64,8 @@ public class TrendRobotController {
             OperatorTradeToastService tradeToasts,
             TrendDeskService deskService,
             TrendPaperJournalService paperJournal,
+            DecisionFrameJournalService decisionFrameJournal,
+            CapitalWeightService capitalWeights,
             com.moex.cointegration.ops.LiveExecutionGate liveGate,
             @org.springframework.beans.factory.annotation.Autowired(required = false)
             TrendSandboxStopService sandboxStop
@@ -69,6 +77,8 @@ public class TrendRobotController {
         this.tradeToasts = tradeToasts;
         this.deskService = deskService;
         this.paperJournal = paperJournal;
+        this.decisionFrameJournal = decisionFrameJournal;
+        this.capitalWeights = capitalWeights;
         this.liveGate = liveGate;
         this.sandboxStop = sandboxStop;
     }
@@ -127,6 +137,29 @@ public class TrendRobotController {
         return trendSettings.setBrmAutoExecution(next);
     }
 
+    /** DF-6: user sleeve weights + live rebalance status / risk impact. */
+    @GetMapping("/capital/weights")
+    public Map<String, Object> capitalWeights() {
+        return capitalWeights.view();
+    }
+
+    @PostMapping("/capital/weights")
+    public Map<String, Object> setCapitalWeights(@RequestBody(required = false) CapitalWeightsBody body) {
+        if (body == null) {
+            return capitalWeights.view();
+        }
+        return capitalWeights.setUserWeights(
+                body.pairs(), body.trendM5(), body.positional(), body.arb(), body.liveRebalance());
+    }
+
+    @PostMapping("/capital/live-rebalance")
+    public Map<String, Object> toggleCapitalLiveRebalance(@RequestBody(required = false) ToggleBody body) {
+        boolean next = body != null && body.enabled() != null
+                ? body.enabled()
+                : !capitalWeights.liveRebalanceEnabled();
+        return capitalWeights.setLiveRebalance(next);
+    }
+
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -158,9 +191,10 @@ public class TrendRobotController {
     public Map<String, Object> desk(
             @RequestParam(name = "instrument", required = false) String instrument,
             @RequestParam(name = "playbook", required = false) String playbook,
-            @RequestParam(name = "study", defaultValue = "false") boolean study
+            @RequestParam(name = "study", defaultValue = "false") boolean study,
+            @RequestParam(name = "syncPreset", required = false) String syncPreset
     ) {
-        return deskService.desk(instrument, playbook, study);
+        return deskService.desk(instrument, playbook, study, syncPreset);
     }
 
     /**
@@ -334,6 +368,42 @@ public class TrendRobotController {
     public record SandboxStopProbeBody(String ticker, Boolean buy, Double stopLossPrice) {
     }
 
+    /**
+     * DF-3: Decision Frame journal — filter by day / instrument / playbook / kind (wait|enter|skip).
+     */
+    @GetMapping("/decision-frames")
+    public Map<String, Object> decisionFrames(
+            @RequestParam(required = false) String day,
+            @RequestParam(required = false) String instrument,
+            @RequestParam(required = false) String playbook,
+            @RequestParam(required = false) String kind,
+            @RequestParam(required = false, defaultValue = "40") int limit
+    ) {
+        return decisionFrameJournal.query(day, instrument, playbook, kind, limit);
+    }
+
+    /** DF-3: JSON export of filtered frames (track-record / sharing). */
+    @GetMapping("/decision-frames/export")
+    public ResponseEntity<String> decisionFramesExport(
+            @RequestParam(required = false) String day,
+            @RequestParam(required = false) String instrument,
+            @RequestParam(required = false) String playbook,
+            @RequestParam(required = false) String kind
+    ) {
+        try {
+            String json = decisionFrameJournal.exportJson(day, instrument, playbook, kind);
+            String dayPart = day == null || day.isBlank() ? "today" : day.trim();
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"decision-frames-" + dayPart + ".json\"")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(json);
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError()
+                    .body("{\"error\":\"export_failed\",\"message\":\"" + ex.getMessage() + "\"}");
+        }
+    }
+
     /** Closed paper trades + statement (research PnL track-record). */
     @GetMapping("/paper")
     public Map<String, Object> paper() {
@@ -427,5 +497,15 @@ public class TrendRobotController {
     }
 
     public record ToggleBody(Boolean enabled) {
+    }
+
+    /** DF-6 user sleeve weights (shares 0..1, normalized server-side). */
+    public record CapitalWeightsBody(
+            Double pairs,
+            Double trendM5,
+            Double positional,
+            Double arb,
+            Boolean liveRebalance
+    ) {
     }
 }

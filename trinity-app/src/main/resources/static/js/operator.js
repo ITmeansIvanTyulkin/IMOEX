@@ -1739,6 +1739,10 @@
     const status = String(robot.status || "");
     const tone = String(robot.tone || "scan");
     if (tone === "trade" || status === "В сделке") return "is-trade";
+    if (tone === "armed" || status.indexOf("Ждёт") === 0 || status.indexOf("Ждет") === 0) {
+      return "is-armed";
+    }
+    if (tone === "watch" || status === "Наблюдение") return "is-watch";
     if (robot.sessionTradable === false || status === "Сессия закрыта" || status === "Выкл") {
       return "is-session-off";
     }
@@ -1835,7 +1839,14 @@
     if (!el || !robot) return;
     setText(el.querySelector(".dash-robot-status"), robot.status || "—");
     const scopeEl = el.querySelector(".dash-robot-scope");
-    if (scopeEl && robot.title) setText(scopeEl, robot.title);
+    if (scopeEl) {
+      const inst = robot.instrument ? String(robot.instrument).trim() : "";
+      const title = robot.title ? String(robot.title).trim() : "";
+      const scope = title && inst && title.indexOf(inst) < 0
+        ? (title + " · " + inst)
+        : (title || inst || "");
+      if (scope) setText(scopeEl, scope);
+    }
     setText(el.querySelector(".dash-robot-detail"), humanizeDashDetail(robot.detail || ""));
     if (robot.href) el.setAttribute("href", robot.href);
     el.classList.remove("is-trade", "is-armed", "is-watch", "is-flat", "is-scan", "is-session-off");
@@ -2259,7 +2270,7 @@
       }
       if ($("pillar-trend-back-stats") && md.summary) {
         setBackStats("pillar-trend-back-stats", [
-          { k: "Playbook", v: "levels-profile-br-m5" },
+          { k: "Робот", v: "диапазонная · BR M5" },
           { k: "Стрим", v: md.streaming ? "live" : "off" },
           { k: "Tape сегодня", v: String(md.archivedTapeLines || 0) },
           { k: "DOM snaps", v: String(md.archivedDomSnapshots || 0) },
@@ -2428,13 +2439,23 @@
     const title = $("invest-delivery-title");
     const hint = $("invest-delivery-hint");
     const status = $("invest-delivery-status");
-    if (title) title.textContent = auto ? "Авто · paper на пульте" : "Наблюдение";
+    if (title) {
+      title.textContent = auto
+        ? (view.liveExecution ? "Авто · Live (мост)" : "Авто · paper на пульте")
+        : "Наблюдение";
+    }
     if (hint) {
       hint.textContent = auto
-        ? "Fair-paper лестницы по чек-листу на /view/investments. Live equity — отдельный флаг."
+        ? (view.liveExecution
+          ? "Авто+live: лестницы в журнал и на T-Invest, если брокер armed. Paper новых входов нет."
+          : "Fair-paper лестницы по чек-листу — пульт «Инвестиции» в меню. Live — тумблер на пульте.")
         : "Скан и графики на пульте без заявок. Включите Авто для paper-исполнения.";
     }
-    if (status) status.textContent = auto ? "Режим: авто" : "Режим: наблюдение";
+    if (status) {
+      status.textContent = auto
+        ? (view.liveExecution ? "Режим: авто · live" : "Режим: авто · paper")
+        : "Режим: наблюдение";
+    }
     const card = wrap && wrap.closest ? wrap.closest(".robot-mode-card") : null;
     if (card) card.classList.toggle("is-auto", auto);
   }
@@ -3558,7 +3579,7 @@
   const TOUR_KEY = "trinity.tour.v1";
   const TOUR_STEPS = [
     { path: "/view", title: "Дашборд", body: "Обзор: режим рынка и роботы спреда, тренда и календаря." },
-    { path: "/view/statement", title: "Statement", body: "Paper track-record по тренду и календарю. Сделки trend тегируются playbookId." },
+    { path: "/view/statement", title: "Statement", body: "Две книги paper / live по Trend, Arb, Invest. Research (replay) отдельно, не в депозит." },
     { path: "/view/trend-signal", title: "Диапазонная торговля", body: "Exclusive BR M5: полки TOP/BOT, bounce/retest. Робот #2 при этом не выключается — у него свой раздел." },
     { path: "/view/trend-positional", title: "Позиционная торговля", body: "H1: тренд HH/HL, промежуточный HVN, сетка 1:1:2:4. «Сканирует» = робот включён, входа по чеклисту нет." },
     { path: "/view/trend-brm", title: "BRM мини", body: "Третий плейбук тренда: тот же чеклист полок, контракт BRM, 1 лот на 50–250к." },

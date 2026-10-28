@@ -20,6 +20,8 @@
   let priceScaleLocked = false;
   let scaleRememberTimer = null;
   let userScaleGesture = false;
+  /** Only true after wheel/pinch/axis zoom — not click, pan, or programmatic restore. */
+  let userScaleIntent = false;
   let chartNav = null;
   const SCALE_STORE = "trinity.trend.desk.scale";
   const DEFAULT_BAR_SPACING = 8;
@@ -90,8 +92,21 @@
   let lastDeskSnapshot = null;
   let liveFlatUntil = 0;
   let liveTp1Until = 0;
+  let decisionFrameUi = null;
 
   function $(id) { return document.getElementById(id); }
+  function ensureDecisionFrameUi() {
+    if (decisionFrameUi) return decisionFrameUi;
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.create !== "function") {
+      return null;
+    }
+    decisionFrameUi = TrinityDecisionFrame.create({
+      root: "decision-frame",
+      staleAfterMs: Math.max(DESK_MS * 3, 45000),
+      onFactFocus: focusDecisionFact
+    });
+    return decisionFrameUi;
+  }
   function deskScope() {
     const root = $("trend-signal-desk");
     const s = root && root.getAttribute("data-desk-scope");
@@ -154,29 +169,38 @@
     if (volLab) volLab.textContent = pos ? "Объём H1" : "Объём M5";
     const hint = $("signal-chart-hint");
     if (hint && pos) {
-      hint.innerHTML = "Часовой график · след / MACD / профиль / линии · "
-        + "<a href=\"/view/investments\">инвестиции · графики</a> · "
+      hint.textContent = "Часовой график · след / MACD / профиль / линии · "
+        + "инвестиции (меню) · "
         + "вход в промежуточную полку объёма · сетка 1:1:2:4 · стоп и тейк";
     } else if (hint && brm) {
-      hint.innerHTML = "M5 · BRM мини · тот же чеклист полок, что у диапазонной · "
-        + "для счетов ~50–150 тыс. · "
-        + "<a href=\"/view/trend-strategy#brm\">описание</a>";
+      hint.textContent = "M5 · BRM мини · тот же чеклист полок, что у диапазонной · "
+        + "для счетов ~50–150 тыс. · описание — в меню «Описание»";
     }
     const oilBan = $("us-oil-banner");
     if (oilBan) oilBan.hidden = pos;
     const lead = $("signal-guide-lead");
     const gtitle = $("signal-guide-title");
     if (pos) {
-      if (gtitle) gtitle.textContent = "Как работает позиционная";
-      if (lead) lead.textContent = "Часовой тренд, средняя полка объёма, сетка 1:1:2:4, охота до входа и трейл за закрытой свечой. «Сканирует» — робот включён, входа сейчас нет.";
-    } else if (brm) {
-      if (gtitle) gtitle.textContent = "Как работает BRM мини";
+      if (gtitle) gtitle.textContent = "Как торгует позиционная";
       if (lead) {
-        lead.textContent = "Тот же чеклист полок на контракте BRM — стратегия для небольших капиталов (~50–150 тыс. ₽). Bounce/retest от TOP/BOT на M5, 1 лот, без параллельной торговли с диапазонной BR.";
+        lead.textContent = "Часовой тренд → средняя полка объёма → пирамида 1:1:2:4, стоп в объёме. "
+          + "Гэп-рукав выключен. Далеко от полки не армим — слот уходит другой семье. "
+          + "«Сканирует» = робот живой, сетапа сейчас нет.";
+      }
+    } else if (brm) {
+      if (gtitle) gtitle.textContent = "Как торгует BRM мини";
+      if (lead) {
+        lead.textContent = "Тот же чеклист полок, что у диапазонной, на мини-контракте BRM (~50–150 тыс. ₽): "
+          + "TOP/BOT, bounce/retest, узкий micro-veto, TP1→TP2→TP3, обычно 1 лот, mutex с полным BR.";
+      }
+    } else {
+      if (gtitle) gtitle.textContent = "Как торгует диапазонная";
+      if (lead) {
+        lead.textContent = "Нефть BR на M5: дневные полки TOP/BOT, отскок или ретест после пробоя, "
+          + "ветер часа и узкий micro-veto — потом лимитки, стоп за зоной, лестница TP1 → TP2 → TP3 (хвост).";
       }
     }
-    const kick = $("sig-kick-btn");
-    if (kick) kick.hidden = pos || brm;
+    // Stuck reset is automatic in the engine (soft ~20 мин) — no manual kick button.
     if (pos) {
       const rangeWrap = $("range-auto-wrap");
       if (rangeWrap) rangeWrap.hidden = true;
@@ -195,6 +219,1165 @@
       el.hidden = !!(want && want !== "both" && want !== deskScope());
     });
   }
+  function paintDecisionFrame(data) {
+    const ui = ensureDecisionFrameUi();
+    if (!ui) return;
+    ui.render(data && data.decisionFrame);
+  }
+
+  let syncPanelOpen = false;
+  let syncAnomOnly = false;
+  let syncPanelBound = false;
+  let syncContextCache = null;
+  let syncPreset = "oil";
+
+  let capitalPanelOpen = false;
+  let capitalPanelBound = false;
+  let capitalWeightsCache = null;
+
+  function pctInput(id, share) {
+    const el = $(id);
+    if (!el) return;
+    const v = share == null || !Number.isFinite(Number(share)) ? 0 : Math.round(Number(share) * 100);
+    el.value = String(v);
+  }
+
+  function readPctShare(id) {
+    const el = $(id);
+    if (!el) return 0;
+    const n = Number(el.value);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    return n / 100;
+  }
+
+  function fmtRub(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    return Math.round(v).toLocaleString("ru-RU") + " ₽";
+  }
+
+  function bindCapitalPanel() {
+    if (capitalPanelBound) return;
+    const toggle = $("signal-capital-toggle");
+    const live = $("signal-capital-live");
+    const body = $("signal-capital-body");
+    const save = $("signal-capital-save");
+    if (!toggle || !body) return;
+    capitalPanelBound = true;
+    try {
+      capitalPanelOpen = localStorage.getItem("trinity.df.capitalOpen") === "1";
+    } catch (_) {}
+    toggle.addEventListener("click", function () {
+      capitalPanelOpen = !capitalPanelOpen;
+      try { localStorage.setItem("trinity.df.capitalOpen", capitalPanelOpen ? "1" : "0"); } catch (_) {}
+      paintCapitalPanel(capitalWeightsCache);
+    });
+    if (live) {
+      live.addEventListener("change", async function () {
+        if (!hasDeskWriteAuth || !hasDeskWriteAuth()) {
+          live.checked = !live.checked;
+          return;
+        }
+        try {
+          const res = await fetch("/api/trend/capital/live-rebalance", {
+            method: "POST",
+            headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+            body: JSON.stringify({ enabled: !!live.checked })
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          capitalWeightsCache = await res.json();
+          paintCapitalPanel(capitalWeightsCache);
+        } catch (e) {
+          live.checked = !live.checked;
+          alert("Live-rebalance: " + (e && e.message ? e.message : e));
+        }
+      });
+    }
+    if (save) {
+      save.addEventListener("click", async function () {
+        if (!hasDeskWriteAuth || !hasDeskWriteAuth()) {
+          alert("Нужна сессия кабинета, чтобы сохранить веса.");
+          return;
+        }
+        try {
+          const res = await fetch("/api/trend/capital/weights", {
+            method: "POST",
+            headers: deskAuthHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+            body: JSON.stringify({
+              pairs: 0,
+              trendM5: readPctShare("cap-w-m5"),
+              positional: readPctShare("cap-w-pos"),
+              arb: readPctShare("cap-w-arb"),
+              liveRebalance: !!(live && live.checked)
+            })
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          capitalWeightsCache = await res.json();
+          paintCapitalPanel(capitalWeightsCache);
+        } catch (e) {
+          alert("Веса: " + (e && e.message ? e.message : e));
+        }
+      });
+    }
+  }
+
+  function paintCapitalPanel(cw) {
+    bindCapitalPanel();
+    capitalWeightsCache = cw || null;
+    const panel = $("signal-capital-panel");
+    const toggle = $("signal-capital-toggle");
+    const body = $("signal-capital-body");
+    const live = $("signal-capital-live");
+    const meta = $("signal-capital-meta");
+    const eff = $("signal-capital-eff");
+    const risk = $("signal-capital-risk");
+    if (!panel) return;
+    panel.hidden = !cw;
+    if (!cw) return;
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", capitalPanelOpen ? "true" : "false");
+      toggle.classList.toggle("is-active", capitalPanelOpen);
+    }
+    if (body) body.hidden = !capitalPanelOpen;
+    if (live) live.checked = !!cw.liveRebalance;
+    const uw = cw.userWeights || {};
+    pctInput("cap-w-m5", uw.trendM5);
+    pctInput("cap-w-pos", uw.positional);
+    pctInput("cap-w-arb", uw.arb);
+    if (meta) {
+      meta.textContent = (cw.focusSlot || "—")
+        + (cw.multiFocusOk ? "" : " · один рукав до 300к")
+        + (cw.liveRebalance ? " · live" : "");
+    }
+    if (eff) {
+      eff.textContent = "Эффективно: " + (cw.effectiveSummary || "—")
+        + (cw.userSummary && cw.userSummary !== cw.effectiveSummary
+          ? (" (база " + cw.userSummary + ")") : "");
+    }
+    if (risk) {
+      const ri = cw.riskImpact || {};
+      risk.textContent = "Лимиты: M5 " + fmtRub(ri.trendM5GrossCap)
+        + " · pos " + fmtRub(ri.positionalGrossCap)
+        + " · arb " + fmtRub(ri.arbGrossCap);
+    }
+  }
+
+  function bindSyncPanel() {
+    if (syncPanelBound) return;
+    const toggle = $("signal-sync-toggle");
+    const anom = $("signal-sync-anom-only");
+    const presetEl = $("signal-sync-preset");
+    const list = $("signal-sync-list");
+    if (!toggle || !list) return;
+    syncPanelBound = true;
+    try {
+      syncPanelOpen = localStorage.getItem("trinity.df.syncOpen") === "1";
+      syncAnomOnly = localStorage.getItem("trinity.df.syncAnom") === "1";
+      const sp = localStorage.getItem("trinity.df.syncPreset");
+      if (sp === "index-oil" || sp === "oil") syncPreset = sp;
+    } catch (_) {}
+    if (anom) anom.checked = syncAnomOnly;
+    if (presetEl) presetEl.value = syncPreset;
+    toggle.addEventListener("click", function () {
+      syncPanelOpen = !syncPanelOpen;
+      try { localStorage.setItem("trinity.df.syncOpen", syncPanelOpen ? "1" : "0"); } catch (_) {}
+      paintSyncPanel(syncContextCache);
+    });
+    if (anom) {
+      anom.addEventListener("change", function () {
+        syncAnomOnly = !!anom.checked;
+        try { localStorage.setItem("trinity.df.syncAnom", syncAnomOnly ? "1" : "0"); } catch (_) {}
+        paintSyncPanel(syncContextCache);
+        refreshSyncAnomalyMarkers();
+      });
+    }
+    if (presetEl) {
+      presetEl.addEventListener("change", function () {
+        syncPreset = presetEl.value === "index-oil" ? "index-oil" : "oil";
+        try { localStorage.setItem("trinity.df.syncPreset", syncPreset); } catch (_) {}
+        loadDesk(false);
+      });
+    }
+    list.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-sync-at]")
+        : null;
+      if (!btn) return;
+      const meta = {
+        text: btn.getAttribute("data-sync-text") || "",
+        peer: btn.getAttribute("data-sync-peer") || "",
+        kind: btn.getAttribute("data-sync-kind") || "",
+        anomaly: btn.getAttribute("data-sync-anomaly") === "1"
+      };
+      seekChartToBarIso(btn.getAttribute("data-sync-at"), meta);
+      openSyncBrief(btn.getAttribute("data-sync-at"), meta);
+    });
+  }
+
+  let syncBriefBound = false;
+  let syncBriefExpanded = false;
+  let syncBriefMeta = null;
+
+  function deskAutoOn() {
+    const data = lastDeskSnapshot || {};
+    const scope = deskScope();
+    if (scope === "positional") return !!positionalAutoFlag(data);
+    if (scope === "brm") return !!brmAutoFlag(data);
+    return !!rangeAutoOn(data);
+  }
+
+  function syncBriefTitle(kind, peer, text) {
+    const k = String(kind || "").toUpperCase();
+    if (k === "RI_LAGS" || k.indexOf("RI_LAG") >= 0) {
+      return "RI отстаёт от нефти";
+    }
+    if (k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST" || k === "RI_AGAINST_BR") {
+      return "RI не с нефтью";
+    }
+    if (k === "OIL_FX_SPLIT" || k === "OIL_SPLIT") return "Нефть и Si разошлись";
+    if (k === "VOL_ANOMALY") return "Объём часа необычный";
+    if (k === "RANGE_ANOMALY") return "Ход бара необычный";
+    if (k === "SI_LEADS" || k === "BRM_LEADS") return "Si сильнее нефти";
+    if (k === "ALIGNED") return "Рынок согласован";
+    if (peer) return "Расхождение · " + peer;
+    return (text || "Расхождение").slice(0, 64);
+  }
+
+  function syncBriefLead(kind) {
+    const k = String(kind || "").toUpperCase();
+    if (k === "RI_LAGS") {
+      return "Нефть уже ушла, индекс почти стоит. Это фон к решению, не команда «входи» или «выходи».";
+    }
+    if (k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST") {
+      return "Широкий рынок спорит с нефтью. Ход по BR может быть локальным — смотрим осторожнее.";
+    }
+    if (k === "OIL_FX_SPLIT" || k === "OIL_SPLIT") {
+      return "Нефть и доллар (Si) смотрят в разные стороны — кросс-актив без единой картины.";
+    }
+    if (k === "VOL_ANOMALY" || k === "RANGE_ANOMALY") {
+      return "Сейчас час выглядит иначе, чем обычно в это же время. Имеет смысл проверить, кто давит в стакане и ленте.";
+    }
+    if (k === "ALIGNED") {
+      return "Нефть и широкий рынок сегодня в одну сторону — контекст спокойнее, но вход всё равно по чеклисту.";
+    }
+    return "Короткий контекст к кадру решения. Разбор — по кнопке ниже.";
+  }
+
+  function syncBriefWhatHappened(kind, text) {
+    const k = String(kind || "").toUpperCase();
+    if (k === "RI_LAGS") {
+      return "За последний час нефть (BR) сделала заметный ход, а RI (индекс RTS) почти не сдвинулся. "
+        + "Рынок «в целом» ещё не подтвердил нефтяной импульс.";
+    }
+    if (k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST") {
+      return "Нефть и RI идут в разные стороны (день или час). Давление по BR не поддержано широким рынком.";
+    }
+    if (k === "OIL_FX_SPLIT" || k === "OIL_SPLIT") {
+      return "BR и Si за день разошлись по знаку хода. Нефтяной импульс и валютный фон не совпадают.";
+    }
+    if (k === "VOL_ANOMALY") {
+      return text || "Объём текущего часа сильно отличается от медианы таких же часов раньше.";
+    }
+    if (k === "RANGE_ANOMALY") {
+      return text || "Размах бара необычен для этого часа — волатильность не как обычно.";
+    }
+    if (k === "SI_LEADS" || k === "BRM_LEADS") {
+      return "За час Si сильнее BR — валютный ход опережает нефть. Это фон, не сигнал входа.";
+    }
+    if (k === "ALIGNED") {
+      return text || "Нефть, мини и RI сегодня в одну сторону.";
+    }
+    return text || "На срезе видно расхождение между инструментами или нормой часа.";
+  }
+
+  function syncBriefWhatYouDo(kind, anomaly) {
+    const k = String(kind || "").toUpperCase();
+    let core = "Не ловите середину хода «потому что аномалия». Смотрите кадр решения и полку: "
+      + "есть ли сетап по чеклисту. При желании включите профиль ленты на отмеченной свече — кто купил/продал.";
+    if (k === "RI_LAGS" || k === "RI_DIVERGE" || k === "RI_HOUR_AGAINST") {
+      core = "Не догоняйте нефть только потому, что она уже ушла. Дождитесь либо подтяжки RI, "
+        + "либо своего сетапа на полке (касание + подтверждение). Footprint на свече — чтобы увидеть, "
+        + "была ли агрессия или тонкий ход.";
+    } else if (k === "VOL_ANOMALY" || k === "RANGE_ANOMALY") {
+      core = "Сверьте со стаканом и профилем ленты: аномальна ли лента у полки, или просто «тихий/шумный» час. "
+        + "Вход только если чеклист собран.";
+    } else if (!anomaly) {
+      core = "Это спокойный фон. Действуйте по кадру и чеклисту как обычно.";
+    }
+    return core;
+  }
+
+  function syncBriefAutoBlock(kind, autoOn, live) {
+    if (!autoOn) {
+      return "Автоторговля выключена: робот только показывает решение. Вход/пропуск — ваше. "
+        + "Аномалия не выставляет и не отменяет заявки сама.";
+    }
+    const liveBit = live
+      ? "Сейчас контур боевой — будьте особенно внимательны."
+      : "Сейчас песочница (бумага): робот сам может выставить/вести сетку по чеклисту.";
+    return liveBit + " Аномалия — не стоп-кран и не «жми market». "
+      + "Робот по-прежнему ждёт правила playbook (полка, микро, сессия). "
+      + "Если контекст не устраивает — выключите авто.";
+  }
+
+  function syncBriefRobotWait(posture, why) {
+    const p = String(posture || "SCANNING").toUpperCase();
+    if (p === "WAITING_FILL") {
+      return "Робот ждёт исполнения: лимитки/сетка уже в работе. Аномалия не отменяет заявки — "
+        + "ждём касание цены. Следите за кадром и статусом «ждёт».";
+    }
+    if (p === "WATCHING_ZONE") {
+      return "Робот смотрит зону: сторона и полка есть, ждёт подход цены и подтверждение (бар/кластер/микро). "
+        + "Пока RI отстаёт или спорит — чаще остаётся в ожидании, а не в середине хода.";
+    }
+    if (p === "IN_TRADE") {
+      return "Робот уже в сделке: ведёт стоп/тейк по правилам. Аномалия — фон, не новая команда входа.";
+    }
+    if (p === "NOT_IN_TRADE") {
+      return "Робот не в сделке / пропускает: чеклист или сессия не дают вход. Аномалия объясняет фон пропуска.";
+    }
+    const whyBit = why ? (" Сейчас в кадре: «" + String(why).slice(0, 120) + "».") : "";
+    return "Робот сканирует / ждёт сетап." + whyBit
+      + " Пока нет касания полки и микро-подтверждения — новых входов нет.";
+  }
+
+  function buildSyncBriefHtml(meta) {
+    const data = lastDeskSnapshot || {};
+    const sit = data.situation || {};
+    const kind = (meta && meta.kind) || "";
+    const text = (meta && meta.text) || "";
+    const anomaly = !!(meta && meta.anomaly);
+    const autoOn = deskAutoOn();
+    const live = !!(sit.liveExecution || data.liveExecution);
+    const posture = sit.posture || data.posture || "SCANNING";
+    const why = sit.why || data.summary || "";
+    return ""
+      + "<section class='signal-sync-brief-sec'><h4>Что случилось</h4><p>"
+      + escHtml(syncBriefWhatHappened(kind, text)) + "</p></section>"
+      + "<section class='signal-sync-brief-sec'><h4>Что делать вам</h4><p>"
+      + escHtml(syncBriefWhatYouDo(kind, anomaly)) + "</p></section>"
+      + "<section class='signal-sync-brief-sec'><h4>Если автоторговля</h4><p>"
+      + escHtml(syncBriefAutoBlock(kind, autoOn, live)) + "</p></section>"
+      + "<section class='signal-sync-brief-sec'><h4>Что ждёт робот</h4><p>"
+      + escHtml(syncBriefRobotWait(posture, why)) + "</p></section>";
+  }
+
+  function bindSyncBrief() {
+    if (syncBriefBound) return;
+    const gate = $("signal-sync-brief");
+    if (!gate) return;
+    syncBriefBound = true;
+    gate.querySelectorAll("[data-sync-brief-close]").forEach(function (el) {
+      el.addEventListener("click", closeSyncBrief);
+    });
+    const expand = $("signal-sync-brief-expand");
+    if (expand) {
+      expand.addEventListener("click", function () {
+        syncBriefExpanded = true;
+        const body = $("signal-sync-brief-body");
+        if (body) {
+          body.hidden = false;
+          body.innerHTML = buildSyncBriefHtml(syncBriefMeta || {});
+        }
+        expand.hidden = true;
+        const fpBtn = $("signal-sync-brief-fp");
+        if (fpBtn) fpBtn.hidden = false;
+      });
+    }
+    const fpBtn = $("signal-sync-brief-fp");
+    if (fpBtn) {
+      fpBtn.addEventListener("click", function () {
+        const tool = $("tool-footprint");
+        if (tool && !tool.classList.contains("is-active")) {
+          tool.click();
+        }
+        closeSyncBrief();
+      });
+    }
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && gate && !gate.hidden) closeSyncBrief();
+    });
+  }
+
+  function openSyncBrief(at, meta) {
+    bindSyncBrief();
+    const gate = $("signal-sync-brief");
+    if (!gate) return;
+    syncBriefMeta = meta || {};
+    syncBriefExpanded = false;
+    const title = $("signal-sync-brief-title");
+    const lead = $("signal-sync-brief-lead");
+    const body = $("signal-sync-brief-body");
+    const expand = $("signal-sync-brief-expand");
+    const fpBtn = $("signal-sync-brief-fp");
+    if (title) {
+      title.textContent = syncBriefTitle(
+        syncBriefMeta.kind, syncBriefMeta.peer, syncBriefMeta.text);
+    }
+    if (lead) lead.textContent = syncBriefLead(syncBriefMeta.kind);
+    if (body) {
+      body.hidden = true;
+      body.innerHTML = "";
+    }
+    if (expand) expand.hidden = false;
+    if (fpBtn) fpBtn.hidden = true;
+    gate.hidden = false;
+    gate.setAttribute("aria-hidden", "false");
+    const dialog = gate.querySelector(".signal-sync-brief-modal");
+    if (dialog && dialog.focus) {
+      try { dialog.focus(); } catch (_) {}
+    }
+  }
+
+  function closeSyncBrief() {
+    const gate = $("signal-sync-brief");
+    if (!gate) return;
+    gate.hidden = true;
+    gate.setAttribute("aria-hidden", "true");
+    syncBriefExpanded = false;
+  }
+
+  function seekChartToBarIso(iso, meta) {
+    if (!chart || !iso) return;
+    const sec = toChartTime(iso);
+    if (sec == null) return;
+    const times = barTimesSorted();
+    const target = times.length ? nearestBarTime(sec) : sec;
+    // No zoom — small chart pane; only skull + dashed vline.
+    const rail = ensureDeskTimelineRail();
+    if (rail && typeof rail.highlightAt === "function") {
+      const peer = (meta && meta.peer) || "";
+      const text = (meta && meta.text) || "";
+      const kind = (meta && meta.kind) || "SYNC_ANOMALY";
+      const isFact = kind === "DF_FACT" || kind === "FACT";
+      rail.highlightAt(target, {
+        kind: kind,
+        color: (meta && meta.color) || (isFact ? "#c4a35a" : "#dc2626"),
+        text: (meta && meta.mark) || (isFact ? "·" : "!"),
+        title: (meta && meta.title)
+          || (isFact ? "Факт кадра" : (peer ? ("Аномалия · " + peer) : "Аномалия")),
+        detail: text || iso
+      });
+    }
+  }
+
+  /** Click DF / journal fact → chart zone / price line / DOM / sync pin. */
+  let factFocusState = null;
+  let factFocusLines = [];
+
+  function parseFactPriceRange(text) {
+    const m = String(text || "").match(
+      /(\d+(?:[.,]\d+)?)\s*[–—\-]\s*(\d+(?:[.,]\d+)?)/
+    );
+    if (!m) return null;
+    const a = Number(String(m[1]).replace(",", "."));
+    const b = Number(String(m[2]).replace(",", "."));
+    if (!isFinite(a) || !isFinite(b)) return null;
+    return { lo: Math.min(a, b), hi: Math.max(a, b) };
+  }
+
+  function parseFactPrice(text) {
+    const s = String(text || "");
+    const near = s.match(/(?:около|POC|полка|уровн\w*)\s+(\d+(?:[.,]\d+)?)/i);
+    if (near) {
+      const v = Number(String(near[1]).replace(",", "."));
+      if (isFinite(v) && v > 0) return v;
+    }
+    const nums = s.match(/\d+(?:[.,]\d+)?/g) || [];
+    for (let i = nums.length - 1; i >= 0; i--) {
+      const v = Number(String(nums[i]).replace(",", "."));
+      if (isFinite(v) && v >= 1) return v;
+    }
+    return null;
+  }
+
+  function clearFactFocusLines() {
+    if (!candleSeries) {
+      factFocusLines = [];
+      return;
+    }
+    factFocusLines.forEach(function (l) {
+      try { candleSeries.removePriceLine(l); } catch (_) {}
+    });
+    factFocusLines = [];
+  }
+
+  function addFactFocusLine(price, title, color) {
+    if (!candleSeries || !(price > 0)) return;
+    try {
+      const line = candleSeries.createPriceLine({
+        price: price,
+        color: color || "#c4a35a",
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: title || "факт"
+      });
+      factFocusLines.push(line);
+    } catch (_) {}
+  }
+
+  function clearFactFocusVisuals() {
+    if (factFocusState && factFocusState.timer) {
+      clearTimeout(factFocusState.timer);
+    }
+    factFocusState = null;
+    clearFactFocusLines();
+    document.querySelectorAll(".is-df-focus").forEach(function (el) {
+      el.classList.remove("is-df-focus");
+    });
+    const rail = ensureDeskTimelineRail();
+    if (rail && typeof rail.clearHighlight === "function") {
+      try { rail.clearHighlight(); } catch (_) {}
+    }
+  }
+
+  function flashDomTopLevels() {
+    const body = $("signal-dom-body");
+    if (!body) return;
+    body.querySelectorAll(".dom-row.is-df-focus").forEach(function (el) {
+      el.classList.remove("is-df-focus");
+    });
+    const asks = Array.prototype.slice.call(body.querySelectorAll(".dom-row.dom-ask"));
+    const bids = Array.prototype.slice.call(body.querySelectorAll(".dom-row.dom-bid"));
+    asks.slice(-5).forEach(function (el) { el.classList.add("is-df-focus"); });
+    bids.slice(0, 5).forEach(function (el) { el.classList.add("is-df-focus"); });
+    try { centerDomOnSpread(body); } catch (_) {}
+    const first = body.querySelector(".dom-row.is-df-focus");
+    if (first && first.scrollIntoView) {
+      try { first.scrollIntoView({ block: "nearest" }); } catch (_) {}
+    }
+    body.classList.add("is-df-focus-host");
+    setTimeout(function () { body.classList.remove("is-df-focus-host"); }, 1200);
+  }
+
+  /** Highlight live DOM rows near snapshot prices; draw chart lines for snap best bid/ask. */
+  function flashDomFromSnap(domSnap) {
+    if (!domSnap || typeof domSnap !== "object") {
+      flashDomTopLevels();
+      return;
+    }
+    clearFactFocusLines();
+    const prices = [];
+    (domSnap.bids || []).forEach(function (lv) {
+      const p = Number(lv && lv.p);
+      if (p > 0) prices.push(p);
+    });
+    (domSnap.asks || []).forEach(function (lv) {
+      const p = Number(lv && lv.p);
+      if (p > 0) prices.push(p);
+    });
+    const bestBid = Number(domSnap.bestBid);
+    const bestAsk = Number(domSnap.bestAsk);
+    if (bestBid > 0) addFactFocusLine(bestBid, "DOM bid·кадр", "#15803d");
+    if (bestAsk > 0) addFactFocusLine(bestAsk, "DOM ask·кадр", "#b91c1c");
+    const body = $("signal-dom-body");
+    if (!body || !prices.length) {
+      if (!prices.length) flashDomTopLevels();
+      return;
+    }
+    body.querySelectorAll(".dom-row.is-df-focus").forEach(function (el) {
+      el.classList.remove("is-df-focus");
+    });
+    let hit = 0;
+    body.querySelectorAll(".dom-row[data-px]").forEach(function (row) {
+      const px = Number(row.getAttribute("data-px"));
+      if (!(px > 0)) return;
+      for (let i = 0; i < prices.length; i++) {
+        if (Math.abs(px - prices[i]) <= Math.max(px * 0.0003, 0.02)) {
+          row.classList.add("is-df-focus");
+          hit += 1;
+          break;
+        }
+      }
+    });
+    if (!hit) {
+      flashDomTopLevels();
+      return;
+    }
+    try { centerDomOnSpread(body); } catch (_) {}
+    const first = body.querySelector(".dom-row.is-df-focus");
+    if (first && first.scrollIntoView) {
+      try { first.scrollIntoView({ block: "nearest" }); } catch (_) {}
+    }
+    body.classList.add("is-df-focus-host");
+    setTimeout(function () { body.classList.remove("is-df-focus-host"); }, 1200);
+  }
+
+  function zoneFromSnap(snap, preferBot) {
+    if (!snap) return null;
+    const top = snap.zoneTop;
+    const bot = snap.zoneBottom;
+    if (preferBot && bot) return bot;
+    if (!preferBot && top) return top;
+    return top || bot || null;
+  }
+
+  function flashZoneBandsForFocus() {
+    const ov = $("signal-zone-overlay");
+    if (!ov || !factFocusState) return;
+    const lo = factFocusState.lo;
+    const hi = factFocusState.hi;
+    ov.querySelectorAll(".signal-zone-band").forEach(function (band) {
+      band.classList.remove("is-df-focus");
+      if (!(lo > 0) || !(hi > 0)) {
+        band.classList.add("is-df-focus");
+        return;
+      }
+      const label = (band.querySelector(".signal-zone-label") || {}).textContent || "";
+      const range = parseFactPriceRange(label);
+      if (range && Math.abs(range.lo - lo) < 0.05 && Math.abs(range.hi - hi) < 0.05) {
+        band.classList.add("is-df-focus");
+      } else if (!range) {
+        band.classList.add("is-df-focus");
+      }
+    });
+  }
+
+  function flashProfilePoc(px) {
+    if (!(px > 0)) return;
+    document.querySelectorAll(".signal-profile-row.is-poc, .charts-profile-row.is-poc, .is-poc")
+      .forEach(function (el) {
+        el.classList.add("is-df-focus");
+      });
+  }
+
+  function flashElBrief(el) {
+    if (!el) return;
+    el.classList.add("is-df-focus");
+    setTimeout(function () { el.classList.remove("is-df-focus"); }, 1600);
+  }
+
+  function openSyncPanelForFact() {
+    if (!syncPanelOpen) {
+      syncPanelOpen = true;
+      try { localStorage.setItem("trinity.df.syncOpen", "1"); } catch (_) {}
+      paintSyncPanel(syncContextCache);
+    }
+  }
+
+  function openCapitalPanelForFact() {
+    if (!capitalPanelOpen) {
+      capitalPanelOpen = true;
+      try { localStorage.setItem("trinity.df.capitalOpen", "1"); } catch (_) {}
+      paintCapitalPanel(capitalWeightsCache);
+    }
+  }
+
+  function repaintFactFocusLines() {
+    if (!factFocusState || !factFocusState.lines || !factFocusState.lines.length) return;
+    clearFactFocusLines();
+    factFocusState.lines.forEach(function (ln) {
+      addFactFocusLine(ln.price, ln.title, ln.color);
+    });
+    if (factFocusState.source === "shelf") flashZoneBandsForFocus();
+    if (factFocusState.source === "poc" && factFocusState.lines[0]) {
+      flashProfilePoc(factFocusState.lines[0].price);
+    }
+  }
+
+  function reapplyFactFocusAfterPaint() {
+    if (!factFocusState) return;
+    if (factFocusState.source === "dom") {
+      if (factFocusState.domSnap) flashDomFromSnap(factFocusState.domSnap);
+      else flashDomTopLevels();
+    } else {
+      repaintFactFocusLines();
+    }
+  }
+
+  function focusDecisionFact(detail, ctx) {
+    ctx = ctx || {};
+    clearFactFocusVisuals();
+    if (!detail) {
+      if (window.TrinityDecisionFrame && TrinityDecisionFrame.clearFactActive) {
+        TrinityDecisionFrame.clearFactActive(document);
+      }
+      return;
+    }
+    const source = String(detail.source || "");
+    const frame = detail.frame || ctx.frame
+      || (lastDeskSnapshot && lastDeskSnapshot.decisionFrame) || {};
+    const snap = detail.marketSnap || frame.marketSnap
+      || (ctx.origin === "live" && lastDeskSnapshot && lastDeskSnapshot.decisionFrame
+        && lastDeskSnapshot.decisionFrame.marketSnap)
+      || null;
+    const text = String(detail.text || "");
+    const value = detail.value != null ? Number(detail.value) : NaN;
+    const barIso = detail.barTime || (snap && snap.barTime) || frame.barTime || frame.asOf || null;
+    const lines = [];
+
+    if (source === "shelf") {
+      const st = overlayStructure || {};
+      let z = null;
+      let zFromSnap = false;
+      const preferBot = /нижн|bot|BOTTOM/i.test(text);
+      const preferTop = /верхн|top|TOP/i.test(text);
+      if (snap) {
+        if (preferBot) z = zoneFromSnap(snap, true);
+        else if (preferTop) z = zoneFromSnap(snap, false);
+        else {
+          const range = parseFactPriceRange(text);
+          if (range && snap.zoneTop && snap.zoneBottom) {
+            const mid = (range.lo + range.hi) / 2;
+            const topMid = (Number(snap.zoneTop.low) + Number(snap.zoneTop.high)) / 2;
+            const botMid = (Number(snap.zoneBottom.low) + Number(snap.zoneBottom.high)) / 2;
+            z = Math.abs(mid - topMid) <= Math.abs(mid - botMid) ? snap.zoneTop : snap.zoneBottom;
+          } else {
+            z = zoneFromSnap(snap, preferBot);
+          }
+        }
+        if (z) zFromSnap = true;
+      }
+      if (!z) {
+        if (preferBot && st.zoneBottom) z = st.zoneBottom;
+        else if (preferTop && st.zoneTop) z = st.zoneTop;
+        else {
+          const range = parseFactPriceRange(text);
+          if (range && st.zoneTop && st.zoneBottom) {
+            const mid = (range.lo + range.hi) / 2;
+            const topMid = (Number(st.zoneTop.low) + Number(st.zoneTop.high)) / 2;
+            const botMid = (Number(st.zoneBottom.low) + Number(st.zoneBottom.high)) / 2;
+            z = Math.abs(mid - topMid) <= Math.abs(mid - botMid) ? st.zoneTop : st.zoneBottom;
+          } else if (range && st.zoneTop) z = st.zoneTop;
+          else z = st.zoneTop || st.zoneBottom;
+        }
+      }
+      if (z && finitePrice(Number(z.low)) && finitePrice(Number(z.high))) {
+        const tag = zFromSnap ? "полка·кадр" : "полка";
+        lines.push({ price: Number(z.high), title: tag + "↑", color: "#7c3aed" });
+        lines.push({ price: Number(z.low), title: tag + "↓", color: "#7c3aed" });
+        factFocusState = { source: source, lines: lines, lo: Number(z.low), hi: Number(z.high), barIso: barIso };
+      } else {
+        const range = parseFactPriceRange(text);
+        if (range) {
+          lines.push({ price: range.hi, title: "полка↑", color: "#7c3aed" });
+          lines.push({ price: range.lo, title: "полка↓", color: "#7c3aed" });
+          factFocusState = { source: source, lines: lines, lo: range.lo, hi: range.hi, barIso: barIso };
+        }
+      }
+      if (factFocusState) {
+        repaintFactFocusLines();
+        flashZoneBandsForFocus();
+      }
+    } else if (source === "poc") {
+      const snapPoc = snap && snap.poc != null ? Number(snap.poc) : NaN;
+      const px = (snapPoc > 0) ? snapPoc
+        : ((isFinite(value) && value > 0) ? value : parseFactPrice(text));
+      if (px > 0) {
+        lines.push({ price: px, title: (snapPoc > 0) ? "POC·кадр" : "POC", color: "#ca8a04" });
+        factFocusState = { source: source, lines: lines, barIso: barIso };
+        repaintFactFocusLines();
+        flashProfilePoc(px);
+      }
+    } else if (source === "dom") {
+      const keep = [];
+      const domSnap = (snap && snap.dom && typeof snap.dom === "object") ? snap.dom : null;
+      if (domSnap) {
+        if (Number(domSnap.bestBid) > 0) {
+          keep.push({ price: Number(domSnap.bestBid), title: "DOM bid·кадр", color: "#15803d" });
+        }
+        if (Number(domSnap.bestAsk) > 0) {
+          keep.push({ price: Number(domSnap.bestAsk), title: "DOM ask·кадр", color: "#b91c1c" });
+        }
+      }
+      factFocusState = { source: source, lines: keep, barIso: barIso, domSnap: domSnap };
+      if (domSnap) flashDomFromSnap(domSnap);
+      else flashDomTopLevels();
+    } else if (source === "delta" || source === "cluster" || source === "footprint") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#c4a35a",
+          mark: "·",
+          title: sourceRuFact(source),
+          text: text
+        });
+      }
+      if (source === "cluster" || source === "shelf") {
+        flashZoneBandsForFocus();
+      }
+    } else if (source === "sync") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      openSyncPanelForFact();
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#dc2626",
+          mark: "!",
+          title: "Расхождение",
+          text: text
+        });
+      }
+    } else if (source === "leadLag") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      openSyncPanelForFact();
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#0f766e",
+          mark: "↔",
+          title: "Связка",
+          text: text
+        });
+      }
+    } else if (source === "sessionNorm") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      flashElBrief($("signal-brief") || $("signal-desk-brief") || $("decision-frame"));
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#64748b",
+          mark: "⏱",
+          title: "Норма сессии",
+          text: text
+        });
+      }
+    } else if (source === "robot") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      flashElBrief($("decision-frame"));
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#1e293b",
+          mark: "R",
+          title: "Робот",
+          text: text
+        });
+      }
+    } else if (source === "allocator") {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      openCapitalPanelForFact();
+      flashElBrief($("signal-capital-panel") || $("decision-frame"));
+    } else {
+      factFocusState = { source: source, lines: [], barIso: barIso };
+      if (barIso) {
+        seekChartToBarIso(barIso, {
+          kind: "DF_FACT",
+          color: "#c4a35a",
+          mark: "·",
+          title: sourceRuFact(source),
+          text: text
+        });
+      }
+    }
+
+    if (factFocusState) {
+      factFocusState.timer = setTimeout(function () {
+        clearFactFocusVisuals();
+        if (window.TrinityDecisionFrame && TrinityDecisionFrame.clearFactActive) {
+          TrinityDecisionFrame.clearFactActive(document);
+        }
+      }, 14000);
+    }
+  }
+
+  function sourceRuFact(src) {
+    if (window.TrinityDecisionFrame && TrinityDecisionFrame.sourceRu) {
+      return TrinityDecisionFrame.sourceRu(src) || src;
+    }
+    return src || "факт";
+  }
+
+  /** «Только аномалии»: skulls for anomaly events in the last 20 minutes. */
+  function refreshSyncAnomalyMarkers() {
+    const rail = ensureDeskTimelineRail();
+    if (!rail || typeof rail.setAnomalyMarkers !== "function") return;
+    if (!syncAnomOnly) {
+      rail.setAnomalyMarkers([]);
+      return;
+    }
+    const events = (syncContextCache && syncContextCache.events) || [];
+    const times = barTimesSorted();
+    const nowSec = times.length ? times[times.length - 1] : Math.floor(Date.now() / 1000);
+    const cutoff = nowSec - 20 * 60;
+    const byTime = {};
+    events.forEach(function (e) {
+      if (!e || !e.anomaly) return;
+      const sec = toChartTime(e.at);
+      if (sec == null || sec < cutoff) return;
+      const t = times.length ? nearestBarTime(sec) : sec;
+      const key = String(t);
+      if (byTime[key]) return;
+      byTime[key] = {
+        time: t,
+        kind: "SYNC_ANOMALY",
+        color: "#dc2626",
+        text: "!",
+        title: e.peer ? ("Аномалия · " + e.peer) : "Аномалия",
+        detail: e.text || ""
+      };
+    });
+    rail.setAnomalyMarkers(Object.keys(byTime).map(function (k) { return byTime[k]; }));
+  }
+
+  function sparklineSvg(closes, up) {
+    const pts = (closes || []).filter(function (v) { return Number.isFinite(Number(v)); })
+      .map(Number);
+    if (pts.length < 2) {
+      return "<svg class='signal-sync-spark-svg' viewBox='0 0 120 36' preserveAspectRatio='none' aria-hidden='true'></svg>";
+    }
+    let min = pts[0];
+    let max = pts[0];
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i] < min) min = pts[i];
+      if (pts[i] > max) max = pts[i];
+    }
+    const span = max - min || 1;
+    const w = 120;
+    const h = 36;
+    const pad = 2;
+    const n = pts.length;
+    const path = pts.map(function (v, i) {
+      const x = pad + (i / (n - 1)) * (w - pad * 2);
+      const y = pad + (1 - (v - min) / span) * (h - pad * 2);
+      return (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
+    }).join(" ");
+    const stroke = up ? "#0f766e" : (up === false ? "#b45309" : "#64748b");
+    return "<svg class='signal-sync-spark-svg' viewBox='0 0 " + w + " " + h
+      + "' preserveAspectRatio='none' aria-hidden='true'>"
+      + "<path d='" + path + "' fill='none' stroke='" + stroke
+      + "' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+  }
+
+  function paintSyncSparks(ctx) {
+    const host = $("signal-sync-sparks");
+    if (!host) return;
+    const sparks = (ctx && ctx.peerSparks) || [];
+    if (!sparks.length) {
+      host.innerHTML = "<p class='signal-sync-spark-empty'>Нет ряда peers</p>";
+      return;
+    }
+    host.innerHTML = sparks.map(function (s) {
+      const peer = (s && s.peer) || "—";
+      const day = s && s.dayPts != null && Number.isFinite(Number(s.dayPts))
+        ? Number(s.dayPts) : null;
+      const up = day == null ? null : day > 0;
+      const dayLbl = day == null ? "—" : ((day > 0 ? "+" : "") + day + " пт");
+      const dayCls = day == null ? "" : (day > 0 ? " is-up" : (day < 0 ? " is-down" : ""));
+      return "<article class='signal-sync-spark" + dayCls + "'>"
+        + "<header class='signal-sync-spark-head'>"
+        + "<span class='signal-sync-spark-peer'>" + escHtml(peer) + "</span>"
+        + "<span class='signal-sync-spark-day'>" + escHtml(dayLbl) + "</span>"
+        + "</header>"
+        + sparklineSvg(s && s.closes, up)
+        + "<p class='signal-sync-spark-secid'>" + escHtml((s && s.secid) || "") + "</p>"
+        + "</article>";
+    }).join("");
+  }
+
+  function paintSyncPanel(ctx) {
+    bindSyncPanel();
+    syncContextCache = ctx || null;
+    const panel = $("signal-sync-panel");
+    const toggle = $("signal-sync-toggle");
+    const body = $("signal-sync-body");
+    const list = $("signal-sync-list");
+    const meta = $("signal-sync-meta");
+    if (!panel || !list) return;
+    const events = (ctx && ctx.events) || [];
+    const peers = (ctx && ctx.peers) || [];
+    const sparks = (ctx && ctx.peerSparks) || [];
+    const presetEl = $("signal-sync-preset");
+    if (ctx && ctx.preset && (ctx.preset === "oil" || ctx.preset === "index-oil")) {
+      syncPreset = ctx.preset;
+      if (presetEl && presetEl.value !== syncPreset) presetEl.value = syncPreset;
+    }
+    // Show panel when there are events or peer sparks (open still reveals sparklines).
+    panel.hidden = !ctx || (!events.length && !sparks.length);
+    refreshSyncAnomalyMarkers();
+    if (panel.hidden) return;
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", syncPanelOpen ? "true" : "false");
+      toggle.classList.toggle("is-active", syncPanelOpen);
+    }
+    panel.classList.toggle("is-open", syncPanelOpen);
+    if (body) body.hidden = !syncPanelOpen;
+    const shown = syncAnomOnly
+      ? events.filter(function (e) { return e && e.anomaly; })
+      : events;
+    if (meta) {
+      const anomN = events.filter(function (e) { return e && e.anomaly; }).length;
+      meta.textContent = (peers.length ? peers.join(" · ") + " · " : "")
+        + shown.length + "/" + events.length
+        + (anomN ? (" · аномалий " + anomN) : "");
+    }
+    if (!syncPanelOpen) {
+      list.innerHTML = "";
+      const sparksEl = $("signal-sync-sparks");
+      if (sparksEl) sparksEl.innerHTML = "";
+      return;
+    }
+    paintSyncSparks(ctx);
+    if (!shown.length) {
+      list.innerHTML = "<li class='signal-sync-empty'>Нет расхождений"
+        + (syncAnomOnly ? " (снимите «только аномалии»)" : "") + "</li>";
+      return;
+    }
+    list.innerHTML = shown.map(function (e) {
+      const at = e.at || "";
+      const t = shortTime(at);
+      const cls = e.anomaly ? " is-anomaly" : "";
+      return "<li class='signal-sync-item" + cls + "'>"
+        + "<button type='button' class='signal-sync-btn' data-sync-at='"
+        + escHtml(at) + "' data-sync-text='" + escHtml(e.text || "")
+        + "' data-sync-peer='" + escHtml(e.peer || "")
+        + "' data-sync-kind='" + escHtml(e.kind || "")
+        + "' data-sync-anomaly='" + (e.anomaly ? "1" : "0")
+        + "' title='Маркер на графике + короткий разбор'>"
+        + "<span class='signal-sync-time'>" + escHtml(t || "—") + "</span>"
+        + "<span class='signal-sync-peer'>" + escHtml(e.peer || "") + "</span>"
+        + "<span class='signal-sync-text'>" + escHtml(e.text || "") + "</span>"
+        + "</button></li>";
+    }).join("");
+  }
+
+  /** Shared DF journal (Exclusive / positional / BRM — same mount). */
+  let dfJournalUi = null;
+  function ensureDfJournalUi() {
+    if (dfJournalUi) return dfJournalUi;
+    if (!window.TrinityDecisionFrame || typeof TrinityDecisionFrame.mountJournal !== "function") {
+      return null;
+    }
+    dfJournalUi = TrinityDecisionFrame.mountJournal({
+      panel: "signal-df-journal",
+      list: "signal-df-journal-list",
+      meta: "signal-df-journal-meta",
+      title: "signal-df-journal-title",
+      filters: "signal-df-journal-filters",
+      humanizeSummary: humanizeFrameSummary,
+      shortTime: shortTime,
+      onFactFocus: focusDecisionFact
+    });
+    return dfJournalUi;
+  }
+
+  /** Drop legacy «pairs N%» from capital summaries (product desk has no pairs sleeve). */
+  function scrubPairsFromSummary(text) {
+    let s = String(text || "");
+    if (!s) return s;
+    s = s.replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*·\s*/gi, "");
+    s = s.replace(/\bpairs\s*\d+(?:[.,]\d+)?\s*%\s*/gi, "");
+    s = s.replace(/Риск-лимиты\s*₽:\s*pairs\s*[\d.,]+\s*·\s*/gi, "Риск-лимиты ₽: ");
+    s = s.replace(/\(\s*·\s*/g, "(");
+    s = s.replace(/\s{2,}/g, " ").trim();
+    return s;
+  }
+
+  /** Humanize English rationale tail inside an already-built frame summary. */
+  function humanizeFrameSummary(text) {
+    const s = scrubPairsFromSummary(String(text || ""));
+    if (!s) return "—";
+    const m = s.match(/^(.*?Робот\s+(?:пропускает|входит|ждёт|в позиции)[:：]\s*)(.+)$/i);
+    if (m) {
+      const ru = humanizeDeskReason(m[2]);
+      return m[1] + (ru && ru !== m[2] ? ru : m[2]);
+    }
+    return humanizeDeskReason(s) || s;
+  }
+
+  let briefDensityBound = false;
+
+  function briefDensity() {
+    const root = $("signal-desk-brief");
+    const fromDom = root && root.getAttribute("data-density");
+    if (fromDom === "full" || fromDom === "brief") return fromDom;
+    try {
+      const s = localStorage.getItem("trinity.df.briefDensity");
+      if (s === "full" || s === "brief") return s;
+    } catch (_) {}
+    return "brief";
+  }
+
+  function applyBriefDensity(next) {
+    const root = $("signal-desk-brief");
+    if (!root) return;
+    const d = next === "full" ? "full" : "brief";
+    root.setAttribute("data-density", d);
+    root.classList.toggle("is-density-brief", d === "brief");
+    root.classList.toggle("is-density-full", d === "full");
+    root.querySelectorAll("[data-brief-density]").forEach(function (el) {
+      el.classList.toggle("is-active", el.getAttribute("data-brief-density") === d);
+    });
+    const body = $("signal-desk-brief-body");
+    if (body) body.classList.toggle("is-collapsed-dense", d === "brief");
+    try { localStorage.setItem("trinity.df.briefDensity", d); } catch (_) {}
+  }
+
+  function bindBriefDensity() {
+    if (briefDensityBound) return;
+    const root = $("signal-desk-brief");
+    if (!root) return;
+    briefDensityBound = true;
+    applyBriefDensity(briefDensity());
+    root.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-brief-density]")
+        : null;
+      if (!btn) return;
+      applyBriefDensity(btn.getAttribute("data-brief-density") || "brief");
+    });
+  }
+
+  function dfFrameForStatus(e) {
+    const frame = (e && e.frame) ? Object.assign({}, e.frame) : (e || {});
+    if (e && e.summary && !frame.summary) frame.summary = e.summary;
+    if (e && e.robotStatus && frame.robot && !frame.robot.status) {
+      frame.robot = Object.assign({}, frame.robot, { status: e.robotStatus });
+    }
+    return frame;
+  }
+
+  function dfBadge(eOrFrame) {
+    const frame = dfFrameForStatus(eOrFrame);
+    const entryStatus = eOrFrame && eOrFrame.robotStatus;
+    const eff = (window.TrinityDecisionFrame && TrinityDecisionFrame.effectiveStatus)
+      ? TrinityDecisionFrame.effectiveStatus(frame, entryStatus)
+      : String((frame.robot && frame.robot.status) || entryStatus || "");
+    const label = (window.TrinityDecisionFrame && TrinityDecisionFrame.statusRu)
+      ? TrinityDecisionFrame.statusRu(eff, frame, entryStatus)
+      : (eff || "—");
+    return { status: eff, label: label };
+  }
+
+  function paintBriefHero(data) {
+    const hero = $("signal-desk-brief-hero");
+    if (!hero) return;
+    const frame = data && data.decisionFrame;
+    if (!frame || !frame.summary) {
+      hero.hidden = true;
+      hero.innerHTML = "";
+      return;
+    }
+    const badge = dfBadge(frame);
+    const heroText = (window.TrinityDecisionFrame && TrinityDecisionFrame.robotDetailText)
+      ? TrinityDecisionFrame.robotDetailText(frame)
+      : humanizeFrameSummary(frame.summary);
+    const chips = (window.TrinityDecisionFrame && TrinityDecisionFrame.whyChips)
+      ? TrinityDecisionFrame.whyChips(frame, heroText)
+      : [];
+    let why = chips.map(function (c) { return c.text; }).filter(Boolean).slice(0, 2).join(" · ");
+    const laneNote = data && data.parallelPlaybooks
+      ? (deskScope() === "positional"
+        ? " · полоса H1 (диапазонная — на своей доске)"
+        : (deskScope() === "brm"
+          ? " · полоса BRM"
+          : " · полоса Exclusive M5 (позиционная — на своей доске)"))
+      : "";
+    hero.innerHTML = "<span class=\"signal-brief-hero-status\" data-status=\""
+      + escHtml(badge.status) + "\">" + escHtml(badge.label) + "</span>"
+      + escHtml(heroText || "—")
+      + (why ? (" <span class=\"signal-brief-note\">· " + escHtml(why) + "</span>") : "")
+      + (laneNote ? (" <span class=\"signal-brief-note\">" + escHtml(laneNote) + "</span>") : "");
+    hero.hidden = false;
+  }
+
+  function paintDecisionFrameJournal(payload) {
+    const ui = ensureDfJournalUi();
+    if (ui) ui.paint(payload);
+  }
+
   function paintRobotChip(data) {
     const chip = $("sig-robot-chip");
     const el = $("sig-robot-status");
@@ -208,25 +1391,35 @@
         sub.textContent = "Робот выключен тумблером — график смотрим, paper-входов нет";
         sub.hidden = false;
       }
-      chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan");
+      chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan", "is-flat");
       chip.classList.add("is-scan");
       chip.title = "Позиционный робот выключен";
       return;
     }
     const copy = buildRobotFabCopy(data);
-    const status = (copy && copy.status) ? copy.status : "Сканирует";
-    const detail = (copy && copy.detail) ? copy.detail : "";
+    let status = (copy && copy.status) ? copy.status : "Сканирует";
+    let detail = (copy && copy.detail) ? copy.detail : "";
+    const instRaw = (data && (data.robotInstrument || data.instrument)) || "";
+    const inst = instRaw ? formatSecidWithMonth(instRaw) : "";
+    if (inst && status !== "Сессия закрыта"
+        && (posture === "WAITING_FILL" || posture === "IN_TRADE"
+        || posture === "WATCHING_ZONE")) {
+      status = status + " · " + inst;
+      if (detail && detail.indexOf(instRaw) < 0 && detail.indexOf(inst) < 0) {
+        detail = inst + " · " + detail;
+      }
+    }
     el.textContent = status;
     const sub = $("sig-robot-detail");
     if (sub) {
       sub.textContent = detail;
       sub.hidden = !detail;
     }
-    chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan");
-    if (posture === "IN_TRADE") chip.classList.add("is-trade");
-    else if (posture === "WAITING_FILL") chip.classList.add("is-armed");
-    else if (posture === "WATCHING_ZONE") chip.classList.add("is-watch");
-    else chip.classList.add("is-scan");
+    chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan", "is-flat");
+    // Prefer fab copy class (session-closed → is-flat) over raw posture (WATCHING_ZONE on weekend).
+    const cls = (copy && copy.cls) ? copy.cls : "is-scan";
+    chip.classList.add(cls === "is-flat" ? "is-scan" : cls);
+    if (cls === "is-flat") chip.classList.add("is-flat");
     chip.title = detail ? (status + " · " + detail) : status;
   }
   function paintModeSwitch(tog, on, hintId, autoHint, manualHint) {
@@ -454,6 +1647,8 @@
       .replace(/§\s*14\b/gi, "")
       .replace(/§\s*\d+(?:\s*[\/–-]\s*\d+)*/g, "")
       .replace(/§\s*/g, "")
+      .replace(/\bmanage\b/gi, "ведение")
+      .replace(/\/view\/[^\s"'<>]*/gi, "")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -538,6 +1733,7 @@
     try {
       const key = isRangeDesk() ? INST_STORE + ".range" : INST_STORE;
       if (v) localStorage.setItem(key, String(v).trim());
+      else localStorage.removeItem(key);
     } catch (_) {}
   }
   function readStoredPlaybook() {
@@ -570,9 +1766,11 @@
   function wantedDeskInstrument() {
     const instSel = $("sig-instrument");
     const fromSel = (instSel && instSel.value) ? instSel.value.trim() : "";
-    const want = (deskInstrumentPinned || fromSel || "").trim();
-    if (isRangeDesk() && want) {
-      const fam = instrumentFamily(want);
+    let want = (deskInstrumentPinned || fromSel || "").trim();
+    if (!want) return "";
+    const fam = instrumentFamily(want);
+    // Range = BR only; BRM = BRM mini; positional = BR/RI/NG/SI/GD/MX (never wipe pin).
+    if (isRangeDesk()) {
       if (deskScope() === "brm" && fam !== "BRM") return "";
       if (deskScope() === "range" && fam !== "BR") return "";
     }
@@ -586,29 +1784,50 @@
       if (v) localStorage.setItem(PB_STORE, String(v).trim());
     } catch (_) {}
   }
-  function matchInstrumentOption(sel, secid) {
+  /**
+   * @param {boolean} [forceSecid=true] when true, family match rewrites option to secid
+   *   (chart/server month). when false, keep live option value — stale pin must not
+   *   paint BRV6 while the list already holds front-month BRX6.
+   */
+  function matchInstrumentOption(sel, secid, forceSecid) {
     if (!sel || !secid) return false;
+    const force = forceSecid !== false;
     for (let i = 0; i < sel.options.length; i++) {
-      if (sel.options[i].value === secid) {
-        sel.value = secid;
+      if (String(sel.options[i].value || "").toUpperCase() === String(secid).toUpperCase()) {
+        sel.value = sel.options[i].value;
         return true;
       }
     }
     const want = String(secid).toUpperCase();
     const fam = instrumentFamily(secid);
     for (let i = 0; i < sel.options.length; i++) {
-      const v = String(sel.options[i].value || "").toUpperCase();
       if (fam && instrumentFamily(sel.options[i].value) === fam) {
-        if (v !== want) {
+        if (force && String(sel.options[i].value || "").toUpperCase() !== want) {
           sel.options[i].value = secid;
           const label = sel.options[i].textContent || "";
-          sel.options[i].textContent = label.replace(/\s·\s\S+$/, " · " + secid);
+          const nameBit = label.split(" · ")[0] || fam;
+          sel.options[i].textContent = nameBit + " · " + formatSecidWithMonth(secid);
         }
-        sel.value = secid;
+        sel.value = sel.options[i].value;
         return true;
       }
     }
     return false;
+  }
+  /** After desk load: toolbar + pin must match the chart month (data.instrument). */
+  function syncSelectorToChartInstrument(chartSecid) {
+    if (!chartSecid) return;
+    const instSel = $("sig-instrument");
+    if (!instSel) return;
+    const pin = deskInstrumentPinned || (instSel.value || "");
+    if (pin && !sameInstrumentFamily(pin, chartSecid)) {
+      // Positional pin on another family (GD while robot on BR) — leave pin alone.
+      return;
+    }
+    if (matchInstrumentOption(instSel, chartSecid, true)) {
+      deskInstrumentPinned = instSel.value || chartSecid;
+      writeStoredInstrument(deskInstrumentPinned);
+    }
   }
   function applyBootInstrumentFromStorage() {
     const instSel = $("sig-instrument");
@@ -616,8 +1835,10 @@
     const fromLayout = deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.instrument;
     let pick = deskInstrumentPinned || fromLayout || readStoredInstrument();
     if (isRangeDesk() && pick && !isOilInstrument(pick)) pick = "";
-    if (pick && matchInstrumentOption(instSel, pick)) {
+    // Family-only: do not rewrite live front-month back to a stale stored month.
+    if (pick && matchInstrumentOption(instSel, pick, false)) {
       deskInstrumentPinned = instSel.value;
+      writeStoredInstrument(instSel.value);
     }
     const pbSel = $("sig-playbook");
     const pbPick = (deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.playbookId)
@@ -658,6 +1879,25 @@
     const m = String(iso).match(/T(\d{2}:\d{2})/);
     return m ? m[1] : iso;
   }
+  /** Full when-clause: «в HH:mm» / «вчера в HH:mm» / «dd.MM в HH:mm». */
+  function shortCloseWhen(iso) {
+    if (!iso) return "";
+    const hm = shortTime(iso);
+    if (!hm || hm === "—") return "";
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})T/);
+    if (!m) return "в " + hm;
+    try {
+      const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const diff = Math.round((today.getTime() - day.getTime()) / 86400000);
+      if (diff === 0) return "в " + hm;
+      if (diff === 1) return "вчера в " + hm;
+      return m[3] + "." + m[2] + " в " + hm;
+    } catch (_) {
+      return "в " + hm;
+    }
+  }
   function clockMeta(sit) {
     if (!sit) return "";
     const rb = sit.robotBar ? shortTime(sit.robotBar) : "";
@@ -673,26 +1913,38 @@
     const lane = fp && fp.lanes && pbId ? fp.lanes[pbId] : null;
     const lc = (lane && lane.lastClose) || (sit && sit.lastClose) || null;
     if (!lc || !lc.exitReason) return "";
-    const t = shortTime(lc.closedAt);
+    const when = shortCloseWhen(lc.closedAt);
     const pnl = typeof lc.pnlRub === "number" ? (" " + fmtPnl(lc.pnlRub)) : "";
     return "Последняя: " + lc.exitReason
       + (lc.slKind === "SWEEP" ? " sweep" : "")
-      + pnl + (t && t !== "—" ? (" в " + t) : "");
+      + pnl + (when ? (" " + when) : "");
   }
   function renderPaper(paper, desk) {
     const st = (paper && paper.statement) || {};
+    const paperBook = st.paper || st;
+    const liveBook = st.live || {};
     const todayEl = $("sig-paper-today");
     const totalEl = $("sig-paper-total");
+    const laneRu = deskScope() === "positional" ? "поз."
+      : (deskScope() === "brm" ? "BRM" : "диап.");
     if (todayEl) {
-      todayEl.textContent = fmtPnl(st.todayPnlRub);
-      todayEl.classList.toggle("is-buy", (st.todayPnlRub || 0) > 0);
-      todayEl.classList.toggle("is-sell", (st.todayPnlRub || 0) < 0);
+      todayEl.textContent = fmtPnl(paperBook.todayPnlRub);
+      todayEl.title = "Сегодня · только " + laneRu + " (без смешения полос)";
+      todayEl.classList.toggle("is-buy", (paperBook.todayPnlRub || 0) > 0);
+      todayEl.classList.toggle("is-sell", (paperBook.todayPnlRub || 0) < 0);
     }
     if (totalEl) {
-      const w = (st.wins || 0) + "/" + (st.losses || 0);
-      totalEl.textContent = fmtPnl(st.realizedPnlRub) + " · " + w;
-      totalEl.classList.toggle("is-buy", (st.realizedPnlRub || 0) > 0);
-      totalEl.classList.toggle("is-sell", (st.realizedPnlRub || 0) < 0);
+      const w = (paperBook.wins || 0) + "/" + (paperBook.losses || 0);
+      const runsBook = st.research || {};
+      const runsN = Number(runsBook.closedCount || 0);
+      const liveN = Number(liveBook.closedCount || 0);
+      const bits = [fmtPnl(paperBook.realizedPnlRub) + " " + laneRu + " · " + w];
+      if (runsN > 0) bits.push(fmtPnl(runsBook.realizedPnlRub) + " прогоны");
+      if (liveN > 0) bits.push(fmtPnl(liveBook.realizedPnlRub) + " боевая");
+      totalEl.textContent = bits.join(" · ");
+      totalEl.title = "Счёт этой полосы (" + laneRu + "), не сумма Exclusive+positional";
+      totalEl.classList.toggle("is-buy", (paperBook.realizedPnlRub || 0) > 0);
+      totalEl.classList.toggle("is-sell", (paperBook.realizedPnlRub || 0) < 0);
     }
     const panel = $("signal-paper-panel");
     const body = $("signal-paper-body");
@@ -710,6 +1962,7 @@
       }
       const id = String((t && t.id) || "");
       if (id.indexOf("BRX6-2026-10-06T06-00") >= 0) return false;
+      if (id.indexOf("BRX6-2026-10-09T16-45") >= 0) return false;
       return true;
     });
     const latest = paper && paper.latestClose;
@@ -717,7 +1970,8 @@
       const latestPb = playbookFromTrade(latest);
       const samePb = !wantPb || wantPb === "both" || latestPb === wantPb;
       const has = rows.some(function (t) { return t && t.id === latest.id; });
-      const voided = String(latest.id || "").indexOf("BRX6-2026-10-06T06-00") >= 0;
+      const voided = String(latest.id || "").indexOf("BRX6-2026-10-06T06-00") >= 0
+          || String(latest.id || "").indexOf("BRX6-2026-10-09T16-45") >= 0;
       if (samePb && !has && !voided) {
         rows.unshift(latest);
       }
@@ -735,9 +1989,11 @@
         const n = t && t.pnlRub;
         return sum + (typeof n === "number" ? n : 0);
       }, 0);
-      meta.innerHTML = "Сегодня · " + ruDeals(rows.length)
+      const laneRu = deskScope() === "positional" ? "позиционная"
+        : (deskScope() === "brm" ? "BRM мини" : "диапазонная");
+      meta.textContent = "Сегодня · " + laneRu + " · " + ruDeals(rows.length)
         + " · PnL " + fmtPnl(rowPnl)
-        + " · <a href=\"/view/statement\">Statement</a>";
+        + " · полный журнал — Statement в меню";
     }
     body.innerHTML = rows.map(function (t) {
       const pnl = t.pnlRub;
@@ -1002,35 +2258,7 @@
       + (srcRu ? (" · " + esc(srcRu)) : "") + "</li>";
     html += "</ul>";
 
-    const sel = data.instrumentSelect || {};
-    const cands = sel.candidates || [];
-    if (cands.length) {
-      const reasons = cands.map(function (c) { return humanizeDeskReason(c.reason || ""); });
-      const allFail = cands.every(function (c) { return !c.pass; });
-      const allSame = reasons.length > 1 && reasons.every(function (r) { return r && r === reasons[0]; });
-      if (allFail && allSame) {
-        html += "<p class='signal-brief-note'><strong>Выбор инструмента.</strong> "
-          + esc(reasons[0])
-          + " Смотрели все семьи: "
-          + cands.map(function (c) { return familyRu(c.family); }).join(", ")
-          + ".</p>";
-      } else {
-        html += "<p class='signal-brief-note'><strong>Выбор инструмента</strong> — в работу берём одну семью:</p>";
-        html += "<ul class='signal-brief-list'>";
-        cands.forEach(function (c) {
-          const why = c.pass ? "проходит" : humanizeDeskReason(c.reason || "нет сетапа");
-          html += "<li>" + esc(familyRu(c.family)) + (c.pass ? " — " : " — не берём: ")
-            + esc(why) + "</li>";
-        });
-        html += "</ul>";
-      }
-    }
-    if (data.robotInstrument && data.instrument
-        && String(data.robotInstrument).toUpperCase() !== String(data.instrument).toUpperCase()) {
-      html += "<p class='signal-brief-note'>На графике " + esc(data.instrument)
-        + ", робот #2 выбрал " + esc(data.robotInstrument)
-        + " — смените инструмент в селекте, чтобы смотреть его H1.</p>";
-    }
+    html += instrumentSelectBriefHtml(data, esc);
 
     if (hunt.blocksNewArm) {
       html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Перед входом · стакан и лента</p>";
@@ -1121,6 +2349,37 @@
     return html;
   }
   function buildOperatorBrief(data) {
+    // Decision Frame is the why — do not duplicate market/robot essay underneath.
+    // Still surface §1 family rotation: it lived only in the long positional brief and vanished here.
+    if (data && data.decisionFrame && data.decisionFrame.summary) {
+      const esc = function (t) {
+        return String(t == null ? "" : t)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      };
+      let html = "<div class='signal-brief-keep-brief'>"
+        + instrumentSelectBriefHtml(data, esc)
+        + "</div>";
+      html += "<div class='signal-brief-dense'>";
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Дополнительно</p>";
+      html += "<p class='signal-brief-note'>Полный why — в <strong>кадре решения</strong> выше "
+        + "(тултип свечи остаётся микро-why одного бара).</p>";
+      const sit = data.situation || {};
+      if (sit.structureNote) {
+        html += "<p class='signal-brief-note'>" + esc(humanizeDeskReason(sit.structureNote)) + "</p>";
+      }
+      const paper = data.paper || {};
+      if (paper.todayCount != null || paper.todayPnlRub != null) {
+        html += "<p class='signal-brief-note'>Бумага сегодня: "
+          + esc(String(paper.todayCount != null ? paper.todayCount : "—"))
+          + " сделок"
+          + (paper.todayPnlRub != null
+            ? (", PnL " + Math.round(paper.todayPnlRub).toLocaleString("ru-RU") + " ₽")
+            : "")
+          + ".</p>";
+      }
+      html += "</div>";
+      return html;
+    }
     const bars = deskBars(data);
     const last = bars.length ? bars[bars.length - 1] : null;
     const close = last && typeof last.close === "number" ? last.close : null;
@@ -1562,7 +2821,8 @@
     }
 
     if (sit.sessionBlock) {
-      newsHtml += "<p class='signal-brief-note'>Сессия: " + esc(sit.sessionBlock) + "</p>";
+      newsHtml += "<p class='signal-brief-note'>Сессия: "
+        + esc(humanizeDeskReason(sit.sessionBlock)) + "</p>";
     } else if (sit.sessionTradable === false) {
       newsHtml += "<p class='signal-brief-note'>Сессия: вне окна входов.</p>";
     } else {
@@ -1584,7 +2844,11 @@
         + " · всего на statement <strong>" + total + "</strong>.</p>";
     }
 
-    return commentaryHtml(data) + marketHtml + robotHtml + newsHtml + paperHtml;
+    return "<div class=\"signal-brief-keep-brief\">"
+      + commentaryHtml(data) + marketHtml + robotHtml
+      + "</div><div class=\"signal-brief-dense\">"
+      + newsHtml + paperHtml
+      + "</div>";
   }
   function paintImpulseBanner(impulse) {
     const el = $("signal-impulse-banner");
@@ -1638,6 +2902,58 @@
     if (u === "MX") return "MIX (MX)";
     return code || "?";
   }
+
+  /** §1 rotation — always show in brief (DF short path used to hide this). */
+  function instrumentSelectBriefHtml(data, esc) {
+    if (!(deskScope() === "positional" || (data && data.deskScope === "positional"))) {
+      return "";
+    }
+    const escFn = esc || escHtml;
+    const sel = (data && data.instrumentSelect) || {};
+    const cands = sel.candidates || [];
+    let html = "";
+    if (!cands.length) {
+      html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Выбор инструмента</p>";
+      html += "<p class='signal-brief-note'>Ротация по семьям ещё не в кэше — обновите desk "
+        + "или подождите следующий тик (BR · RI · NG · SI · GD · MX).</p>";
+      return html;
+    }
+    const reasons = cands.map(function (c) { return humanizeDeskReason(c.reason || ""); });
+    const allFail = cands.every(function (c) { return !c.pass; });
+    const allSame = reasons.length > 1 && reasons.every(function (r) { return r && r === reasons[0]; });
+    html += "<p class='signal-brief-kicker signal-brief-kicker--gold'>Выбор инструмента</p>";
+    if (allFail && allSame) {
+      html += "<p class='signal-brief-note'>"
+        + escFn(reasons[0] || "нет сетапа")
+        + " Смотрели все семьи: "
+        + cands.map(function (c) { return familyRu(c.family); }).join(", ")
+        + ".</p>";
+    } else {
+      html += "<p class='signal-brief-note'>В работу берём одну семью:</p>";
+      html += "<ul class='signal-brief-list'>";
+      cands.forEach(function (c) {
+        const why = c.pass ? "проходит" : humanizeDeskReason(c.reason || "нет сетапа");
+        html += "<li>" + escFn(familyRu(c.family)) + (c.pass ? " — " : " — не берём: ")
+          + escFn(why) + "</li>";
+      });
+      html += "</ul>";
+    }
+    if (data.robotInstrument) {
+      html += "<p class='signal-brief-note'>Победитель ротации: <strong>"
+        + escFn(data.robotInstrument) + "</strong>"
+        + (data.robotFamily ? (" · " + escFn(familyRu(data.robotFamily))) : "")
+        + ".</p>";
+    } else if (allFail) {
+      html += "<p class='signal-brief-note'>Победителя нет — робот #2 никого не берёт.</p>";
+    }
+    if (data.robotInstrument && data.instrument
+        && String(data.robotInstrument).toUpperCase() !== String(data.instrument).toUpperCase()) {
+      html += "<p class='signal-brief-note'>На графике " + escFn(data.instrument)
+        + ", робот выбрал " + escFn(data.robotInstrument)
+        + " — смените инструмент в селекте сверху, чтобы смотреть его H1.</p>";
+    }
+    return html;
+  }
   function h1SourceRu(src) {
     const s = String(src || "").trim();
     if (!s) return "";
@@ -1664,6 +2980,60 @@
     const s = deMark(raw || "");
     if (!s) return "";
     const u = s.toUpperCase();
+    // Exclusive M5 session edge (English from TrendSessionEdge) — never show raw to operator.
+    if (u.indexOf("SESSION EDGE") >= 0) {
+      if (u.indexOf("WEEKEND") >= 0) {
+        return "Выходные — диапазонный робот не торгует, только пишет историю. Новые входы с понедельника.";
+      }
+      if (u.indexOf("BEFORE CLOSE") >= 0) {
+        return "Основная сессия закончена — новых входов сегодня нет. Зону увидим завтра после открытия.";
+      }
+      if (u.indexOf("BEFORE OPEN") >= 0) {
+        return "До открытия основной сессии — робот не ставит новые лимитки.";
+      }
+      if (u.indexOf("AFTER OPEN") >= 0) {
+        return "Слишком рано после открытия — ждём прогрев сессии, потом снова смотрим зону.";
+      }
+      return "Вне торгового окна основной сессии — новых входов нет.";
+    }
+    // Positional H1 gap-fill arm skips (English rationale from PositionalH1GapStrategy).
+    if (u.indexOf("GAP STRATEGY") >= 0) {
+      if (u.indexOf("2 H1") >= 0 || u.indexOf("≥2") >= 0 || u.indexOf(">=2") >= 0) {
+        return "Гэп: нужно ≥2 часовых бара после 07:00 в сторону вчерашнего закрытия "
+          + "(последний бар должен закрыться с заполнением гэпа).";
+      }
+      if (u.indexOf("VOLUME AGAINST") >= 0 || u.indexOf("CONFIRM-WINDOW") >= 0) {
+        return "Гэп: в окне подтверждения объём шёл против заполнения — вход не берём.";
+      }
+      if (u.indexOf("HARD MICRO") >= 0 || u.indexOf("NEED MICRO") >= 0) {
+        return "Гэп: до 10:00 нужен жёсткий микро-confirm (DOM + лента) — пока не подтверждаем.";
+      }
+      if (u.indexOf("AFTER 10:00") >= 0 || u.indexOf("MAIN SESSION") >= 0) {
+        return "Гэп: после 10:00 руки на заполнение гэпа уже не ставим.";
+      }
+      if (u.indexOf("BREAKAWAY") >= 0 || u.indexOf("OUTSIDE PRIOR") >= 0) {
+        return "Гэп: открытие вне вчерашнего диапазона — breakaway, на заполнение не торгуем.";
+      }
+      if (u.indexOf("LARGE GAP") >= 0 || u.indexOf("VS ATR") >= 0) {
+        return "Гэп слишком большой относительно ATR — на заполнение не берём.";
+      }
+      if (u.indexOf("ICEBERG") >= 0 || u.indexOf("SPOOF") >= 0) {
+        return "Гэп: в стакане айсберг/споф против заполнения — пропуск.";
+      }
+      if (u.indexOf("DOM CROWD") >= 0) {
+        return "Гэп: толпа в стакане против заполнения — пропуск.";
+      }
+      if (u.indexOf("TAPE") >= 0 || u.indexOf("FOOTPRINT") >= 0) {
+        return "Гэп: лента против заполнения — пропуск.";
+      }
+      if (u.indexOf("BOUNCE SLEEPS") >= 0 || u.indexOf("NO ARM") >= 0) {
+        return "Гэп ещё открыт — обычный отскок от полки спит, пока гэп не закроют.";
+      }
+      if (u.indexOf("NO CHASE") >= 0 || u.indexOf("REMAINING") >= 0) {
+        return "Гэп: до вчерашнего закрытия осталось мало пунктов — не догоняем.";
+      }
+      return "Фильтр заполнения ночного гэпа — вход сейчас не берём.";
+    }
     if (u.indexOf("GAP-FILL") >= 0 || u.indexOf("GAP FILL") >= 0 || u.indexOf("НОЧН") >= 0 && u.indexOf("ГЭП") >= 0) {
       if (u.indexOf("AGAINST") >= 0 || u.indexOf("NO BUY") >= 0 || u.indexOf("NO SELL") >= 0
           || u.indexOf("ПРОТИВ ЗАПОЛН") >= 0) {
@@ -1722,6 +3092,10 @@
       return "После стопа по этой семье пауза"
         + (d ? (" до " + d[1]) : "") + " — не мстим рынку сразу тем же инструментом.";
     }
+    if (u.indexOf("INSUFFICIENT H1") >= 0 || u.indexOf("NEED MORE BARS") >= 0) {
+      return "На выбранном инструменте мало часовых свечей для структуры — "
+        + "это про график в селекте, не про ротацию семей выше.";
+    }
     if (u.indexOf("STRUCTURE") >= 0 && u.indexOf("MIN") >= 0) {
       return "Тренд на часе слабоват (лесенка хаёв/лоёв нечёткая) — в ротацию эту семью не берём.";
     }
@@ -1752,23 +3126,27 @@
       return "Нужен явный тренд на часе и минимум три полки объёма. Пока этого нет — сетапа нет.";
     }
     const exclusiveDesk = deskScope() !== "positional";
-    if (exclusiveDesk && (u.indexOf("TOP+BOT") >= 0 || u.indexOf("IN PLAY") >= 0)) {
-      if (u.indexOf("TREND_HI") >= 0 || (u.indexOf("FOCUS") >= 0 && u.indexOf("TOP") >= 0) || u.indexOf("TREND_HI") >= 0) {
+    if (exclusiveDesk && (u.indexOf("TOP+BOT") >= 0 || u.indexOf("IN PLAY") >= 0 || u.indexOf("MONITOR") >= 0)) {
+      // Do not match the word TOP inside "TOP+BOT" — role is after nearest/focus.
+      const nearestRole = (u.match(/(?:NEAREST|FOCUS)\s+(TREND_HI|TREND_LO|TOP|BOT)\b/) || [])[1] || "";
+      const nearTop = nearestRole === "TREND_HI" || nearestRole === "TOP";
+      const nearBot = nearestRole === "TREND_LO" || nearestRole === "BOT";
+      if (nearTop) {
         if (u.indexOf("MID-ZONE") >= 0 || u.indexOf("NO BOUNCE") >= 0) {
-          return "Робот смотрит обе полки дня. Сейчас цена у верхней — ждём закрытый отбой, не вход с касания.";
+          return "Мониторим обе полки дня (TOP и BOT). Сейчас цена у верхней — ждём закрытый отбой, не вход с касания.";
         }
         if (u.indexOf("PRICE BELOW TOP") >= 0 || u.indexOf("WAITING RETURN") >= 0) {
-          return "Робот смотрит обе полки. Цена под верхней зоной — продажа только если вернётся и отобьётся закрытой свечой.";
+          return "Мониторим обе полки. Ближе верхняя: цена под TOP — продажа только если вернётся и отобьётся закрытой свечой.";
         }
-        return "Робот смотрит обе полки дня, сейчас внимание на верхней.";
+        return "Мониторим обе полки дня (TOP и BOT). Ближе к цене сейчас верхняя.";
       }
-      if (u.indexOf("TREND_LO") >= 0 || u.indexOf("BOT") >= 0) {
+      if (nearBot) {
         if (u.indexOf("PRICE ABOVE BOT") >= 0 || u.indexOf("WAITING RETURN") >= 0) {
-          return "Робот смотрит обе полки. Цена над нижней зоной — покупка только если вернётся и отобьётся закрытой свечой.";
+          return "Мониторим обе полки. Ближе нижняя: цена над BOT — покупка только если вернётся и отобьётся закрытой свечой.";
         }
-        return "Робот смотрит обе полки дня, сейчас внимание на нижней.";
+        return "Мониторим обе полки дня (TOP и BOT). Ближе к цене сейчас нижняя.";
       }
-      return "Робот смотрит обе полки дня — верхнюю и нижнюю.";
+      return "Мониторим обе полки дня — верхнюю и нижнюю; вход только от ближайшей с подтверждением.";
     }
     if (exclusiveDesk && u.indexOf("HTF UP") >= 0 && (u.indexOf("ШОРТ") >= 0 || u.indexOf("ВЫНОСА ИЗ ЗОНЫ") >= 0)) {
       return "Час смотрит вверх — продавать от верха можно только после сильного отбоя: свеча закрылась обратно ниже зоны.";
@@ -2127,6 +3505,9 @@
       const role = el.dataset.zone || "";
       if (!seen[role]) el.parentNode.removeChild(el);
     });
+    if (factFocusState && factFocusState.source === "shelf") {
+      flashZoneBandsForFocus();
+    }
   }
   function ensureProfileOverlay() {
     const el = $("signal-chart");
@@ -3017,6 +4398,9 @@
     }
     fitPriceToVisibleCandles();
     layoutMarketOverlays();
+    if (factFocusState && factFocusState.lines && factFocusState.lines.length) {
+      repaintFactFocusLines();
+    }
   }
   function ensureVolumeChart() {
     const wrap = $("signal-volume-wrap");
@@ -3107,8 +4491,11 @@
   }
   function sanitizeScaleRow(row) {
     if (!row || !(row.barSpacing > 0)) return null;
+    // Legacy rows without user:true were often poisoned by click/cluster/layout races.
+    // Restore only explicit user zooms so refresh does not re-enlarge the chart.
+    if (row.user !== true && row.userIntent !== true) return null;
     const logical = (row.logical && logicalSpan(row.logical) >= MIN_KEEP_LOGICAL) ? row.logical : null;
-    return { barSpacing: clampBarSpacing(row.barSpacing), logical: logical };
+    return { barSpacing: clampBarSpacing(row.barSpacing), logical: logical, user: true };
   }
   function snapshotTimeScale() {
     if (!chart) return null;
@@ -3128,11 +4515,20 @@
   function loadScaleLocal(instrument) {
     try {
       const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      return sanitizeScaleRow(all[scaleStoreKey(instrument)]);
+      const key = scaleStoreKey(instrument);
+      const raw = all[key];
+      const sane = sanitizeScaleRow(raw);
+      // Drop legacy poisoned rows (saved without explicit user zoom).
+      if (raw && !sane) {
+        delete all[key];
+        localStorage.setItem(SCALE_STORE, JSON.stringify(all));
+      }
+      return sane;
     } catch (_) {}
     return null;
   }
   function saveScaleLocal(instrument) {
+    if (!userScaleIntent) return;
     const snap = snapshotTimeScale();
     const raw = (lockedBarSpacing > 0)
       ? lockedBarSpacing
@@ -3148,7 +4544,14 @@
       const logical = lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL
         ? lockedLogical
         : ((snap && logicalSpan(snap.logical) >= MIN_KEEP_LOGICAL) ? snap.logical : null);
-      all[scaleStoreKey(instrument)] = { barSpacing: spacing, logical: logical };
+      all[scaleStoreKey(instrument)] = { barSpacing: spacing, logical: logical, user: true };
+      localStorage.setItem(SCALE_STORE, JSON.stringify(all));
+    } catch (_) {}
+  }
+  function clearScaleLocal(instrument) {
+    try {
+      const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
+      delete all[scaleStoreKey(instrument)];
       localStorage.setItem(SCALE_STORE, JSON.stringify(all));
     } catch (_) {}
   }
@@ -3158,17 +4561,19 @@
     lockedLogical = null;
     clearTimeout(scaleRememberTimer);
     userScaleGesture = false;
+    userScaleIntent = false;
     unlockPriceScale();
-    try {
-      const all = JSON.parse(localStorage.getItem(SCALE_STORE) || "{}");
-      delete all[scaleStoreKey(lastDeskInstrument)];
-      localStorage.setItem(SCALE_STORE, JSON.stringify(all));
-    } catch (_) {}
+    clearScaleLocal(lastDeskInstrument);
+    if (deskLayoutDoc && deskLayoutDoc.desk) {
+      delete deskLayoutDoc.desk.scale;
+    }
+    scheduleSaveDeskLayout();
   }
   function adoptSavedScale(instrument) {
     const saved = loadScaleLocal(instrument);
     if (!saved) return false;
     scaleLocked = true;
+    userScaleIntent = true;
     lockedBarSpacing = saved.barSpacing;
     lockedLogical = saved.logical || null;
     return true;
@@ -3210,12 +4615,16 @@
       lockedLogical = snap.logical;
       userPinned = true;
     }
-    saveScaleLocal(lastDeskInstrument);
-    scheduleSaveDeskLayout();
+    // Persist only after real zoom/pinch — pan/click must not poison refresh.
+    if (userScaleIntent) {
+      saveScaleLocal(lastDeskInstrument);
+      scheduleSaveDeskLayout();
+    }
     syncGoLiveBtn();
   }
-  function scheduleRememberUserScale() {
+  function scheduleRememberUserScale(fromUserZoom) {
     if (applyingScale) return;
+    if (fromUserZoom) userScaleIntent = true;
     clearTimeout(scaleRememberTimer);
     scaleRememberTimer = setTimeout(rememberUserScale, 120);
   }
@@ -3267,27 +4676,35 @@
   function bindUserScaleCapture(el) {
     if (!el || el._trinityScaleBound) return;
     el._trinityScaleBound = true;
-    const markTime = function () {
-      scheduleRememberUserScale();
-    };
-    el.addEventListener("wheel", markTime, { passive: true, capture: true });
+    // Wheel / pinch = zoom intent. Plain click/drag pan must not write scale to storage.
+    el.addEventListener("wheel", function () {
+      scheduleRememberUserScale(true);
+    }, { passive: true, capture: true });
     el.addEventListener("mousedown", function (ev) {
       userScaleGesture = true;
       const rect = el.getBoundingClientRect();
       const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
       let priceW = 56;
+      let timeH = 28;
       try {
         if (chart && typeof chart.priceScale === "function") {
           priceW = chart.priceScale("right").width() || 56;
         }
       } catch (_) {}
-      if (x > rect.width - priceW - 4) freezePriceScale();
+      if (x > rect.width - priceW - 4) {
+        freezePriceScale();
+        userScaleIntent = true; // drag on price axis
+      } else if (y > rect.height - timeH - 2) {
+        userScaleIntent = true; // drag on time axis = scale
+      }
     });
     el.addEventListener("touchstart", function () { userScaleGesture = true; }, { passive: true });
     const endGesture = function () {
       if (!userScaleGesture) return;
       userScaleGesture = false;
-      markTime();
+      // Update live lock/pin state; persist only if zoom intent was set above / by wheel.
+      scheduleRememberUserScale(false);
       syncPriceLockBtn();
     };
     window.addEventListener("mouseup", endGesture);
@@ -3603,7 +5020,8 @@
         atRightEdge: atRightEdge,
         getPointSize: function () { return deskPointSize(lastDeskInstrument); },
         onTimeGesture: function () {
-          scheduleRememberUserScale();
+          // Pan / programmatic — pin live edge only; wheel handler marks user zoom.
+          scheduleRememberUserScale(false);
           layoutMarketOverlays();
         },
         onPriceLock: function (locked) {
@@ -4048,7 +5466,7 @@
       if (q1 < 0) q1 = 0;
       if (q1 > 0) open.qty = qty - q1;
       open.tp1Done = true;
-      // GAP_FILL keeps structural SL after TP1 (server manage); Exclusive → BE
+      // GAP_FILL: leave SL to server (structural, then H1 candle-trail). Exclusive → BE here.
       const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
       if (!gapFill && Number(open.avg) > 0) open.sl = Number(open.avg);
       liveTp1Until = Date.now() + 60000;
@@ -4173,7 +5591,7 @@
       const buy = Number(t.buy) || 0;
       const sell = Number(t.sell) || 0;
       const isBest = bestAsk != null && Math.abs(p - bestAsk) < 1e-9;
-      html += "<div class=\"dom-row dom-ask" + (isBest ? " is-best" : "") + "\">"
+      html += "<div class=\"dom-row dom-ask" + (isBest ? " is-best" : "") + "\" data-px=\"" + p.toFixed(2) + "\">"
         + "<span class=\"dom-bid-px\"></span>"
         + "<span class=\"dom-bid-q\"></span>"
         + "<span class=\"dom-px\">" + p.toFixed(2) + "</span>"
@@ -4202,7 +5620,7 @@
       const buy = Number(t.buy) || 0;
       const sell = Number(t.sell) || 0;
       const isBest = bestBid != null && Math.abs(p - bestBid) < 1e-9;
-      html += "<div class=\"dom-row dom-bid" + (isBest ? " is-best" : "") + "\">"
+      html += "<div class=\"dom-row dom-bid" + (isBest ? " is-best" : "") + "\" data-px=\"" + p.toFixed(2) + "\">"
         + "<span class=\"dom-bid-px\">" + p.toFixed(2) + "</span>"
         + "<span class=\"dom-bid-q\"><i style=\"width:" + barW(q) + "%\"></i><em>" + q + "</em></span>"
         + "<span class=\"dom-px\">" + p.toFixed(2) + "</span>"
@@ -4227,35 +5645,7 @@
     } else {
       body.scrollTop = prevScroll;
     }
-  }
-  async function kickRobot() {
-    const btn = $("sig-kick-btn");
-    if (btn) btn.disabled = true;
-    try {
-      const res = await fetch("/api/trend/kick?mode=soft&reason=desk-button", {
-        method: "POST",
-        headers: deskAuthHeaders()
-      });
-      const data = await res.json().catch(function () { return {}; });
-      if (!res.ok) {
-        const msg = data.message || data.error || ("HTTP " + res.status);
-        throw new Error(msg);
-      }
-      await loadDesk(true);
-      const brief = $("signal-desk-brief-body");
-      if (brief) {
-        brief.innerHTML = "<p><strong>Сброс залипания:</strong> "
-          + (data.reason || "soft")
-          + " · kicksToday=" + (data.kickCountToday || "?")
-          + " · " + (data.deskSummary || data.engineState || "")
-          + " <span class='signal-brief-note'>(day-lock TOP/BOT сохранён)</span></p>"
-          + brief.innerHTML;
-      }
-    } catch (e) {
-      alert("Сброс не удался: " + (e && e.message ? e.message : e));
-    } finally {
-      if (btn) btn.disabled = false;
-    }
+    reapplyFactFocusAfterPaint();
   }
   function deskInstrumentQuery() {
     let inst = wantedDeskInstrument() || lastDeskInstrument;
@@ -4306,6 +5696,8 @@
     const meta = $("signal-desk-meta");
     const wantInst = wantedDeskInstrument();
     const startedAt = Date.now();
+    const dfUi = ensureDecisionFrameUi();
+    if (dfUi) dfUi.markUpdating();
     if (meta && (!meta.textContent || meta.textContent.indexOf("Загрузка") === 0
         || meta.textContent.indexOf("локальный архив") === 0
         || meta.textContent.indexOf("Ошибка") === 0
@@ -4316,6 +5708,11 @@
       const q = [];
       if (wantInst) q.push("instrument=" + encodeURIComponent(wantInst));
       q.push("playbook=" + encodeURIComponent(viewPlaybookId()));
+      try {
+        const sp = localStorage.getItem("trinity.df.syncPreset");
+        if (sp === "index-oil" || sp === "oil") syncPreset = sp;
+      } catch (_) {}
+      if (syncPreset) q.push("syncPreset=" + encodeURIComponent(syncPreset));
       const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
       const timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (_) {} }, DESK_FETCH_MS) : null;
       const res = await fetch("/api/trend/desk?" + q.join("&"), {
@@ -4328,9 +5725,13 @@
       if (gen !== deskFetchGen) return;
       const stillWant = wantedDeskInstrument() || wantInst;
       if (deskScope() === "positional"
-          && stillWant && data.instrument && !sameInstrumentFamily(stillWant, data.instrument)) {
-        deskReloadQueued = true;
-        return;
+          && stillWant && data.instrument
+          && !sameInstrumentFamily(stillWant, data.instrument)) {
+        // Keep operator pin (золото/Si/…) — do not snap select to server rotation.
+        const instSel = $("sig-instrument");
+        if (instSel) matchInstrumentOption(instSel, stillWant, true);
+        deskInstrumentPinned = stillWant;
+        writeStoredInstrument(stillWant);
       }
       if (meta) {
         meta.textContent = (data.playbookName || data.playbookId || "playbook")
@@ -4344,7 +5745,12 @@
           + " · " + Math.round((Date.now() - startedAt) / 100) / 10 + "s";
       }
       fillDeskSelects(data);
+      if (data.instrument) syncSelectorToChartInstrument(data.instrument);
       paintRobotChip(data);
+      paintDecisionFrame(data);
+      paintSyncPanel(data.syncContext);
+      paintCapitalPanel(data.capitalWeights);
+      paintDecisionFrameJournal(data.decisionFrames);
       if (deskScope() === "positional") {
         syncPositionalAutoSwitch(data);
       } else {
@@ -4387,13 +5793,22 @@
       const chartLabel = $("signal-chart-label");
       const paperTitle = $("signal-paper-title");
       if (paperTitle) {
-        paperTitle.textContent = "Сделки сегодня · " + formatSecidWithMonth(chartInst);
+        const laneTitle = deskScope() === "positional" ? "позиционная"
+          : (deskScope() === "brm" ? "BRM" : "диапазонная");
+        paperTitle.textContent = "Сделки сегодня · " + laneTitle + " · "
+          + formatSecidWithMonth(chartInst)
           + (data.robotInstrument && data.robotInstrument !== chartInst
-            ? (" · робот: " + data.robotInstrument) : "");
+            ? (" · робот: " + formatSecidWithMonth(data.robotInstrument)) : "");
       }
       renderPaper(data.paper, data);
+      bindBriefDensity();
+      paintBriefHero(data);
       const briefBody = $("signal-desk-brief-body");
-      if (briefBody) briefBody.innerHTML = buildOperatorBrief(data);
+      if (briefBody) {
+        briefBody.innerHTML = buildOperatorBrief(data);
+        briefBody.classList.toggle("is-collapsed-dense", briefDensity() === "brief");
+      }
+      applyBriefDensity(briefDensity());
       syncDomPressureFab(data);
 
       ensureChart(data.instrument, data.pointSize);
@@ -4567,6 +5982,8 @@
         ? ("Таймаут desk (" + (DESK_FETCH_MS / 1000) + "с) — жми Обновить")
         : ("Ошибка desk: " + (err && err.message ? err.message : err));
       if (meta) meta.textContent = failMsg;
+      const dfFail = ensureDecisionFrameUi();
+      if (dfFail) dfFail.markStale(aborted ? "таймаут desk" : "ошибка desk");
       const brief = $("signal-brief");
       if (brief && (/Загрузка|грузим/i.test(brief.textContent || "") || !brief.textContent)) {
         brief.textContent = failMsg;
@@ -4596,8 +6013,6 @@
   bindPositionalAutoSwitch();
   bindBrmAutoSwitch();
   hydrateDeskModeSwitches();
-  const kickBtn = $("sig-kick-btn");
-  if (kickBtn) kickBtn.addEventListener("click", kickRobot);
   const fitBtn = $("signal-desk-fit");
   if (fitBtn) fitBtn.addEventListener("click", function () {
     unlockScale();
@@ -4657,17 +6072,7 @@
       if (!chartFlow || typeof chartFlow.setShowClusters !== "function") return;
       chartFlow.setShowClusters(!chartFlow.getShowClusters());
       setToolPressed("tool-clusters", chartFlow.getShowClusters());
-      if (chartFlow.getShowClusters() && chart) {
-        try {
-          const sp = chart.timeScale().options().barSpacing;
-          const lr = chart.timeScale().getVisibleLogicalRange();
-          if (sp > 0) {
-            scaleLocked = true;
-            lockedBarSpacing = sp;
-            if (lr) lockedLogical = lr;
-          }
-        } catch (_) {}
-      }
+      // Cluster auto-zoom must not poison persisted time-scale (refresh would re-enlarge).
     });
   }
   const toolMacd = $("tool-macd");
@@ -4887,8 +6292,12 @@
       bits.push(open.tp2Done ? "TP2 ядро 75%" : "TP1 снят");
       if (open.sl != null) {
         const gapFill = String(open.mode || "").toUpperCase() === "GAP_FILL";
+        const trailed = !!open.candleTrail;
         const nearBe = Number(open.avg) > 0 && Math.abs(Number(open.sl) - Number(open.avg)) < 1e-6;
-        bits.push((gapFill && !nearBe ? "SL " : "SL в БУ/trail ") + fmtStatusPx(open.sl));
+        const slLabel = trailed
+          ? "SL trail "
+          : (gapFill && !nearBe ? "SL " : "SL в БУ/trail ");
+        bits.push(slLabel + fmtStatusPx(open.sl));
       }
       if (!open.tp2Done && open.tp2 != null) bits.push("TP2 " + fmtStatusPx(open.tp2));
       else if (hasTp3 && open.tp3 != null) bits.push("TP3 хвост " + fmtStatusPx(open.tp3));
@@ -5006,6 +6415,17 @@
     const usableWhy = (whyHuman && !looksTechnicalStatus(whyHuman)) ? whyHuman : "";
     const comm = (data && data.commentary) || sit.commentary || {};
     const head = comm.headline || "";
+    // Prefer server flag. Why-heuristic only when flag missing — broad «сесси/окна/открытия»
+    // false-positived «Сессия закрыта» on gap/EIA copy and even on positional.
+    const sessionClosed = sit.sessionTradable === false
+      || (sit.sessionTradable == null && usableWhy && (
+        usableWhy.indexOf("Выходные") >= 0
+        || usableWhy.indexOf("Вне торгового окна") >= 0
+        || usableWhy.indexOf("вне торгового окна") >= 0
+        || usableWhy.indexOf("До открытия основной") >= 0
+        || usableWhy.indexOf("Основная сессия закончена") >= 0
+        || usableWhy.indexOf("Слишком рано после открытия") >= 0
+      ));
 
     let cls = "is-scan";
     let status = "Сканирует";
@@ -5027,6 +6447,11 @@
       else if (lv.entry != null) bits.push("около " + fmtStatusPx(lv.entry));
       if (lv.stop != null) bits.push("стоп " + fmtStatusPx(lv.stop));
       detail = bits.join(" · ");
+    } else if (sessionClosed && deskScope() !== "positional") {
+      // Weekend / out-of-window: never show «Смотрит зону» on Exclusive even if posture lagged.
+      cls = "is-flat";
+      status = "Сессия закрыта";
+      detail = head || usableWhy || "Окно диапазонной сессии сейчас закрыто";
     } else if (posture === "WATCHING_ZONE") {
       cls = "is-watch";
       status = "Смотрит зону";
@@ -5044,20 +6469,8 @@
       }
     } else if (posture === "NOT_IN_TRADE") {
       cls = "is-flat";
-      // Session-closed: prefer sessionTradable flag, then why text (incl. weekend).
-      if (sit.sessionTradable === false
-          || (usableWhy && (usableWhy.indexOf("сесси") >= 0 || usableWhy.indexOf("Сесси") >= 0
-          || usableWhy.indexOf("открытия") >= 0 || usableWhy.indexOf("окна") >= 0
-          || usableWhy.indexOf("Выходные") >= 0 || usableWhy.indexOf("выходн") >= 0))) {
-        status = "Сессия закрыта";
-      } else {
-        status = "Не в сделке";
-      }
+      status = sessionClosed ? "Сессия закрыта" : "Не в сделке";
       detail = head || usableWhy || "Нового сетапа сейчас нет";
-    } else if (sit.sessionTradable === false) {
-      cls = "is-flat";
-      status = "Сессия закрыта";
-      detail = head || usableWhy || "Окно Exclusive сейчас закрыто";
     } else {
       cls = "is-scan";
       status = "Сканирует";
@@ -5218,21 +6631,16 @@
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
       if (activePb) pbSel.value = activePb;
-      if (isRangeDesk()) {
-        if (activeInst) {
-          matchInstrumentOption(instSel, activeInst);
-          deskInstrumentPinned = instSel.value || activeInst;
+      // Chart month wins when same family — syncSelectorToChartInstrument runs right after.
+      if (activeInst) {
+        const pin = deskInstrumentPinned;
+        if (!pin || sameInstrumentFamily(pin, activeInst) || isRangeDesk()) {
+          matchInstrumentOption(instSel, activeInst, true);
+        } else if (pin) {
+          matchInstrumentOption(instSel, pin, false);
         }
       } else if (deskInstrumentPinned) {
-        matchInstrumentOption(instSel, deskInstrumentPinned);
-        if (activeInst && sameInstrumentFamily(deskInstrumentPinned, activeInst)
-            && String(deskInstrumentPinned).toUpperCase() !== String(activeInst).toUpperCase()) {
-          matchInstrumentOption(instSel, activeInst);
-          deskInstrumentPinned = activeInst;
-          writeStoredInstrument(activeInst);
-        }
-      } else if (activeInst) {
-        matchInstrumentOption(instSel, activeInst);
+        matchInstrumentOption(instSel, deskInstrumentPinned, false);
       }
     }
     const wantPb = viewPlaybookId();
@@ -5245,7 +6653,8 @@
     const cur = instSel.options[instSel.selectedIndex];
     if (cur && (cur.hidden || cur.disabled)) {
       if (!isRangeDesk() && deskInstrumentPinned) {
-        matchInstrumentOption(instSel, deskInstrumentPinned);
+        // false: do not rewrite live front-month option back to a stale pin month.
+        matchInstrumentOption(instSel, deskInstrumentPinned, false);
       }
       const still = instSel.options[instSel.selectedIndex];
       if (still && (still.hidden || still.disabled)) {
@@ -5348,12 +6757,18 @@
       const st = desk.tools || null;
       if (chartTools && st) chartTools.setState(st);
       const sc = desk.scale;
-      if (!scaleLocked && lastCandleTime == null && sc && sc.barSpacing > 0
+      const saneScale = sanitizeScaleRow(sc);
+      if (sc && !saneScale && deskLayoutDoc && deskLayoutDoc.desk) {
+        // Strip legacy poison (click/cluster/layout) so refresh stops re-enlarging.
+        delete deskLayoutDoc.desk.scale;
+        scheduleSaveDeskLayout();
+      }
+      if (!scaleLocked && lastCandleTime == null && saneScale
           && (!sc.instrument || sc.instrument === lastDeskInstrument)) {
         scaleLocked = true;
-        const sane = sanitizeScaleRow(sc);
-        lockedBarSpacing = sane ? sane.barSpacing : DEFAULT_BAR_SPACING;
-        lockedLogical = sane ? sane.logical : null;
+        userScaleIntent = true;
+        lockedBarSpacing = saneScale.barSpacing;
+        lockedLogical = saneScale.logical || null;
         restoreTimeScale(followLive && !userPinned);
       }
       if (chartFlow && desk.flow && typeof chartFlow.setState === "function") {
@@ -5383,22 +6798,16 @@
         cur.desk.instrument = ($("sig-instrument") && $("sig-instrument").value) || null;
         cur.desk.playbookId = ($("sig-playbook") && $("sig-playbook").value) || null;
       }
-      if (scaleLocked && lockedBarSpacing > 0) {
+      if (userScaleIntent && scaleLocked && lockedBarSpacing > 0) {
         cur.desk.scale = {
           instrument: lastDeskInstrument || null,
           barSpacing: clampBarSpacing(lockedBarSpacing),
-          logical: (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) ? lockedLogical : null
+          logical: (lockedLogical && logicalSpan(lockedLogical) >= MIN_KEEP_LOGICAL) ? lockedLogical : null,
+          user: true
         };
       } else {
-        const snap = snapshotTimeScale();
-        if (snap && snap.barSpacing > 0) {
-          const sane = sanitizeScaleRow(snap);
-          cur.desk.scale = {
-            instrument: lastDeskInstrument || null,
-            barSpacing: sane ? sane.barSpacing : DEFAULT_BAR_SPACING,
-            logical: sane ? sane.logical : null
-          };
-        }
+        // Drop accidental / legacy scale so the next refresh opens at default spacing.
+        delete cur.desk.scale;
       }
       deskLayoutDoc = await TrinityChartKit.saveLayouts(cur);
     } catch (e) {

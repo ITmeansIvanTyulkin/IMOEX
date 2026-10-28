@@ -6,13 +6,16 @@ import com.moex.cointegration.client.MoexIssClient;
 import com.moex.cointegration.product.ProductEdition;
 import com.moex.cointegration.product.ProductEditionService;
 import com.moex.cointegration.service.InvestChartHistoryStore;
+import com.moex.cointegration.service.DecisionFrameJournalService;
 import com.moex.cointegration.service.InvestmentsDeskService;
+import com.moex.cointegration.service.InvestmentsExecutionBridge;
 import com.moex.cointegration.service.InvestmentsFairPaperLiveService;
 import com.moex.cointegration.service.InvestmentsPaperJournalService;
 import com.moex.cointegration.service.InvestmentsReplayStatementImporter;
 import com.moex.cointegration.service.InvestmentsSettingsService;
 import com.moex.cointegration.upsell.UpsellAccess;
 import com.moex.cointegration.upsell.UpsellService;
+import com.moex.trinity.investments.InvestmentsDecisionFrameAssembler;
 import com.moex.trinity.investments.InvestmentsSignal;
 import com.moex.trinity.investments.InvestmentsTapeBuilder;
 import com.moex.trinity.marketdata.PlainHttp;
@@ -22,6 +25,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -57,6 +63,8 @@ public class InvestmentsController {
     private final InvestmentsPaperJournalService journal;
     private final InvestmentsReplayStatementImporter replayImporter;
     private final InvestChartHistoryStore historyStore;
+    private final DecisionFrameJournalService decisionFrameJournal;
+    private final ObjectProvider<InvestmentsExecutionBridge> liveBridge;
     private final ObjectProvider<TInvestBrokerMarketData> marketData;
     private final ObjectProvider<MoexIssClient> iss;
     private final ObjectProvider<UpsellService> upsell;
@@ -69,6 +77,8 @@ public class InvestmentsController {
             InvestmentsPaperJournalService journal,
             InvestmentsReplayStatementImporter replayImporter,
             InvestChartHistoryStore historyStore,
+            DecisionFrameJournalService decisionFrameJournal,
+            ObjectProvider<InvestmentsExecutionBridge> liveBridge,
             ObjectProvider<TInvestBrokerMarketData> marketData,
             ObjectProvider<MoexIssClient> iss,
             ObjectProvider<UpsellService> upsell,
@@ -80,6 +90,8 @@ public class InvestmentsController {
         this.journal = journal;
         this.replayImporter = replayImporter;
         this.historyStore = historyStore;
+        this.decisionFrameJournal = decisionFrameJournal;
+        this.liveBridge = liveBridge;
         this.marketData = marketData;
         this.iss = iss;
         this.upsell = upsell;
@@ -176,8 +188,11 @@ public class InvestmentsController {
     }
 
     @GetMapping("/desk")
-    public Map<String, Object> desk() {
-        return desk.desk();
+    public Map<String, Object> desk(
+            @RequestParam(value = "ticker", required = false) String ticker,
+            @RequestParam(value = "refresh", required = false, defaultValue = "false") boolean refresh
+    ) {
+        return desk.desk(ticker, refresh);
     }
 
     /** Fast catalog for chart panes (no full universe evaluate). */
@@ -192,6 +207,70 @@ public class InvestmentsController {
         m.put("settings", settings.view());
         m.put("fairPaper", fairPaper.snapshot());
         m.put("journal", journal.view());
+        InvestmentsExecutionBridge bridge = liveBridge == null ? null : liveBridge.getIfAvailable();
+        if (bridge != null) {
+            m.put("liveBridge", bridge.snapshot());
+        }
+        return m;
+    }
+
+    /** DF-3: Decision Frame journal — same filters as /api/trend/decision-frames. */
+    @GetMapping("/decision-frames")
+    public Map<String, Object> decisionFrames(
+            @RequestParam(required = false) String day,
+            @RequestParam(required = false) String instrument,
+            @RequestParam(required = false) String playbook,
+            @RequestParam(required = false) String kind,
+            @RequestParam(required = false, defaultValue = "40") int limit
+    ) {
+        String pb = playbook == null || playbook.isBlank()
+                ? InvestmentsDecisionFrameAssembler.PLAYBOOK_ID
+                : playbook.trim();
+        return decisionFrameJournal.query(day, instrument, pb, kind, limit);
+    }
+
+    @GetMapping("/decision-frames/export")
+    public ResponseEntity<String> decisionFramesExport(
+            @RequestParam(required = false) String day,
+            @RequestParam(required = false) String instrument,
+            @RequestParam(required = false) String playbook,
+            @RequestParam(required = false) String kind
+    ) {
+        try {
+            String pb = playbook == null || playbook.isBlank()
+                    ? InvestmentsDecisionFrameAssembler.PLAYBOOK_ID
+                    : playbook.trim();
+            String json = decisionFrameJournal.exportJson(day, instrument, pb, kind);
+            String dayPart = day == null || day.isBlank() ? "today" : day.trim();
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"invest-decision-frames-" + dayPart + ".json\"")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(json);
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError()
+                    .body("{\"error\":\"export_failed\",\"message\":\"" + ex.getMessage() + "\"}");
+        }
+    }
+
+    /** Closed paper trades + statement (research PnL track-record) — parity with /api/trend/paper. */
+    @GetMapping("/paper")
+    public Map<String, Object> paper() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("statement", journal.statement());
+        m.put("trades", journal.allTradeDtos());
+        m.put("fairPaper", fairPaper.snapshot());
+        return m;
+    }
+
+    @GetMapping("/live-bridge")
+    public Map<String, Object> liveBridge() {
+        InvestmentsExecutionBridge bridge = liveBridge == null ? null : liveBridge.getIfAvailable();
+        if (bridge == null) {
+            return Map.of("available", false, "channel", "UNAVAILABLE");
+        }
+        Map<String, Object> m = new LinkedHashMap<>(bridge.snapshot());
+        m.put("available", true);
         return m;
     }
 

@@ -190,28 +190,36 @@ public class StatementPdfService {
         if (!productEdition.hasTrend()) {
             addMuted(doc, "TREND заблокирован в этой редакции.");
         } else {
+            Map<String, Object> trendPaper = nestedBook(trendSt, "paper");
+            Map<String, Object> trendLive = nestedBook(trendSt, "live");
+            Map<String, Object> trendRuns = nestedBook(trendSt, "research");
             addKvTable(doc, List.of(
-                    new String[]{"Closed", String.valueOf(trendClosed)},
-                    new String[]{"Wins/Losses",
-                            (int) num(trendSt.get("wins")) + "/" + (int) num(trendSt.get("losses"))},
-                    new String[]{"Realized ₽*", formatRub0(trendRealized)},
-                    new String[]{"Сегодня ₽*", formatRub0(trendToday)},
-                    new String[]{"Instrument", String.valueOf(trendSt.getOrDefault("instrument", "BR"))}
+                    new String[]{"Бумажная desk · closed", String.valueOf((int) num(trendPaper.getOrDefault("closedCount", trendClosed)))},
+                    new String[]{"Бумажная desk · W/L",
+                            (int) num(trendPaper.getOrDefault("wins", trendSt.get("wins")))
+                                    + "/" + (int) num(trendPaper.getOrDefault("losses", trendSt.get("losses")))},
+                    new String[]{"Бумажная desk · realized ₽*", formatRub0(num(trendPaper.getOrDefault("realizedPnlRub", trendRealized)))},
+                    new String[]{"Прогоны · closed", String.valueOf((int) num(trendRuns.get("closedCount")))},
+                    new String[]{"Прогоны · realized ₽*", formatRub0(num(trendRuns.get("realizedPnlRub")))},
+                    new String[]{"Боевая · closed", String.valueOf((int) num(trendLive.get("closedCount")))},
+                    new String[]{"Боевая · realized ₽*", formatRub0(num(trendLive.get("realizedPnlRub")))}
             ));
-            if (trendTrades.isEmpty()) {
-                addMuted(doc, "Statement пуст — закрытых paper-сделок BR ещё нет.");
+            List<Map<String, Object>> paperRows = filterPdfTrades(trendTrades, "paper");
+            if (paperRows.isEmpty()) {
+                addMuted(doc, "Бумажных сделок desk по BR ещё нет.");
             } else {
-                Map<String, List<Map<String, Object>>> byYear = new TreeMap<>((a, b) -> b.compareTo(a));
-                for (Map<String, Object> row : trendTrades) {
-                    Object daySrc = row.get("closedAt") != null ? row.get("closedAt") : row.get("openedAt");
-                    byYear.computeIfAbsent(yearOf(daySrc), k -> new ArrayList<>()).add(row);
-                }
-                for (Map.Entry<String, List<Map<String, Object>>> e : byYear.entrySet()) {
-                    double yearPnl = e.getValue().stream().mapToDouble(r -> num(r.get("pnlRub"))).sum();
-                    addMuted(doc, e.getKey() + " · " + e.getValue().size() + " сд. · "
-                            + String.format(Locale.ROOT, "%+.0f ₽", yearPnl));
-                    addTrendTable(doc, e.getValue());
-                }
+                addMuted(doc, "Сделки · бумажная desk");
+                writeTrendTradesByYear(doc, paperRows);
+            }
+            List<Map<String, Object>> runRows = filterPdfTrades(trendTrades, "research");
+            if (!runRows.isEmpty()) {
+                addMuted(doc, "Сделки · бумажные прогоны");
+                writeTrendTradesByYear(doc, runRows);
+            }
+            List<Map<String, Object>> liveRows = filterPdfTrades(trendTrades, "live");
+            if (!liveRows.isEmpty()) {
+                addMuted(doc, "Сделки · боевая");
+                writeTrendTradesByYear(doc, liveRows);
             }
         }
 
@@ -236,32 +244,36 @@ public class StatementPdfService {
 
         if (investmentsPaperJournal.isPresent()) {
             addSpacer(doc, 14);
-            addSectionTitle(doc, "Инвестиции · Experiment");
+            addSectionTitle(doc, "Инвестиции · TQBR");
+            Map<String, Object> invPaper = nestedBook(investSt, "paper");
+            Map<String, Object> invLive = nestedBook(investSt, "live");
+            Map<String, Object> invRuns = nestedBook(investSt, "research");
             addKvTable(doc, List.of(
-                    new String[]{"Closed", String.valueOf(investClosed)},
-                    new String[]{"Wins/Losses",
-                            (int) num(investSt.get("wins")) + "/" + (int) num(investSt.get("losses"))},
-                    new String[]{"Realized ₽*", formatRub0(investRealized)},
-                    new String[]{"Сегодня ₽*", formatRub0(investToday)}
+                    new String[]{"Прогоны · closed", String.valueOf((int) num(invRuns.get("closedCount")))},
+                    new String[]{"Прогоны · W/L",
+                            (int) num(invRuns.get("wins")) + "/" + (int) num(invRuns.get("losses"))},
+                    new String[]{"Прогоны · realized ₽*", formatRub0(num(invRuns.get("realizedPnlRub")))},
+                    new String[]{"Бумажная desk · closed", String.valueOf((int) num(invPaper.getOrDefault("closedCount", investClosed)))},
+                    new String[]{"Бумажная desk · realized ₽*", formatRub0(num(invPaper.getOrDefault("realizedPnlRub", investRealized)))},
+                    new String[]{"Боевая · closed", String.valueOf((int) num(invLive.get("closedCount")))},
+                    new String[]{"Боевая · realized ₽*", formatRub0(num(invLive.get("realizedPnlRub")))}
             ));
-            Object note = investSt.get("note");
-            if (note != null && !String.valueOf(note).isBlank()) {
-                addMuted(doc, String.valueOf(note));
-            }
-            if (investTrades.isEmpty()) {
-                addMuted(doc, "Statement пуст — нет Experiment replay-сделок.");
+            List<Map<String, Object>> runRows = filterPdfTrades(investTrades, "research");
+            if (runRows.isEmpty()) {
+                addMuted(doc, "Бумажных прогонов пока нет.");
             } else {
-                Map<String, List<Map<String, Object>>> byYear = new TreeMap<>((a, b) -> b.compareTo(a));
-                for (Map<String, Object> row : investTrades) {
-                    Object daySrc = row.get("closedAt") != null ? row.get("closedAt") : row.get("openedAt");
-                    byYear.computeIfAbsent(yearOf(daySrc), k -> new ArrayList<>()).add(row);
-                }
-                for (Map.Entry<String, List<Map<String, Object>>> e : byYear.entrySet()) {
-                    double yearPnl = e.getValue().stream().mapToDouble(r -> num(r.get("pnlRub"))).sum();
-                    addMuted(doc, e.getKey() + " · " + e.getValue().size() + " сд. · "
-                            + String.format(Locale.ROOT, "%+.0f ₽", yearPnl));
-                    addTrendTable(doc, e.getValue());
-                }
+                addMuted(doc, "Сделки · бумажные прогоны");
+                writeTrendTradesByYear(doc, runRows);
+            }
+            List<Map<String, Object>> paperRows = filterPdfTrades(investTrades, "paper");
+            if (!paperRows.isEmpty()) {
+                addMuted(doc, "Сделки · бумажная desk");
+                writeTrendTradesByYear(doc, paperRows);
+            }
+            List<Map<String, Object>> liveRows = filterPdfTrades(investTrades, "live");
+            if (!liveRows.isEmpty()) {
+                addMuted(doc, "Сделки · боевая");
+                writeTrendTradesByYear(doc, liveRows);
             }
         }
 
@@ -531,5 +543,54 @@ public class StatementPdfService {
             return s.substring(0, 4);
         }
         return "—";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> nestedBook(Map<String, Object> st, String key) {
+        if (st == null) {
+            return Map.of();
+        }
+        Object o = st.get(key);
+        return o instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+    }
+
+    private static List<Map<String, Object>> filterPdfTrades(List<Map<String, Object>> trades, String book) {
+        if (trades == null || trades.isEmpty() || book == null) {
+            return List.of();
+        }
+        String want = book.trim().toLowerCase(Locale.ROOT);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> t : trades) {
+            String tag = t.get("tag") == null ? "" : String.valueOf(t.get("tag"));
+            String b;
+            if (TrendPaperJournalService.isLiveTag(tag)
+                    || InvestmentsPaperJournalService.isLiveTag(tag)) {
+                b = "live";
+            } else if (TrendPaperJournalService.isResearchTag(tag)
+                    || InvestmentsPaperJournalService.isResearchTag(tag)) {
+                b = "research";
+            } else {
+                b = "paper";
+            }
+            if (want.equals(b)) {
+                out.add(t);
+            }
+        }
+        return out;
+    }
+
+    private void writeTrendTradesByYear(Document doc, List<Map<String, Object>> trades)
+            throws DocumentException {
+        Map<String, List<Map<String, Object>>> byYear = new TreeMap<>((a, b) -> b.compareTo(a));
+        for (Map<String, Object> row : trades) {
+            Object daySrc = row.get("closedAt") != null ? row.get("closedAt") : row.get("openedAt");
+            byYear.computeIfAbsent(yearOf(daySrc), k -> new ArrayList<>()).add(row);
+        }
+        for (Map.Entry<String, List<Map<String, Object>>> e : byYear.entrySet()) {
+            double yearPnl = e.getValue().stream().mapToDouble(r -> num(r.get("pnlRub"))).sum();
+            addMuted(doc, e.getKey() + " · " + e.getValue().size() + " сд. · "
+                    + String.format(Locale.ROOT, "%+.0f ₽", yearPnl));
+            addTrendTable(doc, e.getValue());
+        }
     }
 }

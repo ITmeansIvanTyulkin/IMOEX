@@ -133,11 +133,11 @@ imoex:
     # No weekly book — desks don't run a W1 pairs sleeve; we don't invent one.
     daily-gross-share: 1.0
     intraday-gross-share: 0.0
-    # Focus-слоты: PAIRS | TREND_M5 | TREND_POSITIONAL | ARB | BALANCED
-    # For retail pairs product keep PAIRS (trend sleeves need ≥300к BALANCED).
-    focus-slot: PAIRS
-    pairs-strategy-share: 1.0
-    trend-m5-share: 0.0
+    # Focus-слоты: TREND_M5 | TREND_POSITIONAL | ARB | BALANCED | PAIRS (legacy pairs desk)
+    # Operator desk = Exclusive/BRM/positional — default TREND_M5, не коинтеграционные PAIRS.
+    focus-slot: TREND_M5
+    pairs-strategy-share: 0.0
+    trend-m5-share: 1.0
     trend-positional-share: 0.0
     arb-share: 0.0
   session:
@@ -420,8 +420,13 @@ imoex:
       enabled: true
       auto-execution: true          # fair-paper fills on T-Invest H1 close
       live-execution: true          # две ноги FORTS market у T-Invest (нужен broker armed + без kill-switch)
-      families: BR,SI,RI,GD,NG
-      default-family: BR
+      dom-collect: true             # автоподписка near/next/CS → data/broker-tape/dom-*.jsonl
+      dom-collect-ms: 60000
+      dom-collect-initial-ms: 15000
+      families: NG,GD,SI,RI,BR
+      default-family: GD
+      fv-gate: true              # @CalendarFv — false возвращает сырой z-fade
+      fv-cost-k: 1.5             # |спред−медиана| должен покрыть круг × k, z в ту же сторону
       fly-enabled: true              # 1:-2:1 near/mid/far рядом с calendar
       ng-seasonality: true           # NG: не фадить зимнюю премию / летний дисконт
       dv01-hedge: true               # лоты по basicAssetSize брокера (обычно 1:1)
@@ -467,7 +472,7 @@ imoex:
       no-trade-before-close-minutes: 30
     investments:
       enabled: true
-      auto-execution: false   # OBSERVE vs SANDBOX_FAIR paper ladders
+      auto-execution: true    # fair-paper ladders → SANDBOX_FAIR (live off)
       live-execution: false   # LIVE_EQUITY gated separately
       paper-tick-ms: 30000
       # Daily entry scan + decision/corpus history (independent of auto/live)

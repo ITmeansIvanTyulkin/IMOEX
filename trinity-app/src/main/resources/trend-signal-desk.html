@@ -1,5 +1,5 @@
 <section class="signal-desk" id="trend-signal-desk" data-desk-scope="range">
-  <link rel="stylesheet" href="/css/operator.css?v=20261006-plaques5">
+  <link rel="stylesheet" href="/css/operator.css?v=20261015-stuckquiet">
   <div class="signal-desk-head">
     <div>
       <p class="meta"><a href="/view">← дашборд</a></p>
@@ -89,6 +89,21 @@
       <thead><tr><th>Дата</th><th>Вход</th><th>Выход</th><th>Side</th><th>Qty</th><th>Reason</th><th>PnL</th><th>Tag</th></tr></thead>
       <tbody id="signal-paper-body"></tbody>
     </table>
+  </div>
+  <div class="signal-df-journal" id="signal-df-journal" hidden>
+    <div class="signal-df-journal-head">
+      <p class="signal-brief-title" id="signal-df-journal-title">Журнал кадров</p>
+      <div class="signal-df-journal-filters" id="signal-df-journal-filters" role="group" aria-label="Фильтр кадров">
+        <button type="button" class="signal-df-kind is-active" data-df-kind="">все</button>
+        <button type="button" class="signal-df-kind" data-df-kind="wait">ждёт</button>
+        <button type="button" class="signal-df-kind" data-df-kind="enter">вошёл</button>
+        <button type="button" class="signal-df-kind" data-df-kind="skip">пропуск</button>
+        <button type="button" class="signal-df-kind" data-df-kind="alloc">капитал</button>
+      </div>
+    </div>
+    <p class="signal-df-day-summary" id="signal-df-day-summary" hidden></p>
+    <p class="meta" id="signal-df-journal-meta">—</p>
+    <ul class="signal-df-journal-list" id="signal-df-journal-list"></ul>
   </div>
   <div class="signal-desk-grid">
     <div class="signal-chart-wrap">
@@ -180,14 +195,87 @@
         <span class="lg-hi">HI/LO</span> ·
         <span class="lg-zone">TOP/BOT</span> · ENTRY/SL/TP
       </p>
-      <div class="signal-brief" id="signal-desk-brief" aria-live="polite">
+      <div class="decision-frame is-idle is-density-brief" id="decision-frame" data-state="idle"
+           data-density="brief" hidden data-df-mount="trend">
+        <div class="decision-frame-toolbar">
+          <span class="decision-frame-kicker">Почему так</span>
+          <span class="decision-frame-state" id="decision-frame-state" hidden></span>
+          <div class="decision-frame-density" role="group" aria-label="Детализация">
+            <button type="button" class="decision-frame-density-btn is-active" data-df-density="brief">кратко</button>
+            <button type="button" class="decision-frame-density-btn" data-df-density="full">подробно</button>
+          </div>
+        </div>
+        <button type="button" class="decision-frame-summary" id="decision-frame-summary"
+                aria-expanded="false" aria-controls="decision-frame-details">
+          <span class="decision-frame-status" id="decision-frame-status">—</span>
+          <span class="decision-frame-hero">
+            <span class="decision-frame-text" id="decision-frame-text">Загрузка…</span>
+            <span class="decision-frame-why" id="decision-frame-why" hidden></span>
+          </span>
+          <span class="decision-frame-hint" id="decision-frame-hint">факты</span>
+          <span class="decision-frame-meta" id="decision-frame-meta" hidden></span>
+        </button>
+        <div class="decision-frame-details" id="decision-frame-details" hidden>
+          <p class="decision-frame-details-title">Факты кадра · не тултип свечи</p>
+          <ul class="decision-frame-details-list" id="decision-frame-details-list"></ul>
+        </div>
+      </div>
+      <div class="signal-sync-panel" id="signal-sync-panel" hidden>
+        <div class="signal-sync-head">
+          <button type="button" class="btn btn-ghost btn-xs" id="signal-sync-toggle"
+                  aria-pressed="false" title="Контекст BR / Si / RI · sparklines + лента (DF-5)">
+            Контекст
+          </button>
+          <label class="signal-sync-anom check-label">
+            <input type="checkbox" id="signal-sync-anom-only">
+            только аномалии
+          </label>
+          <label class="signal-sync-preset check-label" title="Порядок peers в контексте">
+            peers
+            <select id="signal-sync-preset" aria-label="Preset peers">
+              <option value="oil">BR · Si · RI</option>
+              <option value="index-oil">RI · BR · Si</option>
+            </select>
+          </label>
+          <span class="meta" id="signal-sync-meta">—</span>
+        </div>
+        <div class="signal-sync-body" id="signal-sync-body" hidden>
+          <div class="signal-sync-sparks" id="signal-sync-sparks" aria-label="Peers BR Si RI"></div>
+          <ul class="signal-sync-list" id="signal-sync-list"></ul>
+        </div>
+      </div>
+      <div class="signal-capital-panel" id="signal-capital-panel" hidden>
+        <div class="signal-capital-head">
+          <button type="button" class="btn btn-ghost btn-xs" id="signal-capital-toggle"
+                  aria-pressed="false" title="Веса рукавов капитала + live-rebalance (DF-6)">
+            Капитал
+          </button>
+          <label class="signal-capital-live check-label">
+            <input type="checkbox" id="signal-capital-live">
+            live-rebalance
+          </label>
+          <span class="meta" id="signal-capital-meta">—</span>
+        </div>
+        <div class="signal-capital-body" id="signal-capital-body" hidden>
+          <div class="signal-capital-grid" id="signal-capital-grid">
+            <label title="Exclusive / BRM M5">M5 <input type="number" id="cap-w-m5" min="0" max="100" step="1"></label>
+            <label title="Positional H1">pos <input type="number" id="cap-w-pos" min="0" max="100" step="1"></label>
+            <label title="Calendar / arb">arb <input type="number" id="cap-w-arb" min="0" max="100" step="1"></label>
+          </div>
+          <p class="signal-capital-eff meta" id="signal-capital-eff">—</p>
+          <p class="signal-capital-risk meta" id="signal-capital-risk">—</p>
+          <button type="button" class="btn btn-ghost btn-xs" id="signal-capital-save">Сохранить веса</button>
+        </div>
+      </div>
+      <div class="signal-brief is-density-brief" id="signal-desk-brief" data-density="brief" aria-live="polite">
         <p class="signal-brief-title">
           Сейчас на рынке
-          <button type="button" class="btn btn-ghost btn-xs" id="sig-kick-btn"
-            title="Soft: сброс arm / cooldown / one-setup без сноса day-lock TOP/BOT. Нужна сессия кабинета (Bearer).">
-            Сброс залипания
-          </button>
+          <span class="signal-brief-density" role="group" aria-label="Детализация рынка">
+            <button type="button" class="signal-brief-density-btn is-active" data-brief-density="brief">кратко</button>
+            <button type="button" class="signal-brief-density-btn" data-brief-density="full">подробно</button>
+          </span>
         </p>
+        <div class="signal-brief-hero" id="signal-desk-brief-hero" hidden></div>
         <div class="signal-brief-body" id="signal-desk-brief-body">Загрузка среза…</div>
         <div class="signal-compliance" id="signal-desk-compliance" aria-label="Чек-лист">
           <p class="meta" id="signal-compliance-meta">Чек-лист…</p>
@@ -253,77 +341,158 @@
     <div class="signal-guide-body">
       <nav class="signal-guide-toc" data-guide-scope="range" aria-label="Разделы">
         <a href="#guide-idea">Идея</a>
+        <a href="#guide-day">День робота</a>
         <a href="#guide-why-oil">Почему нефть</a>
         <a href="#guide-map">Карта дня</a>
         <a href="#guide-wind">Ветер H1</a>
         <a href="#guide-phase">Фаза дня</a>
         <a href="#guide-entries">Два входа</a>
         <a href="#guide-micro">Микро</a>
-        <a href="#guide-robot">Робот</a>
-        <a href="#guide-manual">Без автоторгов</a>
+        <a href="#guide-robot">Авто</a>
+        <a href="#guide-manual">Без авто</a>
         <a href="#guide-skip">Когда молчит</a>
         <a href="#guide-risk">Риск</a>
       </nav>
       <nav class="signal-guide-toc" data-guide-scope="positional" hidden aria-label="Разделы">
         <a href="#guide-idea-pos">Идея</a>
+        <a href="#guide-day-pos">День робота</a>
         <a href="#guide-looks-pos">На что смотрит</a>
         <a href="#guide-side-pos">Сторона и вход</a>
-        <a href="#guide-gap-pos">Гэп до 10:00</a>
+        <a href="#guide-gap-pos">Гэп (выкл.)</a>
         <a href="#guide-grid-pos">Сетка и стоп</a>
         <a href="#guide-hunt-pos">Перед входом</a>
         <a href="#guide-manage-pos">В сделке</a>
-        <a href="#guide-robot-pos">Робот</a>
+        <a href="#guide-robot-pos">Авто</a>
         <a href="#guide-skip-pos">Когда молчит</a>
         <a href="#guide-risk-pos">Риск</a>
       </nav>
       <nav class="signal-guide-toc" data-guide-scope="brm" hidden aria-label="Разделы">
         <a href="#guide-idea-brm">Идея</a>
+        <a href="#guide-day-brm">День робота</a>
         <a href="#guide-capital-brm">Для кого</a>
         <a href="#guide-how-brm">Как торгует</a>
         <a href="#guide-mutex-brm">С диапазонной</a>
-        <a href="#guide-robot-brm">Робот</a>
+        <a href="#guide-robot-brm">Авто</a>
         <a href="#guide-risk-brm">Риск</a>
       </nav>
 
       <article class="signal-guide-section" id="guide-idea" data-guide-scope="range">
-        <h4>Идея в одном абзаце</h4>
+        <h4>Идея простыми словами</h4>
         <p>
-          Робот торгует <strong>только нефтяной фьючерс BR на M5</strong> — текущий
-          <strong>front-month</strong> (сейчас октябрьский BRV6, даже если на календаре сентябрь;
-          месяц в тикере = поставка/экспирация). Полки TOP/BOT по объёму.
-          Сначала смотрит <strong>ветер H1</strong> и <strong>фазу дня</strong>,
-          затем ищет вход у полки с качественным касанием.
-          Не ловит середину канала и не гонится за каждым касанием цены.
+          День на нефти — коридор: сверху «потолок» объёма (полка <strong>TOP</strong>),
+          снизу «пол» (<strong>BOT</strong>). Цена чаще <em>отскакивает</em> от этих полок,
+          чем спокойно гуляет посередине «ничья земля». Робот ждёт, пока рынок
+          <em>нормально</em> ткнётся в полку и даст отказ (reject) — или пробьёт её
+          и вернётся «проверить» (ретест) — и только тогда выставляет лимитки.
         </p>
+        <p>
+          Узкая специализация: <strong>только нефтяной фьючерс BR на пятиминутках (M5)</strong>,
+          текущий front-month. Середину канала не ловит и не дёргается на каждое касание «на всякий».
+        </p>
+        <p class="signal-guide-note">
+          Это не прогноз «нефть вырастет». Это дисциплина:
+          полка → касание с отказом → сетка → стоп за зоной → лестница целей.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-day" data-guide-scope="range">
+        <h4>Как проходит день робота</h4>
+        <div class="signal-guide-flow" aria-hidden="true">
+          <span>открытие</span><i>→</i>
+          <span>карта HI/LO · TOP/BOT</span><i>→</i>
+          <span>ветер часа</span><i>→</i>
+          <span>касание полки</span><i>→</i>
+          <span>лимиты · стоп · цели</span>
+        </div>
+        <ol class="signal-guide-steps">
+          <li><strong>Утро / старт сессии.</strong> Строит карту дня: где сегодня максимум и минимум,
+            где лежат полки объёма под HI и над LO (обычно 15–20 пунктов по BR).</li>
+          <li><strong>Каждый закрытый час.</strong> Обновляет «ветер» — куда смотрит старший час (H1 из тех же M5).
+            С ветром можно полный размер; против ветра — осторожнее или только отскок.</li>
+          <li><strong>На каждой закрытой пятиминутке.</strong> Смотрит, есть ли у полки качественное касание
+            (фитиль в зону и закрытие обратно — reject), не режет ли микро (нож, импульс против часа).</li>
+          <li><strong>Если сценарий собран и фильтры зелёные</strong> — три лимита у зоны, стоп за полкой,
+            цели TP1 → TP2 → TP3. Paper исполняет по <em>закрытым</em> M5, не по «дышащей» свече.</li>
+          <li><strong>В сделке.</strong> TP1 — снять ~⅓, стоп в безубыток, дальше трейл.
+            TP2 — закрыть основную часть (в сумме ≈75%), оставить хвост ~25%.
+            TP3 — чуть дальше TP2 (ещё полстопы): закрывает этот хвост.
+            На 1 лоте или неполном наборе сетки третьей цели нет — закрытие на TP2.</li>
+          <li><strong>Вечер после ~19:00 и края сессии.</strong> Новых сетапов нет: тонкий рынок.
+            Основное окно ≈ 10:20–18:30 МСК.</li>
+        </ol>
       </article>
 
       <article class="signal-guide-section" id="guide-idea-pos" data-guide-scope="positional" hidden>
-        <h4>Идея в одном абзаце</h4>
+        <h4>Идея простыми словами</h4>
         <p>
-          Это <strong>другой робот</strong>, не диапазонная нефть на M5.
-          Позиционный ищет <strong>явный тренд на часовом графике</strong> за последние 1–2 месяца
-          и входит <strong>сеткой в среднюю полку объёма</strong> — не в край тренда и не в пустоту.
-          Семьи: нефть, RTS, газ, Si, золото, MIX. В работу берётся <strong>одна семья</strong>,
-          не несколько сеток сразу. Тумблер «Авто» на этом экране включает paper.
-          «Сканирует» значит робот включён, но по правилам входа сейчас нет.
+          Это <strong>другой робот</strong>, не диапазонная нефть на пятиминутках.
+          Он ищет <strong>явный часовой тренд</strong> за последние недели: серия «выше хай / выше лой»
+          или зеркально вниз. Не лезет в самый нос хода и не ставит лимитки в пустоту —
+          цель — <strong>средняя полка объёма</strong>, где рынок уже стоял и оставил жирный след
+          (HVN), а не нарисованная «поддержка из головы».
+        </p>
+        <p>
+          Вселенная: нефть, RTS, газ, Si, золото, MIX. В работу берётся
+          <strong>ровно одна семья</strong> — не пять пирамид сразу.
+          На полоске «сканирует» = робот живой, а по чек-листу входа сейчас нет.
+          Так бывает часто: тишина — это фильтр, не поломка.
+        </p>
+        <p class="signal-guide-note">
+          Сторону диктует структура часа. Стакан, лента и «охота» могут сказать
+          <em>«подожди»</em> — но никогда не разворачивают лонг в шорт.
         </p>
       </article>
 
+      <article class="signal-guide-section" id="guide-day-pos" data-guide-scope="positional" hidden>
+        <h4>Как проходит день робота</h4>
+        <div class="signal-guide-flow" aria-hidden="true">
+          <span>час закрылся</span><i>→</i>
+          <span>есть тренд?</span><i>→</i>
+          <span>средняя полка рядом?</span><i>→</i>
+          <span>охота / стакан</span><i>→</i>
+          <span>сетка 1:1:2:4</span>
+        </div>
+        <ol class="signal-guide-steps">
+          <li><strong>Утро.</strong> Ночной гэп на графике может быть виден, но
+            <em>отдельный рукав «закрытие гэпа» сейчас выключен</em> — bounce от полки
+            из‑за гэпа больше не усыпляем.</li>
+          <li><strong>Раз в закрытый час.</strong> Крутит семьи (BR / RI / NG / Si / GD / MIX),
+            ищет явную структуру, три объёмные полки, берёт <em>среднюю</em>,
+            меряет ширину и куда воткнуть стоп в объёме.</li>
+          <li><strong>Близость к цене.</strong> Если last уже улетел далеко от mid полки
+            (дальше порога unlock) — эту семью не армим: pending всё равно сняли бы.
+            Слот ротации уходит тому, у кого полка под рукой.</li>
+          <li><strong>Перед лимитками.</strong> Стакан у полки, лента, кластеры:
+            толпа с нами или против; не «воздушная» ли стена (spoof).</li>
+          <li><strong>Вход.</strong> Четыре лимитки в зоне, объёмы <strong>1 : 1 : 2 : 4</strong>.
+            Стоп в ближайшем объёме за зоной. Цель — следующий экстремум по тренду
+            (или 2R, если экстремума нет).</li>
+          <li><strong>Набор и трейл.</strong> Пока сетка копится — стоп на полке не двигаем.
+            Набрали или уже в БУ — стоп за закрытый час <em>с нами</em>, назад не отпускаем.</li>
+          <li><strong>После 16:00 МСК.</strong> Новых bounce нет (анти-овернайт);
+            уже висящая сетка живёт своим стопом и целью.</li>
+        </ol>
+      </article>
+
       <article class="signal-guide-section" id="guide-looks-pos" data-guide-scope="positional" hidden>
-        <h4>На что смотрит</h4>
+        <h4>На что смотрит — по пунктам</h4>
         <ul class="signal-guide-list">
-          <li><strong>Часовой тренд</strong> — нужны понятные максимумы/минимумы (выше-выше или ниже-ниже).
-            Боковик без структуры — входа нет.</li>
-          <li><strong>Профиль объёма на отрезок тренда</strong> — где рынок реально стоял, не «красивая линия».</li>
-          <li><strong>Три последних объёмных диапазона</strong> по касаниям. Вход — в <em>средний</em>,
-            не в самый дальний и не в ближайший край.</li>
-          <li><strong>Ширина этой полки</strong> — слишком узкая или слишком широкая зона не торгуется.</li>
-          <li><strong>Стакан у полки</strong> — где толпа, не сняли ли только что крупную заявку.</li>
-          <li><strong>Лента и кластеры</strong> — крупный объём у полки с нами или против нас.</li>
-          <li><strong>По нефти</strong> ещё WTI, запасы EIA и COT. Нет данных — робот не выдумывает, чек-лист торгует как есть.</li>
+          <li><strong>Часовой тренд</strong> — нужны понятные хаи/лои.
+            Пила без структуры → входа нет, даже если «свечи красивые».</li>
+          <li><strong>Профиль объёма на отрезок тренда</strong> — где рынок реально стоял,
+            не линия «поддержки из головы».</li>
+          <li><strong>Три последних объёмных диапазона</strong> по касаниям.
+            Вход — в <em>средний</em>: не в дальний край тренда и не в ближайший «нос».</li>
+          <li><strong>Ширина полки</strong> — слишком узкая или жирно широкая зона не торгуется.
+            Стоп должен жить в объёме, не «в воздухе».</li>
+          <li><strong>Близость last к полке</strong> — далеко улетела цена → не вешаем мёртвую сетку.</li>
+          <li><strong>Стакан у полки</strong> — где толпа, живая ли стена, не spoof.</li>
+          <li><strong>Лента и кластеры</strong> — крупный объём у полки с нами или против.</li>
+          <li><strong>По нефти</strong> ещё WTI, запасы EIA и COT. Нет данных — не выдумывает,
+            чек-лист идёт как есть.</li>
         </ul>
         <p class="signal-guide-note">
-          MACD на графике — подсказка глазу, робот по нему сторону не меняет и вход не открывает.
+          MACD на графике — подсказка глазу. Робот по нему сторону не меняет и вход не открывает.
         </p>
       </article>
 
@@ -332,83 +501,81 @@
         <div class="signal-guide-cards">
           <div class="signal-guide-card">
             <p class="signal-guide-card-kicker">Час вверх</p>
-            <p>Только покупка. Вход в промежуточную полку объёма по ходу тренда, не шорт «на перекупленности».</p>
+            <p>Только покупка. Вход в промежуточную полку по ходу тренда.
+              Не шортим «на перекупленности» внутри восходящей структуры.</p>
           </div>
           <div class="signal-guide-card">
             <p class="signal-guide-card-kicker">Час вниз</p>
-            <p>Только продажа. Та же полка, та же сетка, зеркально. Фундамент и стакан могут <em>подождать</em> вход — не перевернуть сторону.</p>
+            <p>Только продажа. Та же полка и сетка, зеркально.
+              Фундамент и стакан могут сказать «подожди» — не «разверни».</p>
           </div>
         </div>
         <p>
-          На графике зона входа — средняя полка. HI/LO на позиционной — не дневные TOP/BOT диапазонного робота,
-          а ориентиры хода на видимом отрезке часа.
+          На графике зона входа — средняя полка. Подписи HI/LO на позиционной —
+          ориентиры хода на видимом отрезке часа, не дневные TOP/BOT диапазонного робота.
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-gap-pos" data-guide-scope="positional" hidden>
-        <h4>Отдельная стратегия: закрытие ночного гэпа</h4>
+        <h4>Ночной гэп: рукав сейчас выключен</h4>
         <p>
-          Это <strong>не</strong> отскок от средней полки и не сетка 1:1:2:4.
-          Пока между вчерашним закрытием и утренним открытием есть незакрытый гэп,
-          робот может взять короткий сценарий <strong>«закрытие гэпа»</strong> — или
-          сознательно молчать, чтобы не поймать нож на обычном bounce.
+          Раньше у позиционной был <strong>отдельный утренний рукав</strong> «закрытие гэпа»
+          (до 10:00, не пирамида 1:1:2:4) — и пока гэп висел, обычный bounce от средней полки
+          <em>спал</em>, чтобы не купить нож в незакрытый разрыв.
+        </p>
+        <p>
+          На практике рукав мешал основному чек-листу HVN: утром часто тишина по bounce,
+          а gap-сделки давали шум. Поэтому <strong>GAP_FILL и bounce-sleep выключены по умолчанию</strong>
+          (<code>positionalGapTrade=false</code>). На графике гэп всё ещё можно увидеть —
+          это ориентир, не боевой сценарий.
         </p>
         <div class="signal-guide-cards">
           <div class="signal-guide-card">
-            <p class="signal-guide-card-kicker">Зачем</p>
+            <p class="signal-guide-card-kicker">Сейчас</p>
             <p>
-              Ночные гэпы на фьючерсах часто «затягиваются» к цене закрытия прошлой сессии.
-              Маленький и средний гэп внутри вчерашнего диапазона закрывается чаще, чем
-              большой breakaway наружу. Робот торгует только вероятный fill, не каждый разрыв.
+              Позиционная торгует <strong>чистый H1 bounce</strong> от средней полки объёма.
+              Открытый overnight-гэп сам по себе вход не блокирует и не запускает gap-arm.
             </p>
           </div>
           <div class="signal-guide-card">
-            <p class="signal-guide-card-kicker">Когда жива</p>
+            <p class="signal-guide-card-kicker">Если вернуть</p>
             <p>
-              Только <strong>до 10:00 МСК</strong>. С открытием основной сессии новые gap-входы
-              выключаются — даже если гэп ещё не закрыт. После 10:00 обычный bounce
-              <em>тоже спит</em>, пока цена не коснулась prior close (анти-нож).
+              Рукав можно снова включить флагом — тогда снова появятся gap-входы до 10:00
+              и sleep bounce до касания prior close. Без явного go оператора — не трогаем.
             </p>
           </div>
         </div>
-        <h4 class="signal-guide-sub">Как решает</h4>
-        <ol class="signal-guide-steps">
-          <li><strong>Детект</strong> — первая утренняя H1 (с 07:00) против вчерашнего close; гэп ≥ порога пунктов.</li>
-          <li><strong>Классификация</strong> — размер к ATR и открытие внутри/снаружи вчерашнего high–low.
-            Крупный или breakaway снаружи → fill не берём.</li>
-          <li><strong>Сторона</strong> — гэп вниз → покупка к prior close; гэп вверх → продажа к prior close.
-            Против подтверждения сторону <em>не</em> переворачиваем (fade в v1 нет).</li>
-          <li><strong>Подтверждение</strong> — ранние часы идут к заполнению; объём/агрессия с нами;
-            live стакан и охота (толпа, лента, без spoof против fill). Нет стакана до 10:00 — fail-closed, вход не ставим.</li>
-          <li><strong>Риск</strong> — стоп за ранний экстремум против fill, цель у prior close (частично на полпути).
-            Без пирамиды 1:1:2:4 — это другой чек-лист.</li>
-        </ol>
         <p class="signal-guide-note">
-          На полоске режима будет «закрытие гэпа». Тишина после 10:00 при открытом гэпе —
-          норма: bounce ждёт заполнения, gap-стратегия уже off.
+          На полоске больше не ждите режим «закрытие гэпа». Тишина утром при гэпе —
+          это уже обычные фильтры полки (ширина, близость, size), а не «отскок спит».
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-grid-pos" data-guide-scope="positional" hidden>
         <h4>Сетка, стоп, цель</h4>
         <ul class="signal-guide-list">
-          <li>Четыре лимитки в зоне, шаг равномерный, объёмы <strong>1 : 1 : 2 : 4</strong> (не меньше четырёх лотов).</li>
+          <li>Четыре лимитки в зоне, шаг равномерный, объёмы <strong>1 : 1 : 2 : 4</strong>
+            (нужно не меньше четырёх лотов под риск счёта).</li>
           <li>Стоп — в ближайшем объёмном диапазоне за зоной, не в пустоте.</li>
-          <li>Цель — следующий экстремум по тренду. Если цели нет — после пробоя стоп в безубыток, хвост сетки снимаем.</li>
-          <li>Частичный набор нормален: добираем по часовым барам, не одним рывком.</li>
+          <li>Цель — следующий экстремум по тренду. Если цели нет — после пробоя стоп в безубыток,
+            хвост сетки снимаем, уже набранное держим.</li>
+          <li>Частичный набор нормален: добираем по часовым барам, не одним рывком «всё сразу».</li>
         </ul>
       </article>
 
       <article class="signal-guide-section" id="guide-hunt-pos" data-guide-scope="positional" hidden>
-        <h4>Перед новым входом</h4>
+        <h4>Перед новым входом — «охота»</h4>
         <p>Чек-лист уже выбрал сторону часа. Дополнительно робот может <strong>подождать</strong>:</p>
         <ul class="signal-guide-list">
           <li>Фундамент по нефти <em>и</em> толпа в стакане оба против стороны часа.</li>
           <li>Крупный объём в ленте / кластерах против часа — «кита» не догоняем.</li>
           <li>У полки стояла крупная заявка и её сняли без опоры — стену якорем не считаем.</li>
+          <li>Soft-уроки прошлых closes (WIN/LOSS) — похожий стек может сказать «подожди»
+            или урезать размер; сторону часа не крутят.</li>
         </ul>
         <p class="signal-guide-note">
-          Эти проверки не делают из покупки продажу. Нет стакана или новостей — вход по чек-листу не ломаем.
+          Эти проверки не делают из покупки продажу. Нет стакана или новостей —
+          вход по чек-листу не ломаем.
         </p>
       </article>
 
@@ -416,11 +583,11 @@
         <h4>Пока позиция жива</h4>
         <ul class="signal-guide-list">
           <li>Пока сетка ещё набирается — стоп стоит на полке, не подтягиваем.</li>
-          <li>Когда сетка набрана или стоп уже в безубытке: закрытый час <em>с нами</em> — стоп за эту свечу
-            (лонг: под минимум минус пункт; шорт: над максимум плюс пункт). Двигается со следующего часа,
-            чтобы фитиль той же свечи нас не выбил.</li>
+          <li>Когда сетка набрана или стоп уже в безубытке: закрытый час <em>с нами</em> —
+            стоп за эту свечу (лонг: под минимум минус пункт; шорт: над максимум плюс пункт).
+            Двигается со следующего часа, чтобы фитиль той же свечи нас не выбил.</li>
           <li>Час против нас — стоп не отпускаем назад.</li>
-          <li>Пробой сформированного экстремума — стоп в безубыток, незаполненный хвост снимаем, уже набранное держим.</li>
+          <li>Пробой сформированного экстремума — стоп в безубыток, незаполненный хвост снимаем.</li>
         </ul>
         <p class="signal-guide-note">
           Стоп и тейк считаются по ходу часа, как у брокера, а не «подождать закрытие и потом решить».
@@ -430,26 +597,28 @@
       <article class="signal-guide-section" id="guide-robot-pos" data-guide-scope="positional" hidden>
         <h4>Если автоторги включены</h4>
         <ol class="signal-guide-steps">
-          <li>Тумблер «Авто» на этом экране (и тот же выключатель в настройках) — независимо от диапазонной нефти.</li>
-          <li>Раз в закрытый час: выбирает одну семью, строит сетку, пишет план в историю для обучения.</li>
-          <li>Paper исполняет лимиты, стоп и трейл. Реальные ордера выключены.</li>
-          <li>В «Робот» на полоске: пауза / сканирует / ждёт набор / в сделке.</li>
+          <li>Тумблер «Авто» на этом экране = тот же выключатель в Настройках.
+            Независимо от диапазонной нефти и от BRM.</li>
+          <li>Раз в закрытый час: выбирает семью, строит сетку, пишет план в историю.</li>
+          <li>Paper исполняет лимиты, стоп и трейл. Реальные ордера на FORTS выключены.</li>
+          <li>На полоске «Робот»: пауза / сканирует / ждёт набор / в сделке.</li>
         </ol>
         <p>Если тумблер выключен — график, стакан и план видны, paper-входов нет. Решение входить — за вами.</p>
         <p class="signal-guide-note">
-          Режим: <a href="/view/settings#positional-playbook-settings">Настройки</a>.
+          Режим: <a href="/view/settings#positional-playbook-settings">Настройки · позиционная</a>.
+          Полное описание — <a href="/view/trend-strategy#pos">стратегия тренда · позиционная</a>.
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-skip-pos" data-guide-scope="positional" hidden>
         <h4>Когда робот сознательно молчит</h4>
         <ul class="signal-guide-list">
-          <li>Нет явного часового тренда или нет трёх объёмных полок.</li>
-          <li>Средняя полка слишком узкая / широкая, или стоп некуда поставить в объёме.</li>
-          <li>Не хватает лотов на сетку 1:1:2:4 под риск счёта.</li>
-          <li>После 16:00 МСК новых bounce-входов нет (анти-овернайт); уже открытая сетка живёт.</li>
-          <li>Открыт ночной гэп — bounce спит до касания prior close; gap-arm только до 10:00 и только с confirm.</li>
-          <li>Охота / лимит убытка по книге — ждут, сторону не крутят.</li>
+          <li>Нет явного часового тренда или нет трёх объёмных полок по касаниям.</li>
+          <li>Средняя полка слишком узкая / широкая, или стоп некуда воткнуть в объёме.</li>
+          <li>Полка «археология»: last уже далеко от mid — не армим мёртвый pending, слот уходит другой семье.</li>
+          <li>Не хватает лотов на пирамиду 1:1:2:4 под риск счёта (нужно ≥4).</li>
+          <li>После 16:00 МСК новых bounce нет; уже открытая сетка живёт своим правилом.</li>
+          <li>Охота (кит / фундамент против) или лимит убытка по книге — ждут, сторону не крутят.</li>
         </ul>
         <p>Тишина чаще значит «фильтр сработал», а не «робот сломался».</p>
       </article>
@@ -459,66 +628,56 @@
         <ul class="signal-guide-list">
           <li>Риск считается от стопа в объёме, не от «красивой круглой» цены.</li>
           <li>Серия убытков и просадка по позиционной книге могут временно закрыть новые входы.</li>
-          <li>Гэп через стоп на ночи учитывается в размере, сам стоп из-за этого не двигаем.</li>
+          <li>Гэп через стоп на ночи учитывается в размере; сам стоп из‑за этого не двигаем.</li>
         </ul>
-        <p class="signal-guide-foot">
-          Это операторская памятка по позиционной H1, не офер и не гарантия прибыли.
-          Paper / sandbox — не живой FORTS.
-        </p>
       </article>
 
       <article class="signal-guide-section" id="guide-why-oil" data-guide-scope="range">
-        <h4>Почему робот торгует исключительно нефть</h4>
+        <h4>Почему только нефть</h4>
         <p>
-          Это <strong>узкая специализация</strong>, а не «универсальный бот на всё».
-          Стратегия выверена и калибруется на BR: ширина полок, пункт/GO, сессия Мосбиржи,
-          календарь EIA/API, поведение объёма и стакана на нефти.
+          Узкая специализация, а не «бот на всё». Параметры (ширина полки, пункт, сессия,
+          календарь запасов, поведение стакана) калибруются на BR. Один инструмент —
+          один край, честный журнал и paper без смешения рынков.
         </p>
         <ul class="signal-guide-list">
-          <li><strong>Один инструмент — один край</strong>: параметры (15–20 пт полка, unlock,
-            сессионные окна) не размываются под «средний» рынок.</li>
-          <li><strong>Ликвидность и профиль</strong>: на BR M5 дневные полки объёма читаются
-            стабильнее, чем на тонких или чужих по микроструктуре контрактах.</li>
-          <li><strong>Честный OOS</strong>: paper / replay / журнал копятся по нефти —
-            так проще понять, что работает, без смешения инструментов.</li>
-          <li><strong>Плюшки desk</strong>: footprint, VAP, DOM/tape, gap-fill с HTF,
-            события нефти — заточены под этот контур, а не под абстрактный «любой фьюч».</li>
+          <li><strong>Ликвидность</strong> — дневные полки на BR M5 читаются стабильнее, чем на тонких контрактах.</li>
+          <li><strong>Честный разбор</strong> — все сделки и пропуски копятся по нефти, проще понять, что работает.</li>
+          <li><strong>Инструменты desk</strong> — footprint, VAP, DOM, gap-fill, события нефти заточены под этот контур.</li>
         </ul>
         <p class="signal-guide-note">
-          Другие инструменты в roadmap не запрещены — но только после валидации на BR.
-          Сейчас один фокус: нефть.
+          Другие инструменты — только после валидации на BR. Сейчас один фокус: нефть.
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-map" data-guide-scope="range">
-        <h4>Карта дня на графике</h4>
+        <h4>Карта дня на графике — что означают линии</h4>
         <ul class="signal-guide-list">
           <li><span class="lg-hi">HI / LO</span> — максимум и минимум текущего дня.</li>
-          <li><span class="lg-zone">TOP</span> — полка под HI (обычно 15–20 пунктов по BR).</li>
-          <li><span class="lg-zone">BOT</span> — полка над LO той же ширины.</li>
+          <li><span class="lg-zone">TOP</span> — полка под HI (обычно 15–20 пунктов по BR): «потолок» объёма.</li>
+          <li><span class="lg-zone">BOT</span> — полка над LO той же ширины: «пол» объёма.</li>
           <li><strong>AVG / SL / TP</strong> — пока робот <em>в сделке</em> (факт. вход).
-            Пока план только armed — линии с подписью <em>план BUY/SELL</em>, это не уровни
-            уже закрытой сделки.</li>
+            Пока план только armed — линии с подписью <em>план BUY/SELL</em>, это ещё не закрытая сделка.</li>
         </ul>
         <p class="signal-guide-note">
           Полки фиксируются на день (day-lock). Пробой снимает полку и даёт перезамок.
           Если цена 2–3 часа живёт у одной полки, а робот «залип» на дальней —
-          фокус переключается на ближнюю (BOT/TOP).
+          фокус переключается на ближнюю.
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-wind" data-guide-scope="range">
-        <h4>Зачем старший таймфрейм</h4>
+        <h4>Ветер старшего часа — зачем он</h4>
         <p>
-          Робот собирает <strong>H1 из ваших же M5</strong> и обновляет «ветер» на закрытии часа.
-          Если H1 ещё рано или ход слабый — временно берёт M5-прокси.
+          Робот собирает <strong>H1 из ваших же M5</strong> и обновляет ветер на закрытии часа.
+          Если час ещё рано или ход слабый — временно берёт M5-прокси.
+          Ветер не «угадывает новости» — он говорит: не лезь против сильного часа без сильного сценария.
         </p>
         <ul class="signal-guide-list">
           <li><strong>С ветром</strong> — полный размер.</li>
           <li><strong>Против ветра</strong> — чаще только отскок и/или меньший размер.</li>
-          <li><strong>Пробой и закрепление (ретест)</strong> — вход после того, как полка пробита и цена вернулась проверить её с нужной стороны.</li>
+          <li><strong>Ретест после пробоя</strong> — вход после того, как полка пробита и цена вернулась проверить её с нужной стороны.</li>
           <li>На dump-дне при HTF DOWN bounce у BOT всё же можно, если есть reject и
-            <em>H1 тормозит сброс</em> или цена <em>два раза закрылась над mid BOT</em>.</li>
+            H1 тормозит сброс или цена два раза закрылась над mid BOT.</li>
           <li><strong>Gap-fill</strong>: пока гэп дня открыт — против заполнения не торгуем;
             с заполнением — только если HTF согласен (FLAT = пропуск). Ретест после пробоя не блокируется.</li>
         </ul>
@@ -530,25 +689,26 @@
           <li><strong>После дампа / ралли</strong> — приоритет отскока у противоположной полки (BOT / TOP).</li>
           <li><strong>Продолжение тренда</strong> — приоритет ретеста в сторону ветра.</li>
           <li><strong>Касание</strong> — нужен wick в зону и закрытие обратно (reject).
-            Бычья/медвежья свеча и давление стакана — мягкий бонус.
-            MACD-дивергенция на графике — только подсказка глазу.</li>
+            «Коснулись тенью и уехали дальше» — это не наш вход.
+            Бычья/медвежья свеча и давление стакана — мягкий бонус.</li>
           <li>Ясный reject у BOT/TOP важнее «ожидания ретеста» на этой же полке
             (не путать восстановление над BOT с ретестом TOP после пробоя).</li>
         </ul>
         <p class="signal-guide-note">
-          Сейчас идёт <strong>обкатка на paper (SANDBOX_FAIR)</strong> по живой ленте T-Invest —
+          Сейчас обкатка на paper (SANDBOX_FAIR) по живой ленте T-Invest —
           смотрите блок «Робот» и statement. Реальные ордера выключены.
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-entries" data-guide-scope="range">
-        <h4>Два сценария входа</h4>
+        <h4>Два сценария входа — наглядно</h4>
         <div class="signal-guide-cards">
           <div class="signal-guide-card">
             <p class="signal-guide-card-kicker">Отскок (BOUNCE)</p>
             <p>
-              Цена подходит к TOP или BOT и <em>отскакивает</em> от полки с reject.
+              Цена подходит к TOP или BOT и <em>отскакивает</em> с reject.
               Учитываются ветер H1, фаза дня, gap-fill и макро-фильтр.
+              Пример: дамп дня → касание BOT → фитиль вниз и закрытие выше → покупка от пола.
             </p>
           </div>
           <div class="signal-guide-card">
@@ -556,29 +716,56 @@
             <p>
               Полка пробита и закреплена, цена возвращается «проверить» с правильной стороны.
               Вход в сторону пробоя сеткой у полки — приоритет чек-листа.
+              Пример: пробой TOP вверх → откат к бывшей полке сверху → покупка на ретесте.
             </p>
           </div>
         </div>
         <p>
-          Три лимита у зоны, стоп за полкой. Касание TP1 (фитиль свечи) — частичный выход (~⅓),
-          стоп сначала в безубыток, дальше трейл хвоста, остаток ждёт TP2.
-          При 1 лоте закрыть треть нельзя: только безубыток и трейл.
+          Три лимита у зоны, стоп за полкой. Дальше лестница целей:
         </p>
+        <div class="signal-guide-cards">
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">TP1</p>
+            <p>Первая цель ≈ размера стопа. Касание (фитиль) → снять ~⅓, стоп в безубыток, хвост трейлом.</p>
+          </div>
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">TP2</p>
+            <p>Основная цель (отскок дальше, ретест чуть ближе). Закрываем до ~75% позиции суммарно, оставляем хвост ~25%.</p>
+          </div>
+        </div>
+        <div class="signal-guide-cards">
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">TP3 — когда есть</p>
+            <p>Ставится сразу в плане: на полстопы дальше TP2.
+              Живёт только если сетка набралась полностью (обычно от 3 лотов).
+              Закрывает оставшийся хвост. Пока ждём TP3 — стоп продолжает трейл.</p>
+          </div>
+          <div class="signal-guide-card">
+            <p class="signal-guide-card-kicker">Когда TP3 нет</p>
+            <p>1 лот, частичный набор сетки или сценарий без полного грида —
+              на TP2 закрывается всё. Третьей линии на графике не будет.</p>
+          </div>
+        </div>
       </article>
 
       <article class="signal-guide-section" id="guide-micro" data-guide-scope="range">
         <h4>Микро · стакан и лента</h4>
         <p>
-          Перед лимитами робот смотрит ленту и HTF. Жёстко режет только узкий veto
-          (<code>OCT2026_NARROW_MICRO_VETO</code>) — остальное в разборе как мягкий фон.
+          Перед лимитками робот глядит ленту и старший час. Жёстко режет только
+          <strong>узкий veto</strong> (обкатан на октябрьском OOS и оставлен как baseline) —
+          остальное видно в разборе «как видит робот» мягким фоном.
         </p>
         <ul class="signal-guide-list">
-          <li><strong>Нож</strong> — не покупаем в свежий каскад продаж.</li>
-          <li><strong>Импульс против HTF</strong> — сбор стопов / нож / ракета против стороны при встречном часу → вход не ставим.</li>
-          <li><strong>Кит / толпа / spoof</strong> — видно в «как видит робот», но сами по себе лимиты не снимают.</li>
+          <li><strong>Нож</strong> — не покупаем в свежий каскад продаж (hard на BUY).</li>
+          <li><strong>Импульс против HTF</strong> — сбор стопов / нож / ракета против стороны
+            при встречном часу → лимиток не будет.</li>
+          <li><strong>Кит / толпа / spoof</strong> — в разборе видны, сами по себе сетку не снимают.</li>
+          <li><strong>Уроки soft-книги</strong> — похожий прошлый вход (WIN/LOSS) может шепнуть
+            «бери» / «подожди» / «режь размер»; сторону чек-листа не переворачивают.</li>
         </ul>
         <p class="signal-guide-note">
-          Чек-лист полки может быть зелёным, а нож или импульс против HTF — лимитов не будет.
+          Чек-лист полки может быть зелёным, а нож или импульс против HTF — входа нет.
+          Это дисциплина, не баг.
         </p>
       </article>
 
@@ -586,10 +773,9 @@
         <h4>Если автоторги включены</h4>
         <ol class="signal-guide-steps">
           <li>Сверяет ветер H1, фазу дня, полки M5, gap-fill и стакан.</li>
-          <li>Проверяет микро (стакан / футпринт / сбор стопов) — при ловушке вход не ставит.</li>
-          <li>При собранном сценарии и прохождении фильтров — лимиты, стоп, цели.</li>
-          <li>Fair-paper исполняет по <strong>закрытым M5</strong> (не по формирующейся свече):
-            меньше шума, ближе к чек-листу.</li>
+          <li>Проверяет микро — при ловушке вход не ставит.</li>
+          <li>При собранном сценарии — лимиты, стоп, цели.</li>
+          <li>Fair-paper исполняет по <strong>закрытым M5</strong>: меньше шума, ближе к чек-листу.</li>
           <li>В «Робот · …» и «как видит робот» пишет статус, ветер, фазу и микро.</li>
           <li>Paper / sandbox → statement (виртуальная книга).</li>
         </ol>
@@ -601,16 +787,17 @@
 
       <article class="signal-guide-section" id="guide-manual" data-guide-scope="range">
         <h4>Если автоторги выключены</h4>
-        <p>Робот — <strong>сигнальный ассистент</strong>:</p>
+        <p>Робот — <strong>сигнальный ассистент</strong>. Он показывает план, вы решаете:</p>
         <ol class="signal-guide-steps">
           <li>Полоска: Side / Mode / потенциал TP1.</li>
-          <li>«Робот · …» — почему ждёт/пропускает, ветер, фаза, касание.</li>
+          <li>«Робот · …» — почему ждёт или пропускает, ветер, фаза, касание.</li>
           <li>График: ENTRY / SL / TP — у открытой позиции или у actionable-плана.</li>
-          <li>Стакан — контекст, не отдельный сигнал.</li>
+          <li>Стакан — контекст, не отдельный сигнал «купить потому что толпа».</li>
           <li>Решение входить и размер — за вами.</li>
         </ol>
         <p class="signal-guide-note">
-          Режим: <a href="/view/settings#trend-playbook-settings">Настройки</a>.
+          Режим: <a href="/view/settings#trend-playbook-settings">Настройки · диапазонная</a>.
+          Полное описание — <a href="/view/trend-strategy#range">стратегия тренда</a>.
         </p>
       </article>
 
@@ -618,12 +805,12 @@
         <h4>Когда робот сознательно молчит</h4>
         <ul class="signal-guide-list">
           <li>Против ветра без сильного сценария; RETEST long в дамп.</li>
-          <li>Нет reject / слабое касание полки; тонкая / невалидная полка.</li>
+          <li>Нет reject / слабое касание полки; тонкая или невалидная полка.</li>
           <li>Gap-fill против открытого гэпа или HTF не согласен на сделку «в заполнение».</li>
-          <li>Окно событий (EIA/API), края сессии и <strong>вечерняя сессия</strong> (после 19:00) —
-            тонкий рынок, новых сетапов нет. Торгуем только основную сессию ~10:20–18:30.</li>
+          <li>Окно событий (EIA/API), края сессии и <strong>вечерка после 19:00</strong> —
+            тонкий рынок, новых сетапов нет. Основная сессия ≈ 10:20–18:30.</li>
           <li>Цена в середине между TOP и BOT без сетапа.</li>
-          <li>Микро против: сбор стопов / нож / кит в ленте / толпа в стакане против стороны —
+          <li>Микро против: нож / сбор стопов / импульс против HTF —
             в блоке «как видит робот» будет явная ловушка.</li>
         </ul>
         <p>Тишина чаще значит «фильтр сработал», а не «робот сломался».</p>
@@ -633,97 +820,141 @@
         <h4>Риск и цели (BR)</h4>
         <ul class="signal-guide-list">
           <li>Ширина торговой полки обычно <strong>15–20 пунктов</strong> — калибровка под нефть.</li>
-          <li>Стоп за зоной; первая цель около стопа по величине. Касание TP1 → часть снять,
-            стоп в БУ, дальше трейл хвоста, ждать TP2.</li>
+          <li>Стоп за зоной. TP1 ≈ стопа по величине → часть снять, стоп в БУ, трейл.
+            TP2 — основная фиксация (~75%). TP3 — хвост 25%, на полстопы дальше TP2 (только при полном наборе сетки).</li>
           <li>Размер на старте дробный (сетка); до TP1 стоп не двигаем.</li>
+          <li>Лимит числа сделок и дневной убыток закрывают новые входы — уже открытое живёт правилами выхода.</li>
         </ul>
-        <p class="signal-guide-foot">
-          Это операторская памятка по playbook «Уровни + объёмы» на BR, а не юридический офер
-          и не гарантия прибыли.
-        </p>
       </article>
 
       <article class="signal-guide-section" id="guide-idea-brm" data-guide-scope="brm" hidden>
-        <h4>Идея в одном абзаце</h4>
+        <h4>Идея простыми словами</h4>
         <p>
-          <strong>BRM мини</strong> — тот же чеклист полок, что у диапазонной нефти на M5
-          (TOP/BOT, bounce и retest, ветер H1, фаза дня, сессия ~10:00–19:00),
-          но на контракте <strong>BRM</strong>: 1 баррель, примерно в 10 раз мельче по ₽/пункт, чем BR.
-          Это не отдельная «стратегия вверх», а рукав под небольшой счёт.
+          <strong>BRM мини</strong> — не «другая стратегия вверх», а тот же чеклист диапазонной нефти
+          на контракте <strong>BRM</strong>: 1 баррель, примерно в 10 раз мельче по ₽ за пункт, чем полный BR.
+          День — тот же коридор TOP/BOT, те же bounce и retest, тот же ветер часа —
+          другой размер шага под небольшой счёт.
         </p>
+        <p class="signal-guide-note">
+          Если капитал уже тянет полноценный BR — этот рукав не обязателен.
+          Включайте BRM, когда нужен тот же сценарий полок без грубой маржи полного контракта.
+        </p>
+      </article>
+
+      <article class="signal-guide-section" id="guide-day-brm" data-guide-scope="brm" hidden>
+        <h4>Как проходит день</h4>
+        <div class="signal-guide-flow" aria-hidden="true">
+          <span>карта дня BRM</span><i>→</i>
+          <span>ветер H1</span><i>→</i>
+          <span>касание TOP/BOT</span><i>→</i>
+          <span>лимит · стоп · TP</span>
+        </div>
+        <ol class="signal-guide-steps">
+          <li>Строит полки на front-month <strong>BRM</strong> (не подмешивает полный BR).</li>
+          <li>Ждёт отскок с reject или ретест после пробоя — те же фильтры ветра, фазы,
+            узкого micro-veto, окна сессии ≈ 10:20–18:30 (вечерка после 19:00 — новых сетапов нет).</li>
+          <li>Ставит лимиты у зоны; на малом счёте обычно <strong>1 контракт</strong>
+            (редко 2 на верхней границе капитала). Сетку как на BR не раздуваем.</li>
+          <li>Fair-paper по <em>закрытым</em> M5; решения пишет в корпус <code>retail-brm-m5</code> —
+            отдельно от BR, чтобы soft-уроки не смешивались.</li>
+        </ol>
       </article>
 
       <article class="signal-guide-section" id="guide-capital-brm" data-guide-scope="brm" hidden>
-        <h4>Создана для небольших капиталов</h4>
+        <h4>Для кого создан</h4>
         <p>
-          Плейбук рассчитан на счета примерно <strong>50–150 тыс. ₽</strong> (до ~250 тыс. всё ещё
-          «мини-книга», не стол на полный BR). На полном контракте BR шаг и маржа для такого капитала
-          часто слишком грубые; BRM даёт тот же сценарий с размером 1 лот (редко 2 на верхней границе).
+          Счета примерно <strong>50–150 тыс. ₽</strong> (до ~250 тыс. — ещё «мини-книга»).
+          На полном BR шаг и гарантийка для такого капитала часто слишком жирные.
         </p>
         <ul class="signal-guide-list">
           <li>50–100 тыс. — обычно 1 контракт BRM.</li>
-          <li>150–250 тыс. — 1, редко 2; не раздуваем сетку как на BR.</li>
-          <li>Дневной стоп новых входов ≈ −2% капитала.</li>
+          <li>150–250 тыс. — 1, редко 2.</li>
+          <li>Дневной kill новых входов ≈ −2% капитала sleeve.</li>
         </ul>
-        <p class="signal-guide-note">
-          Если капитал уже тянет полноценную диапазонную на BR — этот рукав не обязателен:
-          включайте BRM, когда нужен тот же чеклист на мини-контракте.
-        </p>
       </article>
 
       <article class="signal-guide-section" id="guide-how-brm" data-guide-scope="brm" hidden>
-        <h4>Как торгует</h4>
+        <h4>Как торгует — те же полки, другой контракт</h4>
         <p>
           Карта дня и входы — как у диапазонной: полки по объёму, отскок от TOP/BOT или ретест
-          после пробоя, лимиты у зоны, стоп за полкой, TP1 → часть / БУ / трейл, хвост к TP2.
-          На 1 лоте треть снять нельзя — только безубыток и трейл.
+          после пробоя, стоп за полкой,
+          <strong>TP1</strong> → часть / БУ / трейл → <strong>TP2</strong> (основное) →
+          <strong>TP3</strong> (хвост ~25%, только если сетка набралась полностью).
+          На 1 лоте треть снять нельзя и TP3 нет — только БУ, трейл и закрытие на TP2.
         </p>
         <ul class="signal-guide-list">
-          <li>График и paper — по <strong>закрытым M5</strong> на front-month BRM.</li>
-          <li>WTI/CL — фильтр и bias, не «купили потому что дёрнули американцы».</li>
-          <li>Решения пишутся в свой корпус <code>retail-brm-m5</code> (для обучения — отдельно от BR).</li>
+          <li>Жёсткий micro-veto тот же: нож на BUY, импульс против HTF. Кит/толпа/spoof — soft.</li>
+          <li>WTI/CL — фильтр и bias, не «купили, потому что дёрнули американцы».</li>
+          <li>Не подменяет календарный арбитраж месяцев и не смешивается с AO/АП.</li>
         </ul>
       </article>
 
       <article class="signal-guide-section" id="guide-mutex-brm" data-guide-scope="brm" hidden>
-        <h4>С диапазонной нефтью</h4>
+        <h4>С диапазонной нефтью — mutex</h4>
         <p>
           BRM и диапазонная на BR <strong>не торгуют вместе</strong>: один чеклист — один боевой рукав.
-          Если включён BRM, диапазонная паркуется, но продолжает писать ENTER/SKIP в корпус (shadow).
-          Наоборот: при включённой диапазонной BRM пишет решения в shadow без сделок.
-          Позиционная H1 от этого не зависит.
+          Включён BRM → диапазонная паркуется, но пишет ENTER/SKIP в корпус (shadow).
+          Включена диапазонная → BRM в shadow без сделок.
+          Позиционная H1 от этого не зависит — свой тумблер.
+        </p>
+        <p class="signal-guide-note">
+          Режим <code>both</code> BRM сам не включает: иначе тот же сигнал ушёл бы и в BR, и в BRM.
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-robot-brm" data-guide-scope="brm" hidden>
         <h4>Если автоторги включены</h4>
         <ol class="signal-guide-steps">
-          <li>Тот же чеклист полок, что у диапазонной, на инструменте BRM.</li>
-          <li>Fair-paper исполняет по закрытым M5; пишет журнал и research-corpus.</li>
-          <li>Тумблер на этом экране = тумблер в
-            <a href="/view/settings#brm-playbook-settings">Настройках · BRM мини</a>.</li>
+          <li>Тот же чеклист полок на инструменте BRM.</li>
+          <li>Fair-paper по закрытым M5; журнал и research-corpus <code>retail-brm-m5</code>.</li>
+          <li>Тумблер на экране =
+            <a href="/view/settings#brm-playbook-settings">Настройки · BRM мини</a>.</li>
         </ol>
         <p class="signal-guide-note">
-          Сейчас обкатка на paper (SANDBOX_FAIR). Живые заявки на срочном — отдельный флаг, не этот тумблер.
+          Обкатка на paper (SANDBOX_FAIR). Живые заявки на срочном — отдельный флаг, не этот тумблер.
+          Полное описание — <a href="/view/trend-strategy#brm">стратегия тренда · BRM</a>.
         </p>
       </article>
 
       <article class="signal-guide-section" id="guide-risk-brm" data-guide-scope="brm" hidden>
         <h4>Риск</h4>
         <ul class="signal-guide-list">
-          <li>Шаг в ₽ меньше, чем у BR, но правила те же: стоп за зоной, лимит дня, не ловить середину канала.</li>
-          <li>Не подменяет календарный арбитраж и не смешивается с AO/AP.</li>
+          <li>Шаг в ₽ меньше, чем у BR, правила те же: стоп за зоной, лимит дня, не ловить середину канала.</li>
+          <li>Малый счёт не отменяет дисциплину: один сетап на зону, без усреднения против ветра.</li>
+          <li>На 1 лоте нет дробления на TP1/TP3 — выход проще, но и «полный грид» реже.</li>
         </ul>
-        <p class="signal-guide-foot">
-          Памятка по playbook «BRM мини · уровни M5» для небольших капиталов — не офер и не гарантия прибыли.
-          Полное описание — <a href="/view/trend-strategy#brm">стратегия тренда · BRM</a>.
-        </p>
       </article>
     </div>
   </div>
 </div>
 
+<div class="signal-sync-brief-gate" id="signal-sync-brief" hidden aria-hidden="true">
+  <div class="signal-sync-brief-backdrop" data-sync-brief-close tabindex="-1" aria-hidden="true"></div>
+  <div class="signal-sync-brief-modal" role="dialog" aria-modal="true"
+       aria-labelledby="signal-sync-brief-title" tabindex="-1">
+    <header class="signal-sync-brief-head">
+      <div>
+        <p class="signal-sync-brief-kicker">Контекст · расхождение</p>
+        <h3 id="signal-sync-brief-title">—</h3>
+        <p class="signal-sync-brief-lead" id="signal-sync-brief-lead"></p>
+      </div>
+      <button type="button" class="signal-sync-brief-close" data-sync-brief-close
+              aria-label="Закрыть">×</button>
+    </header>
+    <div class="signal-sync-brief-actions">
+      <button type="button" class="btn btn-primary btn-xs" id="signal-sync-brief-expand">
+        Разбор агрессии
+      </button>
+      <button type="button" class="btn btn-ghost btn-xs" id="signal-sync-brief-fp" hidden>
+        Включить footprint
+      </button>
+    </div>
+    <div class="signal-sync-brief-body" id="signal-sync-brief-body" hidden></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/js/trinity-fast-boot.js?v=20260921-sess8"></script>
-<script src="/js/trinity-chart-kit.js?v=20261008-impulse-doc1"></script>
-<script src="/js/trend-signal-desk.js?v=20261007-waitfill"></script>
+<script src="/js/trinity-chart-kit.js?v=20261027-drawtv"></script>
+<script src="/js/trinity-decision-frame.js?v=20261015-dfru"></script>
+<script src="/js/trend-signal-desk.js?v=20261028-guides"></script>

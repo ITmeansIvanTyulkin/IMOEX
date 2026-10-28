@@ -1,12 +1,7 @@
 package com.moex.cointegration.controller;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,25 +22,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moex.cointegration.config.DeskCloudSessionStore;
 import com.moex.cointegration.config.DeskSessionStore;
 import com.moex.cointegration.config.ImoexProperties;
+import com.moex.trinity.marketdata.PlainHttp;
 
 /**
  * Public auth mode + same-origin login proxy (browser → app → Supabase).
  * Direct browser→Supabase often fails as Safari/WebKit «Load failed» (extensions / privacy).
+ * Upstream calls use {@link PlainHttp} — JDK HttpClient has flaky connect timeouts to supabase.co.
  */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthModeController {
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+    private static final int UPSTREAM_TIMEOUT_MS = 20_000;
 
     private final ImoexProperties properties;
     private final ObjectMapper objectMapper;
     private final DeskSessionStore deskSessions;
     private final DeskCloudSessionStore cloudSessions;
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
 
     public AuthModeController(
             ImoexProperties properties,
@@ -117,17 +111,9 @@ public class AuthModeController {
                     "email", email,
                     "password", password
             ));
-            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(uri))
-                    .timeout(Duration.ofSeconds(20))
-                    .header("apikey", anon)
-                    .header("Authorization", "Bearer " + anon)
-                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
-                    .header("Accept", MediaType.APPLICATION_JSON_VALUE)
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
-                    .build();
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            PlainHttp.Reply response = postSupabaseWithRetry(uri, anon, payload);
             Map<String, Object> body = parseJson(response.body());
-            if (response.statusCode() < 200 || response.statusCode() >= 300
+            if (response.status() < 200 || response.status() >= 300
                     || body == null
                     || !(body.get("access_token") instanceof String token)
                     || token.isBlank()) {
@@ -135,9 +121,9 @@ public class AuthModeController {
                         stringVal(body, "error_description"),
                         stringVal(body, "msg"),
                         stringVal(body, "error"),
-                        "Supabase login HTTP " + response.statusCode()
+                        "Supabase login HTTP " + response.status()
                 );
-                HttpStatus status = (response.statusCode() >= 400 && response.statusCode() < 500)
+                HttpStatus status = (response.status() >= 400 && response.status() < 500)
                         ? HttpStatus.UNAUTHORIZED
                         : HttpStatus.BAD_GATEWAY;
                 return ResponseEntity.status(status).body(error("login_failed", msg));
@@ -170,8 +156,56 @@ public class AuthModeController {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(
                     "login_upstream",
                     "Не удалось связаться с Supabase: " + detail
+                            + ". Проверьте сеть/VPN и нажмите «Войти» ещё раз."
             ));
         }
+    }
+
+    /** PlainHttp + one retry on connect/timeout (JDK HttpClient was flaky here). */
+    private PlainHttp.Reply postSupabaseWithRetry(String uri, String anon, byte[] payload)
+            throws Exception {
+        Exception last = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                return PlainHttp.exchange(
+                        "POST",
+                        uri,
+                        UPSTREAM_TIMEOUT_MS,
+                        "TRINITY-auth/1.0",
+                        MediaType.APPLICATION_JSON_VALUE,
+                        payload,
+                        Map.of(
+                                "apikey", anon,
+                                "Authorization", "Bearer " + anon,
+                                "Accept", MediaType.APPLICATION_JSON_VALUE
+                        )
+                );
+            } catch (Exception ex) {
+                last = ex;
+                if (attempt < 2 && isTransientUpstream(ex)) {
+                    try {
+                        Thread.sleep(400L);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw ie;
+                    }
+                    continue;
+                }
+                throw ex;
+            }
+        }
+        throw last != null ? last : new IllegalStateException("supabase_upstream_failed");
+    }
+
+    private static boolean isTransientUpstream(Exception ex) {
+        String m = (ex.getMessage() == null ? ex.toString() : ex.getMessage())
+                .toLowerCase(Locale.ROOT);
+        return m.contains("timed out")
+                || m.contains("timeout")
+                || m.contains("connection reset")
+                || m.contains("connection refused")
+                || m.contains("network is unreachable")
+                || m.contains("broken pipe");
     }
 
     @PostMapping("/logout")
