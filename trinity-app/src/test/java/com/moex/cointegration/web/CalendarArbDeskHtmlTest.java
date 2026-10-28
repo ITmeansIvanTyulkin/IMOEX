@@ -29,6 +29,8 @@ class CalendarArbDeskHtmlTest {
                 "arb auto bar must stay hidden until settings hydrate");
         assertTrue(html.contains("Ручная торговля"), html);
         assertTrue(html.contains("Наблюдение"), html);
+        assertTrue(html.contains("id=\"arb-capital-note\""), "capital floor plaque missing");
+        assertTrue(html.contains("Стратегия работает при капитале от 2 млн. рублей"), html);
         assertTrue(html.contains("id=\"arb-guide-idea\""), "guide idea section missing");
         assertTrue(html.contains("календарный спред"), html.toLowerCase());
         assertFalse(html.contains("mean-reversion"), html);
