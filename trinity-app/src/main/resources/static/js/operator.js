@@ -2270,7 +2270,7 @@
       }
       if ($("pillar-trend-back-stats") && md.summary) {
         setBackStats("pillar-trend-back-stats", [
-          { k: "Playbook", v: "levels-profile-br-m5" },
+          { k: "Робот", v: "диапазонная · BR M5" },
           { k: "Стрим", v: md.streaming ? "live" : "off" },
           { k: "Tape сегодня", v: String(md.archivedTapeLines || 0) },
           { k: "DOM snaps", v: String(md.archivedDomSnapshots || 0) },
@@ -2448,7 +2448,7 @@
       hint.textContent = auto
         ? (view.liveExecution
           ? "Авто+live: лестницы в журнал и на T-Invest, если брокер armed. Paper новых входов нет."
-          : "Fair-paper лестницы по чек-листу на /view/investments. Live — тумблер на пульте.")
+          : "Fair-paper лестницы по чек-листу — пульт «Инвестиции» в меню. Live — тумблер на пульте.")
         : "Скан и графики на пульте без заявок. Включите Авто для paper-исполнения.";
     }
     if (status) {

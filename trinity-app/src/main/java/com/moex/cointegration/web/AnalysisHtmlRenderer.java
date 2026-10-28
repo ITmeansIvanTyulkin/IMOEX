@@ -978,7 +978,7 @@ public class AnalysisHtmlRenderer {
                           «Уровни + профиль рынка» (BR). Одновременно на инструменте — не больше одного
                           playbook’а; переключение — через селектор режима (см. ниже / настройки).</p>
                         <div class="widget-back-stats" id="pillar-trend-back-stats">
-                          <div class="widget-stat"><span class="k">Playbook</span><span class="v">levels-profile-br-m5</span></div>
+                          <div class="widget-stat"><span class="k">Робот</span><span class="v">диапазонная · BR M5</span></div>
                           <div class="widget-stat"><span class="k">Режим</span><span class="v">сигнал / авто</span></div>
                           <div class="widget-stat"><span class="k">Данные</span><span class="v">T-Invest tape+DOM</span></div>
                         </div>
@@ -1446,10 +1446,10 @@ public class AnalysisHtmlRenderer {
                     Fair-paper при «оба» крутит оба робота; страницы только разделяют график.
                   </p>
                   <ul>
-                    <li><code>levels-profile-br-m5</code> — BR M5, bounce/retest по TOP/BOT (playbook #1).</li>
-                    <li><code>positional-volume-h1</code> — H1 позиционка: 3 HVN → промежуточный → сетка 1:1:2:4;
+                    <li>Диапазонная (Exclusive) — BR M5, bounce/retest по TOP/BOT.</li>
+                    <li>Позиционная — H1: 3 HVN → промежуточный → сетка 1:1:2:4;
                       инструменты RTS / нефть / газ. H1 берём у брокера (T-Invest hour candles), ISS M5→H1 — только fallback.
-                      SECID front-month роллится только в день last trade / после
+                      Front-month роллится только в день last trade / после
                       (пустой DOM mid-life не переключает месяц).</li>
                   </ul>
                   <p>

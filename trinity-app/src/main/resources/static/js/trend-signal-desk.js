@@ -169,13 +169,12 @@
     if (volLab) volLab.textContent = pos ? "Объём H1" : "Объём M5";
     const hint = $("signal-chart-hint");
     if (hint && pos) {
-      hint.innerHTML = "Часовой график · след / MACD / профиль / линии · "
-        + "<a href=\"/view/investments\">инвестиции · графики</a> · "
+      hint.textContent = "Часовой график · след / MACD / профиль / линии · "
+        + "инвестиции (меню) · "
         + "вход в промежуточную полку объёма · сетка 1:1:2:4 · стоп и тейк";
     } else if (hint && brm) {
-      hint.innerHTML = "M5 · BRM мини · тот же чеклист полок, что у диапазонной · "
-        + "для счетов ~50–150 тыс. · "
-        + "<a href=\"/view/trend-strategy#brm\">описание</a>";
+      hint.textContent = "M5 · BRM мини · тот же чеклист полок, что у диапазонной · "
+        + "для счетов ~50–150 тыс. · описание — в меню «Описание»";
     }
     const oilBan = $("us-oil-banner");
     if (oilBan) oilBan.hidden = pos;
@@ -1359,10 +1358,18 @@
       ? TrinityDecisionFrame.whyChips(frame, heroText)
       : [];
     let why = chips.map(function (c) { return c.text; }).filter(Boolean).slice(0, 2).join(" · ");
+    const laneNote = data && data.parallelPlaybooks
+      ? (deskScope() === "positional"
+        ? " · полоса H1 (диапазонная — на своей доске)"
+        : (deskScope() === "brm"
+          ? " · полоса BRM"
+          : " · полоса Exclusive M5 (позиционная — на своей доске)"))
+      : "";
     hero.innerHTML = "<span class=\"signal-brief-hero-status\" data-status=\""
       + escHtml(badge.status) + "\">" + escHtml(badge.label) + "</span>"
       + escHtml(heroText || "—")
-      + (why ? (" <span class=\"signal-brief-note\">· " + escHtml(why) + "</span>") : "");
+      + (why ? (" <span class=\"signal-brief-note\">· " + escHtml(why) + "</span>") : "")
+      + (laneNote ? (" <span class=\"signal-brief-note\">" + escHtml(laneNote) + "</span>") : "");
     hero.hidden = false;
   }
 
@@ -1384,7 +1391,7 @@
         sub.textContent = "Робот выключен тумблером — график смотрим, paper-входов нет";
         sub.hidden = false;
       }
-      chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan");
+      chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan", "is-flat");
       chip.classList.add("is-scan");
       chip.title = "Позиционный робот выключен";
       return;
@@ -1394,7 +1401,8 @@
     let detail = (copy && copy.detail) ? copy.detail : "";
     const instRaw = (data && (data.robotInstrument || data.instrument)) || "";
     const inst = instRaw ? formatSecidWithMonth(instRaw) : "";
-    if (inst && (posture === "WAITING_FILL" || posture === "IN_TRADE"
+    if (inst && status !== "Сессия закрыта"
+        && (posture === "WAITING_FILL" || posture === "IN_TRADE"
         || posture === "WATCHING_ZONE")) {
       status = status + " · " + inst;
       if (detail && detail.indexOf(instRaw) < 0 && detail.indexOf(inst) < 0) {
@@ -1407,11 +1415,11 @@
       sub.textContent = detail;
       sub.hidden = !detail;
     }
-    chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan");
-    if (posture === "IN_TRADE") chip.classList.add("is-trade");
-    else if (posture === "WAITING_FILL") chip.classList.add("is-armed");
-    else if (posture === "WATCHING_ZONE") chip.classList.add("is-watch");
-    else chip.classList.add("is-scan");
+    chip.classList.remove("is-trade", "is-armed", "is-watch", "is-scan", "is-flat");
+    // Prefer fab copy class (session-closed → is-flat) over raw posture (WATCHING_ZONE on weekend).
+    const cls = (copy && copy.cls) ? copy.cls : "is-scan";
+    chip.classList.add(cls === "is-flat" ? "is-scan" : cls);
+    if (cls === "is-flat") chip.classList.add("is-flat");
     chip.title = detail ? (status + " · " + detail) : status;
   }
   function paintModeSwitch(tog, on, hintId, autoHint, manualHint) {
@@ -1639,6 +1647,8 @@
       .replace(/§\s*14\b/gi, "")
       .replace(/§\s*\d+(?:\s*[\/–-]\s*\d+)*/g, "")
       .replace(/§\s*/g, "")
+      .replace(/\bmanage\b/gi, "ведение")
+      .replace(/\/view\/[^\s"'<>]*/gi, "")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -1774,29 +1784,50 @@
       if (v) localStorage.setItem(PB_STORE, String(v).trim());
     } catch (_) {}
   }
-  function matchInstrumentOption(sel, secid) {
+  /**
+   * @param {boolean} [forceSecid=true] when true, family match rewrites option to secid
+   *   (chart/server month). when false, keep live option value — stale pin must not
+   *   paint BRV6 while the list already holds front-month BRX6.
+   */
+  function matchInstrumentOption(sel, secid, forceSecid) {
     if (!sel || !secid) return false;
+    const force = forceSecid !== false;
     for (let i = 0; i < sel.options.length; i++) {
-      if (sel.options[i].value === secid) {
-        sel.value = secid;
+      if (String(sel.options[i].value || "").toUpperCase() === String(secid).toUpperCase()) {
+        sel.value = sel.options[i].value;
         return true;
       }
     }
     const want = String(secid).toUpperCase();
     const fam = instrumentFamily(secid);
     for (let i = 0; i < sel.options.length; i++) {
-      const v = String(sel.options[i].value || "").toUpperCase();
       if (fam && instrumentFamily(sel.options[i].value) === fam) {
-        if (v !== want) {
+        if (force && String(sel.options[i].value || "").toUpperCase() !== want) {
           sel.options[i].value = secid;
           const label = sel.options[i].textContent || "";
-          sel.options[i].textContent = label.replace(/\s·\s\S+$/, " · " + secid);
+          const nameBit = label.split(" · ")[0] || fam;
+          sel.options[i].textContent = nameBit + " · " + formatSecidWithMonth(secid);
         }
-        sel.value = secid;
+        sel.value = sel.options[i].value;
         return true;
       }
     }
     return false;
+  }
+  /** After desk load: toolbar + pin must match the chart month (data.instrument). */
+  function syncSelectorToChartInstrument(chartSecid) {
+    if (!chartSecid) return;
+    const instSel = $("sig-instrument");
+    if (!instSel) return;
+    const pin = deskInstrumentPinned || (instSel.value || "");
+    if (pin && !sameInstrumentFamily(pin, chartSecid)) {
+      // Positional pin on another family (GD while robot on BR) — leave pin alone.
+      return;
+    }
+    if (matchInstrumentOption(instSel, chartSecid, true)) {
+      deskInstrumentPinned = instSel.value || chartSecid;
+      writeStoredInstrument(deskInstrumentPinned);
+    }
   }
   function applyBootInstrumentFromStorage() {
     const instSel = $("sig-instrument");
@@ -1804,8 +1835,10 @@
     const fromLayout = deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.instrument;
     let pick = deskInstrumentPinned || fromLayout || readStoredInstrument();
     if (isRangeDesk() && pick && !isOilInstrument(pick)) pick = "";
-    if (pick && matchInstrumentOption(instSel, pick)) {
+    // Family-only: do not rewrite live front-month back to a stale stored month.
+    if (pick && matchInstrumentOption(instSel, pick, false)) {
       deskInstrumentPinned = instSel.value;
+      writeStoredInstrument(instSel.value);
     }
     const pbSel = $("sig-playbook");
     const pbPick = (deskLayoutDoc && deskLayoutDoc.desk && deskLayoutDoc.desk.playbookId)
@@ -1892,8 +1925,11 @@
     const liveBook = st.live || {};
     const todayEl = $("sig-paper-today");
     const totalEl = $("sig-paper-total");
+    const laneRu = deskScope() === "positional" ? "поз."
+      : (deskScope() === "brm" ? "BRM" : "диап.");
     if (todayEl) {
       todayEl.textContent = fmtPnl(paperBook.todayPnlRub);
+      todayEl.title = "Сегодня · только " + laneRu + " (без смешения полос)";
       todayEl.classList.toggle("is-buy", (paperBook.todayPnlRub || 0) > 0);
       todayEl.classList.toggle("is-sell", (paperBook.todayPnlRub || 0) < 0);
     }
@@ -1902,10 +1938,11 @@
       const runsBook = st.research || {};
       const runsN = Number(runsBook.closedCount || 0);
       const liveN = Number(liveBook.closedCount || 0);
-      const bits = [fmtPnl(paperBook.realizedPnlRub) + " desk · " + w];
+      const bits = [fmtPnl(paperBook.realizedPnlRub) + " " + laneRu + " · " + w];
       if (runsN > 0) bits.push(fmtPnl(runsBook.realizedPnlRub) + " прогоны");
       if (liveN > 0) bits.push(fmtPnl(liveBook.realizedPnlRub) + " боевая");
       totalEl.textContent = bits.join(" · ");
+      totalEl.title = "Счёт этой полосы (" + laneRu + "), не сумма Exclusive+positional";
       totalEl.classList.toggle("is-buy", (paperBook.realizedPnlRub || 0) > 0);
       totalEl.classList.toggle("is-sell", (paperBook.realizedPnlRub || 0) < 0);
     }
@@ -1952,9 +1989,11 @@
         const n = t && t.pnlRub;
         return sum + (typeof n === "number" ? n : 0);
       }, 0);
-      meta.innerHTML = "Сегодня · " + ruDeals(rows.length)
+      const laneRu = deskScope() === "positional" ? "позиционная"
+        : (deskScope() === "brm" ? "BRM мини" : "диапазонная");
+      meta.textContent = "Сегодня · " + laneRu + " · " + ruDeals(rows.length)
         + " · PnL " + fmtPnl(rowPnl)
-        + " · <a href=\"/view/statement\">Statement</a>";
+        + " · полный журнал — Statement в меню";
     }
     body.innerHTML = rows.map(function (t) {
       const pnl = t.pnlRub;
@@ -2782,7 +2821,8 @@
     }
 
     if (sit.sessionBlock) {
-      newsHtml += "<p class='signal-brief-note'>Сессия: " + esc(sit.sessionBlock) + "</p>";
+      newsHtml += "<p class='signal-brief-note'>Сессия: "
+        + esc(humanizeDeskReason(sit.sessionBlock)) + "</p>";
     } else if (sit.sessionTradable === false) {
       newsHtml += "<p class='signal-brief-note'>Сессия: вне окна входов.</p>";
     } else {
@@ -2940,6 +2980,22 @@
     const s = deMark(raw || "");
     if (!s) return "";
     const u = s.toUpperCase();
+    // Exclusive M5 session edge (English from TrendSessionEdge) — never show raw to operator.
+    if (u.indexOf("SESSION EDGE") >= 0) {
+      if (u.indexOf("WEEKEND") >= 0) {
+        return "Выходные — диапазонный робот не торгует, только пишет историю. Новые входы с понедельника.";
+      }
+      if (u.indexOf("BEFORE CLOSE") >= 0) {
+        return "Основная сессия закончена — новых входов сегодня нет. Зону увидим завтра после открытия.";
+      }
+      if (u.indexOf("BEFORE OPEN") >= 0) {
+        return "До открытия основной сессии — робот не ставит новые лимитки.";
+      }
+      if (u.indexOf("AFTER OPEN") >= 0) {
+        return "Слишком рано после открытия — ждём прогрев сессии, потом снова смотрим зону.";
+      }
+      return "Вне торгового окна основной сессии — новых входов нет.";
+    }
     // Positional H1 gap-fill arm skips (English rationale from PositionalH1GapStrategy).
     if (u.indexOf("GAP STRATEGY") >= 0) {
       if (u.indexOf("2 H1") >= 0 || u.indexOf("≥2") >= 0 || u.indexOf(">=2") >= 0) {
@@ -5673,7 +5729,7 @@
           && !sameInstrumentFamily(stillWant, data.instrument)) {
         // Keep operator pin (золото/Si/…) — do not snap select to server rotation.
         const instSel = $("sig-instrument");
-        if (instSel) matchInstrumentOption(instSel, stillWant);
+        if (instSel) matchInstrumentOption(instSel, stillWant, true);
         deskInstrumentPinned = stillWant;
         writeStoredInstrument(stillWant);
       }
@@ -5689,6 +5745,7 @@
           + " · " + Math.round((Date.now() - startedAt) / 100) / 10 + "s";
       }
       fillDeskSelects(data);
+      if (data.instrument) syncSelectorToChartInstrument(data.instrument);
       paintRobotChip(data);
       paintDecisionFrame(data);
       paintSyncPanel(data.syncContext);
@@ -5736,9 +5793,12 @@
       const chartLabel = $("signal-chart-label");
       const paperTitle = $("signal-paper-title");
       if (paperTitle) {
-        paperTitle.textContent = "Сделки сегодня · " + formatSecidWithMonth(chartInst)
+        const laneTitle = deskScope() === "positional" ? "позиционная"
+          : (deskScope() === "brm" ? "BRM" : "диапазонная");
+        paperTitle.textContent = "Сделки сегодня · " + laneTitle + " · "
+          + formatSecidWithMonth(chartInst)
           + (data.robotInstrument && data.robotInstrument !== chartInst
-            ? (" · робот: " + data.robotInstrument) : "");
+            ? (" · робот: " + formatSecidWithMonth(data.robotInstrument)) : "");
       }
       renderPaper(data.paper, data);
       bindBriefDensity();
@@ -6355,6 +6415,17 @@
     const usableWhy = (whyHuman && !looksTechnicalStatus(whyHuman)) ? whyHuman : "";
     const comm = (data && data.commentary) || sit.commentary || {};
     const head = comm.headline || "";
+    // Prefer server flag. Why-heuristic only when flag missing — broad «сесси/окна/открытия»
+    // false-positived «Сессия закрыта» on gap/EIA copy and even on positional.
+    const sessionClosed = sit.sessionTradable === false
+      || (sit.sessionTradable == null && usableWhy && (
+        usableWhy.indexOf("Выходные") >= 0
+        || usableWhy.indexOf("Вне торгового окна") >= 0
+        || usableWhy.indexOf("вне торгового окна") >= 0
+        || usableWhy.indexOf("До открытия основной") >= 0
+        || usableWhy.indexOf("Основная сессия закончена") >= 0
+        || usableWhy.indexOf("Слишком рано после открытия") >= 0
+      ));
 
     let cls = "is-scan";
     let status = "Сканирует";
@@ -6376,6 +6447,11 @@
       else if (lv.entry != null) bits.push("около " + fmtStatusPx(lv.entry));
       if (lv.stop != null) bits.push("стоп " + fmtStatusPx(lv.stop));
       detail = bits.join(" · ");
+    } else if (sessionClosed && deskScope() !== "positional") {
+      // Weekend / out-of-window: never show «Смотрит зону» on Exclusive even if posture lagged.
+      cls = "is-flat";
+      status = "Сессия закрыта";
+      detail = head || usableWhy || "Окно диапазонной сессии сейчас закрыто";
     } else if (posture === "WATCHING_ZONE") {
       cls = "is-watch";
       status = "Смотрит зону";
@@ -6393,20 +6469,8 @@
       }
     } else if (posture === "NOT_IN_TRADE") {
       cls = "is-flat";
-      // Session-closed: prefer sessionTradable flag, then why text (incl. weekend).
-      if (sit.sessionTradable === false
-          || (usableWhy && (usableWhy.indexOf("сесси") >= 0 || usableWhy.indexOf("Сесси") >= 0
-          || usableWhy.indexOf("открытия") >= 0 || usableWhy.indexOf("окна") >= 0
-          || usableWhy.indexOf("Выходные") >= 0 || usableWhy.indexOf("выходн") >= 0))) {
-        status = "Сессия закрыта";
-      } else {
-        status = "Не в сделке";
-      }
+      status = sessionClosed ? "Сессия закрыта" : "Не в сделке";
       detail = head || usableWhy || "Нового сетапа сейчас нет";
-    } else if (sit.sessionTradable === false) {
-      cls = "is-flat";
-      status = "Сессия закрыта";
-      detail = head || usableWhy || "Окно Exclusive сейчас закрыто";
     } else {
       cls = "is-scan";
       status = "Сканирует";
@@ -6567,21 +6631,16 @@
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
       if (activePb) pbSel.value = activePb;
-      if (isRangeDesk()) {
-        if (activeInst) {
-          matchInstrumentOption(instSel, activeInst);
-          deskInstrumentPinned = instSel.value || activeInst;
+      // Chart month wins when same family — syncSelectorToChartInstrument runs right after.
+      if (activeInst) {
+        const pin = deskInstrumentPinned;
+        if (!pin || sameInstrumentFamily(pin, activeInst) || isRangeDesk()) {
+          matchInstrumentOption(instSel, activeInst, true);
+        } else if (pin) {
+          matchInstrumentOption(instSel, pin, false);
         }
       } else if (deskInstrumentPinned) {
-        matchInstrumentOption(instSel, deskInstrumentPinned);
-        if (activeInst && sameInstrumentFamily(deskInstrumentPinned, activeInst)
-            && String(deskInstrumentPinned).toUpperCase() !== String(activeInst).toUpperCase()) {
-          matchInstrumentOption(instSel, activeInst);
-          deskInstrumentPinned = activeInst;
-          writeStoredInstrument(activeInst);
-        }
-      } else if (activeInst) {
-        matchInstrumentOption(instSel, activeInst);
+        matchInstrumentOption(instSel, deskInstrumentPinned, false);
       }
     }
     const wantPb = viewPlaybookId();
@@ -6594,7 +6653,8 @@
     const cur = instSel.options[instSel.selectedIndex];
     if (cur && (cur.hidden || cur.disabled)) {
       if (!isRangeDesk() && deskInstrumentPinned) {
-        matchInstrumentOption(instSel, deskInstrumentPinned);
+        // false: do not rewrite live front-month option back to a stale pin month.
+        matchInstrumentOption(instSel, deskInstrumentPinned, false);
       }
       const still = instSel.options[instSel.selectedIndex];
       if (still && (still.hidden || still.disabled)) {
