@@ -40,44 +40,62 @@
     }).join("");
   }
 
+  let candidatesBound = false;
+  let candidatesRows = [];
+  function ensureCandidatesDelegate() {
+    const el = $("invest-candidates");
+    if (!el || candidatesBound) return;
+    candidatesBound = true;
+    el.addEventListener("pointerup", function (ev) {
+      if (ev.button != null && ev.button !== 0) return;
+      const row = ev.target && ev.target.closest ? ev.target.closest(".invest-cand-row") : null;
+      if (!row || !el.contains(row) || !row.getAttribute("data-ticker")) return;
+      const t = String(row.getAttribute("data-ticker") || "").trim().toUpperCase();
+      if (!t) return;
+      el.querySelectorAll(".invest-cand-row").forEach(function (x) { x.classList.remove("is-on"); });
+      row.classList.add("is-on");
+      focusTicker(t, candidatesRows);
+    });
+  }
+
   function renderCandidates(rows) {
     const el = $("invest-candidates");
     if (!el) return;
+    ensureCandidatesDelegate();
+    candidatesRows = rows || [];
     if (!rows || !rows.length) {
       el.innerHTML = "<div class=\"charts-dock-empty\">нет данных</div>";
       return;
     }
     el.innerHTML = rows.slice(0, 40).map(function (r) {
-      const t = r.ticker || "?";
+      const t = String(r.ticker || "?").trim().toUpperCase();
       const cat = r.category != null ? "C" + r.category : "—";
       const v = r.verdict || "—";
       return "<div class=\"invest-cand-row\" data-ticker=\"" + t + "\">"
         + "<span>" + t + "</span><span class=\"cat\">" + cat + "</span><span>" + v + "</span></div>";
     }).join("");
-    el.querySelectorAll(".invest-cand-row").forEach(function (row) {
-      row.addEventListener("click", function () {
-        const t = row.getAttribute("data-ticker");
-        el.querySelectorAll(".invest-cand-row").forEach(function (x) { x.classList.remove("is-on"); });
-        row.classList.add("is-on");
-        focusTicker(t, rows);
-      });
-    });
   }
 
   function focusTicker(ticker, rows) {
+    ticker = String(ticker || "").trim().toUpperCase();
+    if (!ticker) return;
     if (window.TrinityInvestCharts && typeof window.TrinityInvestCharts.openInstrument === "function") {
-      window.TrinityInvestCharts.openInstrument(ticker);
+      window.TrinityInvestCharts.openInstrument(ticker).catch(function (e) { console.warn(e); });
     } else {
       const sel = $("charts-instrument");
       if (sel) {
-        const opt = Array.prototype.find.call(sel.options, function (o) { return o.value === ticker; });
+        const opt = Array.prototype.find.call(sel.options, function (o) {
+          return String(o.value || "").toUpperCase() === ticker;
+        });
         if (opt) {
-          sel.value = ticker;
+          sel.value = opt.value;
           sel.dispatchEvent(new Event("change"));
         }
       }
     }
-    const row = (rows || []).find(function (r) { return r.ticker === ticker; });
+    const row = (rows || []).find(function (r) {
+      return String(r.ticker || "").toUpperCase() === ticker;
+    });
     if (row && row.stages) renderPipeline(row.stages);
     refreshDesk({ ticker: ticker, refresh: false }).catch(console.warn);
   }

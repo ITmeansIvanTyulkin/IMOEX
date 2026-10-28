@@ -1736,9 +1736,12 @@
     let selectedMarkId = null;
     let selectedMaId = null;
     let dragState = null; // {kind:'trend'|'vap'|'mark', ...}
+    let dragMoved = false;
+    let suppressNextClick = false;
     let lastPtrDownAt = 0;
     let lastPtrX = 0;
     let lastPtrY = 0;
+    let hoveredId = null; // trend/mark id under cursor (idle)
     let mas = []; // {id,type,period,color,series}
     let showStretched = true;
     let magnetOn = false;
@@ -1747,6 +1750,12 @@
     let drawLayer = null;
     const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
     const TWO_POINT_MODES = { trend: 1, ray: 1, rect: 1, fib: 1 };
+    // TradingView-ish hit targets (px): thin stroke needs a fat invisible grab zone.
+    const HIT_TREND = 16;
+    const HIT_HANDLE = 14;
+    const HIT_SELECT = 18;
+    const HIT_MAGNET_Y = 14;
+    const HANDLE_R = 7;
 
     function ensureOverlay(id, cls) {
       let ov = host.querySelector("#" + id);
@@ -1970,11 +1979,11 @@
         try { t = chart.timeScale().coordinateToTime(param.point.x); } catch (_) {}
       }
       if (t == null) return null;
-      return { t: t, p: p };
+      return { t: t, p: p, x: param.point.x, y: param.point.y };
     }
 
     function findTrendNear(x, y, maxDist) {
-      const lim = maxDist == null ? 8 : maxDist;
+      const lim = maxDist == null ? HIT_TREND : maxDist;
       let best = null;
       let bestD = lim;
       trendLines.forEach(function (tl) {
@@ -2005,34 +2014,57 @@
     function handleHit(tl, x, y) {
       const a = xyFromPoint(tl.t1, tl.p1);
       const b = xyFromPoint(tl.t2, tl.p2);
-      if (a && Math.hypot(x - a.x, y - a.y) <= 10) return "a";
-      if (b && Math.hypot(x - b.x, y - b.y) <= 10) return "b";
+      if (a && Math.hypot(x - a.x, y - a.y) <= HIT_HANDLE) return "a";
+      if (b && Math.hypot(x - b.x, y - b.y) <= HIT_HANDLE) return "b";
       return null;
     }
 
+    /** Screen-space magnet to nearest OHLC of the snapped bar (TradingView-like). */
     function snapPt(pt) {
       if (!pt) return null;
       const t = snapTime(pt.t);
       let p = pt.p;
-      if (magnetOn) {
+      if (magnetOn && series && p != null && isFinite(p)) {
         const bars = getBars() || [];
         const ix = findBarIndex(bars, t);
         if (ix >= 0) {
           const b = bars[ix];
           const cands = [b.open, b.high, b.low, b.close].map(Number).filter(isFinite);
+          const y0 = pt.y != null && isFinite(pt.y) ? pt.y : series.priceToCoordinate(p);
           let best = p;
-          let bestD = Infinity;
+          let bestD = HIT_MAGNET_Y;
+          let hit = false;
           for (let i = 0; i < cands.length; i++) {
-            const d = Math.abs(cands[i] - p);
-            if (d < bestD) {
+            const yy = series.priceToCoordinate(cands[i]);
+            if (yy == null || !isFinite(yy)) continue;
+            const d = y0 == null || !isFinite(y0) ? Infinity : Math.abs(yy - y0);
+            if (d <= bestD) {
               bestD = d;
               best = cands[i];
+              hit = true;
             }
           }
-          p = best;
+          if (hit) p = best;
         }
       }
-      return { t: t, p: p };
+      return { t: t, p: p, x: pt.x, y: pt.y };
+    }
+
+    function pointFromCoord(x, y) {
+      if (!series || !chart) return null;
+      let t = null;
+      try { t = chart.timeScale().coordinateToTime(x); } catch (_) {}
+      if (t == null) t = timeAtX(x);
+      let p = null;
+      try { p = series.coordinateToPrice(y); } catch (_) {}
+      if (t == null || p == null || !isFinite(p)) return null;
+      return { t: t, p: p, x: x, y: y };
+    }
+
+    function notifyModeChange() {
+      if (typeof opts.onModeChange === "function") {
+        try { opts.onModeChange(mode); } catch (_) {}
+      }
     }
 
     function plotSize() {
@@ -2103,9 +2135,8 @@
             const y1 = Math.max(a.y, b.y);
             const dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
             const dy = y < y0 ? y0 - y : y > y1 ? y - y1 : 0;
-            d = (dx === 0 && dy === 0)
-              ? Math.min(x - x0, x1 - x, y - y0, y1 - y)
-              : Math.hypot(dx, dy);
+            // Inside counts as a hit (body-drag), not distance-to-edge.
+            d = (dx === 0 && dy === 0) ? 0 : Math.hypot(dx, dy);
           }
         } else if (mk.kind === "fib") {
           const a = xyFromPoint(mk.t1, mk.p1);
@@ -2198,7 +2229,7 @@
     }
 
     function nearestSelectable(x, y, maxDist) {
-      const lim = maxDist == null ? 14 : maxDist;
+      const lim = maxDist == null ? HIT_SELECT : maxDist;
       const tl = findTrendNear(x, y, lim);
       const mk = findMarkNear(x, y, lim);
       const ma = findMaNear(x, y, lim);
@@ -2326,22 +2357,24 @@
           x2 = b.x + ux * pad;
           y2 = b.y + uy * pad;
         }
-        let out = '<line class="' + cls + (soft ? " is-preview" : "") + '" data-id="' + esc(tl.id || "")
+        const hover = !soft && tl.id && tl.id === hoveredId && tl.id !== selectedTrendId;
+        let out = '<line class="' + cls + (soft ? " is-preview" : "") + (hover ? " is-hover" : "")
+          + '" data-id="' + esc(tl.id || "")
           + '" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" />';
         if (!soft && tl.id && tl.id === selectedTrendId) {
           out += '<circle class="chart-draw-handle" data-id="' + esc(tl.id) + '" data-end="a" cx="'
-            + a.x + '" cy="' + a.y + '" r="5" />';
+            + a.x + '" cy="' + a.y + '" r="' + HANDLE_R + '" />';
           out += '<circle class="chart-draw-handle" data-id="' + esc(tl.id) + '" data-end="b" cx="'
-            + b.x + '" cy="' + b.y + '" r="5" />';
+            + b.x + '" cy="' + b.y + '" r="' + HANDLE_R + '" />';
         }
         return out;
       }
       function paintHandles(a, b, id) {
         if (!a || !b || id !== selectedMarkId) return "";
         return '<circle class="chart-draw-handle" data-mid="' + esc(id) + '" data-end="a" cx="'
-          + a.x + '" cy="' + a.y + '" r="5" />'
+          + a.x + '" cy="' + a.y + '" r="' + HANDLE_R + '" />'
           + '<circle class="chart-draw-handle" data-mid="' + esc(id) + '" data-end="b" cx="'
-          + b.x + '" cy="' + b.y + '" r="5" />';
+          + b.x + '" cy="' + b.y + '" r="' + HANDLE_R + '" />';
       }
       function paintMark(mk, soft) {
         const sel = !soft && mk.id === selectedMarkId;
@@ -2354,11 +2387,11 @@
           if (sel) {
             const hx2 = Math.max(36, sz.w - 72);
             out += '<circle class="chart-draw-handle is-level-h" data-mid="' + esc(mk.id) + '" data-end="move" cx="16" cy="'
-              + y + '" r="6" />';
+              + y + '" r="' + HANDLE_R + '" />';
             out += '<circle class="chart-draw-handle is-level-h" data-mid="' + esc(mk.id) + '" data-end="move" cx="'
-              + hx2 + '" cy="' + y + '" r="6" />';
+              + hx2 + '" cy="' + y + '" r="' + HANDLE_R + '" />';
             out += '<text class="chart-draw-sel-label" x="24" y="' + (y - 10) + '">'
-              + Number(mk.p1).toFixed(2) + " · Delete</text>";
+              + Number(mk.p1).toFixed(2) + " · Del / 2×клик</text>";
           }
           return out;
         }
@@ -2371,10 +2404,10 @@
           if (sel) {
             const hy2 = Math.max(36, sz.h - 36);
             out += '<circle class="chart-draw-handle is-level-v" data-mid="' + esc(mk.id) + '" data-end="move" cx="'
-              + x + '" cy="16" r="6" />';
+              + x + '" cy="16" r="' + HANDLE_R + '" />';
             out += '<circle class="chart-draw-handle is-level-v" data-mid="' + esc(mk.id) + '" data-end="move" cx="'
-              + x + '" cy="' + hy2 + '" r="6" />';
-            out += '<text class="chart-draw-sel-label" x="' + (x + 10) + '" y="22">Delete</text>';
+              + x + '" cy="' + hy2 + '" r="' + HANDLE_R + '" />';
+            out += '<text class="chart-draw-sel-label" x="' + (x + 10) + '" y="22">Del / 2×клик</text>';
           }
           return out;
         }
@@ -2571,10 +2604,13 @@
       trendAnchor = null;
       trendHover = null;
       dragState = null;
+      dragMoved = false;
+      hoveredId = null;
       host.classList.toggle("is-vap-tool", mode === "vap");
       host.classList.toggle("is-trend-tool", mode === "trend" || mode === "ray");
       host.classList.toggle("is-drawing", !!mode);
       layoutTrendLines();
+      notifyModeChange();
     }
 
     function snapTime(t) {
@@ -2585,6 +2621,10 @@
 
     function onChartClick(param) {
       if (dragState) return;
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        return;
+      }
       if (drawingsLocked && !mode) return;
       if (mode === "vap") {
         const pt = snapPt(pointFromChartParam(param));
@@ -2693,6 +2733,21 @@
         if (!pt) return;
         vapHover = pt.t;
         layoutTrendLines();
+        return;
+      }
+      // Idle hover highlight — fat target feels grabable before click.
+      if (!mode && param && param.point) {
+        const hit = nearestSelectable(param.point.x, param.point.y, HIT_SELECT);
+        const next = hit && (hit.kind === "trend" || hit.kind === "mark") ? hit.id : null;
+        if (next !== hoveredId) {
+          hoveredId = next;
+          host.classList.toggle("is-draw-hover", !!next);
+          layoutTrendLines();
+        }
+      } else if (hoveredId) {
+        hoveredId = null;
+        host.classList.remove("is-draw-hover");
+        layoutTrendLines();
       }
     }
 
@@ -2707,6 +2762,7 @@
       lastPtrDownAt = now;
       lastPtrX = x;
       lastPtrY = y;
+      dragMoved = false;
 
       const vapEnd = vapHandleHit(x, y);
       if (vapEnd) {
@@ -2720,21 +2776,27 @@
         return;
       }
 
-      if (mode === "hline" || mode === "vline") {
-        if (selectedMarkId) {
-          const mk = marks.find(function (z) { return z.id === selectedMarkId; });
-          if (mk && mk.kind === mode && levelHandleHit(mk, x, y)) {
-            dragState = { kind: "mark", id: mk.id, end: "move" };
-            beginDrag(ev);
-            return;
-          }
-        }
-        return;
-      }
+      // While placing, don't steal pointer for edit — click path owns it.
       if (mode === "vap" || TWO_POINT_MODES[mode]) {
         return;
       }
 
+      // Hline/vline tool: allow dragging an existing level of the same kind.
+      if (mode === "hline" || mode === "vline") {
+        const near = findMarkNear(x, y, HIT_SELECT);
+        if (near && near.kind === mode) {
+          selectObject({ kind: "mark", id: near.id });
+          dragState = { kind: "mark", id: near.id, end: "move" };
+          beginDrag(ev);
+          return;
+        }
+        return;
+      }
+
+      // Idle edit: select + drag in one gesture (handles or body).
+      if (likelyDbl) return;
+
+      // Prefer endpoint handles of selected object, then any nearby drawing.
       if (selectedTrendId) {
         const tl = trendLines.find(function (z) { return z.id === selectedTrendId; });
         if (tl) {
@@ -2765,7 +2827,55 @@
           }
         }
       }
-      if (likelyDbl) return;
+
+      const nearTl = findTrendNear(x, y, HIT_TREND);
+      if (nearTl) {
+        const end = handleHit(nearTl, x, y);
+        selectObject({ kind: "trend", id: nearTl.id });
+        if (end) {
+          dragState = { kind: "trend", id: nearTl.id, end: end };
+        } else {
+          dragState = {
+            kind: "trend",
+            id: nearTl.id,
+            end: "body",
+            t1: nearTl.t1,
+            p1: nearTl.p1,
+            t2: nearTl.t2,
+            p2: nearTl.p2,
+            x0: x,
+            y0: y
+          };
+        }
+        beginDrag(ev);
+        return;
+      }
+
+      const nearMk = findMarkNear(x, y, HIT_SELECT);
+      if (nearMk) {
+        selectObject({ kind: "mark", id: nearMk.id });
+        if (nearMk.kind === "hline" || nearMk.kind === "vline") {
+          dragState = { kind: "mark", id: nearMk.id, end: "move" };
+        } else {
+          const end = handleHit(nearMk, x, y);
+          if (end) {
+            dragState = { kind: "mark", id: nearMk.id, end: end };
+          } else {
+            dragState = {
+              kind: "mark",
+              id: nearMk.id,
+              end: "body",
+              t1: nearMk.t1,
+              p1: nearMk.p1,
+              t2: nearMk.t2,
+              p2: nearMk.p2,
+              x0: x,
+              y0: y
+            };
+          }
+        }
+        beginDrag(ev);
+      }
     }
 
     function beginDrag(ev) {
@@ -2788,23 +2898,55 @@
       if (!dragState) return;
       const pt = pointFromClient(ev.clientX, ev.clientY);
       if (!pt) return;
+      dragMoved = true;
       if (dragState.kind === "trend") {
-        if (pt.t == null || pt.p == null || !isFinite(pt.p)) return;
-        const sp = snapPt(pt) || pt;
-        if (dragState.end === "a") updateTrendLine(dragState.id, { t1: sp.t, p1: sp.p });
-        else if (dragState.end === "b") updateTrendLine(dragState.id, { t2: sp.t, p2: sp.p });
+        if (dragState.end === "body") {
+          const a0 = xyFromPoint(dragState.t1, dragState.p1);
+          const b0 = xyFromPoint(dragState.t2, dragState.p2);
+          if (!a0 || !b0) return;
+          const dx = pt.x - dragState.x0;
+          const dy = pt.y - dragState.y0;
+          const a1 = pointFromCoord(a0.x + dx, a0.y + dy);
+          const b1 = pointFromCoord(b0.x + dx, b0.y + dy);
+          if (!a1 || !b1) return;
+          const sa = magnetOn ? (snapPt(a1) || a1) : a1;
+          const sb = magnetOn ? (snapPt(b1) || b1) : b1;
+          updateTrendLine(dragState.id, { t1: sa.t, p1: sa.p, t2: sb.t, p2: sb.p });
+        } else {
+          if (pt.t == null || pt.p == null || !isFinite(pt.p)) return;
+          const sp = snapPt(pt) || pt;
+          if (dragState.end === "a") updateTrendLine(dragState.id, { t1: sp.t, p1: sp.p });
+          else if (dragState.end === "b") updateTrendLine(dragState.id, { t2: sp.t, p2: sp.p });
+        }
       } else if (dragState.kind === "mark") {
         const mk = marks.find(function (z) { return z.id === dragState.id; });
         if (mk) {
           if (mk.kind === "hline") {
-            if (pt.p == null || !isFinite(pt.p)) return;
-            mk.p1 = pt.p;
-            mk.p2 = pt.p;
+            const sp = snapPt(pt) || pt;
+            if (sp.p == null || !isFinite(sp.p)) return;
+            mk.p1 = sp.p;
+            mk.p2 = sp.p;
           } else if (mk.kind === "vline") {
-            const t = pt.t != null ? pt.t : timeAtX(pt.x);
+            const sp = snapPt(pt) || pt;
+            const t = sp.t != null ? sp.t : timeAtX(pt.x);
             if (t == null) return;
-            mk.t1 = t;
-            mk.t2 = t;
+            mk.t1 = snapTime(t);
+            mk.t2 = mk.t1;
+          } else if (dragState.end === "body") {
+            const a0 = xyFromPoint(dragState.t1, dragState.p1);
+            const b0 = xyFromPoint(dragState.t2, dragState.p2);
+            if (!a0 || !b0) return;
+            const dx = pt.x - dragState.x0;
+            const dy = pt.y - dragState.y0;
+            const a1 = pointFromCoord(a0.x + dx, a0.y + dy);
+            const b1 = pointFromCoord(b0.x + dx, b0.y + dy);
+            if (!a1 || !b1) return;
+            const sa = magnetOn ? (snapPt(a1) || a1) : a1;
+            const sb = magnetOn ? (snapPt(b1) || b1) : b1;
+            mk.t1 = sa.t;
+            mk.p1 = sa.p;
+            mk.t2 = sb.t;
+            mk.p2 = sb.p;
           } else if (dragState.end === "a") {
             const sp = snapPt(pt) || pt;
             if (sp.t == null || sp.p == null) return;
@@ -2832,7 +2974,9 @@
     function onPointerUp(ev) {
       if (!dragState) return;
       const wasVap = dragState.kind === "vap";
+      suppressNextClick = true;
       dragState = null;
+      dragMoved = false;
       host.classList.remove("is-dragging-draw");
       endDragListeners();
       try { host.releasePointerCapture(ev.pointerId); } catch (_) {}
@@ -2848,30 +2992,19 @@
       const tag = (ev.target && ev.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
       if (ev.key === "Escape") {
-        if (vapAnchor != null || trendAnchor != null || mode) {
+        // TV-like: 1st Esc cancels in-progress points; 2nd exits the tool; then clears selection.
+        if (vapAnchor != null || trendAnchor != null) {
           vapAnchor = null;
           vapHover = null;
           trendAnchor = null;
           trendHover = null;
-          if (mode) setMode(null);
-          else layoutTrendLines();
-          ev.preventDefault();
-        } else if (selectedTrendId) {
-          selectedTrendId = null;
           layoutTrendLines();
           ev.preventDefault();
-        } else if (selectedMarkId) {
-          selectedMarkId = null;
-          layoutTrendLines();
+        } else if (mode) {
+          setMode(null);
           ev.preventDefault();
-        } else if (selectedMaId) {
-          selectedMaId = null;
-          applyMaHighlight();
-          layoutTrendLines();
-          ev.preventDefault();
-        } else if (vapSelected) {
-          vapSelected = false;
-          layoutTrendLines();
+        } else if (selectedTrendId || selectedMarkId || selectedMaId || vapSelected) {
+          selectObject(null);
           ev.preventDefault();
         }
         return;
@@ -2895,16 +3028,23 @@
     }
 
     function onHostDblClick(ev) {
+      if (drawingsLocked) return;
       const rect = host.getBoundingClientRect();
       const x = ev.clientX - rect.left;
       const y = ev.clientY - rect.top;
-      let hit = nearestSelectable(x, y, 22);
+      let hit = nearestSelectable(x, y, 24);
       if (!hit && vapFrom != null && vapTo != null) {
         const xs = vapRangeXs(vapFrom, vapTo);
         if (xs && x >= xs.left - 6 && x <= xs.right + 6) hit = { kind: "vap" };
       }
       if (!hit) return;
       selectObject(hit);
+      // TradingView: double-click removes the drawing under the cursor.
+      if (hit.kind === "trend" && hit.id) removeTrendLine(hit.id);
+      else if (hit.kind === "mark" && hit.id) removeMark(hit.id);
+      else if (hit.kind === "ma" && hit.id) removeMa(hit.id);
+      else if (hit.kind === "vap") clearVap();
+      suppressNextClick = true;
       ev.preventDefault();
       ev.stopPropagation();
     }

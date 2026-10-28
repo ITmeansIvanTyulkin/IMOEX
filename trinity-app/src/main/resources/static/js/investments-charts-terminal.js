@@ -9,6 +9,12 @@
   let saveTimer = null;
   let hydrating = true;
   let fsBusy = false;
+  let openSeq = 0;
+  let watchlistBound = false;
+
+  function normId(id) {
+    return String(id == null ? "" : id).trim().toUpperCase();
+  }
 
   async function authFetch(url, opts) {
     opts = opts || {};
@@ -34,6 +40,52 @@
       }
     }
     return res;
+  }
+
+  /** MSK calendar day. ISS midnight and T-Invest 03:00 are the same session. */
+  function sessionDayKey(t) {
+    if (t == null || t === "") return null;
+    if (typeof t === "number" && isFinite(t)) {
+      const ms = (t > 1e12 ? t : t * 1000) + 3 * 3600 * 1000;
+      const d = new Date(ms);
+      const p = function (n) { return (n < 10 ? "0" : "") + n; };
+      return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate());
+    }
+    const m = String(t).trim().match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : null;
+  }
+  function isExchangeDailyStamp(t) {
+    const s = String(t == null ? "" : t).trim();
+    return s.indexOf("T") < 0 && /00:00:00$/.test(s);
+  }
+  /** One candle per session. Exchange daily (00:00:00) wins over the T-Invest twin. */
+  function collapseDuplicateSessions(raw) {
+    const by = Object.create(null);
+    const order = [];
+    (raw || []).forEach(function (b) {
+      if (!b) return;
+      const rawT = b.time != null ? b.time : b.begin;
+      const day = sessionDayKey(rawT);
+      if (!day) return;
+      const prev = by[day];
+      if (!prev) {
+        by[day] = b;
+        order.push(day);
+        return;
+      }
+      const prevIss = isExchangeDailyStamp(prev.time != null ? prev.time : prev.begin);
+      const nextIss = isExchangeDailyStamp(rawT);
+      if (nextIss && !prevIss) {
+        by[day] = b;
+      } else if (nextIss === prevIss && (Number(b.volume) || 0) > (Number(prev.volume) || 0)) {
+        by[day] = b;
+      }
+    });
+    return order.map(function (d) { return by[d]; });
+  }
+  function dailyFamilyTf(tf) {
+    const u = String(tf || "").toUpperCase();
+    return u === "D1" || u === "W1" || u === "WEEK" || u === "MN" || u === "MONTH" || u === "DAY" || u === "1D";
   }
 
   function toChartTime(iso) {
@@ -185,10 +237,11 @@
   const DRAW_MODES = { trend: 1, ray: 1, hline: 1, vline: 1, rect: 1, fib: 1, vap: 1 };
 
   function applyToolbar() {
+    const act = normId(activeId);
     Object.keys(panes).forEach(function (id) {
       const p = panes[id];
       if (!p) return;
-      const mine = id === activeId;
+      const mine = normId(id) === act;
       if (p.tools && typeof p.tools.setMode === "function") {
         const next = mine && DRAW_MODES[toolbarMode] ? toolbarMode : null;
         if (p.tools.getMode() !== next) p.tools.setMode(next);
@@ -210,6 +263,9 @@
   }
 
   function createPane(secid, title) {
+    secid = normId(secid);
+    if (!secid) return null;
+    if (panes[secid]) return panes[secid];
     const grid = $("charts-terminal-grid");
     const wrap = document.createElement("article");
     wrap.className = "charts-pane";
@@ -225,7 +281,7 @@
       togglePaneFullscreen(secid);
     });
     wrap.addEventListener("pointerdown", function () {
-      if (activeId !== secid) setActive(secid);
+      if (normId(activeId) !== secid) setActive(secid);
     }, true);
     wrap.addEventListener("click", function () {
       setActive(secid);
@@ -270,6 +326,12 @@
         if (panes[secid]) panes[secid].layoutDirty = true;
         scheduleSave();
         syncToolButtons();
+      },
+      onModeChange: function (m) {
+        // Keep invest toolbar in sync when Esc cancels a tool inside the kit.
+        if (m) toolbarMode = m;
+        else if (toolbarMode && toolbarMode !== "measure") toolbarMode = null;
+        applyToolbar();
       },
       freezePrice: false,
       legendEl: hud.legendEl || null
@@ -430,12 +492,22 @@
   }
 
   function setActive(secid) {
+    secid = normId(secid);
+    if (!secid) return;
     activeId = secid;
     Object.keys(panes).forEach(function (id) {
-      panes[id].wrap.classList.toggle("is-active", id === secid);
+      if (panes[id] && panes[id].wrap) {
+        panes[id].wrap.classList.toggle("is-active", normId(id) === secid);
+      }
     });
     const sel = $("charts-instrument");
-    if (sel) sel.value = secid;
+    if (sel) {
+      const opt = Array.prototype.find.call(sel.options || [], function (o) {
+        return normId(o.value) === secid;
+      });
+      if (opt) sel.value = opt.value;
+      else sel.value = secid;
+    }
     applyToolbar();
     const pane = panes[secid];
     if (pane && pane.tf) {
@@ -451,7 +523,7 @@
     }
     seedTapeFromBars([secid]);
     scheduleSave();
-    renderWatchlist();
+    syncWatchlistChrome();
   }
 
   function prefersReducedMotion() {
@@ -478,6 +550,20 @@
       || document.querySelector(".investments-workspace");
   }
 
+  function lockPageScroll(on) {
+    const html = document.documentElement;
+    if (on) {
+      html.classList.add("invest-chart-fs");
+      document.body.classList.add("invest-chart-fs");
+    } else {
+      html.classList.remove("invest-chart-fs");
+      document.body.classList.remove("invest-chart-fs");
+      // Belt-and-braces: leftover inline locks from older builds / other overlays.
+      html.style.overflow = "";
+      document.body.style.overflow = "";
+    }
+  }
+
   function enterFullscreen(secid) {
     const p = panes[secid];
     if (!p) return;
@@ -485,7 +571,7 @@
     const root = workspaceRoot();
     fsBusy = true;
     if (root) root.classList.add("is-chart-fs");
-    document.body.classList.add("invest-chart-fs");
+    lockPageScroll(true);
     grid.classList.add("is-fullscreen");
     Object.keys(panes).forEach(function (id) {
       panes[id].wrap.classList.toggle("is-fs-target", id === secid);
@@ -512,8 +598,8 @@
       if (panes[id].wrap.classList.contains("is-fs-target")) targetId = id;
     });
     if (root) root.classList.remove("is-chart-fs");
-    document.body.classList.remove("invest-chart-fs");
-    grid.classList.remove("is-fullscreen");
+    lockPageScroll(false);
+    if (grid) grid.classList.remove("is-fullscreen");
     Object.keys(panes).forEach(function (id) {
       panes[id].wrap.hidden = false;
       panes[id].wrap.classList.remove("is-fs-target");
@@ -557,6 +643,7 @@
   }
 
   function showInstrument(secid) {
+    secid = normId(secid);
     if (!secid || !panes[secid]) return;
     setActive(secid);
     if (gridFullscreen()) {
@@ -566,7 +653,7 @@
     try {
       panes[secid].wrap.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch (_) {}
-    renderWatchlist();
+    syncWatchlistChrome();
   }
 
   var MAX_OPEN_PANES = 6;
@@ -610,6 +697,7 @@
   }
 
   function destroyPane(secid) {
+    secid = normId(secid);
     const p = panes[secid];
     if (!p) return;
     snapshotPaneIntoLayout(secid);
@@ -620,34 +708,42 @@
   }
 
   async function openInstrument(secid) {
-    secid = String(secid || "").trim().toUpperCase();
+    secid = normId(secid);
     if (!secid) return;
+    const seq = ++openSeq;
     if (panes[secid]) {
       showInstrument(secid);
       return;
     }
     const inst = (instruments || []).find(function (o) {
-      return String(o.secid).toUpperCase() === secid;
+      return normId(o.secid) === secid;
     }) || { secid: secid, name: secid };
     const openIds = Object.keys(panes);
     if (openIds.length >= MAX_OPEN_PANES) {
-      const replaceId = (activeId && panes[activeId]) ? activeId : openIds[0];
-      if (replaceId) destroyPane(replaceId);
+      const replaceId = (activeId && panes[normId(activeId)]) ? normId(activeId) : openIds[0];
+      if (replaceId && replaceId !== secid) destroyPane(replaceId);
     }
     createPane(secid, inst.name || secid);
-    await paintPaneFromCache(secid);
-    restorePaneFromLayout(secid);
-    await refreshPane(secid);
-    restorePaneFromLayout(secid);
+    // Activate immediately — do not wait on network (felt like "click does nothing").
     setActive(secid);
+    syncWatchlistChrome();
     if (gridFullscreen()) enterFullscreen(secid);
     else {
       try { panes[secid].wrap.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
     }
-    ensureTapeCoverage();
-    warmLocalHistory([{ secid: secid }]).catch(function (e) { console.warn("warm", e); });
-    renderWatchlist();
     scheduleSave();
+    try {
+      await paintPaneFromCache(secid);
+      if (seq !== openSeq || !panes[secid]) return;
+      restorePaneFromLayout(secid);
+      await refreshPane(secid);
+      if (seq !== openSeq || !panes[secid]) return;
+      restorePaneFromLayout(secid);
+      ensureTapeCoverage();
+      warmLocalHistory([{ secid: secid }]).catch(function (e) { console.warn("warm", e); });
+    } catch (e) {
+      console.warn("openInstrument", secid, e);
+    }
   }
 
   function resizePane(secid) {
@@ -669,7 +765,7 @@
     return $("charts-terminal-grid").classList.contains("is-fullscreen");
   }
 
-  const BAR_CACHE_V = 4;
+  const BAR_CACHE_V = 5;
   const HISTORY_YEARS = 5;
 
   function apiTfFor(tf) {
@@ -783,6 +879,9 @@
   function paintCandles(p, raw, opts) {
     if (!p || !p.series) return false;
     opts = opts || {};
+    if (dailyFamilyTf(p.tf) && String(p.tf || "").toUpperCase() === "D1") {
+      raw = collapseDuplicateSessions(raw);
+    }
     const candles = sanitizeCandles(raw);
     if (!candles.length) return false;
     if (looksLikeSyntheticStairs(candles)) return false;
@@ -850,9 +949,11 @@
       try {
         const row = await TrinityChartKit.barCacheGet(secid, key);
         if (cacheRowOk(row)) {
-          const candles = sanitizeCandles(row.raw || row.bars || []);
+          let rawBars = (row.raw && row.raw.length) ? row.raw : (row.bars || []);
+          if (key === "D1" || key === "W1") rawBars = collapseDuplicateSessions(rawBars);
+          const candles = sanitizeCandles(rawBars);
           if (candles.length) {
-            p.tfCache[key] = (row.raw && row.raw.length) ? row.raw : candles;
+            p.tfCache[key] = rawBars.length ? rawBars : candles;
             if (key === "M5") p.m5Bars = p.tfCache[key].slice();
             return p.tfCache[key];
           }
@@ -861,13 +962,16 @@
     }
     try {
       const data = await loadDeskFor(secid, tf);
-      const candles = sanitizeCandles(data.bars || []);
+      const fetched = (key === "D1" || key === "W1")
+        ? collapseDuplicateSessions(data.bars || [])
+        : (data.bars || []);
+      const candles = sanitizeCandles(fetched);
       if (!deskBarsMatchPane(secid, data, candles)) return p.tfCache[key] || [];
       const toolBars = candles.map(function (c) {
         return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: 0 };
       });
       const volByT = Object.create(null);
-      (data.bars || []).forEach(function (b) {
+      fetched.forEach(function (b) {
         const t = toChartTime(b.time);
         if (t != null) volByT[t] = Number(b.volume) || 0;
       });
@@ -930,6 +1034,10 @@
         instruments = wl.watchlist.map(function (t) { return { secid: t, name: t }; });
       }
     } catch (_) {}
+    instruments = (instruments || []).map(function (o) {
+      const id = normId(o && o.secid);
+      return { secid: id, name: (o && o.name) || id, family: o && o.family };
+    }).filter(function (o) { return !!o.secid; });
     try {
       layoutDoc = await TrinityChartKit.loadLayouts();
     } catch (_) {
@@ -948,7 +1056,8 @@
     const catalog = instruments;
     const list = (savedIds && savedIds.length
       ? savedIds.map(function (id) {
-          return catalog.find(function (o) { return o.secid === id; }) || { secid: id, name: id };
+          const want = normId(id);
+          return catalog.find(function (o) { return o.secid === want; }) || { secid: want, name: want };
         })
       : catalog
     ).slice(0, 6);
@@ -965,8 +1074,8 @@
       createPane(o.secid, o.name || o.secid);
     });
 
-    activeId = term.active || list[0].secid;
-    if (!panes[activeId]) activeId = list[0].secid;
+    activeId = normId(term.active || list[0].secid);
+    if (!panes[activeId]) activeId = normId(list[0].secid);
     setActive(activeId);
 
     await Promise.all(list.map(function (o) { return paintPaneFromCache(o.secid); }));
@@ -1020,13 +1129,16 @@
   }
 
   async function storeWarmBars(secid, tf, data, years) {
-    const candles = sanitizeCandles((data && data.bars) || []);
+    const srcBars = (tf === "D1" || tf === "W1")
+      ? collapseDuplicateSessions((data && data.bars) || [])
+      : ((data && data.bars) || []);
+    const candles = sanitizeCandles(srcBars);
     if (!deskBarsMatchPane(secid, data, candles)) return 0;
     const toolBars = candles.map(function (c) {
       return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: 0 };
     });
     const volByT = Object.create(null);
-    (data.bars || []).forEach(function (b) {
+    srcBars.forEach(function (b) {
       const t = toChartTime(b.time);
       if (t != null) volByT[t] = Number(b.volume) || 0;
     });
@@ -1250,7 +1362,7 @@
   function noteWatch(msg) {
     const px = Number(msg.px);
     if (!(px > 0)) return;
-    const id = String(msg.instrument || "").trim().toUpperCase();
+    const id = normId(msg.instrument);
     if (!id) return;
     // Investments panes are equities — never fold SIBN into Si via familyOf.
     let row = quotes[id];
@@ -1258,55 +1370,139 @@
     if (row.px > 0) row.prev = row.px;
     row.px = px;
     row.inst = id;
-    renderWatchlist();
+    // In-place price update only — full rebuild on every tape tick killed clicks.
+    patchWatchlistQuote(id);
   }
   function deskVerdict(id) {
     const desk = window.__investDeskCache;
     const rows = desk && desk.candidates;
     if (!rows || !rows.length) return "";
-    const hit = rows.find(function (r) { return String(r.ticker || "").toUpperCase() === id; });
-    return hit && hit.verdict ? String(hit.verdict) : "";
+    const hit = rows.find(function (r) { return normId(r.ticker) === normId(id); });
+    return hit && hit.verdict ? String(hit.verdict).toLowerCase() : "";
   }
 
-  function renderWatchlist() {
+  /** RU labels for the robot strip (was raw invest/watch; skip was hidden → «пустой» список). */
+  function verdictLabel(v) {
+    const x = String(v || "").toLowerCase();
+    if (x === "invest") return "вход";
+    if (x === "watch") return "смотрит";
+    if (x === "skip") return "ждёт";
+    if (!x) return "…";
+    return x;
+  }
+
+  function patchWatchlistQuote(id) {
     const el = $("charts-watchlist");
     if (!el) return;
+    const row = el.querySelector('.charts-watch-row[data-id="' + id + '"]');
+    if (!row) return;
+    const q = quotes[id];
+    const px = q ? q.px : 0;
+    const up = q && q.prev && px >= q.prev;
+    let pxEl = row.querySelector(".charts-watch-px");
+    if (!pxEl) {
+      pxEl = document.createElement("span");
+      pxEl.className = "charts-watch-px";
+      row.appendChild(pxEl);
+    }
+    pxEl.className = "charts-watch-px " + (up ? "is-up" : "is-down");
+    pxEl.textContent = px > 0 ? px.toFixed(2) : "—";
+    patchWatchlistVerdict(row, id);
+  }
+
+  function patchWatchlistVerdict(row, id) {
+    if (!row) return;
+    const v = deskVerdict(id);
+    const cls = v ? ("is-" + v) : "is-pending";
+    let nameEl = row.firstElementChild;
+    if (!nameEl) return;
+    let badge = nameEl.querySelector(".v");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "v";
+      nameEl.appendChild(badge);
+    }
+    badge.className = "v " + cls;
+    badge.textContent = verdictLabel(v);
+  }
+
+  /** Active / open flags without wiping DOM (preserves pointer→click). */
+  function syncWatchlistChrome() {
+    const el = $("charts-watchlist");
+    if (!el) return;
+    const act = normId(activeId);
+    el.querySelectorAll(".charts-watch-row").forEach(function (row) {
+      const id = normId(row.getAttribute("data-id"));
+      row.classList.toggle("is-on", id === act);
+      row.classList.toggle("is-open", !!panes[id]);
+    });
+  }
+
+  function ensureWatchlistDelegate() {
+    const el = $("charts-watchlist");
+    if (!el || watchlistBound) return;
+    watchlistBound = true;
+    // pointerup is more reliable than click when rows used to thrash under tape.
+    el.addEventListener("pointerup", function (ev) {
+      if (ev.button != null && ev.button !== 0) return;
+      const row = ev.target && ev.target.closest ? ev.target.closest(".charts-watch-row") : null;
+      if (!row || !el.contains(row)) return;
+      const id = normId(row.getAttribute("data-id"));
+      if (!id) return;
+      openInstrument(id).catch(function (e) { console.warn(e); });
+    });
+  }
+
+  function renderWatchlist(opts) {
+    const el = $("charts-watchlist");
+    if (!el) return;
+    ensureWatchlistDelegate();
+    const force = !!(opts && opts.force);
     const catalog = (instruments && instruments.length)
-      ? instruments.map(function (o) { return String(o.secid || "").toUpperCase(); }).filter(Boolean)
-      : Object.keys(panes);
-    const open = Object.keys(panes);
+      ? instruments.map(function (o) { return normId(o.secid); }).filter(Boolean)
+      : Object.keys(panes).map(normId);
+    const open = Object.keys(panes).map(normId);
     const seen = Object.create(null);
     const ids = [];
     function push(id) {
+      id = normId(id);
       if (!id || seen[id]) return;
       seen[id] = 1;
       ids.push(id);
     }
-    if (activeId) push(String(activeId).toUpperCase());
-    open.forEach(function (id) { push(String(id).toUpperCase()); });
+    if (activeId) push(activeId);
+    open.forEach(push);
     catalog.forEach(push);
     const nEl = $("charts-watch-n");
     if (nEl) nEl.textContent = String(ids.length);
-    el.innerHTML = ids.map(function (id) {
-      const q = quotes[id];
-      const px = q ? q.px : 0;
-      const up = q && q.prev && px >= q.prev;
-      const opened = !!panes[id];
-      const v = deskVerdict(id);
-      const cls = "charts-watch-row"
-        + (id === activeId ? " is-on" : "")
-        + (opened ? " is-open" : "");
-      return "<div class=\"" + cls + "\" data-id=\"" + id + "\">"
-        + "<span>" + id
-        + (v && v !== "skip" ? "<span class=\"v is-" + v + "\">" + v + "</span>" : "")
-        + "</span><span class=\"charts-watch-px " + (up ? "is-up" : "is-down") + "\">"
-        + (px > 0 ? px.toFixed(2) : "—") + "</span></div>";
-    }).join("");
-    el.querySelectorAll(".charts-watch-row").forEach(function (row) {
-      row.addEventListener("click", function () {
-        openInstrument(row.getAttribute("data-id")).catch(function (e) { console.warn(e); });
-      });
+
+    // Rebuild structure only when the id set changes — never on every quote tick.
+    const prev = Array.prototype.map.call(el.querySelectorAll(".charts-watch-row"), function (r) {
+      return normId(r.getAttribute("data-id"));
     });
+    const same = !force && prev.length === ids.length && prev.every(function (id, i) { return id === ids[i]; });
+    if (!same) {
+      const act = normId(activeId);
+      el.innerHTML = ids.map(function (id) {
+        const q = quotes[id];
+        const px = q ? q.px : 0;
+        const up = q && q.prev && px >= q.prev;
+        const opened = !!panes[id];
+        const v = deskVerdict(id);
+        const vCls = v ? ("is-" + v) : "is-pending";
+        const cls = "charts-watch-row"
+          + (id === act ? " is-on" : "")
+          + (opened ? " is-open" : "");
+        return "<div class=\"" + cls + "\" data-id=\"" + id + "\">"
+          + "<span>" + id
+          + "<span class=\"v " + vCls + "\">" + verdictLabel(v) + "</span>"
+          + "</span><span class=\"charts-watch-px " + (up ? "is-up" : "is-down") + "\">"
+          + (px > 0 ? px.toFixed(2) : "—") + "</span></div>";
+      }).join("");
+    } else {
+      syncWatchlistChrome();
+      ids.forEach(patchWatchlistQuote);
+    }
   }
   function appendTermTape(msg) {
     const el = $("charts-tape");
@@ -1448,6 +1644,7 @@
       } else if (tf === "W1" || tf === "MN") {
         src = await ensureTfBars(target, "W1", { forceNetwork: !p.tfCache || !p.tfCache.W1 });
         if (!src.length) src = await ensureTfBars(target, "D1", { forceNetwork: true });
+        src = collapseDuplicateSessions(src);
         src = aggregateCalendarBars(src, tf === "MN" ? "month" : "week");
       } else if (tf === "M15") {
         src = await ensureTfBars(target, "M5", { forceNetwork: !p.tfCache || !p.tfCache.M5 });
@@ -1650,6 +1847,8 @@
   });
   window.addEventListener("resize", resizeAll);
   window.addEventListener("pagehide", function () {
+    if (gridFullscreen()) exitFullscreen();
+    else lockPageScroll(false);
     if (hydrating) return;
     persist();
   });
@@ -1665,7 +1864,7 @@
 
   window.TrinityInvestCharts = {
     openInstrument: openInstrument,
-    refreshWatchlist: renderWatchlist
+    refreshWatchlist: function () { renderWatchlist({ force: true }); }
   };
 
   bootstrap().catch(function (e) {

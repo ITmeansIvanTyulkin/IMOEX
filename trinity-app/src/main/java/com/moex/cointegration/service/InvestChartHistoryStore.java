@@ -84,6 +84,7 @@ public class InvestChartHistoryStore {
                         """);
                 st.execute("CREATE INDEX IF NOT EXISTS idx_invest_bars_inst_tf ON invest_bars(instrument, tf)");
             }
+            compactAliasBars();
             log.info("Invest chart history SQLite ready: {}", dbPath.toAbsolutePath());
         } catch (Exception ex) {
             log.warn("Invest chart history DB init failed: {}", ex.getMessage());
@@ -183,6 +184,7 @@ public class InvestChartHistoryStore {
                     }
                 }
             }
+            bars = collapseAliasBars(tfN, bars);
             if (bars.isEmpty()) {
                 return null;
             }
@@ -248,7 +250,8 @@ public class InvestChartHistoryStore {
                         if (time == null) {
                             continue;
                         }
-                        String t = String.valueOf(time);
+                        String raw = String.valueOf(time);
+                        String t = canonicalBarTime(tfN, raw);
                         if (t.isBlank()) {
                             continue;
                         }
@@ -273,6 +276,7 @@ public class InvestChartHistoryStore {
                     del.setString(3, cutoff);
                     del.executeUpdate();
                 }
+                collapseStoredSeries(inst, tfN);
                 try (PreparedStatement meta = conn.prepareStatement("""
                         INSERT INTO invest_series(instrument, tf, source, updated_at)
                         VALUES(?,?,?,?)
@@ -339,6 +343,178 @@ public class InvestChartHistoryStore {
             };
         }
         return LocalDate.now().minusDays(days).toString();
+    }
+
+    /**
+     * One session, one key. ISS daily is {@code yyyy-MM-dd 00:00:00}; T-Invest daily is
+     * {@code yyyy-MM-ddT03:00} (UTC midnight in MSK). Same hour on H1/M5 is {@code T} vs space.
+     * Without this the chart draws two candles for one bar.
+     */
+    public static String canonicalBarTime(String tf, String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String s = raw.trim().replace('T', ' ');
+        if (s.length() < 10) {
+            return raw.trim();
+        }
+        String date = s.substring(0, 10);
+        String tfN = normTf(tf);
+        if ("D1".equals(tfN) || "W1".equals(tfN) || "MN".equals(tfN)) {
+            return date + " 00:00:00";
+        }
+        String clock = "00:00:00";
+        if (s.length() >= 19 && s.charAt(10) == ' ') {
+            clock = s.substring(11, 19);
+        } else if (s.length() >= 16 && s.charAt(10) == ' ') {
+            clock = s.substring(11, 16) + ":00";
+        }
+        return date + " " + clock;
+    }
+
+    /** Exchange stamp ({@code yyyy-MM-dd HH:mm:ss}) wins over a T-Invest twin of the same session. */
+    static boolean exchangeStamp(String raw) {
+        return raw != null && !raw.contains("T");
+    }
+
+    static List<Map<String, Object>> collapseAliasBars(String tf, List<Map<String, Object>> bars) {
+        if (bars == null || bars.size() < 2) {
+            return bars == null ? List.of() : bars;
+        }
+        Map<String, Map<String, Object>> best = new LinkedHashMap<>();
+        Map<String, String> origin = new LinkedHashMap<>();
+        for (Map<String, Object> b : bars) {
+            if (b == null || b.get("time") == null) {
+                continue;
+            }
+            String raw = String.valueOf(b.get("time"));
+            String key = canonicalBarTime(tf, raw);
+            if (key.isBlank()) {
+                continue;
+            }
+            Map<String, Object> prev = best.get(key);
+            if (prev == null || preferIncoming(origin.get(key), prev, raw, b)) {
+                Map<String, Object> copy = new LinkedHashMap<>(b);
+                copy.put("time", key);
+                best.put(key, copy);
+                origin.put(key, raw);
+            }
+        }
+        return new ArrayList<>(best.values());
+    }
+
+    /** True when {@code incoming} should replace the bar already chosen for this session. */
+    private static boolean preferIncoming(
+            String keptRaw, Map<String, Object> kept, String incomingRaw, Map<String, Object> incoming
+    ) {
+        boolean keptEx = exchangeStamp(keptRaw);
+        boolean inEx = exchangeStamp(incomingRaw);
+        if (inEx != keptEx) {
+            return inEx;
+        }
+        return asDouble(incoming.get("volume")) > asDouble(kept.get("volume"));
+    }
+
+    /** Drop T-Invest twins already stored under a second timestamp. Safe to re-run. */
+    private void compactAliasBars() {
+        if (!ready()) {
+            return;
+        }
+        synchronized (this) {
+            try {
+                List<String[]> keys = new ArrayList<>();
+                try (Statement st = conn.createStatement();
+                     ResultSet rs = st.executeQuery(
+                             "SELECT DISTINCT instrument, tf FROM invest_bars")) {
+                    while (rs.next()) {
+                        keys.add(new String[]{rs.getString(1), rs.getString(2)});
+                    }
+                }
+                int removed = 0;
+                conn.setAutoCommit(false);
+                for (String[] key : keys) {
+                    removed += collapseStoredSeries(key[0], key[1]);
+                }
+                conn.commit();
+                if (removed > 0) {
+                    log.info("Invest chart history: removed {} duplicate session bars", removed);
+                }
+            } catch (Exception ex) {
+                try {
+                    conn.rollback();
+                } catch (Exception ignored) {
+                }
+                log.warn("Invest chart history compact failed: {}", ex.getMessage());
+            } finally {
+                try {
+                    conn.setAutoCommit(true);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    /**
+     * Rewrite one series onto canonical timestamps. Caller holds the transaction
+     * (and the store lock). Returns how many extra rows were removed.
+     */
+    private int collapseStoredSeries(String inst, String tfN) throws Exception {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT t, open, high, low, close, volume FROM invest_bars WHERE instrument=? AND tf=?")) {
+            ps.setString(1, inst);
+            ps.setString(2, tfN);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(bar(
+                            rs.getString(1),
+                            rs.getDouble(2),
+                            rs.getDouble(3),
+                            rs.getDouble(4),
+                            rs.getDouble(5),
+                            rs.getDouble(6)
+                    ));
+                }
+            }
+        }
+        List<Map<String, Object>> collapsed = collapseAliasBars(tfN, rows);
+        boolean dirty = collapsed.size() != rows.size();
+        if (!dirty) {
+            for (Map<String, Object> row : rows) {
+                String raw = String.valueOf(row.get("time"));
+                if (!raw.equals(canonicalBarTime(tfN, raw))) {
+                    dirty = true;
+                    break;
+                }
+            }
+        }
+        if (!dirty) {
+            return 0;
+        }
+        try (PreparedStatement del = conn.prepareStatement(
+                "DELETE FROM invest_bars WHERE instrument=? AND tf=?")) {
+            del.setString(1, inst);
+            del.setString(2, tfN);
+            del.executeUpdate();
+        }
+        try (PreparedStatement ins = conn.prepareStatement("""
+                INSERT INTO invest_bars(instrument, tf, t, open, high, low, close, volume)
+                VALUES(?,?,?,?,?,?,?,?)
+                """)) {
+            for (Map<String, Object> b : collapsed) {
+                ins.setString(1, inst);
+                ins.setString(2, tfN);
+                ins.setString(3, String.valueOf(b.get("time")));
+                ins.setDouble(4, asDouble(b.get("open")));
+                ins.setDouble(5, asDouble(b.get("high")));
+                ins.setDouble(6, asDouble(b.get("low")));
+                ins.setDouble(7, asDouble(b.get("close")));
+                ins.setDouble(8, asDouble(b.get("volume")));
+                ins.addBatch();
+            }
+            ins.executeBatch();
+        }
+        return rows.size() - collapsed.size();
     }
 
     private static long approxEpochMs(String time) {
