@@ -68,6 +68,7 @@
   let deskLayoutTimer = null;
   let domFollowMid = true;
   let domScrollBound = false;
+  let domScrollProgrammatic = false;
   let lastDomBook = null;
   const DOM_DEPTH = 50;
   const DESK_MS = 12000;
@@ -5317,7 +5318,12 @@
     while (el.childNodes.length > 80) el.removeChild(el.lastChild);
   }
   function tapeSubscribe(inst) {
-    tapeWsWant = String(inst || wantedDeskInstrument() || lastDeskInstrument || "").trim().toUpperCase();
+    const next = String(inst || wantedDeskInstrument() || lastDeskInstrument || "").trim().toUpperCase();
+    if (next && next !== tapeWsWant) {
+      lastDomBook = null;
+      domFollowMid = true;
+    }
+    tapeWsWant = next;
     const kit = window.TrinityChartKit;
     if (kit && kit.tape) kit.tape.subscribe(tapeWsWant ? [tapeWsWant] : []);
   }
@@ -5510,7 +5516,9 @@
     const bodyBox = body.getBoundingClientRect();
     const midBox = mid.getBoundingClientRect();
     const y = midBox.top - bodyBox.top + body.scrollTop;
+    domScrollProgrammatic = true;
     body.scrollTop = Math.max(0, y - body.clientHeight / 2 + midBox.height / 2);
+    requestAnimationFrame(function () { domScrollProgrammatic = false; });
     return true;
   }
   function renderDom(book) {
@@ -5523,6 +5531,8 @@
     if (!domScrollBound) {
       domScrollBound = true;
       body.addEventListener("scroll", function () {
+        // Ignore programmatic center — otherwise first paint kills mid-follow and bids fall below the fold.
+        if (domScrollProgrammatic) return;
         domFollowMid = false;
       }, { passive: true });
     }
@@ -5530,6 +5540,12 @@
     const instOf = function (b) {
       return (b && (b.instrumentId || b.instrument)) || "";
     };
+    const wantDom = String(tapeWsWant || wantedDeskInstrument() || lastDeskInstrument || "").trim();
+    if (wantDom && instOf(book) && kit && typeof kit.sameTapeInstrument === "function"
+        && !kit.sameTapeInstrument(wantDom, instOf(book))) {
+      // Wrong FORTS month (e.g. RIH7 while chart is RIZ6) — do not paint.
+      return;
+    }
     if (lastDomBook && book && kit && typeof kit.sameTapeInstrument === "function"
         && instOf(book) && instOf(lastDomBook)
         && !kit.sameTapeInstrument(instOf(book), instOf(lastDomBook))) {
@@ -5636,7 +5652,7 @@
     body.innerHTML = html;
     const tapePx = liveCandlePx(book);
     if (tapePx > 0) paintLastCandle(tapePx, book);
-    if (firstPaint) {
+    if (firstPaint || domFollowMid) {
       centerDomOnSpread(body);
       requestAnimationFrame(function () {
         centerDomOnSpread(body);
@@ -6947,8 +6963,6 @@
     if (domBody && domBody.textContent && domBody.textContent.indexOf("Загрузка DOM") >= 0) {
       domBody.innerHTML = "<div class=\"signal-dom-empty\">грузим стакан…</div>";
     }
-    // DOM in parallel — don't wait for the heavy desk payload.
-    Promise.resolve(loadBook()).catch(function () {});
     try {
       if (window.TrinityChartKit) {
         await loadDeskLayoutOnce();
@@ -6962,13 +6976,15 @@
       deskInstrumentPinned = null;
     }
     applyUrlInstrumentOnce();
+    applyBootInstrumentFromStorage();
     bindTape();
     tapeSubscribe(wantedDeskInstrument() || lastDeskInstrument);
+    // DOM after pin/subscribe — exact SECID filter rejects other FORTS months.
+    Promise.resolve(loadBook()).catch(function () {});
     const hadCache = await paintCachedChart();
     try {
       await applyUrlPlaybookOnce();
     } catch (_) {}
-    applyBootInstrumentFromStorage();
     await loadDesk(!hadCache);
     loadBook();
     (function pollDeskLoop() {

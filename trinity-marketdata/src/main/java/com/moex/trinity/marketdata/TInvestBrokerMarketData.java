@@ -460,6 +460,10 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         if (u.startsWith("RI") || u.startsWith("RT")) {
             return "RI";
         }
+        // BRM before BR — otherwise mini oil collapses into Exclusive BR fan-out.
+        if (u.startsWith("BRM")) {
+            return "BRM";
+        }
         if (u.startsWith("BR")) {
             return "BR";
         }
