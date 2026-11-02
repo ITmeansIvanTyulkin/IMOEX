@@ -280,6 +280,12 @@ public class InvestmentsController {
         return sig.toDeskRow();
     }
 
+    /** Live robot markup / ladder / position lines for one ticker chart (no candles). */
+    @GetMapping("/plan-overlay/{ticker}")
+    public Map<String, Object> planOverlay(@PathVariable String ticker) {
+        return desk.chartPlanOverlay(ticker);
+    }
+
     /** Daily / H1 candles for the investments chart terminal (fast ISS, then T-Invest). */
     @GetMapping("/chart/{ticker}")
     public Map<String, Object> chart(
@@ -307,6 +313,8 @@ public class InvestmentsController {
             out.put("profile", List.of());
             out.put("footprint", footprintFor(t));
             out.put("chartMarkers", List.of());
+            // Overlay is live (ladder/position) — never bake into bar cache.
+            out.put("planOverlay", desk.chartPlanOverlay(t));
             return out;
         }
 
@@ -405,6 +413,7 @@ public class InvestmentsController {
         out.put("profile", List.of());
         out.put("footprint", footprintFor(t));
         out.put("chartMarkers", List.of());
+        out.put("planOverlay", desk.chartPlanOverlay(t));
         return out;
     }
 

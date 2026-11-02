@@ -713,6 +713,7 @@
     const seq = ++openSeq;
     if (panes[secid]) {
       showInstrument(secid);
+      refreshPlanOverlay(secid);
       return;
     }
     const inst = (instruments || []).find(function (o) {
@@ -876,6 +877,69 @@
     return out;
   }
 
+  function clearPlanLines(p) {
+    if (!p || !p.series) return;
+    (p.planLines || []).forEach(function (l) {
+      try { p.series.removePriceLine(l); } catch (_) {}
+    });
+    p.planLines = [];
+  }
+
+  function paintPlanOverlay(p, overlay) {
+    if (!p || !p.series) return;
+    clearPlanLines(p);
+    p.planOverlay = overlay || null;
+    const lines = overlay && Array.isArray(overlay.lines) ? overlay.lines : [];
+    lines.forEach(function (ln) {
+      if (!ln) return;
+      const px = Number(ln.price);
+      if (!(px > 0) || !isFinite(px)) return;
+      try {
+        const pl = p.series.createPriceLine({
+          price: px,
+          color: ln.color || "#64748b",
+          lineWidth: ln.lineWidth != null ? ln.lineWidth : 1,
+          lineStyle: ln.lineStyle != null ? ln.lineStyle : 2,
+          axisLabelVisible: true,
+          title: ln.title || ""
+        });
+        p.planLines.push(pl);
+      } catch (e) {
+        console.warn("plan line", e);
+      }
+    });
+    const marker = overlay && overlay.marker;
+    if (marker && p.bars && p.bars.length) {
+      const last = p.bars[p.bars.length - 1];
+      const buy = String(marker.side || "LONG").toUpperCase() !== "SHORT";
+      try {
+        p.series.setMarkers([{
+          time: last.time,
+          position: buy ? "belowBar" : "aboveBar",
+          color: buy ? "#16a34a" : "#dc2626",
+          shape: buy ? "arrowUp" : "arrowDown",
+          text: marker.text || (buy ? "LONG" : "SHORT")
+        }]);
+      } catch (_) {}
+    } else {
+      try { p.series.setMarkers([]); } catch (_) {}
+    }
+  }
+
+  async function refreshPlanOverlay(secid) {
+    const p = panes[secid];
+    if (!p || !p.series) return;
+    try {
+      const res = await authFetch(
+          "/api/investments/plan-overlay/" + encodeURIComponent(secid), { ms: 20000 });
+      if (!res.ok) return;
+      const data = await res.json();
+      paintPlanOverlay(p, data);
+    } catch (e) {
+      console.warn("refreshPlanOverlay", secid, e);
+    }
+  }
+
   function paintCandles(p, raw, opts) {
     if (!p || !p.series) return false;
     opts = opts || {};
@@ -923,6 +987,13 @@
     if (sid) resizePane(sid);
     if (p.tools && typeof p.tools.paintOhlc === "function") p.tools.paintOhlc();
     if (p.tools && typeof p.tools.refreshOverlays === "function") p.tools.refreshOverlays();
+    // Instant paint from payload/cache, then always re-fetch live ladder/position markup.
+    if (opts.planOverlay) {
+      paintPlanOverlay(p, opts.planOverlay);
+    } else if (p.planOverlay && Array.isArray(p.planOverlay.lines) && p.planOverlay.lines.length) {
+      paintPlanOverlay(p, p.planOverlay);
+    }
+    if (sid) refreshPlanOverlay(sid);
     return true;
   }
 
@@ -978,6 +1049,9 @@
       toolBars.forEach(function (b) { b.volume = volByT[b.time] || 0; });
       p.tfCache[key] = toolBars;
       if (key === "M5") p.m5Bars = toolBars.slice();
+      if (data && data.planOverlay) {
+        p.planOverlay = data.planOverlay;
+      }
       if (window.TrinityChartKit && typeof TrinityChartKit.barCachePut === "function") {
         TrinityChartKit.barCachePut(secid, key, {
           v: BAR_CACHE_V,
@@ -1661,6 +1735,7 @@
       if (seq !== tfSeq && target === activeId) return;
       if (!src.length) return;
       paintCandles(p, src);
+      refreshPlanOverlay(target);
       if (p.flow && typeof p.flow.layout === "function") p.flow.layout();
       resizePane(target);
     } finally {

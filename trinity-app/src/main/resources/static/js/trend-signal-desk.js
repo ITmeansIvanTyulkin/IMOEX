@@ -5667,7 +5667,7 @@
     let inst = wantedDeskInstrument() || lastDeskInstrument;
     if (isRangeDesk()) {
       if (!inst || !isOilInstrument(inst)) {
-        inst = (lastDeskSnapshot && lastDeskSnapshot.instrument) || "BRV6";
+        inst = (lastDeskSnapshot && lastDeskSnapshot.instrument) || "BR";
       }
     }
     return inst ? ("?instrument=" + encodeURIComponent(inst)) : "";
@@ -5718,7 +5718,7 @@
         || meta.textContent.indexOf("локальный архив") === 0
         || meta.textContent.indexOf("Ошибка") === 0
         || meta.textContent.indexOf("грузим") === 0)) {
-      meta.textContent = "грузим desk… " + formatSecidWithMonth(wantInst || "BRV6");
+      meta.textContent = "грузим desk… " + formatSecidWithMonth(wantInst || "BR");
     }
     try {
       const q = [];
@@ -6620,29 +6620,47 @@
         pbSel.appendChild(opt);
       });
     }
-    if (instSel.options.length === 0 && instruments.length) {
-      instruments.forEach(function (o) {
-        const opt = document.createElement("option");
-        opt.value = o.secid;
-        opt.textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
-        opt.dataset.playbookIds = (o.playbookIds || []).join(",");
-        instSel.appendChild(opt);
-      });
-    } else if (instruments.length) {
-      instruments.forEach(function (o) {
-        if (!o || !o.secid) return;
-        const fam = String(o.family || o.secid).slice(0, 2).toUpperCase();
-        for (let i = 0; i < instSel.options.length; i++) {
-          const v = String(instSel.options[i].value || "").toUpperCase();
-          if (v.indexOf(fam) === 0 && v !== String(o.secid).toUpperCase()) {
-            instSel.options[i].value = o.secid;
-            instSel.options[i].textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
-          }
-          if (String(instSel.options[i].value).toUpperCase() === String(o.secid).toUpperCase()) {
-            instSel.options[i].textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
-          }
+    if (instruments.length) {
+      // Rebuild when empty or count drifted — never patch by secid prefix:
+      // family.slice(0,2) turned BRM→"BR" and overwrote Нефть (BRZ6) with BRMZ6.
+      let oilPolluted = false;
+      for (let i = 0; i < instSel.options.length; i++) {
+        const of = String(instSel.options[i].dataset.family || "").toUpperCase();
+        const ov = String(instSel.options[i].value || "");
+        if (of === "BR" && instrumentFamily(ov) === "BRM") {
+          oilPolluted = true;
+          break;
         }
-      });
+      }
+      const needRebuild = instSel.options.length === 0
+          || instSel.options.length !== instruments.length
+          || oilPolluted;
+      if (needRebuild) {
+        instSel.innerHTML = "";
+        instruments.forEach(function (o) {
+          if (!o || !o.secid) return;
+          const opt = document.createElement("option");
+          opt.value = o.secid;
+          opt.textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
+          opt.dataset.playbookIds = (o.playbookIds || []).join(",");
+          opt.dataset.family = String(o.family || "").toUpperCase();
+          instSel.appendChild(opt);
+        });
+      } else {
+        instruments.forEach(function (o) {
+          if (!o || !o.secid) return;
+          const fam = String(o.family || "").toUpperCase();
+          for (let i = 0; i < instSel.options.length; i++) {
+            const optFam = String(instSel.options[i].dataset.family || "").toUpperCase();
+            if (fam && optFam === fam) {
+              instSel.options[i].value = o.secid;
+              instSel.options[i].textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
+              instSel.options[i].dataset.playbookIds = (o.playbookIds || []).join(",");
+              break;
+            }
+          }
+        });
+      }
     }
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
@@ -6958,7 +6976,7 @@
     applyDeskChrome();
     hydrateDeskModeSwitches();
     const metaBoot = $("signal-desk-meta");
-    if (metaBoot) metaBoot.textContent = "грузим desk… " + formatSecidWithMonth(wantedDeskInstrument() || "BRV6");
+    if (metaBoot) metaBoot.textContent = "грузим desk… " + formatSecidWithMonth(wantedDeskInstrument() || "BR");
     const domBody = $("signal-dom-body");
     if (domBody && domBody.textContent && domBody.textContent.indexOf("Загрузка DOM") >= 0) {
       domBody.innerHTML = "<div class=\"signal-dom-empty\">грузим стакан…</div>";

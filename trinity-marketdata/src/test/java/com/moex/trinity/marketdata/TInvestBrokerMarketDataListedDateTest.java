@@ -86,4 +86,23 @@ class TInvestBrokerMarketDataListedDateTest {
         assertTrue(picked.isPresent());
         assertEquals("BRX6", picked.get().ticker());
     }
+
+    @Test
+    void brx6LastTradeDay2026RollsToBrz6() {
+        var x = new TInvestBrokerMarketData.FrontMonth("BRX6", "figi-x", LocalDate.of(2026, 11, 2));
+        var z = new TInvestBrokerMarketData.FrontMonth("BRZ6", "figi-z", LocalDate.of(2026, 12, 1));
+        var picked = TInvestBrokerMarketData.pickLiveMonth(
+                List.of(x, z), t -> true, LocalDate.of(2026, 11, 2));
+        assertTrue(picked.isPresent());
+        assertEquals("BRZ6", picked.get().ticker());
+    }
+
+    @Test
+    void matchesFamilyDoesNotTreatBrmAsBr() {
+        assertTrue(TInvestBrokerMarketData.matchesFamily("BRZ6", "BR"));
+        assertTrue(TInvestBrokerMarketData.matchesFamily("BRMZ6", "BRM"));
+        assertFalse(TInvestBrokerMarketData.matchesFamily("BRMZ6", "BR"),
+                "BRMZ6 must not enter BR front-month list");
+        assertFalse(TInvestBrokerMarketData.matchesFamily("BRZ6", "BRM"));
+    }
 }

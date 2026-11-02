@@ -97,8 +97,8 @@
     var status = String(robot.status || entryStatus || "").toUpperCase();
     if (status !== "ENTER") return status || "";
     var hero = robotDetailText(frame) || scrubPairs(frame && frame.summary) || "";
-    if (/лимитки|ждёт касани|ждет касани|сетка вооружен|WAITING_FILL|ждёт исполнения|ждет исполнения/i.test(hero)
-        && !/в позиции|вед[её]т сделку/i.test(hero)) {
+    if (/лимит|лестниц|ждёт касани|ждет касани|сетка вооружен|WAITING_FILL|WORKING_ORDERS|ждёт исполнения|ждет исполнения|fair-paper выставит/i.test(hero)
+        && !/в позиции|вед[её]т сделку|в fair-paper позиции/i.test(hero)) {
       return "WAIT";
     }
     return "ENTER";
@@ -111,7 +111,7 @@
       : String(status || entryStatus || "").toUpperCase();
     if (s === "WAIT" && frame) {
       var hero = robotDetailText(frame) || scrubPairs(frame.summary) || "";
-      if (/лимитки|сетка вооружен|ждёт касани|ждет касани|WAITING_FILL|ждёт исполнения|ждет исполнения/i.test(hero)) {
+      if (/лимит|лестниц|сетка вооружен|ждёт касани|ждет касани|WAITING_FILL|WORKING_ORDERS|ждёт исполнения|ждет исполнения|fair-paper выставит/i.test(hero)) {
         return "ждёт исполнения";
       }
     }
