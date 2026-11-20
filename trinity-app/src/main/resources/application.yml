@@ -493,6 +493,9 @@ imoex:
       max-names: 12
       invest-score-min: 0.72
       watch-score-min: 0.40
+      # Dual LONG/SHORT sleeves (name D1 must still pass TrendGate). Not full invest-risk-v1.
+      bear-market-shorts: true
+      # experiment: true  # full invest-risk-v1 (trend-break/seed/shorts) — leave off unless A/B
   # Marketplace live DOM/trades — T-Invest only (no ISS tape).
   marketdata:
     enabled: true
