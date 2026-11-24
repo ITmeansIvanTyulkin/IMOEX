@@ -897,6 +897,8 @@
       ? (legendRoot.querySelector(".signal-legend-ohlc") || legendRoot)
       : null;
     let impulseNotes = {};
+    /** Crosshair bar time while inspecting history; null → legend follows live last bar. */
+    let hoverTime = null;
     const tip = document.createElement("div");
     tip.className = "trinity-candle-ohlc-tip";
     tip.hidden = true;
@@ -911,19 +913,25 @@
       return { time: bar.time, open: v, high: v, low: v, close: v, value: v };
     }
 
+    function sameBarTime(a, b) {
+      if (a == null || b == null) return false;
+      return a === b || String(a) === String(b) || Number(a) === Number(b);
+    }
+
     function lastBar() {
       if (!getBars) return null;
       const bars = getBars();
       return bars && bars.length ? asOhlcBar(bars[bars.length - 1]) : null;
     }
 
-    function paintLegend(bar) {
+    function paintLegend(bar, inspecting) {
       if (!legendOhlc || !bar || bar.open == null) return;
       const bull = Number(bar.close) >= Number(bar.open);
       const chg = Number(bar.close) - Number(bar.open);
       const sign = chg >= 0 ? "+" : "−";
       legendOhlc.classList.toggle("is-bull", bull);
       legendOhlc.classList.toggle("is-bear", !bull);
+      legendOhlc.classList.toggle("is-inspect", !!inspecting);
       legendOhlc.innerHTML = ""
         + "<i>O</i>" + fmtOhlcPx(bar.open, pointSize)
         + "<i>H</i>" + fmtOhlcPx(bar.high, pointSize)
@@ -932,13 +940,22 @@
         + '<em class="signal-legend-chg">' + sign + fmtOhlcPx(Math.abs(chg), pointSize) + "</em>";
     }
 
+    function paintLiveLegend() {
+      hoverTime = null;
+      if (legendOhlc) legendOhlc.classList.remove("is-inspect");
+      paintLegend(lastBar(), false);
+    }
+
     function hide() {
       tip.hidden = true;
-      paintLegend(lastBar());
+      paintLiveLegend();
     }
 
     function layoutTip(bar, x, y) {
-      paintLegend(bar);
+      hoverTime = bar.time != null ? bar.time : null;
+      const live = lastBar();
+      const inspecting = !!(hoverTime != null && live && !sameBarTime(hoverTime, live.time));
+      paintLegend(bar, inspecting);
       const note = impulseNotes[barTimeKey(bar.time)]
         || impulseNotes[String(bar.time)]
         || null;
@@ -1030,18 +1047,39 @@
     if (typeof chart.subscribeCrosshairMove === "function") {
       chart.subscribeCrosshairMove(onCrosshair);
     }
-    paintLegend(lastBar());
+    paintLiveLegend();
 
     return {
       setPointSize: function (ps) {
         if (ps > 0) pointSize = ps;
-        paintLegend(lastBar());
+        if (hoverTime == null) {
+          paintLiveLegend();
+          return;
+        }
+        const live = lastBar();
+        if (live && sameBarTime(hoverTime, live.time)) {
+          paintLegend(live, false);
+          return;
+        }
+        const held = asOhlcBar(barFromGetBars(hoverTime));
+        if (held) paintLegend(held, true);
       },
       setImpulseNotes: function (notes) {
         impulseNotes = notes || {};
       },
       paintLast: function () {
-        paintLegend(lastBar());
+        // Live tape/poll must not stomp history OHLC while the crosshair inspects a past bar.
+        if (hoverTime == null) {
+          paintLiveLegend();
+          return;
+        }
+        const live = lastBar();
+        if (live && sameBarTime(hoverTime, live.time)) {
+          paintLegend(live, false);
+          return;
+        }
+        const held = asOhlcBar(barFromGetBars(hoverTime));
+        if (held) paintLegend(held, true);
       },
       destroy: function () {
         hide();

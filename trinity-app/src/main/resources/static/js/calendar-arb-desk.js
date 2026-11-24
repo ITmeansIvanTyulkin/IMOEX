@@ -28,8 +28,166 @@
   let arbScaleLocked = false;
   let syncingRange = false;
   let resizeBound = false;
+  let autoFocusedOpen = false;
+  let entryPriceLine = null;
 
   function $(id) { return document.getElementById(id); }
+
+  function sideRu(side) {
+    if (side === "LONG_SPREAD") return "длинный спред (купили дальний / продали ближний)";
+    if (side === "SHORT_SPREAD") return "короткий спред (продали дальний / купили ближний)";
+    return side || "—";
+  }
+
+  function famMatchOpen(open, sel) {
+    if (!open || !sel || !sel.family) return !!open;
+    return String(open.family || "").toUpperCase() === String(sel.family || "").toUpperCase();
+  }
+
+  function openMtmRub(open, mark) {
+    if (!open || !isFinite(Number(mark)) || !isFinite(Number(open.entrySpread))) return null;
+    const point = Number(open.pointSize) > 0 ? Number(open.pointSize) : 1;
+    const rub = Number(open.rubPerPoint) > 0 ? Number(open.rubPerPoint) : 1;
+    const lots = Number(open.lots) > 0 ? Number(open.lots) : 1;
+    const sign = open.side === "SHORT_SPREAD" ? -1 : 1;
+    return sign * ((Number(mark) - Number(open.entrySpread)) / point) * rub * lots;
+  }
+
+  function formatOpenedAt(iso) {
+    if (!iso) return "—";
+    const s = String(iso).replace("T", " ");
+    return s.length > 16 ? s.slice(0, 16) : s;
+  }
+
+  /** When plaque opens /view/calendar-arb with no family, land on the live open. */
+  function maybeFocusOpenFamily(data) {
+    if (autoFocusedOpen) return false;
+    if (loadFamilyFromUrl()) {
+      autoFocusedOpen = true;
+      return false;
+    }
+    const open = data && data.fairPaper && data.fairPaper.open;
+    const fam = open && open.family ? String(open.family).toUpperCase() : "";
+    if (!fam) return false;
+    autoFocusedOpen = true;
+    if ($("arb-family")) $("arb-family").value = fam;
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set("family", fam);
+      history.replaceState(null, "", u.pathname + u.search + u.hash);
+    } catch (_) {}
+    return true;
+  }
+
+  function paintOpenPanel(fp, sel) {
+    const panel = $("arb-open-panel");
+    if (!panel) return;
+    const open = fp && fp.open;
+    if (!open) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    const famMatch = !sel || !sel.family
+      || String(sel.family).toUpperCase() === String(open.family || "").toUpperCase();
+    const summary = $("arb-open-summary");
+    const markEl = $("arb-open-mark");
+    const progEl = $("arb-open-progress");
+    const legsEl = $("arb-open-legs");
+    if (summary) {
+      summary.textContent = (open.pair || open.family || "—")
+        + " · " + sideRu(open.side)
+        + " · вход " + fmt(open.entrySpread, 0)
+        + " · " + formatOpenedAt(open.openedAt)
+        + (open.lots != null ? (" · " + open.lots + " лот") : "");
+    }
+    if (!famMatch) {
+      if (markEl) {
+        markEl.textContent = "Сейчас на экране другая семья — выбери "
+          + (open.family || "SI") + ", чтобы видеть ход этой сделки.";
+      }
+      if (progEl) progEl.textContent = "";
+      if (legsEl) {
+        legsEl.textContent = (open.nearTicker || "near") + " / " + (open.nextTicker || "next")
+          + (open.hedge ? (" · hedge " + open.hedge) : "");
+      }
+      return;
+    }
+    const mark = sel && sel.spread != null ? Number(sel.spread) : NaN;
+    const mtm = openMtmRub(open, mark);
+    if (markEl) {
+      if (!isFinite(mark)) {
+        markEl.textContent = "Спред сейчас: ждём котировку…";
+      } else {
+        const delta = mark - Number(open.entrySpread);
+        const mtmTxt = mtm == null ? "—" : ((mtm >= 0 ? "+" : "") + Math.round(mtm) + " ₽");
+        markEl.innerHTML = "Спред сейчас <strong>" + fmt(mark, 0) + "</strong>"
+          + " · от входа " + (delta >= 0 ? "+" : "") + fmt(delta, 0)
+          + " · MTM <strong class=\"" + (mtm >= 0 ? "is-up" : "is-down") + "\">" + mtmTxt + "</strong>";
+      }
+    }
+    if (progEl) {
+      const z = sel && sel.z != null ? Number(sel.z) : NaN;
+      const mean = sel && sel.zMean != null ? Number(sel.zMean) : NaN;
+      const act = sel && sel.action ? String(sel.action) : "";
+      let line = "";
+      if (isFinite(z)) {
+        line = "z=" + fmt(z, 2);
+        if (isFinite(mean)) line += " · среднее спреда ≈ " + fmt(mean, 0);
+      }
+      if (act === "HOLD" || act.indexOf("EXIT") === 0 || act === "NONE") {
+        line += (line ? " · " : "") + (act === "HOLD" || act === "NONE"
+          ? "держим, ждём возврат к среднему / EXIT"
+          : act);
+      } else if (sel && sel.reason) {
+        line += (line ? " · " : "") + sel.reason;
+      }
+      progEl.textContent = line || "Ждём обновление сигнала…";
+    }
+    if (legsEl) {
+      legsEl.textContent = (open.nearTicker || (sel && sel.near) || "near")
+        + " / " + (open.nextTicker || (sel && sel.next) || "next")
+        + (open.hedge ? (" · hedge " + open.hedge) : "")
+        + (open.fillState ? (" · fill " + open.fillState) : "")
+        + (open.execution ? (" · " + open.execution) : "");
+    }
+  }
+
+  function syncEntryLine(fp, sel) {
+    if (!series) return;
+    if (entryPriceLine) {
+      try { series.removePriceLine(entryPriceLine); } catch (_) {}
+      entryPriceLine = null;
+    }
+    try { series.setMarkers([]); } catch (_) {}
+    const open = fp && fp.open;
+    if (!open || !sel) return;
+    if (String(open.family || "").toUpperCase() !== String(sel.family || "").toUpperCase()) return;
+    const entry = Number(open.entrySpread);
+    if (!isFinite(entry)) return;
+    try {
+      entryPriceLine = series.createPriceLine({
+        price: entry,
+        color: "#2563eb",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "вход"
+      });
+    } catch (_) {}
+    const openedMs = open.openedAt ? Date.parse(String(open.openedAt).replace(" ", "T")) : NaN;
+    if (!isFinite(openedMs)) return;
+    const t = Math.floor(openedMs / 1000);
+    try {
+      series.setMarkers([{
+        time: t,
+        position: open.side === "SHORT_SPREAD" ? "aboveBar" : "belowBar",
+        color: "#2563eb",
+        shape: open.side === "SHORT_SPREAD" ? "arrowDown" : "arrowUp",
+        text: "вход"
+      }]);
+    } catch (_) {}
+  }
 
   function fmt(v, d) {
     if (v == null || !isFinite(Number(v))) return "—";
@@ -385,19 +543,29 @@
     }
     if ($("arb-fair")) {
       $("arb-fair").textContent = fp.open
-        ? ("OPEN " + fp.open.side + " " + fp.open.pair)
+        ? ("OPEN " + sideRu(fp.open.side) + " " + (fp.open.pair || "")
+          + " · вход " + fmt(fp.open.entrySpread, 0)
+          + " · " + formatOpenedAt(fp.open.openedAt))
         : ((fp.lastAction || "idle") + (fp.lastReason ? " · " + fp.lastReason : ""));
       if (fp.liveBroker) {
         $("arb-fair").textContent += liveBrokerNote(fp);
       }
     }
+    paintOpenPanel(fp, data.selected || null);
     if ($("arb-paper-today") && st.todayPnlRub != null) {
       $("arb-paper-today").textContent = Number(st.todayPnlRub).toFixed(0) + " ₽";
     }
-    fillFamilySelect(data.families && data.families.length ? data.families : DEFAULT_FAMS, settings.family);
+    fillFamilySelect(
+      data.families && data.families.length ? data.families : DEFAULT_FAMS,
+      loadFamilyFromUrl()
+        || ($("arb-family") && $("arb-family").value)
+        || (fp.open && fp.open.family)
+        || settings.family
+    );
     if ($("arb-desk-meta")) {
       const armed = fp.open
-        ? "есть позиция"
+        ? ("в сделке " + (fp.open.pair || fp.open.family || "")
+          + (fp.open.entrySpread != null ? (" · вход " + fmt(fp.open.entrySpread, 0)) : ""))
         : (autoOn(data) === false
           ? "наблюдение"
           : (fp.liveArmed ? "авто · живые заявки, ордеров нет" : "авто · журнал, ордеров нет"));
@@ -634,12 +802,20 @@
       : (warming ? "ждём кривую у брокера…" : "нет кривой у брокера");
     const fp = data.fairPaper || {};
     if ($("arb-robot")) $("arb-robot").textContent = robotLine(data);
+    if (fp.open && famMatchOpen(fp.open, sel)) {
+      $("arb-action").textContent = (String(sel.action || "").indexOf("EXIT") === 0)
+        ? sel.action
+        : "В сделке · держим";
+    }
     $("arb-fair").textContent = fp.open
-      ? ("OPEN " + fp.open.side + " " + fp.open.pair)
+      ? ("OPEN " + sideRu(fp.open.side) + " " + (fp.open.pair || "")
+        + " · вход " + fmt(fp.open.entrySpread, 0)
+        + " · " + formatOpenedAt(fp.open.openedAt))
       : ((fp.lastAction || "idle") + (fp.lastReason ? " · " + fp.lastReason : ""));
     if (fp.liveBroker) {
       $("arb-fair").textContent += liveBrokerNote(fp);
     }
+    paintOpenPanel(fp, sel);
     const warn = $("arb-warning");
     if (data.warning) {
       warn.hidden = false;
@@ -664,7 +840,9 @@
       (series.length ? (" · баров " + series.length) : (sel.bars ? (" · баров " + sel.bars) : "")) +
       (warming ? " · загрузка…" : "") +
       (data.stale ? " · локальный снимок" : "") +
-      (fp.open ? " · есть позиция"
+      (fp.open
+        ? (" · в сделке " + (fp.open.pair || fp.open.family || "")
+          + (fp.open.entrySpread != null ? (" · вход " + fmt(fp.open.entrySpread, 0)) : ""))
         : (autoOn(data) === false ? " · наблюдение"
           : (fp.liveArmed ? " · авто · живые заявки, ордеров нет" : " · авто · журнал, ордеров нет")));
   }
@@ -1074,6 +1252,7 @@
     if (series) setLineDataKeep(chart, series, spread);
     if (nearSeries) setLineDataKeep(legsChart, nearSeries, near);
     if (nextSeries) setLineDataKeep(legsChart, nextSeries, next);
+    syncEntryLine((lastArbDesk && lastArbDesk.fairPaper) || {}, sel);
     if (pairChanged) {
       if (chart) chart.timeScale().fitContent();
       if (legsChart) legsChart.timeScale().fitContent();
@@ -1197,13 +1376,23 @@
         });
       });
     }
-    refreshStatus().catch(function () {});
-    const fam0 = ($("arb-family") && $("arb-family").value) || loadFamilyFromUrl();
-    const st0 = window.__arbStructure || loadStructureFromUrl();
-    paintCachedSeries(fam0, st0, "").finally(function () {
-      refresh().catch(function (e) {
-        $("arb-desk-meta").textContent = "Desk: " + (e.message || e);
+    function bootDesk() {
+      const fam0 = ($("arb-family") && $("arb-family").value) || loadFamilyFromUrl();
+      const st0 = window.__arbStructure || loadStructureFromUrl();
+      paintCachedSeries(fam0, st0, "").finally(function () {
+        refresh().catch(function (e) {
+          $("arb-desk-meta").textContent = "Desk: " + (e.message || e);
+        });
       });
+    }
+    refreshStatus().then(function (data) {
+      if (maybeFocusOpenFamily(data)) {
+        bootDesk();
+        return;
+      }
+      bootDesk();
+    }).catch(function () {
+      bootDesk();
     });
     setTimeout(function () {
       if (!everReady) refresh().catch(function () {});

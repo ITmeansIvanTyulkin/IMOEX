@@ -4935,6 +4935,7 @@
         candleSeries: candleSeries,
         hostEl: el,
         pointSize: deskPointSize(secid, pointSize),
+        barSec: lastChartTf === "H1" ? 3600 : 300,
         overlayId: "signal-vap-stretch",
         getBars: function () {
           return (lastBarsRaw || []).map(function (b) {
