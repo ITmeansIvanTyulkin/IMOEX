@@ -124,9 +124,9 @@ imoex:
     reduce-factor: 0.5
     index-board: SNDX
   capital:
-    # Product default: ordinary subscription user ~250–300к ₽ (band 50–500к).
+    # Product default: ≥300к so BALANCED multi-sleeve is allowed (MIN_EQUITY_FOR_MULTI_FOCUS).
     # Pair slots: RetailPairsScale + @Might OCT2026_RETAIL_CONCENTRATION (50к→1, 250к→2, 500к→3).
-    equity-rub: 250000
+    equity-rub: 300000
     allow-leverage-above-rub: 1000000
     max-gross-when-no-leverage: 1.0
     # Retail pairs: Daily-only (как у крупных парных столов). H1 off — 2026 PF0.33.
@@ -134,11 +134,11 @@ imoex:
     daily-gross-share: 1.0
     intraday-gross-share: 0.0
     # Focus-слоты: TREND_M5 | TREND_POSITIONAL | ARB | BALANCED | PAIRS (legacy pairs desk)
-    # Operator desk = Exclusive/BRM/positional — default TREND_M5, не коинтеграционные PAIRS.
-    focus-slot: TREND_M5
+    # Exclusive + positional both funded — AVG 1:1:2:4 needs a real positional sleeve.
+    focus-slot: BALANCED
     pairs-strategy-share: 0.0
-    trend-m5-share: 1.0
-    trend-positional-share: 0.0
+    trend-m5-share: 0.5
+    trend-positional-share: 0.5
     arb-share: 0.0
   session:
     # DUAL code path kept; trading capital is Daily-only (intraday share = 0).
@@ -353,7 +353,8 @@ imoex:
       sandbox-broker-stop: true
       sandbox-broker-stop-dry-run: true   # paper: не слать в sandbox (PostStop там всё равно нельзя)
       sandbox-broker-stop-qty: 1
-      # Parallel on after hvnHills VAP/peak caps (was OOM). Collect window — no positional gate tune.
+      # Parallel on after hvnHills VAP/peak caps (was OOM).
+      # Checklist core intact; EXT unlock/proximity + sleeve floor tuned so AVG ≥4 can arm.
       playbook: both
       # both = Exclusive + Positional. all = + retail-brm-m5 (плейбук #3, не четвёртая стратегия).
       parallel-playbooks: true
@@ -492,6 +493,9 @@ imoex:
       max-names: 12
       invest-score-min: 0.72
       watch-score-min: 0.40
+      # Dual LONG/SHORT sleeves (name D1 must still pass TrendGate). Not full invest-risk-v1.
+      bear-market-shorts: true
+      # experiment: true  # full invest-risk-v1 (trend-break/seed/shorts) — leave off unless A/B
   # Marketplace live DOM/trades — T-Invest only (no ISS tape).
   marketdata:
     enabled: true

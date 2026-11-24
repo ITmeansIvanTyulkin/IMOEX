@@ -5292,6 +5292,20 @@ body[data-upsell="off"] .full-core-badge {
 .signal-legend-ohlc b {
   font-weight: 700;
 }
+.signal-legend-ohlc.is-inspect {
+  opacity: 0.92;
+}
+.signal-legend-ohlc.is-inspect::before {
+  content: "история";
+  margin-right: 0.45em;
+  font-size: 0.72em;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  vertical-align: 0.05em;
+}
 .signal-legend-ohlc.is-bull b,
 .signal-legend-ohlc.is-bull .signal-legend-chg {
   color: #16a34a;
@@ -6590,6 +6604,20 @@ a.signal-tool {
   height: 280px;
   min-height: 240px;
 }
+.arb-open-panel {
+  margin: 0.35rem 0 0.75rem;
+  padding: 0.55rem 0.7rem 0.6rem;
+  border-left: 3px solid #2563eb;
+  background: rgba(37, 99, 235, 0.05);
+}
+.arb-open-panel .signal-brief-title {
+  margin: 0 0 0.2rem;
+}
+.arb-open-panel .meta {
+  margin: 0.15rem 0 0;
+}
+.arb-open-panel .is-up { color: #15803d; }
+.arb-open-panel .is-down { color: #b91c1c; }
 .arb-context {
   padding: 0.15rem 0.1rem 0.5rem;
 }

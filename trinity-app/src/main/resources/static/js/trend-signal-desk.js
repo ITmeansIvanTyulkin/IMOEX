@@ -68,6 +68,7 @@
   let deskLayoutTimer = null;
   let domFollowMid = true;
   let domScrollBound = false;
+  let domScrollProgrammatic = false;
   let lastDomBook = null;
   const DOM_DEPTH = 50;
   const DESK_MS = 12000;
@@ -4934,6 +4935,7 @@
         candleSeries: candleSeries,
         hostEl: el,
         pointSize: deskPointSize(secid, pointSize),
+        barSec: lastChartTf === "H1" ? 3600 : 300,
         overlayId: "signal-vap-stretch",
         getBars: function () {
           return (lastBarsRaw || []).map(function (b) {
@@ -5317,7 +5319,12 @@
     while (el.childNodes.length > 80) el.removeChild(el.lastChild);
   }
   function tapeSubscribe(inst) {
-    tapeWsWant = String(inst || wantedDeskInstrument() || lastDeskInstrument || "").trim().toUpperCase();
+    const next = String(inst || wantedDeskInstrument() || lastDeskInstrument || "").trim().toUpperCase();
+    if (next && next !== tapeWsWant) {
+      lastDomBook = null;
+      domFollowMid = true;
+    }
+    tapeWsWant = next;
     const kit = window.TrinityChartKit;
     if (kit && kit.tape) kit.tape.subscribe(tapeWsWant ? [tapeWsWant] : []);
   }
@@ -5510,7 +5517,9 @@
     const bodyBox = body.getBoundingClientRect();
     const midBox = mid.getBoundingClientRect();
     const y = midBox.top - bodyBox.top + body.scrollTop;
+    domScrollProgrammatic = true;
     body.scrollTop = Math.max(0, y - body.clientHeight / 2 + midBox.height / 2);
+    requestAnimationFrame(function () { domScrollProgrammatic = false; });
     return true;
   }
   function renderDom(book) {
@@ -5523,6 +5532,8 @@
     if (!domScrollBound) {
       domScrollBound = true;
       body.addEventListener("scroll", function () {
+        // Ignore programmatic center — otherwise first paint kills mid-follow and bids fall below the fold.
+        if (domScrollProgrammatic) return;
         domFollowMid = false;
       }, { passive: true });
     }
@@ -5530,6 +5541,12 @@
     const instOf = function (b) {
       return (b && (b.instrumentId || b.instrument)) || "";
     };
+    const wantDom = String(tapeWsWant || wantedDeskInstrument() || lastDeskInstrument || "").trim();
+    if (wantDom && instOf(book) && kit && typeof kit.sameTapeInstrument === "function"
+        && !kit.sameTapeInstrument(wantDom, instOf(book))) {
+      // Wrong FORTS month (e.g. RIH7 while chart is RIZ6) — do not paint.
+      return;
+    }
     if (lastDomBook && book && kit && typeof kit.sameTapeInstrument === "function"
         && instOf(book) && instOf(lastDomBook)
         && !kit.sameTapeInstrument(instOf(book), instOf(lastDomBook))) {
@@ -5636,7 +5653,7 @@
     body.innerHTML = html;
     const tapePx = liveCandlePx(book);
     if (tapePx > 0) paintLastCandle(tapePx, book);
-    if (firstPaint) {
+    if (firstPaint || domFollowMid) {
       centerDomOnSpread(body);
       requestAnimationFrame(function () {
         centerDomOnSpread(body);
@@ -5651,7 +5668,7 @@
     let inst = wantedDeskInstrument() || lastDeskInstrument;
     if (isRangeDesk()) {
       if (!inst || !isOilInstrument(inst)) {
-        inst = (lastDeskSnapshot && lastDeskSnapshot.instrument) || "BRV6";
+        inst = (lastDeskSnapshot && lastDeskSnapshot.instrument) || "BR";
       }
     }
     return inst ? ("?instrument=" + encodeURIComponent(inst)) : "";
@@ -5702,7 +5719,7 @@
         || meta.textContent.indexOf("локальный архив") === 0
         || meta.textContent.indexOf("Ошибка") === 0
         || meta.textContent.indexOf("грузим") === 0)) {
-      meta.textContent = "грузим desk… " + formatSecidWithMonth(wantInst || "BRV6");
+      meta.textContent = "грузим desk… " + formatSecidWithMonth(wantInst || "BR");
     }
     try {
       const q = [];
@@ -6604,29 +6621,47 @@
         pbSel.appendChild(opt);
       });
     }
-    if (instSel.options.length === 0 && instruments.length) {
-      instruments.forEach(function (o) {
-        const opt = document.createElement("option");
-        opt.value = o.secid;
-        opt.textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
-        opt.dataset.playbookIds = (o.playbookIds || []).join(",");
-        instSel.appendChild(opt);
-      });
-    } else if (instruments.length) {
-      instruments.forEach(function (o) {
-        if (!o || !o.secid) return;
-        const fam = String(o.family || o.secid).slice(0, 2).toUpperCase();
-        for (let i = 0; i < instSel.options.length; i++) {
-          const v = String(instSel.options[i].value || "").toUpperCase();
-          if (v.indexOf(fam) === 0 && v !== String(o.secid).toUpperCase()) {
-            instSel.options[i].value = o.secid;
-            instSel.options[i].textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
-          }
-          if (String(instSel.options[i].value).toUpperCase() === String(o.secid).toUpperCase()) {
-            instSel.options[i].textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
-          }
+    if (instruments.length) {
+      // Rebuild when empty or count drifted — never patch by secid prefix:
+      // family.slice(0,2) turned BRM→"BR" and overwrote Нефть (BRZ6) with BRMZ6.
+      let oilPolluted = false;
+      for (let i = 0; i < instSel.options.length; i++) {
+        const of = String(instSel.options[i].dataset.family || "").toUpperCase();
+        const ov = String(instSel.options[i].value || "");
+        if (of === "BR" && instrumentFamily(ov) === "BRM") {
+          oilPolluted = true;
+          break;
         }
-      });
+      }
+      const needRebuild = instSel.options.length === 0
+          || instSel.options.length !== instruments.length
+          || oilPolluted;
+      if (needRebuild) {
+        instSel.innerHTML = "";
+        instruments.forEach(function (o) {
+          if (!o || !o.secid) return;
+          const opt = document.createElement("option");
+          opt.value = o.secid;
+          opt.textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
+          opt.dataset.playbookIds = (o.playbookIds || []).join(",");
+          opt.dataset.family = String(o.family || "").toUpperCase();
+          instSel.appendChild(opt);
+        });
+      } else {
+        instruments.forEach(function (o) {
+          if (!o || !o.secid) return;
+          const fam = String(o.family || "").toUpperCase();
+          for (let i = 0; i < instSel.options.length; i++) {
+            const optFam = String(instSel.options[i].dataset.family || "").toUpperCase();
+            if (fam && optFam === fam) {
+              instSel.options[i].value = o.secid;
+              instSel.options[i].textContent = (o.name || o.family) + " · " + formatSecidWithMonth(o.secid);
+              instSel.options[i].dataset.playbookIds = (o.playbookIds || []).join(",");
+              break;
+            }
+          }
+        });
+      }
     }
     // Don't clobber the select while a save is in flight (poll would snap back to "both").
     if (!deskSaveInFlight) {
@@ -6942,13 +6977,11 @@
     applyDeskChrome();
     hydrateDeskModeSwitches();
     const metaBoot = $("signal-desk-meta");
-    if (metaBoot) metaBoot.textContent = "грузим desk… " + formatSecidWithMonth(wantedDeskInstrument() || "BRV6");
+    if (metaBoot) metaBoot.textContent = "грузим desk… " + formatSecidWithMonth(wantedDeskInstrument() || "BR");
     const domBody = $("signal-dom-body");
     if (domBody && domBody.textContent && domBody.textContent.indexOf("Загрузка DOM") >= 0) {
       domBody.innerHTML = "<div class=\"signal-dom-empty\">грузим стакан…</div>";
     }
-    // DOM in parallel — don't wait for the heavy desk payload.
-    Promise.resolve(loadBook()).catch(function () {});
     try {
       if (window.TrinityChartKit) {
         await loadDeskLayoutOnce();
@@ -6962,13 +6995,15 @@
       deskInstrumentPinned = null;
     }
     applyUrlInstrumentOnce();
+    applyBootInstrumentFromStorage();
     bindTape();
     tapeSubscribe(wantedDeskInstrument() || lastDeskInstrument);
+    // DOM after pin/subscribe — exact SECID filter rejects other FORTS months.
+    Promise.resolve(loadBook()).catch(function () {});
     const hadCache = await paintCachedChart();
     try {
       await applyUrlPlaybookOnce();
     } catch (_) {}
-    applyBootInstrumentFromStorage();
     await loadDesk(!hadCache);
     loadBook();
     (function pollDeskLoop() {

@@ -897,6 +897,8 @@
       ? (legendRoot.querySelector(".signal-legend-ohlc") || legendRoot)
       : null;
     let impulseNotes = {};
+    /** Crosshair bar time while inspecting history; null → legend follows live last bar. */
+    let hoverTime = null;
     const tip = document.createElement("div");
     tip.className = "trinity-candle-ohlc-tip";
     tip.hidden = true;
@@ -911,19 +913,25 @@
       return { time: bar.time, open: v, high: v, low: v, close: v, value: v };
     }
 
+    function sameBarTime(a, b) {
+      if (a == null || b == null) return false;
+      return a === b || String(a) === String(b) || Number(a) === Number(b);
+    }
+
     function lastBar() {
       if (!getBars) return null;
       const bars = getBars();
       return bars && bars.length ? asOhlcBar(bars[bars.length - 1]) : null;
     }
 
-    function paintLegend(bar) {
+    function paintLegend(bar, inspecting) {
       if (!legendOhlc || !bar || bar.open == null) return;
       const bull = Number(bar.close) >= Number(bar.open);
       const chg = Number(bar.close) - Number(bar.open);
       const sign = chg >= 0 ? "+" : "−";
       legendOhlc.classList.toggle("is-bull", bull);
       legendOhlc.classList.toggle("is-bear", !bull);
+      legendOhlc.classList.toggle("is-inspect", !!inspecting);
       legendOhlc.innerHTML = ""
         + "<i>O</i>" + fmtOhlcPx(bar.open, pointSize)
         + "<i>H</i>" + fmtOhlcPx(bar.high, pointSize)
@@ -932,13 +940,22 @@
         + '<em class="signal-legend-chg">' + sign + fmtOhlcPx(Math.abs(chg), pointSize) + "</em>";
     }
 
+    function paintLiveLegend() {
+      hoverTime = null;
+      if (legendOhlc) legendOhlc.classList.remove("is-inspect");
+      paintLegend(lastBar(), false);
+    }
+
     function hide() {
       tip.hidden = true;
-      paintLegend(lastBar());
+      paintLiveLegend();
     }
 
     function layoutTip(bar, x, y) {
-      paintLegend(bar);
+      hoverTime = bar.time != null ? bar.time : null;
+      const live = lastBar();
+      const inspecting = !!(hoverTime != null && live && !sameBarTime(hoverTime, live.time));
+      paintLegend(bar, inspecting);
       const note = impulseNotes[barTimeKey(bar.time)]
         || impulseNotes[String(bar.time)]
         || null;
@@ -1030,18 +1047,39 @@
     if (typeof chart.subscribeCrosshairMove === "function") {
       chart.subscribeCrosshairMove(onCrosshair);
     }
-    paintLegend(lastBar());
+    paintLiveLegend();
 
     return {
       setPointSize: function (ps) {
         if (ps > 0) pointSize = ps;
-        paintLegend(lastBar());
+        if (hoverTime == null) {
+          paintLiveLegend();
+          return;
+        }
+        const live = lastBar();
+        if (live && sameBarTime(hoverTime, live.time)) {
+          paintLegend(live, false);
+          return;
+        }
+        const held = asOhlcBar(barFromGetBars(hoverTime));
+        if (held) paintLegend(held, true);
       },
       setImpulseNotes: function (notes) {
         impulseNotes = notes || {};
       },
       paintLast: function () {
-        paintLegend(lastBar());
+        // Live tape/poll must not stomp history OHLC while the crosshair inspects a past bar.
+        if (hoverTime == null) {
+          paintLiveLegend();
+          return;
+        }
+        const live = lastBar();
+        if (live && sameBarTime(hoverTime, live.time)) {
+          paintLegend(live, false);
+          return;
+        }
+        const held = asOhlcBar(barFromGetBars(hoverTime));
+        if (held) paintLegend(held, true);
       },
       destroy: function () {
         hide();
@@ -4120,6 +4158,8 @@
     if (u === "RTS" || u.indexOf("RI") === 0 || u.indexOf("RT") === 0
         || (raw.length >= 2 && raw.charAt(0) === "R" && raw.charAt(1) === "i")) return "RI";
     if (u.indexOf("NG") === 0) return "NG";
+    // BRM before BR — otherwise BRMV6 collapses into Exclusive BR.
+    if (u === "BRM" || u.indexOf("BRM") === 0) return "BRM";
     if (u.indexOf("BR") === 0) return "BR";
     return u.slice(0, 2);
   }
@@ -4145,13 +4185,22 @@
     const cap = Math.max(Math.abs(c) * 0.006, c >= 1000 ? Math.abs(c) * 0.003 : 0.12);
     return Math.abs(px - c) <= cap;
   }
+  /**
+   * Exact SECID (or "*"). Family match used to equate RIZ6≈RIH7 and painted the
+   * wrong month's DOM/tape on positional desk (asks-only view / empty bids).
+   * Server may still fan-out by family; clients must filter exact contract.
+   */
   function sameTapeInstrument(a, b) {
     if (!a || !b) return false;
     const A = String(a).trim().toUpperCase();
     const B = String(b).trim().toUpperCase();
-    if (A === B || A === "*") return true;
-    const fa = familyOf(A);
-    const fb = familyOf(B);
+    return A === B || A === "*" || B === "*";
+  }
+  /** Family-only (BR / RI / …) — for roll hints, not live DOM/tape paint. */
+  function sameTapeFamily(a, b) {
+    if (!a || !b) return false;
+    const fa = familyOf(a);
+    const fb = familyOf(b);
     return !!(fa && fa === fb);
   }
   function currentBucketUnix(minutes) {
@@ -4295,6 +4344,10 @@
   function mergeDomBook(prev, next) {
     if (!next) return prev || null;
     if (!prev) return next;
+    const pi = String(prev.instrumentId || prev.instrument || "").trim().toUpperCase();
+    const ni = String(next.instrumentId || next.instrument || "").trim().toUpperCase();
+    // Never merge ladders across FORTS months (RIZ6 bids + RIH7 asks → fake one-sided book).
+    if (pi && ni && pi !== ni) return next;
     const nb = Array.isArray(next.bids) ? next.bids : null;
     const na = Array.isArray(next.asks) ? next.asks : null;
     const pb = prev.bids || [];
@@ -4742,6 +4795,7 @@
     tape: createTapeClient(),
     mergeDomBook: mergeDomBook,
     familyOf: familyOf,
+    sameTapeFamily: sameTapeFamily,
     quotesMatchInstrument: quotesMatchInstrument,
     printFitsLast: printFitsLast,
     sameTapeInstrument: sameTapeInstrument,

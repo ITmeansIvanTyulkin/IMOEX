@@ -11,12 +11,14 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Public (non-ISS, non-T-Invest) energy context: CME WTI via Yahoo {@code CL=F},
- * EIA stocks via FRED, optional street consensus file/URL (not Bloomberg Terminal),
- * CFTC COT (SODA), and 3-2-1 crack from Yahoo CL/RB/HO. Fail-soft.
+ * Public (non-ISS, non-T-Invest) macro/energy context for positional FA:
+ * CME WTI {@code CL=F}, NG {@code NG=F}, gold {@code GC=F}, FX {@code USDRUB=X},
+ * equity Russia {@code IMOEX.ME}, EIA stocks (FRED), CFTC COT, 3-2-1 crack. Fail-soft.
  */
 public final class PublicEnergyContext {
 
@@ -24,6 +26,14 @@ public final class PublicEnergyContext {
     private static final ZoneId NY = ZoneId.of("America/New_York");
     private static final String CL_URL =
             "https://query1.finance.yahoo.com/v8/finance/chart/CL=F?interval=1h&range=5d";
+    private static final String NG_URL =
+            "https://query1.finance.yahoo.com/v8/finance/chart/NG=F?interval=1h&range=5d";
+    private static final String GC_URL =
+            "https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1h&range=5d";
+    private static final String USDRUB_URL =
+            "https://query1.finance.yahoo.com/v8/finance/chart/USDRUB=X?interval=1h&range=5d";
+    private static final String IMOEX_URL =
+            "https://query1.finance.yahoo.com/v8/finance/chart/IMOEX.ME?interval=1h&range=5d";
     private static final String RB_URL =
             "https://query1.finance.yahoo.com/v8/finance/chart/RB=F?interval=1d&range=5d";
     private static final String HO_URL =
@@ -41,6 +51,7 @@ public final class PublicEnergyContext {
     private static final long CRACK_CACHE_MS = 15 * 60_000L;
 
     private final AtomicReference<Cached<ClSnapshot>> cl = new AtomicReference<>();
+    private final Map<String, Cached<ClSnapshot>> yahooDay = new ConcurrentHashMap<>();
     private final AtomicReference<Cached<EiaPrint>> eia = new AtomicReference<>();
     private final AtomicReference<Cached<CotSnapshot>> cot = new AtomicReference<>();
     private final AtomicReference<Cached<CrackSnapshot>> crack = new AtomicReference<>();
@@ -71,6 +82,61 @@ public final class PublicEnergyContext {
             log.debug("WTI CL=F fetch failed: {}", ex.toString());
             ClSnapshot miss = hit != null && hit.value != null ? hit.value : ClSnapshot.unknown();
             cl.set(new Cached<>(now, miss));
+            return miss;
+        }
+    }
+
+    /** Henry Hub natgas — positional NG family FA. */
+    public ClSnapshot natgas() {
+        return yahooDayMove("NG=F", NG_URL);
+    }
+
+    /** COMEX gold — positional GD family FA. */
+    public ClSnapshot gold() {
+        return yahooDayMove("GC=F", GC_URL);
+    }
+
+    /** USD/RUB spot — positional SI (and RI dollar-leg) FA. */
+    public ClSnapshot usdRub() {
+        return yahooDayMove("USDRUB=X", USDRUB_URL);
+    }
+
+    /** MOEX Russia index — positional MX / RI equity-leg FA. */
+    public ClSnapshot imoex() {
+        return yahooDayMove("IMOEX.ME", IMOEX_URL);
+    }
+
+    /**
+     * Positional family day-move driver (Yahoo, fail-soft).
+     * BR → WTI; NG → NG=F; GD → GC=F; SI → USDRUB; RI/MX → IMOEX (+ caller may mix FX).
+     */
+    public ClSnapshot positionalDriver(String family) {
+        String fam = family == null ? "" : family.trim().toUpperCase(Locale.ROOT);
+        return switch (fam) {
+            case "BR" -> wti();
+            case "NG" -> natgas();
+            case "GD", "GOLD" -> gold();
+            case "SI" -> usdRub();
+            case "RI", "MX", "MIX" -> imoex();
+            default -> ClSnapshot.unknown();
+        };
+    }
+
+    private ClSnapshot yahooDayMove(String symbol, String url) {
+        Cached<ClSnapshot> hit = yahooDay.get(symbol);
+        long now = System.currentTimeMillis();
+        if (hit != null && now - hit.atMs < CL_CACHE_MS && hit.value != null) {
+            return hit.value;
+        }
+        try {
+            String body = get(url);
+            ClSnapshot snap = parseYahooCl(body, Instant.now());
+            yahooDay.put(symbol, new Cached<>(now, snap));
+            return snap;
+        } catch (Exception ex) {
+            log.debug("Yahoo {} fetch failed: {}", symbol, ex.toString());
+            ClSnapshot miss = hit != null && hit.value != null ? hit.value : ClSnapshot.unknown();
+            yahooDay.put(symbol, new Cached<>(now, miss));
             return miss;
         }
     }

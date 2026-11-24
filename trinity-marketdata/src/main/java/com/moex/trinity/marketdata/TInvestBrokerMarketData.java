@@ -460,6 +460,10 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         if (u.startsWith("RI") || u.startsWith("RT")) {
             return "RI";
         }
+        // BRM before BR — otherwise mini oil collapses into Exclusive BR fan-out.
+        if (u.startsWith("BRM")) {
+            return "BRM";
+        }
         if (u.startsWith("BR")) {
             return "BR";
         }
@@ -469,12 +473,26 @@ public final class TInvestBrokerMarketData implements AutoCloseable {
         return u.length() >= 2 ? u.substring(0, 2) : u;
     }
 
-    private static boolean matchesFamily(String ticker, String family) {
+    /**
+     * Family membership for front-month listing. BR must not swallow BRM
+     * ({@code BRMZ6}.startsWith("BR") && length≤5 was true — mini polluted oil front).
+     */
+    static boolean matchesFamily(String ticker, String family) {
+        if (ticker == null || family == null || family.isBlank()) {
+            return false;
+        }
         String t = ticker.toUpperCase(Locale.ROOT);
-        if ("RI".equals(family)) {
+        String f = family.toUpperCase(Locale.ROOT);
+        if ("RI".equals(f)) {
             return t.startsWith("RI") || t.startsWith("RTS");
         }
-        return t.startsWith(family) && t.length() <= 5;
+        if ("BRM".equals(f)) {
+            return t.startsWith("BRM");
+        }
+        if ("BR".equals(f)) {
+            return t.startsWith("BR") && !t.startsWith("BRM");
+        }
+        return t.startsWith(f);
     }
 
     public DomBook fetchOrderBook(String instrumentId, String figi, int depth) {

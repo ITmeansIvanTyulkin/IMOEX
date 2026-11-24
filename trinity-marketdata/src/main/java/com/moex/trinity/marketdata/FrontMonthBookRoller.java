@@ -33,6 +33,7 @@ public final class FrontMonthBookRoller {
     public void rollSubscribedFamilies() {
         Set<String> families = new LinkedHashSet<>();
         families.add("BR");
+        families.add("BRM");
         families.add("RI");
         families.add("NG");
         families.add("SI");
